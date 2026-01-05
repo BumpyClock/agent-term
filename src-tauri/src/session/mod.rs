@@ -10,6 +10,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+use crate::diagnostics;
+
 mod error;
 mod model;
 mod runtime;
@@ -113,6 +115,15 @@ impl SessionManager {
             is_open: true,
             tab_order: Some(self.next_tab_order()),
         };
+        diagnostics::log(format!(
+            "create_session id={} title={} tool={:?} command={} project_path={} section_id={}",
+            record.id,
+            record.title,
+            record.tool,
+            record.command,
+            record.project_path,
+            record.section_id
+        ));
         let mut snapshot = self.snapshot.lock();
         snapshot.sessions.push(record.clone());
         self.storage.save(&snapshot).map_err(|e| e.to_string())?;
@@ -193,17 +204,36 @@ impl SessionManager {
         cols: Option<u16>,
     ) -> Result<(), String> {
         let record = self.get_session(id)?;
+        diagnostics::log(format!(
+            "start_session id={} tool={:?} cmd={} rows={:?} cols={:?} project_path={}",
+            id, record.tool, record.command, rows, cols, record.project_path
+        ));
 
         {
             let runtimes = self.runtimes.lock();
             if runtimes.contains_key(id) {
                 // Session already running - this is OK, just return success
                 // This makes start_session idempotent
+                diagnostics::log(format!(
+                    "start_session id={} already running (idempotent)",
+                    id
+                ));
                 return Ok(());
             }
         }
 
         let cmd_spec = build_command(&record)?;
+        diagnostics::log(format!(
+            "start_session id={} command_spec program={} args={:?} env_keys={:?}",
+            id,
+            cmd_spec.program,
+            cmd_spec.args,
+            cmd_spec
+                .env
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>()
+        ));
         let pty_system = NativePtySystem::default();
         let size = PtySize {
             rows: rows.unwrap_or(24),
@@ -214,13 +244,22 @@ impl SessionManager {
 
         let pair = pty_system
             .openpty(size)
-            .map_err(|e| format!("failed to open pty: {}", e))?;
+            .map_err(|e| {
+                let msg = format!("failed to open pty: {}", e);
+                diagnostics::log(format!("start_session id={} {}", id, msg));
+                msg
+            })?;
 
         let working_dir = if record.project_path.is_empty() {
             dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
         } else {
             std::path::PathBuf::from(&record.project_path)
         };
+        diagnostics::log(format!(
+            "start_session id={} working_dir={}",
+            id,
+            working_dir.display()
+        ));
 
         let mut cmd = CommandBuilder::new(&cmd_spec.program);
         cmd.args(&cmd_spec.args);
@@ -236,7 +275,11 @@ impl SessionManager {
         let child = pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| format!("failed to spawn: {}", e))?;
+            .map_err(|e| {
+                let msg = format!("failed to spawn: {}", e);
+                diagnostics::log(format!("start_session id={} {}", id, msg));
+                msg
+            })?;
 
         let mut reader = pair
             .master
@@ -254,6 +297,10 @@ impl SessionManager {
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
         let reader_thread = thread::spawn(move || {
+            diagnostics::log(format!(
+                "session_reader_started id={} tool={:?}",
+                session_id, tool
+            ));
             let mut buf = vec![0u8; 16384];
             let mut pending: Vec<u8> = Vec::with_capacity(16384);
             let detector = prompt_detector(tool);
@@ -262,6 +309,7 @@ impl SessionManager {
             let mut status_buffer = String::with_capacity(8192);
             let status_buffer_max = 4096;
             let mut tool_session_id_extracted = false;
+            let mut output_events: u64 = 0;
 
             let emit_output = |data: &[u8], app: &AppHandle, sid: &str| {
                 let payload = SessionOutput {
@@ -301,6 +349,10 @@ impl SessionManager {
                             emit_output(&pending, &app_clone, &session_id);
                             pending.clear();
                         }
+                        diagnostics::log(format!(
+                            "session_reader_eof id={} output_events={}",
+                            session_id, output_events
+                        ));
                         let _ = app_clone.emit(
                             "session-exit",
                             SessionExit {
@@ -311,6 +363,13 @@ impl SessionManager {
                     }
                     Ok(n) => {
                         pending.extend_from_slice(&buf[..n]);
+                        output_events += 1;
+                        if output_events <= 3 {
+                            diagnostics::log(format!(
+                                "session_reader_output id={} bytes={} event={}",
+                                session_id, n, output_events
+                            ));
+                        }
                         if let Ok(text) = std::str::from_utf8(&buf[..n]) {
                             status_buffer.push_str(text);
                             if status_buffer.len() > status_buffer_max {
@@ -356,6 +415,10 @@ impl SessionManager {
                             emit_output(&pending, &app_clone, &session_id);
                             pending.clear();
                         }
+                        diagnostics::log(format!(
+                            "session_reader_error id={} output_events={}",
+                            session_id, output_events
+                        ));
                         break;
                     }
                 }
@@ -392,6 +455,13 @@ impl SessionManager {
     }
 
     pub fn write_session_input(&self, id: &str, data: &[u8]) -> Result<(), String> {
+        if data.len() > 4096 {
+            diagnostics::log(format!(
+                "write_session_input large payload id={} bytes={} (consider base64)",
+                id,
+                data.len()
+            ));
+        }
         let mut runtimes = self.runtimes.lock();
         let runtime = runtimes
             .get_mut(id)
@@ -582,6 +652,11 @@ pub fn write_session_input_base64(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&data_base64)
         .map_err(|e| format!("invalid base64: {}", e))?;
+    diagnostics::log(format!(
+        "write_session_input_base64 id={} bytes={}",
+        id,
+        bytes.len()
+    ));
     state.write_session_input(&id, &bytes)
 }
 

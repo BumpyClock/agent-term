@@ -1,0 +1,24 @@
+{
+  "languages": ["rust", "typescript", "javascript"],
+  "tools": {
+    "preset": "full",
+    "enable": ["semanticSearch", "codemap"],
+    "disable": [
+      "listFiles",
+      "readSourceCode",
+      "findIdentifier",
+      "findReferencedSymbols"
+    ]
+  },
+  "semantic_search": {
+    "enabled": true,
+    "exclude": {
+      "directories": ["**/sample_project/**"]
+    }
+  },
+  "debug": {
+    "enabled": true,
+    "log_level": "debug",
+    "log_dir": ".lsp-mcp/logs"
+  }
+}

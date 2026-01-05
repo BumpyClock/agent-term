@@ -97,6 +97,8 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       };
 
       const start = async () => {
+        const logPrefix = `[terminal ${sessionId}]`;
+        let outputEvents = 0;
         // Set up event listeners BEFORE starting the session to avoid missing early output
         inputDisposable = xterm.onData((data) => {
           invoke("write_session_input", {
@@ -106,27 +108,35 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         });
 
         unlistenOutput = await listen<{
-          session_id: string;
-          data_base64: string;
+          sessionId: string;
+          dataBase64: string;
         }>("session-output", (event) => {
-          if (event.payload.session_id === sessionId) {
-            const bytes = decodeBase64(event.payload.data_base64);
+          if (event.payload.sessionId === sessionId) {
+            const bytes = decodeBase64(event.payload.dataBase64);
             const text = decoder.decode(bytes, { stream: true });
             if (text.length > 0) {
               xterm.write(text);
             }
+            outputEvents += 1;
+            if (outputEvents <= 3) {
+              console.debug(`${logPrefix} output`, {
+                bytes: bytes.length,
+                events: outputEvents,
+              });
+            }
           }
         });
 
-        unlistenExit = await listen<{ session_id: string }>(
+        unlistenExit = await listen<{ sessionId: string }>(
           "session-exit",
           (event) => {
-            if (event.payload.session_id === sessionId) {
+            if (event.payload.sessionId === sessionId) {
               const tail = decoder.decode();
               if (tail.length > 0) {
                 xterm.write(tail);
               }
               xterm.write("\r\n\x1b[33m[Process exited]\x1b[0m\r\n");
+              console.info(`${logPrefix} session-exit`);
             }
           },
         );
@@ -149,11 +159,16 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
 
         // Now start the session after listeners are ready
         try {
+          console.info(`${logPrefix} start_session`, {
+            rows: initialDims?.rows ?? 24,
+            cols: initialDims?.cols ?? 80,
+          });
           await invoke("start_session", {
             id: sessionId,
             rows: initialDims?.rows ?? 24,
             cols: initialDims?.cols ?? 80,
           });
+          console.info(`${logPrefix} start_session ok`);
         } catch (err) {
           console.error("Failed to start session:", err);
           xterm.write(

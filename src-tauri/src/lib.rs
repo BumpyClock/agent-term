@@ -9,6 +9,7 @@ use std::thread;
 use tauri::{Emitter, State};
 use uuid::Uuid;
 
+mod diagnostics;
 mod session;
 
 // Terminal session state
@@ -65,7 +66,7 @@ fn create_terminal(
         .map_err(|e| format!("Failed to open pty: {}", e))?;
 
     // Build the shell command
-    let mut cmd = CommandBuilder::new(get_default_shell());
+    let mut cmd = CommandBuilder::new(detect_default_shell());
     cmd.cwd(working_dir);
     if cfg!(not(target_os = "windows")) {
         cmd.arg("-i");
@@ -236,15 +237,42 @@ fn get_home_dir() -> Option<String> {
     home
 }
 
-fn get_default_shell() -> String {
+fn detect_default_shell() -> String {
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(shell) = std::env::var("SHELL") {
+            if !shell.trim().is_empty() {
+                return shell;
+            }
+        }
+        if let Ok(user) = std::env::var("USER") {
+            if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
+                for line in passwd.lines() {
+                    if line.starts_with(&format!("{}:", user)) {
+                        let parts: Vec<&str> = line.split(':').collect();
+                        if let Some(shell) = parts.get(6) {
+                            if !shell.trim().is_empty() {
+                                return shell.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     #[cfg(target_os = "windows")]
     {
         std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
     }
     #[cfg(not(target_os = "windows"))]
     {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        "/bin/bash".to_string()
     }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_default_shell() -> String {
+    detect_default_shell()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -267,6 +295,7 @@ pub fn run() {
             close_terminal,
             generate_id,
             get_home_dir,
+            get_default_shell,
             session::list_sessions,
             session::list_sections,
             session::get_session,

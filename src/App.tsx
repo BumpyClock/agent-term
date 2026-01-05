@@ -66,8 +66,8 @@ function App() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    listen<{ session_id: string; status: SessionStatus }>('session-status', (event) => {
-      updateSessionStatus(event.payload.session_id, event.payload.status);
+    listen<{ sessionId: string; status: SessionStatus }>('session-status', (event) => {
+      updateSessionStatus(event.payload.sessionId, event.payload.status);
     }).then((unsub) => {
       unlisten = unsub;
     });
@@ -78,8 +78,8 @@ function App() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    listen<{ session_id: string; tool_session_id: string; tool: string }>('tool-session-id', (event) => {
-      updateToolSessionId(event.payload.session_id, event.payload.tool, event.payload.tool_session_id);
+    listen<{ sessionId: string; toolSessionId: string; tool: string }>('tool-session-id', (event) => {
+      updateToolSessionId(event.payload.sessionId, event.payload.tool, event.payload.toolSessionId);
     }).then((unsub) => {
       unlisten = unsub;
     });

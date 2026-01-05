@@ -59,11 +59,16 @@ interface TerminalState {
 
 const DEFAULT_SECTION_ID = 'default-section';
 
-function getDefaultShell(): string {
-  if (typeof window !== 'undefined' && navigator.platform.includes('Win')) {
-    return 'cmd.exe';
+async function getDefaultShell(): Promise<string> {
+  if (typeof window === 'undefined') {
+    return '/bin/bash';
   }
-  return '/bin/bash';
+  try {
+    return await invoke<string>('get_default_shell');
+  } catch (err) {
+    console.error('Failed to get default shell:', err);
+    return '/bin/bash';
+  }
 }
 
 export const useTerminalStore = create<TerminalState>()(
@@ -136,7 +141,7 @@ export const useTerminalStore = create<TerminalState>()(
         const sectionSessions = sessions.filter((s) => s.sectionId === sectionId);
         const sessionTitle = title || `Terminal ${sectionSessions.length + 1}`;
         const projectPath = section?.path || '';
-        const shell = getDefaultShell();
+        const shell = await getDefaultShell();
 
         const session = await invoke<Session>('create_session', {
           input: {
