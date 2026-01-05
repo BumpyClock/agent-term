@@ -5,16 +5,9 @@ import { Terminal } from './components/Terminal';
 import { useTerminalStore } from './store/terminalStore';
 import './App.css';
 
-interface TerminalInstance {
-  id: string;
-  sectionId: string;
-  cwd: string;
-}
-
 function App() {
   const { sections, tabs, activeTabId, addTab, updateSection, getDefaultSection } =
     useTerminalStore();
-  const [terminals, setTerminals] = useState<TerminalInstance[]>([]);
   const initializedRef = useRef(false);
   const [sidebarWidth, setSidebarWidth] = useState(250);
   const sidebarWidthRef = useRef(250);
@@ -88,13 +81,7 @@ function App() {
       const section = sections.find((s) => s.id === sectionId);
       if (!section) return;
 
-      const tab = addTab(sectionId);
-      const terminal: TerminalInstance = {
-        id: tab.id,
-        sectionId,
-        cwd: section.path,
-      };
-      setTerminals((prev) => [...prev, terminal]);
+      addTab(sectionId);
     },
     [sections, addTab]
   );
@@ -110,13 +97,6 @@ function App() {
     []
   );
 
-  // Clean up terminals when tabs are removed
-  useEffect(() => {
-    setTerminals((prev) =>
-      prev.filter((t) => tabs.some((tab) => tab.id === t.id))
-    );
-  }, [tabs]);
-
   return (
     <div className="app">
       <div className="sidebar-wrapper" style={{ width: sidebarWidth }}>
@@ -124,20 +104,23 @@ function App() {
       </div>
       <div className="sidebar-resizer" onMouseDown={handleResizeStart} />
       <div className="terminal-container">
-        {terminals.length === 0 ? (
+        {tabs.length === 0 ? (
           <div className="no-terminals">
             <p>No terminals open</p>
             <p>Click + on a project to create a new terminal</p>
           </div>
         ) : (
-          terminals.map((terminal) => (
-            <Terminal
-              key={terminal.id}
-              id={terminal.id}
-              cwd={terminal.cwd}
-              isActive={activeTabId === terminal.id}
-            />
-          ))
+          tabs.map((tab) => {
+            const section = sections.find((item) => item.id === tab.sectionId);
+            return (
+              <Terminal
+                key={tab.id}
+                id={tab.id}
+                cwd={section?.path ?? ''}
+                isActive={activeTabId === tab.id}
+              />
+            );
+          })
         )}
       </div>
     </div>
