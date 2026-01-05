@@ -301,8 +301,9 @@ impl SessionManager {
                 "session_reader_started id={} tool={:?}",
                 session_id, tool
             ));
-            let mut buf = vec![0u8; 16384];
-            let mut pending: Vec<u8> = Vec::with_capacity(16384);
+            let mut buf = vec![0u8; 32768];
+            let mut pending: Vec<u8> = Vec::with_capacity(65536);
+            let emit_threshold: usize = 8192;
             let detector = prompt_detector(tool);
             let mut tracker = status_tracker();
             let mut last_status = SessionStatus::Running;
@@ -370,37 +371,45 @@ impl SessionManager {
                                 session_id, n, output_events
                             ));
                         }
-                        if let Ok(text) = std::str::from_utf8(&buf[..n]) {
-                            status_buffer.push_str(text);
-                            if status_buffer.len() > status_buffer_max {
-                                let drain_to = status_buffer.len() - status_buffer_max;
+                        let text = String::from_utf8_lossy(&buf[..n]);
+                        status_buffer.push_str(&text);
+                        if status_buffer.len() > status_buffer_max {
+                            let mut drain_to = status_buffer.len() - status_buffer_max;
+                            while drain_to < status_buffer.len()
+                                && !status_buffer.is_char_boundary(drain_to)
+                            {
+                                drain_to += 1;
+                            }
+                            if drain_to > 0 {
                                 status_buffer.drain(..drain_to);
                             }
+                        }
 
-                            // Try to extract tool session ID once during startup
-                            if !tool_session_id_extracted {
-                                if let Some(extracted) =
-                                    extract_session_id(&tool_for_extract, &status_buffer)
-                                {
-                                    tool_session_id_extracted = true;
-                                    let (tool_id, tool_name) = match extracted {
-                                        ExtractedSessionId::Claude(id) => (id, "claude"),
-                                        ExtractedSessionId::Gemini(id) => (id, "gemini"),
-                                    };
-                                    let _ = app_clone.emit(
-                                        "tool-session-id",
-                                        ToolSessionIdEvent {
-                                            session_id: session_id.clone(),
-                                            tool_session_id: tool_id,
-                                            tool: tool_name.to_string(),
-                                        },
-                                    );
-                                }
+                        // Try to extract tool session ID once during startup
+                        if !tool_session_id_extracted {
+                            if let Some(extracted) =
+                                extract_session_id(&tool_for_extract, &status_buffer)
+                            {
+                                tool_session_id_extracted = true;
+                                let (tool_id, tool_name) = match extracted {
+                                    ExtractedSessionId::Claude(id) => (id, "claude"),
+                                    ExtractedSessionId::Gemini(id) => (id, "gemini"),
+                                };
+                                let _ = app_clone.emit(
+                                    "tool-session-id",
+                                    ToolSessionIdEvent {
+                                        session_id: session_id.clone(),
+                                        tool_session_id: tool_id,
+                                        tool: tool_name.to_string(),
+                                    },
+                                );
                             }
                         }
-                        // Always emit immediately to avoid missing early output
-                        emit_output(&pending, &app_clone, &session_id);
-                        pending.clear();
+                        let should_emit = pending.len() >= emit_threshold || n < buf.len();
+                        if should_emit {
+                            emit_output(&pending, &app_clone, &session_id);
+                            pending.clear();
+                        }
                         check_status(
                             &status_buffer,
                             &detector,
