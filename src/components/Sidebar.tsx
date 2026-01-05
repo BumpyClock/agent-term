@@ -1,6 +1,40 @@
 import { useState } from 'react';
-import { useTerminalStore, Section, Tab } from '../store/terminalStore';
+import { useTerminalStore, Section, Session, SessionStatus } from '../store/terminalStore';
 import './Sidebar.css';
+
+function getStatusIcon(status: SessionStatus): string {
+  switch (status) {
+    case 'running':
+      return '🟢';
+    case 'waiting':
+      return '🟡';
+    case 'idle':
+      return '⚪';
+    case 'error':
+      return '🔴';
+    case 'starting':
+      return '🔵';
+    default:
+      return '⬛';
+  }
+}
+
+function getStatusTitle(status: SessionStatus): string {
+  switch (status) {
+    case 'running':
+      return 'Running';
+    case 'waiting':
+      return 'Waiting for input';
+    case 'idle':
+      return 'Idle';
+    case 'error':
+      return 'Error';
+    case 'starting':
+      return 'Starting';
+    default:
+      return 'Unknown';
+  }
+}
 
 interface SidebarProps {
   onCreateTerminal: (sectionId: string) => void;
@@ -9,14 +43,14 @@ interface SidebarProps {
 export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const {
     sections,
-    tabs,
-    activeTabId,
+    sessions,
+    activeSessionId,
     addSection,
     removeSection,
     updateSection,
     toggleSectionCollapse,
-    removeTab,
-    setActiveTab,
+    removeSession,
+    setActiveSession,
   } = useTerminalStore();
 
   const [isAddingSection, setIsAddingSection] = useState(false);
@@ -25,9 +59,9 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
 
-  const handleAddSection = () => {
+  const handleAddSection = async () => {
     if (newSectionName.trim() && newSectionPath.trim()) {
-      addSection(newSectionName.trim(), newSectionPath.trim());
+      await addSection(newSectionName.trim(), newSectionPath.trim());
       setNewSectionName('');
       setNewSectionPath('');
       setIsAddingSection(false);
@@ -48,8 +82,8 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     setEditingName('');
   };
 
-  const getTabsBySection = (sectionId: string): Tab[] => {
-    return tabs.filter((t) => t.sectionId === sectionId);
+  const getSessionsBySection = (sectionId: string): Session[] => {
+    return sessions.filter((s) => s.sectionId === sectionId);
   };
 
   return (
@@ -90,7 +124,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
       <div className="sections-list">
         {sections.map((section) => {
           const isDefault = !!section.isDefault;
-          const isCollapsed = isDefault ? false : section.isCollapsed;
+          const isCollapsed = isDefault ? false : section.collapsed;
           return (
             <div key={section.id} className="section">
             <div
@@ -143,14 +177,14 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                 {!section.isDefault && (
                   <button
                     className="action-btn delete-btn"
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
                       if (
                         confirm(
                           `Delete project "${section.name}"? Terminals will be moved to Default.`
                         )
                       ) {
-                        removeSection(section.id);
+                        await removeSection(section.id);
                       }
                     }}
                     title="Delete Project"
@@ -163,19 +197,21 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
 
             {!isCollapsed && (
               <div className="tabs-list">
-                {getTabsBySection(section.id).map((tab) => (
+                {getSessionsBySection(section.id).map((session) => (
                   <div
-                    key={tab.id}
-                    className={`tab ${activeTabId === tab.id ? 'active' : ''}`}
-                    onClick={() => setActiveTab(tab.id)}
+                    key={session.id}
+                    className={`tab ${activeSessionId === session.id ? 'active' : ''} status-${session.status}`}
+                    onClick={() => setActiveSession(session.id)}
                   >
-                    <span className="tab-icon">⬛</span>
-                    <span className="tab-title">{tab.title}</span>
+                    <span className="tab-icon" title={getStatusTitle(session.status)}>
+                      {getStatusIcon(session.status)}
+                    </span>
+                    <span className="tab-title">{session.title}</span>
                     <button
                       className="tab-close"
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        removeTab(tab.id);
+                        await removeSession(session.id);
                       }}
                       title="Close Terminal"
                     >
@@ -183,7 +219,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                     </button>
                   </div>
                 ))}
-                {getTabsBySection(section.id).length === 0 && (
+                {getSessionsBySection(section.id).length === 0 && (
                   <div className="empty-section">No terminals</div>
                 )}
               </div>

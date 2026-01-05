@@ -21,7 +21,7 @@ pub fn build_command(record: &SessionRecord) -> Result<CommandSpec, String> {
     match &record.tool {
         SessionTool::Shell => Ok(CommandSpec {
             program: record.command.clone(),
-            args: vec!["-i".to_string()],
+            args: vec!["-l".to_string(), "-i".to_string()],
             env: Vec::new(),
         }),
         SessionTool::Claude => build_claude_command(record),

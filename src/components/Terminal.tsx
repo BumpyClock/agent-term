@@ -8,25 +8,22 @@ import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
   id: string;
+  sessionId: string;
   cwd: string;
   isActive: boolean;
 }
 
-export function Terminal({ id, cwd, isActive }: TerminalProps) {
+export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initialCwdRef = useRef<string | null>(null);
+
   const initTerminal = useCallback(
     (container: HTMLDivElement) => {
-      const sessionId =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `${id}-${Date.now()}-${Math.random()}`;
       if (initialCwdRef.current === null) {
         initialCwdRef.current = cwd;
       }
-      const initialCwd = initialCwdRef.current || "";
       const decoder = new TextDecoder("utf-8");
 
       const xterm = new XTerm({
@@ -86,86 +83,45 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
         unlistenExit?.();
         resizeObserver?.disconnect();
         inputDisposable?.dispose();
-        invoke("close_terminal", { terminalId: id }).catch(console.error);
+        invoke("stop_session", { id: sessionId }).catch(console.error);
         xterm.dispose();
       };
 
+      const decodeBase64 = (input: string) => {
+        const binary = atob(input);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+      };
+
       const start = async () => {
-        try {
-          const payload: Record<string, unknown> = {
-            terminalId: id,
-            sessionId,
-            rows: initialDims?.rows ?? 24,
-            cols: initialDims?.cols ?? 80,
-          };
-          if (initialCwd) {
-            payload.cwd = initialCwd;
-          }
-          await invoke("create_terminal", payload);
-        } catch (err) {
-          console.error("Failed to create terminal:", err);
-          xterm.write(
-            `\r\n\x1b[31mFailed to create terminal: ${err}\x1b[0m\r\n`,
-          );
-          return;
-        }
-
-        if (cancelled) {
-          teardown();
-          return;
-        }
-
-        if (initialDims) {
-          invoke("resize_terminal", {
-            terminalId: id,
-            rows: initialDims.rows,
-            cols: initialDims.cols,
-          }).catch(console.error);
-        }
-
-        const decodeBase64 = (input: string) => {
-          const binary = atob(input);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i += 1) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-          return bytes;
-        };
-
+        // Set up event listeners BEFORE starting the session to avoid missing early output
         inputDisposable = xterm.onData((data) => {
-          invoke("write_terminal", {
-            terminalId: id,
+          invoke("write_session_input", {
+            id: sessionId,
             data,
           }).catch(console.error);
         });
 
         unlistenOutput = await listen<{
-          terminal_id: string;
           session_id: string;
           data_base64: string;
-        }>(
-          "terminal-output",
-          (event) => {
-            if (
-              event.payload.terminal_id === id &&
-              event.payload.session_id === sessionId
-            ) {
-              const bytes = decodeBase64(event.payload.data_base64);
-              const text = decoder.decode(bytes, { stream: true });
-              if (text.length > 0) {
-                xterm.write(text);
-              }
+        }>("session-output", (event) => {
+          if (event.payload.session_id === sessionId) {
+            const bytes = decodeBase64(event.payload.data_base64);
+            const text = decoder.decode(bytes, { stream: true });
+            if (text.length > 0) {
+              xterm.write(text);
             }
-          },
-        );
+          }
+        });
 
-        unlistenExit = await listen<{ terminal_id: string; session_id: string }>(
-          "terminal-exit",
+        unlistenExit = await listen<{ session_id: string }>(
+          "session-exit",
           (event) => {
-            if (
-              event.payload.terminal_id === id &&
-              event.payload.session_id === sessionId
-            ) {
+            if (event.payload.session_id === sessionId) {
               const tail = decoder.decode();
               if (tail.length > 0) {
                 xterm.write(tail);
@@ -180,8 +136,8 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
             fitAddonRef.current.fit();
             const dims = fitAddonRef.current.proposeDimensions();
             if (dims) {
-              invoke("resize_terminal", {
-                terminalId: id,
+              invoke("resize_session", {
+                id: sessionId,
                 rows: dims.rows,
                 cols: dims.cols,
               }).catch(console.error);
@@ -190,6 +146,26 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
         });
 
         resizeObserver.observe(container);
+
+        // Now start the session after listeners are ready
+        try {
+          await invoke("start_session", {
+            id: sessionId,
+            rows: initialDims?.rows ?? 24,
+            cols: initialDims?.cols ?? 80,
+          });
+        } catch (err) {
+          console.error("Failed to start session:", err);
+          xterm.write(
+            `\r\n\x1b[31mFailed to start session: ${err}\x1b[0m\r\n`,
+          );
+          return;
+        }
+
+        if (cancelled) {
+          teardown();
+          return;
+        }
       };
 
       start().catch(console.error);
@@ -199,7 +175,7 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
         teardown();
       };
     },
-    [id],
+    [sessionId],
   );
 
   useEffect(() => {
@@ -211,8 +187,9 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
     if (isActive && xtermRef.current) {
       xtermRef.current.focus();
       fitAddonRef.current?.fit();
+      invoke("acknowledge_session", { id: sessionId }).catch(console.error);
     }
-  }, [isActive]);
+  }, [isActive, sessionId]);
 
   return (
     <div

@@ -1,20 +1,26 @@
 import { useEffect, useCallback, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Sidebar } from './components/Sidebar';
 import { Terminal } from './components/Terminal';
-import { useTerminalStore } from './store/terminalStore';
+import { useTerminalStore, type SessionStatus } from './store/terminalStore';
 import './App.css';
 
 function App() {
   const {
     sections,
-    tabs,
-    activeTabId,
-    addTab,
+    sessions,
+    activeSessionId,
+    addSession,
     updateSection,
+    updateSessionStatus,
+    updateToolSessionId,
+    setActiveSession,
     getDefaultSection,
+    loadFromBackend,
     hasHydrated,
   } = useTerminalStore();
+
   const [sidebarWidth, setSidebarWidth] = useState(250);
   const sidebarWidthRef = useRef(250);
   const isResizingRef = useRef(false);
@@ -30,6 +36,8 @@ function App() {
     let cancelled = false;
 
     const hydrateDefaults = async () => {
+      await loadFromBackend();
+
       const defaultSection = getDefaultSection();
       if (!defaultSection) return;
 
@@ -44,8 +52,9 @@ function App() {
         }
       }
 
-      if (!cancelled && tabs.length === 0) {
-        addTab(defaultSection.id);
+      const currentSessions = useTerminalStore.getState().sessions;
+      if (!cancelled && currentSessions.length === 0) {
+        await addSession(defaultSection.id);
       }
     };
 
@@ -53,11 +62,83 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [addTab, getDefaultSection, hasHydrated, tabs.length, updateSection]);
+  }, [addSession, getDefaultSection, hasHydrated, loadFromBackend, updateSection]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<{ session_id: string; status: SessionStatus }>('session-status', (event) => {
+      updateSessionStatus(event.payload.session_id, event.payload.status);
+    }).then((unsub) => {
+      unlisten = unsub;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [updateSessionStatus]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<{ session_id: string; tool_session_id: string; tool: string }>('tool-session-id', (event) => {
+      updateToolSessionId(event.payload.session_id, event.payload.tool, event.payload.tool_session_id);
+    }).then((unsub) => {
+      unlisten = unsub;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [updateToolSessionId]);
 
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth;
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isMeta = event.metaKey || event.ctrlKey;
+      if (!isMeta) return;
+
+      if (event.key >= '1' && event.key <= '9') {
+        event.preventDefault();
+        const index = parseInt(event.key, 10) - 1;
+        if (index < sessions.length) {
+          setActiveSession(sessions[index].id);
+        }
+        return;
+      }
+
+      if (event.key === '[' || event.key === '{') {
+        event.preventDefault();
+        if (sessions.length === 0) return;
+        const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
+        const prevIndex = currentIndex <= 0 ? sessions.length - 1 : currentIndex - 1;
+        setActiveSession(sessions[prevIndex].id);
+        return;
+      }
+
+      if (event.key === ']' || event.key === '}') {
+        event.preventDefault();
+        if (sessions.length === 0) return;
+        const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
+        const nextIndex = currentIndex >= sessions.length - 1 ? 0 : currentIndex + 1;
+        setActiveSession(sessions[nextIndex].id);
+        return;
+      }
+
+      if (event.key === 't' && !event.shiftKey) {
+        event.preventDefault();
+        const defaultSection = getDefaultSection();
+        if (defaultSection) {
+          addSession(defaultSection.id);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [sessions, activeSessionId, setActiveSession, getDefaultSection, addSession]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -86,13 +167,12 @@ function App() {
   }, []);
 
   const handleCreateTerminal = useCallback(
-    (sectionId: string) => {
+    async (sectionId: string) => {
       const section = sections.find((s) => s.id === sectionId);
       if (!section) return;
-
-      addTab(sectionId);
+      await addSession(sectionId);
     },
-    [sections, addTab]
+    [sections, addSession]
   );
 
   const handleResizeStart = useCallback(
@@ -113,20 +193,21 @@ function App() {
       </div>
       <div className="sidebar-resizer" onMouseDown={handleResizeStart} />
       <div className="terminal-container">
-        {tabs.length === 0 ? (
+        {sessions.length === 0 ? (
           <div className="no-terminals">
             <p>No terminals open</p>
             <p>Click + on a project to create a new terminal</p>
           </div>
         ) : (
-          tabs.map((tab) => {
-            const section = sections.find((item) => item.id === tab.sectionId);
+          sessions.map((session) => {
+            const section = sections.find((item) => item.id === session.sectionId);
             return (
               <Terminal
-                key={tab.id}
-                id={tab.id}
+                key={session.id}
+                id={session.id}
+                sessionId={session.id}
                 cwd={section?.path ?? ''}
-                isActive={activeTabId === tab.id}
+                isActive={activeSessionId === session.id}
               />
             );
           })

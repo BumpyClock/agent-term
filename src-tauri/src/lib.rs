@@ -9,6 +9,8 @@ use std::thread;
 use tauri::{Emitter, State};
 use uuid::Uuid;
 
+mod session;
+
 // Terminal session state
 struct PtySession {
     master: Box<dyn portable_pty::MasterPty + Send>,
@@ -251,9 +253,13 @@ pub fn run() {
         sessions: Mutex::new(HashMap::new()),
     });
 
+    let session_manager = session::build_session_manager()
+        .expect("failed to build session manager");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
+        .manage(session_manager)
         .invoke_handler(tauri::generate_handler![
             create_terminal,
             write_terminal,
@@ -261,6 +267,25 @@ pub fn run() {
             close_terminal,
             generate_id,
             get_home_dir,
+            session::list_sessions,
+            session::list_sections,
+            session::get_session,
+            session::create_session,
+            session::rename_session,
+            session::delete_session,
+            session::move_session,
+            session::set_active_session,
+            session::create_section,
+            session::rename_section,
+            session::delete_section,
+            session::start_session,
+            session::stop_session,
+            session::restart_session,
+            session::write_session_input,
+            session::write_session_input_base64,
+            session::resize_session,
+            session::acknowledge_session,
+            session::set_tool_session_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

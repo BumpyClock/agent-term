@@ -1,18 +1,55 @@
 use std::collections::HashMap;
+use std::io::Read;
+use std::sync::mpsc;
+use std::thread;
 
+use base64::Engine;
 use parking_lot::Mutex;
-use tauri::State;
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+mod error;
 mod model;
 mod runtime;
 mod status;
 mod storage;
 mod tools;
 
-pub use model::{NewSessionInput, SectionRecord, SessionRecord, SessionStatus, SessionTool};
-use runtime::{session_runtime, SessionRuntime};
+pub use model::{NewSessionInput, SectionRecord, SessionRecord, SessionStatus};
+use runtime::SessionRuntime;
+use status::{extract_session_id, prompt_detector, status_tracker, ExtractedSessionId};
 use storage::{default_storage_root, Storage, StorageSnapshot};
+use tools::build_command;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionOutput {
+    session_id: String,
+    data_base64: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionExit {
+    session_id: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionStatusEvent {
+    session_id: String,
+    status: SessionStatus,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolSessionIdEvent {
+    session_id: String,
+    tool_session_id: String,
+    tool: String,
+}
 
 /// Coordinates session metadata and runtime state.
 ///
@@ -67,7 +104,7 @@ impl SessionManager {
             section_id: input.section_id,
             tool: input.tool,
             command: input.command,
-            status: SessionStatus::Starting,
+            status: SessionStatus::Idle,
             created_at: chrono_now(),
             last_accessed_at: None,
             claude_session_id: None,
@@ -78,7 +115,7 @@ impl SessionManager {
         };
         let mut snapshot = self.snapshot.lock();
         snapshot.sessions.push(record.clone());
-        self.storage.save(&snapshot)?;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())?;
         Ok(record)
     }
 
@@ -90,15 +127,14 @@ impl SessionManager {
             .find(|session| session.id == id)
             .ok_or_else(|| "Session not found".to_string())?;
         session.title = title;
-        self.storage.save(&snapshot)
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
     pub fn delete_session(&self, id: &str) -> Result<(), String> {
+        self.runtimes.lock().remove(id);
         let mut snapshot = self.snapshot.lock();
         snapshot.sessions.retain(|session| session.id != id);
-        self.storage.save(&snapshot)?;
-        self.runtimes.lock().remove(id);
-        Ok(())
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
     pub fn move_session(&self, id: &str, section_id: String) -> Result<(), String> {
@@ -109,13 +145,13 @@ impl SessionManager {
             .find(|session| session.id == id)
             .ok_or_else(|| "Session not found".to_string())?;
         session.section_id = section_id;
-        self.storage.save(&snapshot)
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
     pub fn set_active_session(&self, id: Option<String>) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
         snapshot.active_session_id = id;
-        self.storage.save(&snapshot)
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
     pub fn create_section(&self, name: String, path: String) -> Result<SectionRecord, String> {
@@ -128,7 +164,7 @@ impl SessionManager {
         };
         let mut snapshot = self.snapshot.lock();
         snapshot.sections.push(section.clone());
-        self.storage.save(&snapshot)?;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())?;
         Ok(section)
     }
 
@@ -140,23 +176,265 @@ impl SessionManager {
             .find(|section| section.id == id)
             .ok_or_else(|| "Section not found".to_string())?;
         section.name = name;
-        self.storage.save(&snapshot)
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
     pub fn delete_section(&self, id: &str) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
         snapshot.sections.retain(|section| section.id != id);
-        self.storage.save(&snapshot)
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn open_runtime(&self, session_id: &str, tool: SessionTool) -> Result<(), String> {
-        let mut runtimes = self.runtimes.lock();
-        if runtimes.contains_key(session_id) {
-            return Ok(());
+    pub fn start_session(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        rows: Option<u16>,
+        cols: Option<u16>,
+    ) -> Result<(), String> {
+        let record = self.get_session(id)?;
+
+        {
+            let runtimes = self.runtimes.lock();
+            if runtimes.contains_key(id) {
+                // Session already running - this is OK, just return success
+                // This makes start_session idempotent
+                return Ok(());
+            }
         }
-        let runtime = session_runtime(session_id.to_string(), tool);
-        runtimes.insert(session_id.to_string(), runtime);
+
+        let cmd_spec = build_command(&record)?;
+        let pty_system = NativePtySystem::default();
+        let size = PtySize {
+            rows: rows.unwrap_or(24),
+            cols: cols.unwrap_or(80),
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+
+        let pair = pty_system
+            .openpty(size)
+            .map_err(|e| format!("failed to open pty: {}", e))?;
+
+        let working_dir = if record.project_path.is_empty() {
+            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
+        } else {
+            std::path::PathBuf::from(&record.project_path)
+        };
+
+        let mut cmd = CommandBuilder::new(&cmd_spec.program);
+        cmd.args(&cmd_spec.args);
+        cmd.cwd(&working_dir);
+        for (key, value) in &cmd_spec.env {
+            cmd.env(key, value);
+        }
+        if cfg!(not(target_os = "windows")) {
+            cmd.env("TERM", "xterm-256color");
+            cmd.env("COLORTERM", "truecolor");
+        }
+
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("failed to spawn: {}", e))?;
+
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("failed to clone reader: {}", e))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| format!("failed to get writer: {}", e))?;
+
+        let session_id = id.to_string();
+        let app_clone = app.clone();
+        let tool = record.tool.clone();
+        let tool_for_extract = record.tool.clone();
+        let (shutdown_tx, shutdown_rx) = mpsc::channel();
+
+        let reader_thread = thread::spawn(move || {
+            let mut buf = vec![0u8; 16384];
+            let mut pending: Vec<u8> = Vec::with_capacity(16384);
+            let detector = prompt_detector(tool);
+            let mut tracker = status_tracker();
+            let mut last_status = SessionStatus::Running;
+            let mut status_buffer = String::with_capacity(8192);
+            let status_buffer_max = 4096;
+            let mut tool_session_id_extracted = false;
+
+            let emit_output = |data: &[u8], app: &AppHandle, sid: &str| {
+                let payload = SessionOutput {
+                    session_id: sid.to_string(),
+                    data_base64: base64::engine::general_purpose::STANDARD.encode(data),
+                };
+                let _ = app.emit("session-output", payload);
+            };
+
+            let check_status = |buffer: &str,
+                                detector: &status::PromptDetector,
+                                tracker: &mut status::StatusTracker,
+                                last: &mut SessionStatus,
+                                app: &AppHandle,
+                                sid: &str| {
+                let has_prompt = detector.has_prompt(buffer);
+                let new_status = tracker.update(buffer, has_prompt);
+                if new_status != *last {
+                    *last = new_status;
+                    let _ = app.emit(
+                        "session-status",
+                        SessionStatusEvent {
+                            session_id: sid.to_string(),
+                            status: new_status,
+                        },
+                    );
+                }
+            };
+
+            loop {
+                if shutdown_rx.try_recv().is_ok() {
+                    break;
+                }
+                match reader.read(&mut buf) {
+                    Ok(0) => {
+                        if !pending.is_empty() {
+                            emit_output(&pending, &app_clone, &session_id);
+                            pending.clear();
+                        }
+                        let _ = app_clone.emit(
+                            "session-exit",
+                            SessionExit {
+                                session_id: session_id.clone(),
+                            },
+                        );
+                        break;
+                    }
+                    Ok(n) => {
+                        pending.extend_from_slice(&buf[..n]);
+                        if let Ok(text) = std::str::from_utf8(&buf[..n]) {
+                            status_buffer.push_str(text);
+                            if status_buffer.len() > status_buffer_max {
+                                let drain_to = status_buffer.len() - status_buffer_max;
+                                status_buffer.drain(..drain_to);
+                            }
+
+                            // Try to extract tool session ID once during startup
+                            if !tool_session_id_extracted {
+                                if let Some(extracted) =
+                                    extract_session_id(&tool_for_extract, &status_buffer)
+                                {
+                                    tool_session_id_extracted = true;
+                                    let (tool_id, tool_name) = match extracted {
+                                        ExtractedSessionId::Claude(id) => (id, "claude"),
+                                        ExtractedSessionId::Gemini(id) => (id, "gemini"),
+                                    };
+                                    let _ = app_clone.emit(
+                                        "tool-session-id",
+                                        ToolSessionIdEvent {
+                                            session_id: session_id.clone(),
+                                            tool_session_id: tool_id,
+                                            tool: tool_name.to_string(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                        // Always emit immediately to avoid missing early output
+                        emit_output(&pending, &app_clone, &session_id);
+                        pending.clear();
+                        check_status(
+                            &status_buffer,
+                            &detector,
+                            &mut tracker,
+                            &mut last_status,
+                            &app_clone,
+                            &session_id,
+                        );
+                    }
+                    Err(_) => {
+                        if !pending.is_empty() {
+                            emit_output(&pending, &app_clone, &session_id);
+                            pending.clear();
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+
+        let runtime = SessionRuntime::new(
+            pair.master,
+            writer,
+            child,
+            reader_thread,
+            shutdown_tx,
+        );
+
+        self.runtimes.lock().insert(id.to_string(), runtime);
+        self.update_session_status(id, SessionStatus::Running)?;
         Ok(())
+    }
+
+    pub fn stop_session(&self, id: &str) -> Result<(), String> {
+        self.runtimes.lock().remove(id);
+        self.update_session_status(id, SessionStatus::Idle)
+    }
+
+    pub fn restart_session(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        rows: Option<u16>,
+        cols: Option<u16>,
+    ) -> Result<(), String> {
+        let _ = self.stop_session(id);
+        self.start_session(app, id, rows, cols)
+    }
+
+    pub fn write_session_input(&self, id: &str, data: &[u8]) -> Result<(), String> {
+        let mut runtimes = self.runtimes.lock();
+        let runtime = runtimes
+            .get_mut(id)
+            .ok_or_else(|| "session not running".to_string())?;
+        runtime.write(data)
+    }
+
+    pub fn resize_session(&self, id: &str, rows: u16, cols: u16) -> Result<(), String> {
+        let mut runtimes = self.runtimes.lock();
+        let runtime = runtimes
+            .get_mut(id)
+            .ok_or_else(|| "session not running".to_string())?;
+        runtime.resize(rows, cols)
+    }
+
+    pub fn acknowledge_session(&self, _id: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn set_tool_session_id(
+        &self,
+        id: &str,
+        tool: &str,
+        tool_session_id: String,
+    ) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        if let Some(session) = snapshot.sessions.iter_mut().find(|s| s.id == id) {
+            match tool {
+                "claude" => session.claude_session_id = Some(tool_session_id),
+                "gemini" => session.gemini_session_id = Some(tool_session_id),
+                _ => return Err(format!("unknown tool: {}", tool)),
+            }
+        }
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    fn update_session_status(&self, id: &str, status: SessionStatus) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        if let Some(session) = snapshot.sessions.iter_mut().find(|s| s.id == id) {
+            session.status = status;
+            session.last_accessed_at = Some(chrono_now());
+        }
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
     fn next_tab_order(&self) -> u32 {
@@ -206,7 +484,11 @@ pub fn create_session(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn rename_session(state: State<'_, SessionManager>, id: String, title: String) -> Result<(), String> {
+pub fn rename_session(
+    state: State<'_, SessionManager>,
+    id: String,
+    title: String,
+) -> Result<(), String> {
     state.rename_session(&id, title)
 }
 
@@ -216,7 +498,11 @@ pub fn delete_session(state: State<'_, SessionManager>, id: String) -> Result<()
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn move_session(state: State<'_, SessionManager>, id: String, section_id: String) -> Result<(), String> {
+pub fn move_session(
+    state: State<'_, SessionManager>,
+    id: String,
+    section_id: String,
+) -> Result<(), String> {
     state.move_session(&id, section_id)
 }
 
@@ -229,12 +515,20 @@ pub fn set_active_session(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn create_section(state: State<'_, SessionManager>, name: String, path: String) -> Result<SectionRecord, String> {
+pub fn create_section(
+    state: State<'_, SessionManager>,
+    name: String,
+    path: String,
+) -> Result<SectionRecord, String> {
     state.create_section(name, path)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn rename_section(state: State<'_, SessionManager>, id: String, name: String) -> Result<(), String> {
+pub fn rename_section(
+    state: State<'_, SessionManager>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
     state.rename_section(&id, name)
 }
 
@@ -243,6 +537,238 @@ pub fn delete_section(state: State<'_, SessionManager>, id: String) -> Result<()
     state.delete_section(&id)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn start_session(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    id: String,
+    rows: Option<u16>,
+    cols: Option<u16>,
+) -> Result<(), String> {
+    state.start_session(&app, &id, rows, cols)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn stop_session(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
+    state.stop_session(&id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn restart_session(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    id: String,
+    rows: Option<u16>,
+    cols: Option<u16>,
+) -> Result<(), String> {
+    state.restart_session(&app, &id, rows, cols)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn write_session_input(
+    state: State<'_, SessionManager>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    state.write_session_input(&id, data.as_bytes())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn write_session_input_base64(
+    state: State<'_, SessionManager>,
+    id: String,
+    data_base64: String,
+) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data_base64)
+        .map_err(|e| format!("invalid base64: {}", e))?;
+    state.write_session_input(&id, &bytes)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn resize_session(
+    state: State<'_, SessionManager>,
+    id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    state.resize_session(&id, rows, cols)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn acknowledge_session(state: State<'_, SessionManager>, id: String) -> Result<(), String> {
+    state.acknowledge_session(&id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_tool_session_id(
+    state: State<'_, SessionManager>,
+    id: String,
+    tool: String,
+    tool_session_id: String,
+) -> Result<(), String> {
+    state.set_tool_session_id(&id, &tool, tool_session_id)
+}
+
 fn chrono_now() -> String {
-    time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| "".to_string())
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| String::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_manager() -> (TempDir, SessionManager) {
+        let temp = TempDir::new().unwrap();
+        let storage = Storage::new(temp.path().to_path_buf(), "test".to_string());
+        let snapshot = storage.load().unwrap();
+        let manager = SessionManager {
+            storage,
+            snapshot: Mutex::new(snapshot),
+            runtimes: Mutex::new(HashMap::new()),
+        };
+        (temp, manager)
+    }
+
+    #[test]
+    fn test_create_and_list_sessions() {
+        let (_temp, manager) = test_manager();
+
+        let input = NewSessionInput {
+            title: "Test Session".to_string(),
+            project_path: "/tmp".to_string(),
+            section_id: "default".to_string(),
+            tool: model::SessionTool::Shell,
+            command: "/bin/bash".to_string(),
+        };
+
+        let session = manager.create_session(input).unwrap();
+        assert_eq!(session.title, "Test Session");
+        assert_eq!(session.project_path, "/tmp");
+
+        let sessions = manager.list_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, session.id);
+    }
+
+    #[test]
+    fn test_rename_session() {
+        let (_temp, manager) = test_manager();
+
+        let input = NewSessionInput {
+            title: "Original".to_string(),
+            project_path: "".to_string(),
+            section_id: "default".to_string(),
+            tool: model::SessionTool::Shell,
+            command: "/bin/bash".to_string(),
+        };
+
+        let session = manager.create_session(input).unwrap();
+        manager.rename_session(&session.id, "Renamed".to_string()).unwrap();
+
+        let updated = manager.get_session(&session.id).unwrap();
+        assert_eq!(updated.title, "Renamed");
+    }
+
+    #[test]
+    fn test_delete_session() {
+        let (_temp, manager) = test_manager();
+
+        let input = NewSessionInput {
+            title: "To Delete".to_string(),
+            project_path: "".to_string(),
+            section_id: "default".to_string(),
+            tool: model::SessionTool::Shell,
+            command: "/bin/bash".to_string(),
+        };
+
+        let session = manager.create_session(input).unwrap();
+        assert_eq!(manager.list_sessions().len(), 1);
+
+        manager.delete_session(&session.id).unwrap();
+        assert_eq!(manager.list_sessions().len(), 0);
+    }
+
+    #[test]
+    fn test_create_and_list_sections() {
+        let (_temp, manager) = test_manager();
+
+        let section = manager.create_section("Project A".to_string(), "/home/user/project-a".to_string()).unwrap();
+        assert_eq!(section.name, "Project A");
+        assert_eq!(section.path, "/home/user/project-a");
+
+        let sections = manager.list_sections();
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].id, section.id);
+    }
+
+    #[test]
+    fn test_move_session_to_section() {
+        let (_temp, manager) = test_manager();
+
+        let section = manager.create_section("New Section".to_string(), "".to_string()).unwrap();
+
+        let input = NewSessionInput {
+            title: "Movable".to_string(),
+            project_path: "".to_string(),
+            section_id: "default".to_string(),
+            tool: model::SessionTool::Shell,
+            command: "/bin/bash".to_string(),
+        };
+
+        let session = manager.create_session(input).unwrap();
+        assert_eq!(session.section_id, "default");
+
+        manager.move_session(&session.id, section.id.clone()).unwrap();
+
+        let updated = manager.get_session(&session.id).unwrap();
+        assert_eq!(updated.section_id, section.id);
+    }
+
+    #[test]
+    fn test_set_tool_session_id() {
+        let (_temp, manager) = test_manager();
+
+        let input = NewSessionInput {
+            title: "Claude Session".to_string(),
+            project_path: "".to_string(),
+            section_id: "default".to_string(),
+            tool: model::SessionTool::Claude,
+            command: "claude".to_string(),
+        };
+
+        let session = manager.create_session(input).unwrap();
+        assert!(session.claude_session_id.is_none());
+
+        manager.set_tool_session_id(&session.id, "claude", "abc-123".to_string()).unwrap();
+
+        let updated = manager.get_session(&session.id).unwrap();
+        assert_eq!(updated.claude_session_id, Some("abc-123".to_string()));
+    }
+
+    #[test]
+    fn test_session_tab_order() {
+        let (_temp, manager) = test_manager();
+
+        for i in 1..=3 {
+            let input = NewSessionInput {
+                title: format!("Session {}", i),
+                project_path: "".to_string(),
+                section_id: "default".to_string(),
+                tool: model::SessionTool::Shell,
+                command: "/bin/bash".to_string(),
+            };
+            manager.create_session(input).unwrap();
+        }
+
+        let sessions = manager.list_sessions();
+        assert_eq!(sessions.len(), 3);
+
+        // Tab orders should be sequential
+        let orders: Vec<u32> = sessions.iter().filter_map(|s| s.tab_order).collect();
+        assert_eq!(orders, vec![1, 2, 3]);
+    }
 }

@@ -1,49 +1,70 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { v4 as uuidv4 } from 'uuid';
+import { invoke } from '@tauri-apps/api/core';
 
-export interface Tab {
+export type SessionTool = 'shell' | 'claude' | 'gemini' | 'codex' | 'openCode' | { custom: string };
+export type SessionStatus = 'running' | 'waiting' | 'idle' | 'error' | 'starting';
+
+export interface Session {
   id: string;
   title: string;
+  projectPath: string;
   sectionId: string;
+  tool: SessionTool;
+  command: string;
+  status: SessionStatus;
+  createdAt: string;
+  lastAccessedAt: string | null;
+  claudeSessionId: string | null;
+  geminiSessionId: string | null;
+  loadedMcpNames: string[];
+  isOpen: boolean;
+  tabOrder: number | null;
 }
 
 export interface Section {
   id: string;
   name: string;
   path: string;
+  collapsed: boolean;
+  order: number;
   isDefault?: boolean;
-  isCollapsed?: boolean;
 }
 
 interface TerminalState {
   sections: Section[];
-  tabs: Tab[];
-  activeTabId: string | null;
+  sessions: Session[];
+  activeSessionId: string | null;
   hasHydrated: boolean;
 
-  // Section actions
-  addSection: (name: string, path: string) => Section;
-  removeSection: (id: string) => void;
+  addSection: (name: string, path: string) => Promise<Section>;
+  removeSection: (id: string) => Promise<void>;
   updateSection: (id: string, updates: Partial<Section>) => void;
   toggleSectionCollapse: (id: string) => void;
 
-  // Tab actions
-  addTab: (sectionId: string, title?: string) => Tab;
-  removeTab: (id: string) => void;
-  setActiveTab: (id: string) => void;
-  updateTabTitle: (id: string, title: string) => void;
-  moveTabToSection: (tabId: string, sectionId: string) => void;
+  addSession: (sectionId: string, title?: string) => Promise<Session>;
+  removeSession: (id: string) => Promise<void>;
+  setActiveSession: (id: string) => void;
+  updateSessionTitle: (id: string, title: string) => Promise<void>;
+  moveSessionToSection: (sessionId: string, sectionId: string) => Promise<void>;
+  updateSessionStatus: (id: string, status: SessionStatus) => void;
+  updateToolSessionId: (id: string, tool: string, toolSessionId: string) => void;
 
-  // Hydration
+  loadFromBackend: () => Promise<void>;
   setHasHydrated: (value: boolean) => void;
 
-  // Getters
-  getTabsBySection: (sectionId: string) => Tab[];
+  getSessionsBySection: (sectionId: string) => Session[];
   getDefaultSection: () => Section | undefined;
 }
 
 const DEFAULT_SECTION_ID = 'default-section';
+
+function getDefaultShell(): string {
+  if (typeof window !== 'undefined' && navigator.platform.includes('Win')) {
+    return 'cmd.exe';
+  }
+  return '/bin/bash';
+}
 
 export const useTerminalStore = create<TerminalState>()(
   persist(
@@ -52,44 +73,38 @@ export const useTerminalStore = create<TerminalState>()(
         {
           id: DEFAULT_SECTION_ID,
           name: 'Default',
-          path: '', // Will be set to home dir
+          path: '',
+          collapsed: false,
+          order: 0,
           isDefault: true,
-          isCollapsed: false,
         },
       ],
-      tabs: [],
-      activeTabId: null,
+      sessions: [],
+      activeSessionId: null,
       hasHydrated: false,
 
-      addSection: (name: string, path: string) => {
-        const newSection: Section = {
-          id: uuidv4(),
-          name,
-          path,
-          isCollapsed: false,
-        };
+      addSection: async (name: string, path: string) => {
+        const section = await invoke<Section>('create_section', { name, path });
         set((state) => ({
-          sections: [...state.sections, newSection],
+          sections: [...state.sections, { ...section, isDefault: false }],
         }));
-        return newSection;
+        return section;
       },
 
-      removeSection: (id: string) => {
+      removeSection: async (id: string) => {
         const section = get().sections.find((s) => s.id === id);
-        if (section?.isDefault) return; // Cannot remove default section
-
+        if (section?.isDefault) return;
+        await invoke('delete_section', { id });
         set((state) => {
-          // Move tabs from this section to default
           const defaultSection = state.sections.find((s) => s.isDefault);
-          const updatedTabs = state.tabs.map((tab) =>
-            tab.sectionId === id
-              ? { ...tab, sectionId: defaultSection?.id || DEFAULT_SECTION_ID }
-              : tab
+          const updatedSessions = state.sessions.map((session) =>
+            session.sectionId === id
+              ? { ...session, sectionId: defaultSection?.id || DEFAULT_SECTION_ID }
+              : session
           );
-
           return {
             sections: state.sections.filter((s) => s.id !== id),
-            tabs: updatedTabs,
+            sessions: updatedSessions,
           };
         });
       },
@@ -100,6 +115,9 @@ export const useTerminalStore = create<TerminalState>()(
             s.id === id ? { ...s, ...updates } : s
           ),
         }));
+        if (updates.name) {
+          invoke('rename_section', { id, name: updates.name }).catch(console.error);
+        }
       },
 
       toggleSectionCollapse: (id: string) => {
@@ -107,73 +125,147 @@ export const useTerminalStore = create<TerminalState>()(
         if (section?.isDefault) return;
         set((state) => ({
           sections: state.sections.map((s) =>
-            s.id === id ? { ...s, isCollapsed: !s.isCollapsed } : s
+            s.id === id ? { ...s, collapsed: !s.collapsed } : s
           ),
         }));
       },
 
-      addTab: (sectionId: string, title?: string) => {
-        const tabs = get().tabs;
-        const sectionTabs = tabs.filter((t) => t.sectionId === sectionId);
-        const newTab: Tab = {
-          id: uuidv4(),
-          title: title || `Terminal ${sectionTabs.length + 1}`,
-          sectionId,
-        };
+      addSession: async (sectionId: string, title?: string) => {
+        const section = get().sections.find((s) => s.id === sectionId);
+        const sessions = get().sessions;
+        const sectionSessions = sessions.filter((s) => s.sectionId === sectionId);
+        const sessionTitle = title || `Terminal ${sectionSessions.length + 1}`;
+        const projectPath = section?.path || '';
+        const shell = getDefaultShell();
+
+        const session = await invoke<Session>('create_session', {
+          input: {
+            title: sessionTitle,
+            projectPath,
+            sectionId,
+            tool: 'shell',
+            command: shell,
+          },
+        });
+
         set((state) => ({
-          tabs: [...state.tabs, newTab],
-          activeTabId: newTab.id,
+          sessions: [...state.sessions, session],
+          activeSessionId: session.id,
         }));
-        return newTab;
+        return session;
       },
 
-      removeTab: (id: string) => {
+      removeSession: async (id: string) => {
+        await invoke('delete_session', { id });
         set((state) => {
-          const newTabs = state.tabs.filter((t) => t.id !== id);
-          let newActiveTabId = state.activeTabId;
-
-          if (state.activeTabId === id) {
-            // Find another tab to activate
-            const tabIndex = state.tabs.findIndex((t) => t.id === id);
-            if (newTabs.length > 0) {
-              newActiveTabId =
-                newTabs[Math.min(tabIndex, newTabs.length - 1)]?.id || null;
+          const newSessions = state.sessions.filter((s) => s.id !== id);
+          let newActiveSessionId = state.activeSessionId;
+          if (state.activeSessionId === id) {
+            const sessionIndex = state.sessions.findIndex((s) => s.id === id);
+            if (newSessions.length > 0) {
+              newActiveSessionId =
+                newSessions[Math.min(sessionIndex, newSessions.length - 1)]?.id || null;
             } else {
-              newActiveTabId = null;
+              newActiveSessionId = null;
             }
           }
-
           return {
-            tabs: newTabs,
-            activeTabId: newActiveTabId,
+            sessions: newSessions,
+            activeSessionId: newActiveSessionId,
           };
         });
       },
 
-      setActiveTab: (id: string) => {
-        set({ activeTabId: id });
+      setActiveSession: (id: string) => {
+        set({ activeSessionId: id });
+        invoke('set_active_session', { id }).catch(console.error);
       },
 
-      updateTabTitle: (id: string, title: string) => {
+      updateSessionTitle: async (id: string, title: string) => {
+        await invoke('rename_session', { id, title });
         set((state) => ({
-          tabs: state.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
-        }));
-      },
-
-      moveTabToSection: (tabId: string, sectionId: string) => {
-        set((state) => ({
-          tabs: state.tabs.map((t) =>
-            t.id === tabId ? { ...t, sectionId } : t
+          sessions: state.sessions.map((s) =>
+            s.id === id ? { ...s, title } : s
           ),
         }));
+      },
+
+      moveSessionToSection: async (sessionId: string, sectionId: string) => {
+        await invoke('move_session', { id: sessionId, sectionId });
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId ? { ...s, sectionId } : s
+          ),
+        }));
+      },
+
+      updateSessionStatus: (id: string, status: SessionStatus) => {
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === id ? { ...s, status } : s
+          ),
+        }));
+      },
+
+      updateToolSessionId: (id: string, tool: string, toolSessionId: string) => {
+        set((state) => ({
+          sessions: state.sessions.map((s) => {
+            if (s.id !== id) return s;
+            if (tool === 'claude') {
+              return { ...s, claudeSessionId: toolSessionId };
+            } else if (tool === 'gemini') {
+              return { ...s, geminiSessionId: toolSessionId };
+            }
+            return s;
+          }),
+        }));
+        // Persist to backend
+        invoke('set_tool_session_id', { id, tool, toolSessionId }).catch(console.error);
+      },
+
+      loadFromBackend: async () => {
+        try {
+          const [sessions, sections] = await Promise.all([
+            invoke<Session[]>('list_sessions'),
+            invoke<Section[]>('list_sections'),
+          ]);
+
+          const currentSections = get().sections;
+          const hasDefaultSection = sections.some((s) =>
+            currentSections.find((cs) => cs.isDefault && cs.id === s.id)
+          );
+
+          let mergedSections: Section[];
+          if (hasDefaultSection || sections.length === 0) {
+            mergedSections = sections.length > 0
+              ? sections.map((s) => ({
+                  ...s,
+                  isDefault: currentSections.find((cs) => cs.id === s.id)?.isDefault || false,
+                }))
+              : currentSections;
+          } else {
+            mergedSections = [
+              ...currentSections.filter((s) => s.isDefault),
+              ...sections.map((s) => ({ ...s, isDefault: false })),
+            ];
+          }
+
+          set({
+            sessions,
+            sections: mergedSections,
+            activeSessionId: sessions.find((s) => s.isOpen)?.id || null,
+          });
+        } catch (err) {
+          console.error('Failed to load from backend:', err);
+        }
       },
 
       setHasHydrated: (value: boolean) => {
         set({ hasHydrated: value });
       },
 
-      getTabsBySection: (sectionId: string) => {
-        return get().tabs.filter((t) => t.sectionId === sectionId);
+      getSessionsBySection: (sectionId: string) => {
+        return get().sessions.filter((s) => s.sectionId === sectionId);
       },
 
       getDefaultSection: () => {
@@ -184,7 +276,6 @@ export const useTerminalStore = create<TerminalState>()(
       name: 'terminal-storage',
       partialize: (state) => ({
         sections: state.sections,
-        // Don't persist tabs - they will be recreated
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
