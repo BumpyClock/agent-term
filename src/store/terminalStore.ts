@@ -40,6 +40,7 @@ interface TerminalState {
 }
 
 const DEFAULT_SECTION_ID = 'default-section';
+const INITIAL_TAB_ID = uuidv4();
 
 export const useTerminalStore = create<TerminalState>()(
   persist(
@@ -53,8 +54,14 @@ export const useTerminalStore = create<TerminalState>()(
           isCollapsed: false,
         },
       ],
-      tabs: [],
-      activeTabId: null,
+      tabs: [
+        {
+          id: INITIAL_TAB_ID,
+          title: 'Terminal 1',
+          sectionId: DEFAULT_SECTION_ID,
+        },
+      ],
+      activeTabId: INITIAL_TAB_ID,
 
       addSection: (name: string, path: string) => {
         const newSection: Section = {

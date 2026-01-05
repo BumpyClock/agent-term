@@ -8,7 +8,6 @@ import './App.css';
 function App() {
   const { sections, tabs, activeTabId, addTab, updateSection, getDefaultSection } =
     useTerminalStore();
-  const initializedRef = useRef(false);
   const [sidebarWidth, setSidebarWidth] = useState(250);
   const sidebarWidthRef = useRef(250);
   const isResizingRef = useRef(false);
@@ -34,17 +33,6 @@ function App() {
     };
     initDefaultSection();
   }, [getDefaultSection, updateSection]);
-
-  // Create initial terminal on first load
-  useEffect(() => {
-    if (!initializedRef.current && tabs.length === 0) {
-      initializedRef.current = true;
-      const defaultSection = getDefaultSection();
-      if (defaultSection) {
-        handleCreateTerminal(defaultSection.id);
-      }
-    }
-  }, [tabs.length, getDefaultSection]);
 
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth;

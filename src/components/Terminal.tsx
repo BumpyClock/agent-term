@@ -16,13 +16,18 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const initialCwdRef = useRef<string | null>(null);
   const initTerminal = useCallback(
     (container: HTMLDivElement) => {
       const sessionId =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `${id}-${Date.now()}-${Math.random()}`;
-      console.debug("[terminal] init", { id, sessionId, cwd });
+      if (initialCwdRef.current === null) {
+        initialCwdRef.current = cwd;
+      }
+      const initialCwd = initialCwdRef.current || "";
+      console.debug("[terminal] init", { id, sessionId, cwd: initialCwd });
       const decoder = new TextDecoder("utf-8");
 
       const xterm = new XTerm({
@@ -97,8 +102,8 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
             rows: initialDims?.rows ?? 24,
             cols: initialDims?.cols ?? 80,
           };
-          if (cwd) {
-            payload.cwd = cwd;
+          if (initialCwd) {
+            payload.cwd = initialCwd;
           }
           await invoke("create_terminal", payload);
           console.debug("[terminal] create_terminal_done", { id, sessionId });
@@ -211,7 +216,7 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
         teardown();
       };
     },
-    [id, cwd],
+    [id],
   );
 
   useEffect(() => {
