@@ -98,6 +98,8 @@ export const useTerminalStore = create<TerminalState>()(
       },
 
       toggleSectionCollapse: (id: string) => {
+        const section = get().sections.find((s) => s.id === id);
+        if (section?.isDefault) return;
         set((state) => ({
           sections: state.sections.map((s) =>
             s.id === id ? { ...s, isCollapsed: !s.isCollapsed } : s

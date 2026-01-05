@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Sidebar } from './components/Sidebar';
 import { Terminal } from './components/Terminal';
@@ -16,6 +16,13 @@ function App() {
     useTerminalStore();
   const [terminals, setTerminals] = useState<TerminalInstance[]>([]);
   const initializedRef = useRef(false);
+  const [sidebarWidth, setSidebarWidth] = useState(250);
+  const sidebarWidthRef = useRef(250);
+  const isResizingRef = useRef(false);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(250);
+  const minSidebarWidth = 200;
+  const maxSidebarWidth = 420;
 
   // Initialize default section with home directory
   useEffect(() => {
@@ -46,6 +53,36 @@ function App() {
     }
   }, [tabs.length, getDefaultSection]);
 
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const delta = event.clientX - resizeStartXRef.current;
+      const nextWidth = Math.min(
+        maxSidebarWidth,
+        Math.max(minSidebarWidth, resizeStartWidthRef.current + delta)
+      );
+      setSidebarWidth(nextWidth);
+    };
+
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) return;
+      isResizingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
   const handleCreateTerminal = useCallback(
     (sectionId: string) => {
       const section = sections.find((s) => s.id === sectionId);
@@ -62,6 +99,17 @@ function App() {
     [sections, addTab]
   );
 
+  const handleResizeStart = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      isResizingRef.current = true;
+      resizeStartXRef.current = event.clientX;
+      resizeStartWidthRef.current = sidebarWidthRef.current;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    },
+    []
+  );
+
   // Clean up terminals when tabs are removed
   useEffect(() => {
     setTerminals((prev) =>
@@ -71,7 +119,10 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar onCreateTerminal={handleCreateTerminal} />
+      <div className="sidebar-wrapper" style={{ width: sidebarWidth }}>
+        <Sidebar onCreateTerminal={handleCreateTerminal} />
+      </div>
+      <div className="sidebar-resizer" onMouseDown={handleResizeStart} />
       <div className="terminal-container">
         {terminals.length === 0 ? (
           <div className="no-terminals">

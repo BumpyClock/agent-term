@@ -1,7 +1,7 @@
 .sidebar {
-  width: 250px;
-  min-width: 200px;
-  max-width: 350px;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
   background-color: #252526;
   border-right: 1px solid #3c3c3c;
   display: flex;
@@ -110,6 +110,10 @@
   background-color: #2d2d2d;
 }
 
+.section-header.default {
+  cursor: default;
+}
+
 .section-header:hover {
   background-color: #333333;
 }
@@ -119,6 +123,10 @@
   color: #858585;
   margin-right: 8px;
   width: 12px;
+}
+
+.collapse-icon.placeholder {
+  visibility: hidden;
 }
 
 .section-name {

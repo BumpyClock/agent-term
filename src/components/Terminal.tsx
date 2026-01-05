@@ -23,6 +23,7 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
           ? crypto.randomUUID()
           : `${id}-${Date.now()}-${Math.random()}`;
       console.debug("[terminal] init", { id, sessionId, cwd });
+      const decoder = new TextDecoder("utf-8");
 
       const xterm = new XTerm({
         cursorBlink: true,
@@ -90,13 +91,16 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
 
       const start = async () => {
         try {
-          await invoke("create_terminal", {
+          const payload: Record<string, unknown> = {
             terminalId: id,
             sessionId,
-            cwd: cwd || null,
             rows: initialDims?.rows ?? 24,
             cols: initialDims?.cols ?? 80,
-          });
+          };
+          if (cwd) {
+            payload.cwd = cwd;
+          }
+          await invoke("create_terminal", payload);
           console.debug("[terminal] create_terminal_done", { id, sessionId });
         } catch (err) {
           console.error("Failed to create terminal:", err);
@@ -119,6 +123,15 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
           }).catch(console.error);
         }
 
+        const decodeBase64 = (input: string) => {
+          const binary = atob(input);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i += 1) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          return bytes;
+        };
+
         inputDisposable = xterm.onData((data) => {
           console.debug("[terminal] input", { id, size: data.length });
           invoke("write_terminal", {
@@ -130,7 +143,7 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
         unlistenOutput = await listen<{
           terminal_id: string;
           session_id: string;
-          data: string;
+          data_base64: string;
         }>(
           "terminal-output",
           (event) => {
@@ -138,12 +151,16 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
               event.payload.terminal_id === id &&
               event.payload.session_id === sessionId
             ) {
+              const bytes = decodeBase64(event.payload.data_base64);
+              const text = decoder.decode(bytes, { stream: true });
+              if (text.length > 0) {
+                xterm.write(text);
+              }
               console.debug("[terminal] output", {
                 id,
                 sessionId,
-                size: event.payload.data.length,
+                size: bytes.length,
               });
-              xterm.write(event.payload.data);
             }
           },
         );
@@ -155,6 +172,10 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
               event.payload.terminal_id === id &&
               event.payload.session_id === sessionId
             ) {
+              const tail = decoder.decode();
+              if (tail.length > 0) {
+                xterm.write(tail);
+              }
               console.debug("[terminal] exit", { id, sessionId });
               xterm.write("\r\n\x1b[33m[Process exited]\x1b[0m\r\n");
             }

@@ -88,14 +88,21 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
       )}
 
       <div className="sections-list">
-        {sections.map((section) => (
-          <div key={section.id} className="section">
+        {sections.map((section) => {
+          const isDefault = !!section.isDefault;
+          const isCollapsed = isDefault ? false : section.isCollapsed;
+          return (
+            <div key={section.id} className="section">
             <div
-              className="section-header"
-              onClick={() => toggleSectionCollapse(section.id)}
+              className={`section-header ${isDefault ? 'default' : ''}`}
+              onClick={() => {
+                if (!isDefault) {
+                  toggleSectionCollapse(section.id);
+                }
+              }}
             >
-              <span className="collapse-icon">
-                {section.isCollapsed ? '▶' : '▼'}
+              <span className={`collapse-icon ${isDefault ? 'placeholder' : ''}`}>
+                {isDefault ? '' : isCollapsed ? '▶' : '▼'}
               </span>
               {editingSectionId === section.id ? (
                 <input
@@ -154,7 +161,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
               </div>
             </div>
 
-            {!section.isCollapsed && (
+            {!isCollapsed && (
               <div className="tabs-list">
                 {getTabsBySection(section.id).map((tab) => (
                   <div
@@ -181,8 +188,9 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                 )}
               </div>
             )}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

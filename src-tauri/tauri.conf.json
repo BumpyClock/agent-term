@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "terminal-app",
+  "productName": "Agent Term",
   "version": "0.1.0",
-  "identifier": "com.adityasharma.terminal-app",
+  "identifier": "com.adityasharma.agent-term-app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "terminal-app",
+        "title": "Agent Term",
         "width": 800,
         "height": 600
       }

@@ -22,6 +22,24 @@ body,
     Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
 }
 
+.sidebar-wrapper {
+  height: 100%;
+  min-width: 200px;
+  max-width: 420px;
+  flex-shrink: 0;
+}
+
+.sidebar-resizer {
+  width: 4px;
+  cursor: col-resize;
+  background-color: #1f1f1f;
+  flex-shrink: 0;
+}
+
+.sidebar-resizer:hover {
+  background-color: #2a2a2a;
+}
+
 .terminal-container {
   flex: 1;
   display: flex;

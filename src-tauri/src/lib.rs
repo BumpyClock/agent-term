@@ -1,3 +1,4 @@
+use base64::Engine;
 use parking_lot::Mutex;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use serde::Serialize;
@@ -12,8 +13,7 @@ use uuid::Uuid;
 struct PtySession {
     master: Box<dyn portable_pty::MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    // We keep the child handle to track the process
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
     session_id: String,
 }
 
@@ -25,7 +25,7 @@ struct AppState {
 struct TerminalOutput {
     terminal_id: String,
     session_id: String,
-    data: String,
+    data_base64: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -111,7 +111,9 @@ fn create_terminal(
 
     // Spawn a thread to read from the PTY and emit events
     thread::spawn(move || {
-        let mut buf = [0u8; 8192];
+        let mut buf = vec![0u8; 16384];
+        let mut pending: Vec<u8> = Vec::with_capacity(65536);
+        let emit_threshold = 65536;
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => {
@@ -120,6 +122,16 @@ fn create_terminal(
                         "terminal_read eof id={} session_id={}",
                         terminal_id_clone, session_id_clone
                     );
+                    if !pending.is_empty() {
+                        let payload = TerminalOutput {
+                            terminal_id: terminal_id_clone.clone(),
+                            session_id: session_id_clone.clone(),
+                            data_base64: base64::engine::general_purpose::STANDARD
+                                .encode(&pending),
+                        };
+                        let _ = app_clone.emit("terminal-output", payload);
+                        pending.clear();
+                    }
                     let _ = app_clone.emit(
                         "terminal-exit",
                         TerminalExit {
@@ -130,22 +142,33 @@ fn create_terminal(
                     break;
                 }
                 Ok(n) => {
-                    // Convert to string (lossy for invalid UTF-8)
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app_clone.emit(
-                        "terminal-output",
-                        TerminalOutput {
+                    pending.extend_from_slice(&buf[..n]);
+                    if pending.len() >= emit_threshold || n < buf.len() {
+                        let payload = TerminalOutput {
                             terminal_id: terminal_id_clone.clone(),
                             session_id: session_id_clone.clone(),
-                            data,
-                        },
-                    );
+                            data_base64: base64::engine::general_purpose::STANDARD
+                                .encode(&pending),
+                        };
+                        let _ = app_clone.emit("terminal-output", payload);
+                        pending.clear();
+                    }
                 }
                 Err(err) => {
                     println!(
                         "terminal_read error id={} session_id={} err={}",
                         terminal_id_clone, session_id_clone, err
                     );
+                    if !pending.is_empty() {
+                        let payload = TerminalOutput {
+                            terminal_id: terminal_id_clone.clone(),
+                            session_id: session_id_clone.clone(),
+                            data_base64: base64::engine::general_purpose::STANDARD
+                                .encode(&pending),
+                        };
+                        let _ = app_clone.emit("terminal-output", payload);
+                        pending.clear();
+                    }
                     break;
                 }
             }
@@ -156,7 +179,7 @@ fn create_terminal(
     let session = PtySession {
         master: pair.master,
         writer,
-        _child: child,
+        child,
         session_id: session_id.clone(),
     };
     state.sessions.lock().insert(terminal_id.clone(), session);
@@ -231,7 +254,13 @@ fn resize_terminal(
 fn close_terminal(state: State<'_, Arc<AppState>>, terminal_id: String) -> Result<(), String> {
     println!("terminal_close start id={}", terminal_id);
     let mut sessions = state.sessions.lock();
-    if sessions.remove(&terminal_id).is_some() {
+    if let Some(mut session) = sessions.remove(&terminal_id) {
+        if let Err(err) = session.child.kill() {
+            println!("terminal_close kill_failed id={} err={}", terminal_id, err);
+        }
+        if let Err(err) = session.child.try_wait() {
+            println!("terminal_close wait_failed id={} err={}", terminal_id, err);
+        }
         println!("terminal_close done id={}", terminal_id);
         Ok(())
     } else {
