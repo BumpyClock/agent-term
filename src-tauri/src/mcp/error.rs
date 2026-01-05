@@ -25,6 +25,8 @@ pub enum McpError {
     InvalidConfig(String),
     /// IO error
     IoError(String),
+    /// Invalid input parameter
+    InvalidInput(String),
 }
 
 impl fmt::Display for McpError {
@@ -44,6 +46,7 @@ impl fmt::Display for McpError {
             }
             McpError::InvalidConfig(msg) => write!(f, "invalid MCP configuration: {}", msg),
             McpError::IoError(msg) => write!(f, "IO error: {}", msg),
+            McpError::InvalidInput(msg) => write!(f, "invalid input: {}", msg),
         }
     }
 }

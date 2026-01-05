@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use super::error::{McpError, McpResult};
+
 /// User configuration loaded from ~/.agent-term/config.toml
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UserConfig {

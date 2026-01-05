@@ -106,6 +106,7 @@ impl SessionManager {
             section_id: input.section_id,
             tool: input.tool,
             command: input.command,
+            icon: input.icon,
             status: SessionStatus::Idle,
             created_at: chrono_now(),
             last_accessed_at: None,
@@ -141,6 +142,28 @@ impl SessionManager {
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
+    pub fn set_session_command(&self, id: &str, command: String) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        let session = snapshot
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        session.command = command;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    pub fn set_session_icon(&self, id: &str, icon: Option<String>) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        let session = snapshot
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        session.icon = icon;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
     pub fn delete_session(&self, id: &str) -> Result<(), String> {
         self.runtimes.lock().remove(id);
         let mut snapshot = self.snapshot.lock();
@@ -170,6 +193,7 @@ impl SessionManager {
             id: Uuid::new_v4().to_string(),
             name,
             path,
+            icon: None,
             collapsed: false,
             order: self.next_section_order(),
         };
@@ -187,6 +211,28 @@ impl SessionManager {
             .find(|section| section.id == id)
             .ok_or_else(|| "Section not found".to_string())?;
         section.name = name;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    pub fn set_section_path(&self, id: &str, path: String) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        let section = snapshot
+            .sections
+            .iter_mut()
+            .find(|section| section.id == id)
+            .ok_or_else(|| "Section not found".to_string())?;
+        section.path = path;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    pub fn set_section_icon(&self, id: &str, icon: Option<String>) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        let section = snapshot
+            .sections
+            .iter_mut()
+            .find(|section| section.id == id)
+            .ok_or_else(|| "Section not found".to_string())?;
+        section.icon = icon;
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
@@ -537,6 +583,37 @@ impl SessionManager {
             .unwrap_or(0)
             .saturating_add(1)
     }
+
+    fn is_ai_tool(tool: &model::SessionTool) -> bool {
+        matches!(
+            tool,
+            model::SessionTool::Claude
+                | model::SessionTool::Gemini
+                | model::SessionTool::Codex
+                | model::SessionTool::OpenCode
+        )
+    }
+
+    fn get_running_session_ids(&self) -> Vec<String> {
+        let runtimes = self.runtimes.lock();
+        runtimes.keys().cloned().collect()
+    }
+
+    pub fn find_running_ai_sessions(&self, project_path: Option<&str>) -> Vec<String> {
+        let snapshot = self.snapshot.lock();
+        let running_ids = self.get_running_session_ids();
+
+        snapshot
+            .sessions
+            .iter()
+            .filter(|session| {
+                running_ids.contains(&session.id)
+                    && Self::is_ai_tool(&session.tool)
+                    && project_path.map_or(true, |path| session.project_path == path)
+            })
+            .map(|session| session.id.clone())
+            .collect()
+    }
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -569,6 +646,24 @@ pub fn rename_session(
     title: String,
 ) -> Result<(), String> {
     state.rename_session(&id, title)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_session_command(
+    state: State<'_, SessionManager>,
+    id: String,
+    command: String,
+) -> Result<(), String> {
+    state.set_session_command(&id, command)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_session_icon(
+    state: State<'_, SessionManager>,
+    id: String,
+    icon: Option<String>,
+) -> Result<(), String> {
+    state.set_session_icon(&id, icon)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -609,6 +704,24 @@ pub fn rename_section(
     name: String,
 ) -> Result<(), String> {
     state.rename_section(&id, name)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_section_path(
+    state: State<'_, SessionManager>,
+    id: String,
+    path: String,
+) -> Result<(), String> {
+    state.set_section_path(&id, path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_section_icon(
+    state: State<'_, SessionManager>,
+    id: String,
+    icon: Option<String>,
+) -> Result<(), String> {
+    state.set_section_icon(&id, icon)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -727,6 +840,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            icon: None,
         };
 
         let session = manager.create_session(input).unwrap();
@@ -748,6 +862,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            icon: None,
         };
 
         let session = manager.create_session(input).unwrap();
@@ -767,6 +882,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            icon: None,
         };
 
         let session = manager.create_session(input).unwrap();
@@ -783,6 +899,7 @@ mod tests {
         let section = manager.create_section("Project A".to_string(), "/home/user/project-a".to_string()).unwrap();
         assert_eq!(section.name, "Project A");
         assert_eq!(section.path, "/home/user/project-a");
+        assert!(section.icon.is_none());
 
         let sections = manager.list_sections();
         assert_eq!(sections.len(), 1);
@@ -801,6 +918,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            icon: None,
         };
 
         let session = manager.create_session(input).unwrap();
@@ -822,6 +940,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Claude,
             command: "claude".to_string(),
+            icon: None,
         };
 
         let session = manager.create_session(input).unwrap();
@@ -844,6 +963,7 @@ mod tests {
                 section_id: "default".to_string(),
                 tool: model::SessionTool::Shell,
                 command: "/bin/bash".to_string(),
+                icon: None,
             };
             manager.create_session(input).unwrap();
         }
@@ -854,5 +974,55 @@ mod tests {
         // Tab orders should be sequential
         let orders: Vec<u32> = sessions.iter().filter_map(|s| s.tab_order).collect();
         assert_eq!(orders, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_get_running_session_ids_returns_only_running() {
+        let (_temp, manager) = test_manager();
+
+        let session1 = manager
+            .create_session(NewSessionInput {
+                title: "Session 1".to_string(),
+                project_path: "/tmp".to_string(),
+                section_id: "default".to_string(),
+                tool: model::SessionTool::Claude,
+                command: "claude".to_string(),
+                icon: None,
+            })
+            .unwrap();
+
+        let _session2 = manager
+            .create_session(NewSessionInput {
+                title: "Session 2".to_string(),
+                project_path: "/tmp".to_string(),
+                section_id: "default".to_string(),
+                tool: model::SessionTool::Gemini,
+                command: "gemini".to_string(),
+                icon: None,
+            })
+            .unwrap();
+
+        let results = manager.get_running_session_ids();
+        assert_eq!(
+            results.len(),
+            0,
+            "should return empty when no sessions are running"
+        );
+    }
+
+    #[test]
+    fn test_is_ai_tool_returns_true_for_ai_tools() {
+        assert!(SessionManager::is_ai_tool(&model::SessionTool::Claude));
+        assert!(SessionManager::is_ai_tool(&model::SessionTool::Gemini));
+        assert!(SessionManager::is_ai_tool(&model::SessionTool::Codex));
+        assert!(SessionManager::is_ai_tool(&model::SessionTool::OpenCode));
+    }
+
+    #[test]
+    fn test_is_ai_tool_returns_false_for_non_ai_tools() {
+        assert!(!SessionManager::is_ai_tool(&model::SessionTool::Shell));
+        assert!(!SessionManager::is_ai_tool(
+            &model::SessionTool::Custom("custom".to_string())
+        ));
     }
 }

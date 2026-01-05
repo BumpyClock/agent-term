@@ -12,6 +12,7 @@ export interface Session {
   sectionId: string;
   tool: SessionTool;
   command: string;
+  icon: string | null;
   status: SessionStatus;
   createdAt: string;
   lastAccessedAt: string | null;
@@ -26,6 +27,7 @@ export interface Section {
   id: string;
   name: string;
   path: string;
+  icon: string | null;
   collapsed: boolean;
   order: number;
   isDefault?: boolean;
@@ -36,19 +38,27 @@ interface TerminalState {
   sessions: Session[];
   activeSessionId: string | null;
   hasHydrated: boolean;
+  lastKnownRows: number;
+  lastKnownCols: number;
 
   addSection: (name: string, path: string) => Promise<Section>;
   removeSection: (id: string) => Promise<void>;
   updateSection: (id: string, updates: Partial<Section>) => void;
   toggleSectionCollapse: (id: string) => void;
 
-  addSession: (sectionId: string, title?: string) => Promise<Session>;
+  addSession: (
+    sectionId: string,
+    options?: { title?: string; tool?: SessionTool }
+  ) => Promise<Session>;
   removeSession: (id: string) => Promise<void>;
   setActiveSession: (id: string) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
+  updateSessionCommand: (id: string, command: string) => Promise<void>;
+  updateSessionIcon: (id: string, icon: string | null) => Promise<void>;
   moveSessionToSection: (sessionId: string, sectionId: string) => Promise<void>;
   updateSessionStatus: (id: string, status: SessionStatus) => void;
   updateToolSessionId: (id: string, tool: string, toolSessionId: string) => void;
+  setLastKnownSize: (rows: number, cols: number) => void;
 
   loadFromBackend: () => Promise<void>;
   setHasHydrated: (value: boolean) => void;
@@ -71,6 +81,46 @@ async function getDefaultShell(): Promise<string> {
   }
 }
 
+async function getCommandForTool(tool: SessionTool): Promise<string> {
+  if (typeof tool === 'string') {
+    switch (tool) {
+      case 'shell':
+        return getDefaultShell();
+      case 'claude':
+        return 'claude';
+      case 'gemini':
+        return 'gemini';
+      case 'codex':
+        return 'codex';
+      case 'openCode':
+        return 'opencode';
+      default:
+        return tool;
+    }
+  }
+  return tool.custom;
+}
+
+function getToolTitle(tool: SessionTool): string {
+  if (typeof tool === 'string') {
+    switch (tool) {
+      case 'shell':
+        return 'Terminal';
+      case 'claude':
+        return 'Claude Code';
+      case 'gemini':
+        return 'Gemini';
+      case 'codex':
+        return 'Codex';
+      case 'openCode':
+        return 'OpenCode';
+      default:
+        return tool;
+    }
+  }
+  return tool.custom;
+}
+
 export const useTerminalStore = create<TerminalState>()(
   persist(
     (set, get) => ({
@@ -79,6 +129,7 @@ export const useTerminalStore = create<TerminalState>()(
           id: DEFAULT_SECTION_ID,
           name: 'Default',
           path: '',
+          icon: null,
           collapsed: false,
           order: 0,
           isDefault: true,
@@ -87,6 +138,8 @@ export const useTerminalStore = create<TerminalState>()(
       sessions: [],
       activeSessionId: null,
       hasHydrated: false,
+      lastKnownRows: 24,
+      lastKnownCols: 80,
 
       addSection: async (name: string, path: string) => {
         const section = await invoke<Section>('create_section', { name, path });
@@ -123,6 +176,12 @@ export const useTerminalStore = create<TerminalState>()(
         if (updates.name) {
           invoke('rename_section', { id, name: updates.name }).catch(console.error);
         }
+        if (Object.prototype.hasOwnProperty.call(updates, 'path')) {
+          invoke('set_section_path', { id, path: updates.path ?? '' }).catch(console.error);
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, 'icon')) {
+          invoke('set_section_icon', { id, icon: updates.icon ?? null }).catch(console.error);
+        }
       },
 
       toggleSectionCollapse: (id: string) => {
@@ -135,21 +194,35 @@ export const useTerminalStore = create<TerminalState>()(
         }));
       },
 
-      addSession: async (sectionId: string, title?: string) => {
+      addSession: async (sectionId: string, options?: { title?: string; tool?: SessionTool }) => {
         const section = get().sections.find((s) => s.id === sectionId);
         const sessions = get().sessions;
         const sectionSessions = sessions.filter((s) => s.sectionId === sectionId);
-        const sessionTitle = title || `Terminal ${sectionSessions.length + 1}`;
+        const tool = options?.tool ?? 'shell';
+        const toolTitle = getToolTitle(tool);
+        const toolCount = sectionSessions.filter((s) =>
+          typeof tool === 'string' && typeof s.tool === 'string'
+            ? s.tool === tool
+            : false
+        ).length;
+        const sessionTitle =
+          options?.title ||
+          (tool === 'shell'
+            ? `Terminal ${sectionSessions.length + 1}`
+            : toolCount === 0
+              ? toolTitle
+              : `${toolTitle} ${toolCount + 1}`);
         const projectPath = section?.path || '';
-        const shell = await getDefaultShell();
+        const command = await getCommandForTool(tool);
 
         const session = await invoke<Session>('create_session', {
           input: {
             title: sessionTitle,
             projectPath,
             sectionId,
-            tool: 'shell',
-            command: shell,
+            tool,
+            command,
+            icon: null,
           },
         });
 
@@ -195,6 +268,24 @@ export const useTerminalStore = create<TerminalState>()(
         }));
       },
 
+      updateSessionCommand: async (id: string, command: string) => {
+        await invoke('set_session_command', { id, command });
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === id ? { ...s, command } : s
+          ),
+        }));
+      },
+
+      updateSessionIcon: async (id: string, icon: string | null) => {
+        await invoke('set_session_icon', { id, icon });
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === id ? { ...s, icon } : s
+          ),
+        }));
+      },
+
       moveSessionToSection: async (sessionId: string, sectionId: string) => {
         await invoke('move_session', { id: sessionId, sectionId });
         set((state) => ({
@@ -226,6 +317,11 @@ export const useTerminalStore = create<TerminalState>()(
         }));
         // Persist to backend
         invoke('set_tool_session_id', { id, tool, toolSessionId }).catch(console.error);
+      },
+
+      setLastKnownSize: (rows: number, cols: number) => {
+        if (rows <= 0 || cols <= 0) return;
+        set({ lastKnownRows: rows, lastKnownCols: cols });
       },
 
       loadFromBackend: async () => {

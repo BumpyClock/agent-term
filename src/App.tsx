@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Sidebar } from './components/Sidebar';
 import { Terminal } from './components/Terminal';
-import { useTerminalStore, type SessionStatus } from './store/terminalStore';
+import { useTerminalStore, type SessionStatus, type SessionTool } from './store/terminalStore';
 import './App.css';
 
 function App() {
@@ -54,7 +54,7 @@ function App() {
 
       const currentSessions = useTerminalStore.getState().sessions;
       if (!cancelled && currentSessions.length === 0) {
-        await addSession(defaultSection.id);
+        await addSession(defaultSection.id, { tool: 'shell' });
       }
     };
 
@@ -128,7 +128,7 @@ function App() {
         event.preventDefault();
         const defaultSection = getDefaultSection();
         if (defaultSection) {
-          addSession(defaultSection.id);
+          addSession(defaultSection.id, { tool: 'shell' });
         }
         return;
       }
@@ -167,10 +167,10 @@ function App() {
   }, []);
 
   const handleCreateTerminal = useCallback(
-    async (sectionId: string) => {
+    async (sectionId: string, tool: SessionTool) => {
       const section = sections.find((s) => s.id === sectionId);
       if (!section) return;
-      await addSession(sectionId);
+      await addSession(sectionId, { tool });
     },
     [sections, addSession]
   );

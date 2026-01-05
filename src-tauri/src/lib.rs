@@ -6,10 +6,18 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::thread;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 use uuid::Uuid;
 
+#[cfg(target_os = "macos")]
+use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+
+#[cfg(target_os = "windows")]
+use window_vibrancy::apply_blur;
+
 mod diagnostics;
+mod mcp;
+mod search;
 mod session;
 
 // Terminal session state
@@ -284,10 +292,18 @@ pub fn run() {
     let session_manager = session::build_session_manager()
         .expect("failed to build session manager");
 
+    let mcp_manager = mcp::build_mcp_manager()
+        .expect("failed to build mcp manager");
+
+    let search_manager = search::build_search_manager()
+        .expect("failed to build search manager");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .manage(session_manager)
+        .manage(mcp_manager)
+        .manage(search_manager)
         .invoke_handler(tauri::generate_handler![
             create_terminal,
             write_terminal,
@@ -301,11 +317,15 @@ pub fn run() {
             session::get_session,
             session::create_session,
             session::rename_session,
+            session::set_session_command,
+            session::set_session_icon,
             session::delete_session,
             session::move_session,
             session::set_active_session,
             session::create_section,
             session::rename_section,
+            session::set_section_path,
+            session::set_section_icon,
             session::delete_section,
             session::start_session,
             session::stop_session,
@@ -315,7 +335,27 @@ pub fn run() {
             session::resize_session,
             session::acknowledge_session,
             session::set_tool_session_id,
+            mcp::mcp_list,
+            mcp::mcp_attached,
+            mcp::mcp_attach,
+            mcp::mcp_detach,
+            search::search_index_status,
+            search::search_reindex,
+            search::search_query,
         ])
+        .setup(|app| {
+            let window = app.get_webview_window("main").expect("failed to get main window");
+
+            #[cfg(target_os = "macos")]
+            apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
+                .expect("Failed to apply vibrancy");
+
+            #[cfg(target_os = "windows")]
+            apply_blur(&window, Some((18, 18, 18, 125)))
+                .expect("Failed to apply blur");
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -4,6 +4,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useTerminalStore } from "../store/terminalStore";
+import { useShallow } from "zustand/shallow";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
@@ -18,6 +20,37 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initialCwdRef = useRef<string | null>(null);
+  const lastSentSizeRef = useRef<{ rows: number; cols: number } | null>(null);
+  const isActiveRef = useRef(isActive);
+  const { lastKnownRows, lastKnownCols, setLastKnownSize } = useTerminalStore(
+    useShallow((state) => ({
+      lastKnownRows: state.lastKnownRows,
+      lastKnownCols: state.lastKnownCols,
+      setLastKnownSize: state.setLastKnownSize,
+    })),
+  );
+
+  const syncSize = useCallback(() => {
+    const fitAddon = fitAddonRef.current;
+    if (!fitAddon) return;
+    fitAddon.fit();
+    const dims = fitAddon.proposeDimensions();
+    if (dims && dims.rows > 0 && dims.cols > 0) {
+      const lastSent = lastSentSizeRef.current;
+      if (lastSent && lastSent.rows === dims.rows && lastSent.cols === dims.cols) {
+        return;
+      }
+      invoke("resize_session", {
+        id: sessionId,
+        rows: dims.rows,
+        cols: dims.cols,
+      }).catch(console.error);
+      lastSentSizeRef.current = { rows: dims.rows, cols: dims.cols };
+      if (dims.rows !== lastKnownRows || dims.cols !== lastKnownCols) {
+        setLastKnownSize(dims.rows, dims.cols);
+      }
+    }
+  }, [sessionId, setLastKnownSize, lastKnownRows, lastKnownCols]);
 
   const initTerminal = useCallback(
     (container: HTMLDivElement) => {
@@ -31,6 +64,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         fontSize: 14,
         fontFamily:
           '"FiraCode Nerd Font", Menlo, Monaco, "Courier New", monospace',
+        allowTransparency: true,
         theme: {
           background: "transparent",
           foreground: "#d4d4d4",
@@ -68,6 +102,10 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       xtermRef.current = xterm;
       fitAddonRef.current = fitAddon;
       const initialDims = fitAddon.proposeDimensions();
+      const initialRows =
+        initialDims && initialDims.rows > 0 ? initialDims.rows : lastKnownRows;
+      const initialCols =
+        initialDims && initialDims.cols > 0 ? initialDims.cols : lastKnownCols;
 
       let inputDisposable: IDisposable | null = null;
       let resizeObserver: ResizeObserver | null = null;
@@ -142,17 +180,11 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         );
 
         resizeObserver = new ResizeObserver(() => {
-          if (fitAddonRef.current) {
-            fitAddonRef.current.fit();
-            const dims = fitAddonRef.current.proposeDimensions();
-            if (dims) {
-              invoke("resize_session", {
-                id: sessionId,
-                rows: dims.rows,
-                cols: dims.cols,
-              }).catch(console.error);
-            }
+          if (!isActiveRef.current) return;
+          if (container.clientWidth === 0 || container.clientHeight === 0) {
+            return;
           }
+          syncSize();
         });
 
         resizeObserver.observe(container);
@@ -165,8 +197,8 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
           });
           await invoke("start_session", {
             id: sessionId,
-            rows: initialDims?.rows ?? 24,
-            cols: initialDims?.cols ?? 80,
+            rows: initialRows ?? 24,
+            cols: initialCols ?? 80,
           });
           console.info(`${logPrefix} start_session ok`);
         } catch (err) {
@@ -190,7 +222,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         teardown();
       };
     },
-    [sessionId],
+    [sessionId, syncSize, lastKnownRows, lastKnownCols],
   );
 
   useEffect(() => {
@@ -199,12 +231,20 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   }, [initTerminal]);
 
   useEffect(() => {
-    if (isActive && xtermRef.current) {
-      xtermRef.current.focus();
-      fitAddonRef.current?.fit();
+    if (!isActive) return;
+    const raf = requestAnimationFrame(() => {
+      if (xtermRef.current) {
+        xtermRef.current.focus();
+      }
+      syncSize();
       invoke("acknowledge_session", { id: sessionId }).catch(console.error);
-    }
-  }, [isActive, sessionId]);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [isActive, sessionId, syncSize]);
+
+  useEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive]);
 
   return (
     <div

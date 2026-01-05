@@ -30,6 +30,8 @@ pub struct SessionRecord {
     pub section_id: String,
     pub tool: SessionTool,
     pub command: String,
+    #[serde(default)]
+    pub icon: Option<String>,
     pub status: SessionStatus,
     pub created_at: String,
     pub last_accessed_at: Option<String>,
@@ -48,6 +50,7 @@ pub struct SessionRecord {
 ///     id: "default".to_string(),
 ///     name: "Default".to_string(),
 ///     path: "".to_string(),
+///     icon: None,
 ///     collapsed: false,
 ///     order: 0,
 /// };
@@ -58,6 +61,8 @@ pub struct SectionRecord {
     pub id: String,
     pub name: String,
     pub path: String,
+    #[serde(default)]
+    pub icon: Option<String>,
     pub collapsed: bool,
     pub order: u32,
 }
@@ -115,4 +120,6 @@ pub struct NewSessionInput {
     pub section_id: String,
     pub tool: SessionTool,
     pub command: String,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
