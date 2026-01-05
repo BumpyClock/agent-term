@@ -27,7 +27,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
         initialCwdRef.current = cwd;
       }
       const initialCwd = initialCwdRef.current || "";
-      console.debug("[terminal] init", { id, sessionId, cwd: initialCwd });
       const decoder = new TextDecoder("utf-8");
 
       const xterm = new XTerm({
@@ -71,8 +70,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
 
       xtermRef.current = xterm;
       fitAddonRef.current = fitAddon;
-      console.debug("[terminal] xterm_ready", { id, sessionId });
-
       const initialDims = fitAddon.proposeDimensions();
 
       let inputDisposable: IDisposable | null = null;
@@ -85,7 +82,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
       const teardown = () => {
         if (disposed) return;
         disposed = true;
-        console.debug("[terminal] cleanup", { id });
         unlistenOutput?.();
         unlistenExit?.();
         resizeObserver?.disconnect();
@@ -106,7 +102,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
             payload.cwd = initialCwd;
           }
           await invoke("create_terminal", payload);
-          console.debug("[terminal] create_terminal_done", { id, sessionId });
         } catch (err) {
           console.error("Failed to create terminal:", err);
           xterm.write(
@@ -138,7 +133,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
         };
 
         inputDisposable = xterm.onData((data) => {
-          console.debug("[terminal] input", { id, size: data.length });
           invoke("write_terminal", {
             terminalId: id,
             data,
@@ -161,11 +155,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
               if (text.length > 0) {
                 xterm.write(text);
               }
-              console.debug("[terminal] output", {
-                id,
-                sessionId,
-                size: bytes.length,
-              });
             }
           },
         );
@@ -181,7 +170,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
               if (tail.length > 0) {
                 xterm.write(tail);
               }
-              console.debug("[terminal] exit", { id, sessionId });
               xterm.write("\r\n\x1b[33m[Process exited]\x1b[0m\r\n");
             }
           },
@@ -192,11 +180,6 @@ export function Terminal({ id, cwd, isActive }: TerminalProps) {
             fitAddonRef.current.fit();
             const dims = fitAddonRef.current.proposeDimensions();
             if (dims) {
-              console.debug("[terminal] resize", {
-                id,
-                rows: dims.rows,
-                cols: dims.cols,
-              });
               invoke("resize_terminal", {
                 terminalId: id,
                 rows: dims.rows,

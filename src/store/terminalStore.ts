@@ -20,6 +20,7 @@ interface TerminalState {
   sections: Section[];
   tabs: Tab[];
   activeTabId: string | null;
+  hasHydrated: boolean;
 
   // Section actions
   addSection: (name: string, path: string) => Section;
@@ -34,13 +35,15 @@ interface TerminalState {
   updateTabTitle: (id: string, title: string) => void;
   moveTabToSection: (tabId: string, sectionId: string) => void;
 
+  // Hydration
+  setHasHydrated: (value: boolean) => void;
+
   // Getters
   getTabsBySection: (sectionId: string) => Tab[];
   getDefaultSection: () => Section | undefined;
 }
 
 const DEFAULT_SECTION_ID = 'default-section';
-const INITIAL_TAB_ID = uuidv4();
 
 export const useTerminalStore = create<TerminalState>()(
   persist(
@@ -54,14 +57,9 @@ export const useTerminalStore = create<TerminalState>()(
           isCollapsed: false,
         },
       ],
-      tabs: [
-        {
-          id: INITIAL_TAB_ID,
-          title: 'Terminal 1',
-          sectionId: DEFAULT_SECTION_ID,
-        },
-      ],
-      activeTabId: INITIAL_TAB_ID,
+      tabs: [],
+      activeTabId: null,
+      hasHydrated: false,
 
       addSection: (name: string, path: string) => {
         const newSection: Section = {
@@ -170,6 +168,10 @@ export const useTerminalStore = create<TerminalState>()(
         }));
       },
 
+      setHasHydrated: (value: boolean) => {
+        set({ hasHydrated: value });
+      },
+
       getTabsBySection: (sectionId: string) => {
         return get().tabs.filter((t) => t.sectionId === sectionId);
       },
@@ -184,6 +186,9 @@ export const useTerminalStore = create<TerminalState>()(
         sections: state.sections,
         // Don't persist tabs - they will be recreated
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );

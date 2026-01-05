@@ -44,21 +44,12 @@ fn create_terminal(
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> Result<String, String> {
-    println!(
-        "terminal_create start id={} session_id={} cwd={:?}",
-        terminal_id, session_id, cwd
-    );
     let pty_system = NativePtySystem::default();
 
     // Get the working directory
     let working_dir = cwd
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")));
-    println!(
-        "terminal_create working_dir id={} session_id={} dir={:?}",
-        terminal_id, session_id, working_dir
-    );
-
     let size = PtySize {
         rows: rows.unwrap_or(24),
         cols: cols.unwrap_or(80),
@@ -70,7 +61,6 @@ fn create_terminal(
     let pair = pty_system
         .openpty(size)
         .map_err(|e| format!("Failed to open pty: {}", e))?;
-    println!("terminal_create pty_opened id={} session_id={}", terminal_id, session_id);
 
     // Build the shell command
     let mut cmd = CommandBuilder::new(get_default_shell());
@@ -80,19 +70,11 @@ fn create_terminal(
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
     }
-    println!(
-        "terminal_create spawn_command id={} session_id={} shell={}",
-        terminal_id,
-        session_id,
-        get_default_shell()
-    );
-
     // Spawn the child process
     let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn command: {}", e))?;
-    println!("terminal_create spawned id={} session_id={}", terminal_id, session_id);
 
     // Get reader and writer
     let mut reader = pair
@@ -103,7 +85,6 @@ fn create_terminal(
         .master
         .take_writer()
         .map_err(|e| format!("Failed to get writer: {}", e))?;
-    println!("terminal_create io_ready id={} session_id={}", terminal_id, session_id);
 
     let terminal_id_clone = terminal_id.clone();
     let session_id_clone = session_id.clone();
@@ -118,10 +99,6 @@ fn create_terminal(
             match reader.read(&mut buf) {
                 Ok(0) => {
                     // EOF - terminal closed
-                    println!(
-                        "terminal_read eof id={} session_id={}",
-                        terminal_id_clone, session_id_clone
-                    );
                     if !pending.is_empty() {
                         let payload = TerminalOutput {
                             terminal_id: terminal_id_clone.clone(),
@@ -154,11 +131,7 @@ fn create_terminal(
                         pending.clear();
                     }
                 }
-                Err(err) => {
-                    println!(
-                        "terminal_read error id={} session_id={} err={}",
-                        terminal_id_clone, session_id_clone, err
-                    );
+                Err(_) => {
                     if !pending.is_empty() {
                         let payload = TerminalOutput {
                             terminal_id: terminal_id_clone.clone(),
@@ -184,10 +157,6 @@ fn create_terminal(
     };
     state.sessions.lock().insert(terminal_id.clone(), session);
 
-    println!(
-        "terminal_create ready id={} session_id={}",
-        terminal_id, session_id
-    );
     Ok(terminal_id)
 }
 
@@ -197,11 +166,6 @@ fn write_terminal(
     terminal_id: String,
     data: String,
 ) -> Result<(), String> {
-    println!(
-        "terminal_write start id={} bytes={}",
-        terminal_id,
-        data.len()
-    );
     let mut sessions = state.sessions.lock();
     if let Some(session) = sessions.get_mut(&terminal_id) {
         session
@@ -212,9 +176,7 @@ fn write_terminal(
             .writer
             .flush()
             .map_err(|e| format!("Failed to flush: {}", e))?;
-        println!("terminal_write done id={}", terminal_id);
     } else {
-        println!("terminal_write missing id={}", terminal_id);
         return Err("Terminal not found".to_string());
     }
     Ok(())
@@ -227,10 +189,6 @@ fn resize_terminal(
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
-    println!(
-        "terminal_resize start id={} rows={} cols={}",
-        terminal_id, rows, cols
-    );
     let mut sessions = state.sessions.lock();
     if let Some(session) = sessions.get_mut(&terminal_id) {
         session
@@ -242,29 +200,24 @@ fn resize_terminal(
                 pixel_height: 0,
             })
             .map_err(|e| format!("Failed to resize pty: {}", e))?;
-        println!("terminal_resize done id={}", terminal_id);
         Ok(())
     } else {
-        println!("terminal_resize missing id={}", terminal_id);
         Err("Terminal not found".to_string())
     }
 }
 
 #[tauri::command(rename_all = "camelCase")]
 fn close_terminal(state: State<'_, Arc<AppState>>, terminal_id: String) -> Result<(), String> {
-    println!("terminal_close start id={}", terminal_id);
     let mut sessions = state.sessions.lock();
     if let Some(mut session) = sessions.remove(&terminal_id) {
         if let Err(err) = session.child.kill() {
-            println!("terminal_close kill_failed id={} err={}", terminal_id, err);
+            let _ = err;
         }
         if let Err(err) = session.child.try_wait() {
-            println!("terminal_close wait_failed id={} err={}", terminal_id, err);
+            let _ = err;
         }
-        println!("terminal_close done id={}", terminal_id);
         Ok(())
     } else {
-        println!("terminal_close missing id={}", terminal_id);
         Err("Terminal not found".to_string())
     }
 }
@@ -272,14 +225,12 @@ fn close_terminal(state: State<'_, Arc<AppState>>, terminal_id: String) -> Resul
 #[tauri::command(rename_all = "camelCase")]
 fn generate_id() -> String {
     let id = Uuid::new_v4().to_string();
-    println!("terminal_generate_id id={}", id);
     id
 }
 
 #[tauri::command(rename_all = "camelCase")]
 fn get_home_dir() -> Option<String> {
     let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string());
-    println!("terminal_home_dir value={:?}", home);
     home
 }
 

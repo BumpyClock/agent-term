@@ -6,8 +6,15 @@ import { useTerminalStore } from './store/terminalStore';
 import './App.css';
 
 function App() {
-  const { sections, tabs, activeTabId, addTab, updateSection, getDefaultSection } =
-    useTerminalStore();
+  const {
+    sections,
+    tabs,
+    activeTabId,
+    addTab,
+    updateSection,
+    getDefaultSection,
+    hasHydrated,
+  } = useTerminalStore();
   const [sidebarWidth, setSidebarWidth] = useState(250);
   const sidebarWidthRef = useRef(250);
   const isResizingRef = useRef(false);
@@ -15,24 +22,38 @@ function App() {
   const resizeStartWidthRef = useRef(250);
   const minSidebarWidth = 200;
   const maxSidebarWidth = 420;
+  const initializedRef = useRef(false);
 
-  // Initialize default section with home directory
   useEffect(() => {
-    const initDefaultSection = async () => {
+    if (!hasHydrated || initializedRef.current) return;
+    initializedRef.current = true;
+    let cancelled = false;
+
+    const hydrateDefaults = async () => {
       const defaultSection = getDefaultSection();
-      if (defaultSection && !defaultSection.path) {
+      if (!defaultSection) return;
+
+      if (!defaultSection.path) {
         try {
           const homeDir = await invoke<string | null>('get_home_dir');
-          if (homeDir) {
+          if (!cancelled && homeDir) {
             updateSection(defaultSection.id, { path: homeDir });
           }
         } catch (err) {
           console.error('Failed to get home dir:', err);
         }
       }
+
+      if (!cancelled && tabs.length === 0) {
+        addTab(defaultSection.id);
+      }
     };
-    initDefaultSection();
-  }, [getDefaultSection, updateSection]);
+
+    hydrateDefaults();
+    return () => {
+      cancelled = true;
+    };
+  }, [addTab, getDefaultSection, hasHydrated, tabs.length, updateSection]);
 
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth;
