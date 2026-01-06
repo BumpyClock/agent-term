@@ -63,10 +63,6 @@ impl PromptDetector {
 }
 
 impl StatusTracker {
-    pub fn acknowledge(&mut self) {
-        self.acknowledged = true;
-    }
-
     pub fn update(&mut self, content: &str, has_prompt: bool) -> SessionStatus {
         let current_hash = hash_content(content);
         if current_hash != self.last_hash {

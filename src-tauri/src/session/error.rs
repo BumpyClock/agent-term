@@ -89,9 +89,7 @@ impl From<serde_json::Error> for StorageError {
     }
 }
 
-pub type SessionResult<T> = Result<T, SessionError>;
 pub type StorageResult<T> = Result<T, StorageError>;
-pub type AppResult<T> = Result<T, AppError>;
 
 impl From<AppError> for String {
     fn from(e: AppError) -> Self {

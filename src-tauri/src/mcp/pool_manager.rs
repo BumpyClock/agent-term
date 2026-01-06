@@ -32,8 +32,6 @@ pub fn initialize_global_pool(config: &UserConfig) -> McpResult<Option<Arc<Pool>
         pool_all: config.mcp_pool.pool_all,
         exclude_mcps: config.mcp_pool.exclude_mcps.clone(),
         pool_mcps: config.mcp_pool.pool_mcps.clone(),
-        fallback_stdio: config.mcp_pool.fallback_to_stdio,
-        start_on_demand: config.mcp_pool.start_on_demand,
     }));
 
     let discovered = pool.discover_existing_sockets();
@@ -54,10 +52,6 @@ pub fn initialize_global_pool(config: &UserConfig) -> McpResult<Option<Arc<Pool>
 
 pub fn ensure_global_pool(config: &UserConfig) -> McpResult<Option<Arc<Pool>>> {
     initialize_global_pool(config)
-}
-
-pub fn get_global_pool() -> Option<Arc<Pool>> {
-    global_pool_state().lock().as_ref().cloned()
 }
 
 pub fn shutdown_global_pool() -> McpResult<()> {

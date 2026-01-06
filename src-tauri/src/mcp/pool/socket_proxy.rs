@@ -60,16 +60,8 @@ impl SocketProxy {
         *self.status.lock().unwrap()
     }
 
-    pub fn name(&self) -> String {
-        self.name.clone()
-    }
-
     pub fn socket_path(&self) -> PathBuf {
         self.socket_path.clone()
-    }
-
-    pub fn is_owned(&self) -> bool {
-        self.owned
     }
 
     pub fn start(&self) -> io::Result<()> {
@@ -154,9 +146,6 @@ impl SocketProxy {
         Ok(())
     }
 
-    pub fn client_count(&self) -> usize {
-        self.clients.lock().unwrap().len()
-    }
 
     fn spawn_stderr_logger(&self, stderr: std::process::ChildStderr) -> io::Result<()> {
         let log_dir = diagnostics::log_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -200,7 +189,6 @@ impl SocketProxy {
                     Ok((stream, _)) => {
                         let client_id = format!("{}-client-{}", name, counter);
                         counter += 1;
-                        let mut stream = stream;
                         let _ = stream.set_nonblocking(false);
                         if let Ok(write_stream) = stream.try_clone() {
                             clients.lock().unwrap().insert(client_id.clone(), write_stream);
@@ -302,7 +290,7 @@ impl SocketProxy {
 }
 
 fn handle_client(
-    mut stream: UnixStream,
+    stream: UnixStream,
     client_id: String,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,

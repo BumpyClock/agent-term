@@ -16,16 +16,6 @@ pub struct PoolConfig {
     pub pool_all: bool,
     pub exclude_mcps: Vec<String>,
     pub pool_mcps: Vec<String>,
-    pub fallback_stdio: bool,
-    pub start_on_demand: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProxyInfo {
-    pub name: String,
-    pub socket_path: String,
-    pub status: String,
-    pub clients: usize,
 }
 
 pub struct Pool {
@@ -39,10 +29,6 @@ impl Pool {
             proxies: RwLock::new(HashMap::new()),
             config,
         }
-    }
-
-    pub fn config(&self) -> &PoolConfig {
-        &self.config
     }
 
     pub fn should_pool(&self, name: &str) -> bool {
@@ -137,19 +123,6 @@ impl Pool {
             }
         }
         discovered
-    }
-
-    pub fn list_servers(&self) -> Vec<ProxyInfo> {
-        let proxies = self.proxies.read();
-        proxies
-            .values()
-            .map(|proxy| ProxyInfo {
-                name: proxy.name(),
-                socket_path: proxy.socket_path().display().to_string(),
-                status: proxy.status().as_str().to_string(),
-                clients: proxy.client_count(),
-            })
-            .collect()
     }
 
     pub fn shutdown(&self) {

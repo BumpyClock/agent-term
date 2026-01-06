@@ -10,12 +10,4 @@ pub enum ServerStatus {
 }
 
 impl ServerStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ServerStatus::Stopped => "stopped",
-            ServerStatus::Starting => "starting",
-            ServerStatus::Running => "running",
-            ServerStatus::Failed => "failed",
-        }
-    }
 }

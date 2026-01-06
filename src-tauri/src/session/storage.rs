@@ -147,7 +147,7 @@ pub fn default_storage_root() -> PathBuf {
 }
 
 enum SaveMessage {
-    Save(StorageSnapshot),
+    Save,
     Shutdown,
 }
 
@@ -183,20 +183,7 @@ impl DebouncedStorage {
     /// Queue a save operation (will be debounced)
     pub fn save(&self, snapshot: &StorageSnapshot) -> StorageResult<()> {
         *self.pending.lock() = Some(snapshot.clone());
-        let _ = self.sender.send(SaveMessage::Save(snapshot.clone()));
-        Ok(())
-    }
-
-    /// Load from storage (delegates to inner Storage)
-    pub fn load(&self) -> StorageResult<StorageSnapshot> {
-        self.storage.load()
-    }
-
-    /// Flush any pending save immediately
-    pub fn flush(&self) -> StorageResult<()> {
-        if let Some(snapshot) = self.pending.lock().take() {
-            self.storage.save(&snapshot)?;
-        }
+        let _ = self.sender.send(SaveMessage::Save);
         Ok(())
     }
 
@@ -217,7 +204,7 @@ impl DebouncedStorage {
             };
 
             match receiver.recv_timeout(timeout) {
-                Ok(SaveMessage::Save(_)) => {
+                Ok(SaveMessage::Save) => {
                     last_request = Some(Instant::now());
                 }
                 Ok(SaveMessage::Shutdown) => {
