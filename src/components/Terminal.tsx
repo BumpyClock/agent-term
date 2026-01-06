@@ -120,15 +120,6 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         xterm.dispose();
       };
 
-      const decodeBase64 = (input: string) => {
-        const binary = atob(input);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        return bytes;
-      };
-
       const start = async () => {
         const logPrefix = `[terminal ${sessionId}]`;
         let outputEvents = 0;
@@ -142,10 +133,10 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
 
         unlistenOutput = await listen<{
           sessionId: string;
-          dataBase64: string;
+          data: number[];
         }>("session-output", (event) => {
           if (event.payload.sessionId === sessionId) {
-            const bytes = decodeBase64(event.payload.dataBase64);
+            const bytes = new Uint8Array(event.payload.data);
             const text = decoder.decode(bytes, { stream: true });
             if (text.length > 0) {
               xterm.write(text);

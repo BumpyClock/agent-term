@@ -3,7 +3,6 @@ use std::io::Read;
 use std::sync::mpsc;
 use std::thread;
 
-use base64::Engine;
 use parking_lot::Mutex;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use serde::Serialize;
@@ -30,7 +29,7 @@ use tools::build_command;
 #[serde(rename_all = "camelCase")]
 struct SessionOutput {
     session_id: String,
-    data_base64: String,
+    data: Vec<u8>,
 }
 
 #[derive(Clone, Serialize)]
@@ -374,7 +373,7 @@ impl SessionManager {
             let emit_output = |data: &[u8], app: &AppHandle, sid: &str| {
                 let payload = SessionOutput {
                     session_id: sid.to_string(),
-                    data_base64: base64::engine::general_purpose::STANDARD.encode(data),
+                    data: data.to_vec(),
                 };
                 let _ = app.emit("session-output", payload);
             };
