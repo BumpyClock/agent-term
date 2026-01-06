@@ -81,7 +81,7 @@
     padding: 8px;
     margin-bottom: 8px;
     background-color: var(--secondary);
-    border: 1px solid var(--color-border-strong);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--foreground);
     font-size: 13px;
@@ -127,7 +127,7 @@
 }
 
 .section {
-    border-bottom: 1px solid #2d2d2d;
+    border-bottom: 1px solid var(--border);
     position: relative;
 }
 
@@ -195,8 +195,8 @@
 
 .default-badge {
     font-size: 10px;
-    background-color: #4a4a4a;
-    color: #a0a0a0;
+    background-color: var(--muted);
+    color: var(--muted-foreground);
     padding: 2px 6px;
     border-radius: var(--radius-xs);
     margin-left: 8px;
@@ -236,12 +236,12 @@
 }
 
 .action-btn:hover {
-    background-color: #4a4a4a;
+    background-color: var(--muted);
     color: var(--foreground);
 }
 
 .delete-btn:hover {
-    background-color: #5a3030;
+    background-color: oklch(0.25 0.08 25);
     color: var(--destructive);
 }
 
@@ -369,7 +369,7 @@
 }
 
 .tab-menu:hover {
-    background-color: #4a4a4a;
+    background-color: var(--muted);
     color: var(--foreground);
 }
 
@@ -385,7 +385,7 @@
 }
 
 .tab-close:hover {
-    background-color: #5a3030;
+    background-color: oklch(0.25 0.08 25);
     color: var(--destructive);
 }
 
@@ -413,7 +413,7 @@
     font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.6px;
-    color: #7f7f7f;
+    color: var(--muted-foreground);
     margin-bottom: 6px;
 }
 
@@ -533,9 +533,9 @@
 }
 
 .mcp-scope-tab.active {
-    background-color: rgba(120, 150, 255, 0.2);
+    background-color: oklch(0.547 0.158 244 / 20%);
     border-color: var(--primary);
-    color: #ffffff;
+    color: var(--foreground);
 }
 
 .mcp-scope-tab.disabled {
@@ -550,9 +550,9 @@
 }
 
 .mcp-warning {
-    background-color: rgba(245, 158, 11, 0.18);
-    border: 1px solid rgba(245, 158, 11, 0.4);
-    color: #f8d489;
+    background-color: oklch(0.788 0.108 85 / 18%);
+    border: 1px solid oklch(0.788 0.108 85 / 40%);
+    color: var(--color-warning);
     padding: 8px;
     border-radius: var(--radius-md);
     font-size: var(--font-size-sm);
@@ -589,7 +589,7 @@
     gap: 8px;
     padding: 8px;
     border-radius: var(--radius-md);
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: oklch(1 0 0 / 3%);
     border: 1px solid transparent;
     margin-bottom: 8px;
 }
@@ -599,7 +599,7 @@
 }
 
 .mcp-item:hover {
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: oklch(1 0 0 / 8%);
 }
 
 .mcp-item-main {
@@ -636,8 +636,8 @@
 }
 
 .mcp-tag-warn {
-    background-color: rgba(245, 158, 11, 0.25);
-    color: #f8d489;
+    background-color: oklch(0.788 0.108 85 / 25%);
+    color: var(--color-warning);
 }
 
 .mcp-action {
@@ -653,7 +653,7 @@
 .mcp-action-primary {
     background-color: var(--primary);
     border-color: transparent;
-    color: #ffffff;
+    color: var(--primary-foreground);
 }
 
 .mcp-action:disabled {
@@ -668,7 +668,7 @@
 }
 
 .mcp-error {
-    color: #f97171;
+    color: var(--destructive);
     font-size: var(--font-size-sm);
     margin-bottom: 8px;
 }
@@ -704,7 +704,7 @@
     font-size: var(--font-size-xs);
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: #7f7f7f;
+    color: var(--muted-foreground);
 }
 
 .dialog-label input {
@@ -753,7 +753,7 @@
 
 .dialog-icon-option.active {
     border-color: var(--primary);
-    box-shadow: 0 0 0 1px var(--color-accent-soft);
+    box-shadow: 0 0 0 1px oklch(0.547 0.158 244 / 30%);
 }
 
 .dialog-icon-option:hover {
@@ -775,7 +775,7 @@
     width: 100%;
     padding: 10px 14px;
     background-color: var(--secondary);
-    border: 1px solid var(--color-border-strong);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     color: var(--foreground);
     font-size: var(--font-size-md);
@@ -808,7 +808,7 @@
 .search-result-item {
     padding: 10px 12px;
     cursor: pointer;
-    border-bottom: 1px solid #2d2d2d;
+    border-bottom: 1px solid var(--border);
 }
 
 .search-result-item:last-child {
