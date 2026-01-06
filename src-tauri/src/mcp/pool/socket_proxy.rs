@@ -4,17 +4,18 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use interprocess::local_socket::traits::{Listener as _, Stream as _};
-use interprocess::TryClone;
 use serde_json::Value;
 
 use crate::diagnostics;
 use super::transport::{self, LocalListener, LocalStream};
 use super::types::ServerStatus;
+
+type ClientSender = mpsc::Sender<String>;
 
 pub struct SocketProxy {
     name: String,
@@ -27,7 +28,7 @@ pub struct SocketProxy {
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     child: Arc<Mutex<Option<Child>>>,
     listener: Mutex<Option<Arc<LocalListener>>>,
-    clients: Arc<Mutex<HashMap<String, LocalStream>>>,
+    clients: Arc<Mutex<HashMap<String, ClientSender>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
     shutdown: Arc<AtomicBool>,
 }
@@ -219,27 +220,12 @@ impl SocketProxy {
                         }
                         let client_id = format!("{}-client-{}", name, counter);
                         counter += 1;
-                        match stream.try_clone() {
-                            Ok(write_stream) => {
-                                if let Err(err) = write_stream.set_nonblocking(false) {
-                                    diagnostics::log(format!(
-                                        "pool_client_set_blocking_failed name={} error={}",
-                                        name, err
-                                    ));
-                                }
-                                clients.lock().unwrap().insert(client_id.clone(), write_stream);
-                                diagnostics::log(format!(
-                                    "pool_client_connected name={} client_id={}",
-                                    name, client_id
-                                ));
-                            }
-                            Err(err) => {
-                                diagnostics::log(format!(
-                                    "pool_client_clone_failed name={} client_id={} error={}",
-                                    name, client_id, err
-                                ));
-                            }
-                        }
+                        let (tx, rx) = mpsc::channel::<String>();
+                        clients.lock().unwrap().insert(client_id.clone(), tx);
+                        diagnostics::log(format!(
+                            "pool_client_connected name={} client_id={}",
+                            name, client_id
+                        ));
 
                         let clients_for_drop = clients.clone();
                         let request_map_for_drop = request_map.clone();
@@ -255,6 +241,7 @@ impl SocketProxy {
                                 request_map_for_drop,
                                 clients_for_drop,
                                 shutdown_for_client,
+                                rx,
                             );
                         });
                     }
@@ -337,33 +324,25 @@ fn handle_client(
     client_id: String,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
-    clients: Arc<Mutex<HashMap<String, LocalStream>>>,
+    clients: Arc<Mutex<HashMap<String, ClientSender>>>,
     shutdown: Arc<AtomicBool>,
+    rx: mpsc::Receiver<String>,
 ) {
-    let reader_stream = match stream.try_clone() {
-        Ok(s) => s,
-        Err(err) => {
-            diagnostics::log(format!(
-                "pool_handle_client_clone_failed client_id={} error={}",
-                client_id, err
-            ));
-            stream
-        }
-    };
-    if let Err(err) = reader_stream.set_nonblocking(false) {
-        diagnostics::log(format!(
-            "pool_handle_client_set_blocking_failed client_id={} error={}",
-            client_id, err
-        ));
-    }
     diagnostics::log(format!(
         "pool_handle_client_started client_id={}",
         client_id
     ));
-    let mut reader = BufReader::new(reader_stream);
+    if let Err(err) = stream.set_nonblocking(true) {
+        diagnostics::log(format!(
+            "pool_handle_client_set_nonblocking_failed client_id={} error={}",
+            client_id, err
+        ));
+    }
+    let mut reader = BufReader::new(stream);
     let mut buffer = String::new();
     let mut parse_failures = 0u32;
     while !shutdown.load(Ordering::SeqCst) {
+        let mut did_work = false;
         buffer.clear();
         match reader.read_line(&mut buffer) {
             Ok(0) => {
@@ -374,6 +353,7 @@ fn handle_client(
                 break;
             }
             Ok(_) => {
+                did_work = true;
                 let line = buffer.trim_end_matches('\n').to_string();
                 if line.is_empty() {
                     continue;
@@ -416,16 +396,33 @@ fn handle_client(
                 }
             }
             Err(err) => {
-                if err.kind() == io::ErrorKind::WouldBlock {
-                    thread::sleep(Duration::from_millis(10));
-                    continue;
+                if err.kind() != io::ErrorKind::WouldBlock {
+                    diagnostics::log(format!(
+                        "pool_client_read_error client_id={} error={}",
+                        client_id, err
+                    ));
+                    break;
                 }
+            }
+        }
+
+        let mut wrote_any = false;
+        while let Ok(message) = rx.try_recv() {
+            wrote_any = true;
+            did_work = true;
+            if !write_line(reader.get_mut(), message.as_bytes(), &client_id) {
                 diagnostics::log(format!(
-                    "pool_client_read_error client_id={} error={}",
-                    client_id, err
+                    "pool_client_write_failed client_id={}",
+                    client_id
                 ));
                 break;
             }
+        }
+
+        if !did_work {
+            thread::sleep(Duration::from_millis(10));
+        } else if wrote_any {
+            let _ = reader.get_mut().flush();
         }
     }
 
@@ -434,7 +431,7 @@ fn handle_client(
 
 fn route_response(
     line: &str,
-    clients: &Arc<Mutex<HashMap<String, LocalStream>>>,
+    clients: &Arc<Mutex<HashMap<String, ClientSender>>>,
     request_map: &Arc<Mutex<HashMap<String, String>>>,
 ) {
     let mut target = None;
@@ -451,12 +448,18 @@ fn route_response(
     }
 
     if let Some(client_id) = target {
-        if let Some(stream) = clients.lock().unwrap().get_mut(&client_id) {
-            if write_with_retry(stream, line.as_bytes(), "response") && write_with_retry(stream, b"\n", "response") {
+        let sender = clients.lock().unwrap().get(&client_id).cloned();
+        if let Some(sender) = sender {
+            if sender.send(line.to_string()).is_ok() {
                 diagnostics::log(format!(
                     "pool_response_routed client_id={} bytes={}",
                     client_id,
                     line.len()
+                ));
+            } else {
+                diagnostics::log(format!(
+                    "pool_response_send_failed client_id={}",
+                    client_id
                 ));
             }
         } else {
@@ -467,47 +470,54 @@ fn route_response(
     }
 }
 
-fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, LocalStream>>>) {
-    let mut clients_guard = clients.lock().unwrap();
-    for stream in clients_guard.values_mut() {
-        let _ = write_with_retry(stream, line.as_bytes(), "broadcast");
-        let _ = write_with_retry(stream, b"\n", "broadcast");
+fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, ClientSender>>>) {
+    let senders: Vec<ClientSender> = clients.lock().unwrap().values().cloned().collect();
+    for sender in &senders {
+        let _ = sender.send(line.to_string());
     }
     diagnostics::log(format!(
         "pool_response_broadcast bytes={} clients={}",
         line.len(),
-        clients_guard.len()
+        senders.len()
     ));
 }
 
-fn write_with_retry(stream: &mut LocalStream, data: &[u8], context: &str) -> bool {
-    for attempt in 0..8 {
+fn write_line(stream: &mut LocalStream, data: &[u8], client_id: &str) -> bool {
+    let mut attempt: u64 = 0;
+    loop {
         match stream.write_all(data) {
-            Ok(()) => return true,
+            Ok(()) => {
+                if let Err(err) = stream.write_all(b"\n") {
+                    diagnostics::log(format!(
+                        "pool_client_write_failed client_id={} error={}",
+                        client_id, err
+                    ));
+                    return false;
+                }
+                return true;
+            }
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                diagnostics::log(format!(
-                    "pool_response_write_blocked context={} attempt={} bytes={}",
-                    context,
-                    attempt + 1,
-                    data.len()
-                ));
-                thread::sleep(Duration::from_millis(10 * (attempt + 1) as u64));
+                attempt += 1;
+                if attempt % 10 == 0 {
+                    diagnostics::log(format!(
+                        "pool_client_write_blocked client_id={} attempts={} bytes={}",
+                        client_id,
+                        attempt,
+                        data.len()
+                    ));
+                }
+                thread::sleep(Duration::from_millis(10));
                 continue;
             }
             Err(err) => {
                 diagnostics::log(format!(
-                    "pool_response_write_failed context={} error={}",
-                    context, err
+                    "pool_client_write_failed client_id={} error={}",
+                    client_id, err
                 ));
                 return false;
             }
         }
     }
-    diagnostics::log(format!(
-        "pool_response_write_failed context={} error=wouldblock timeout",
-        context
-    ));
-    false
 }
 
 fn id_key(value: &Value) -> Option<String> {
