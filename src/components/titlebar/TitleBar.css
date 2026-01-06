@@ -8,7 +8,7 @@
     display: grid;
     grid-template-columns: 1fr auto;
     align-items: stretch;
-    color: var(--color-text-primary);
+    color: var(--foreground);
     background: rgba(10, 10, 10, 0.04);
     backdrop-filter: blur(22px) saturate(1.2);
     -webkit-backdrop-filter: blur(22px) saturate(1.2);

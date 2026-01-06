@@ -1,4 +1,6 @@
+/* App-specific tokens - shadcn handles colors, radius, etc. */
 :root {
+    /* Typography - non-standard sizes */
     --font-sans:
         "FiraCode Nerd Font", -apple-system, BlinkMacSystemFont, "Segoe UI",
         Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue",
@@ -14,64 +16,36 @@
     --font-weight-medium: 500;
     --font-weight-semibold: 600;
 
-    --line-height-tight: 1.1;
-    --line-height-snug: 1.3;
-    --line-height-normal: 1.5;
+    /* Custom text colors not in shadcn */
+    --color-text-subtle: oklch(0.698 0 0);    /* #a6a6a6 */
+    --color-text-faint: oklch(0.418 0 0);     /* #5a5a5a */
 
-    --color-text-primary: #d4d4d4;
-    --color-text-muted: #858585;
-    --color-text-subtle: #a6a6a6;
-    --color-text-faint: #5a5a5a;
+    /* Custom surface colors with alpha (not in shadcn) */
+    --color-surface-sidebar: oklch(0.213 0 0 / 32%);
+    --color-surface-panel: oklch(0.255 0 0 / 82%);
+    --color-surface-panel-strong: oklch(0.255 0 0 / 88%);
 
-    --color-surface-sidebar: rgba(37, 37, 38, 0.32);
-    --color-surface-panel: rgba(45, 45, 45, 0.82);
-    --color-surface-panel-strong: rgba(45, 45, 45, 0.88);
-    --color-surface-1: #1f1f1f;
-    --color-surface-2: #2a2a2a;
-    --color-surface-3: #2a2d2e;
-    --color-surface-4: #333333;
-    --color-surface-5: #3c3c3c;
-    --color-surface-6: #37373d;
+    /* Custom border with alpha */
+    --color-border-soft: oklch(0.296 0 0 / 50%);
 
-    --color-border: #3c3c3c;
-    --color-border-strong: #5c5c5c;
-    --color-border-soft: rgba(60, 60, 60, 0.5);
+    /* Semantic colors */
+    --color-warning: oklch(0.788 0.108 85);   /* #d7ba7d */
 
-    --color-accent: #007acc;
-    --color-accent-soft: rgba(0, 122, 204, 0.35);
-    --color-warning: #d7ba7d;
-    --color-error: #f48771;
-
-    --radius-xs: 3px;
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 8px;
-    --radius-xl: 12px;
-    --radius-2xl: 18px;
-    --radius-pill: 999px;
-
-    --space-1: 4px;
-    --space-2: 6px;
-    --space-3: 8px;
-    --space-4: 12px;
-    --space-5: 16px;
-
+    /* Shadows */
     --shadow-sidebar:
-        0 18px 45px rgba(0, 0, 0, 0.25), 0 6px 18px rgba(0, 0, 0, 0.15);
-    --shadow-popover: 0 12px 28px rgba(0, 0, 0, 0.4);
-    --shadow-dialog: 0 18px 40px rgba(0, 0, 0, 0.45);
+        0 18px 45px oklch(0 0 0 / 25%), 0 6px 18px oklch(0 0 0 / 15%);
+    --shadow-popover: 0 12px 28px oklch(0 0 0 / 40%);
+    --shadow-dialog: 0 18px 40px oklch(0 0 0 / 45%);
 
+    /* Layout */
     --titlebar-height: 40px;
     --sidebar-top: calc(var(--titlebar-height) + 8px);
     --sidebar-content-top-padding: 8px;
 
-    --elevation-1: 0 6px 18px rgba(0, 0, 0, 0.22);
-    --elevation-2: 0 12px 28px rgba(0, 0, 0, 0.32);
-    --elevation-3: 0 18px 45px rgba(0, 0, 0, 0.45);
-
+    /* Z-index scale */
     --z-base: 1;
-    --z-titlebar: 80;
     --z-sidebar: 30;
+    --z-titlebar: 80;
     --z-popover: 120;
     --z-dialog: 140;
 }
