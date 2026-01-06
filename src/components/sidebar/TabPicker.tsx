@@ -11,7 +11,7 @@ interface TabPickerProps {
 }
 
 export function TabPicker({ position, onSelect, onClose }: TabPickerProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   useOutsideClick(containerRef, () => onClose(), true);
 
   return (

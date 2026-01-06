@@ -14,7 +14,7 @@ interface MenuPopoverProps {
 }
 
 export function MenuPopover({ position, items, onClose }: MenuPopoverProps) {
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   useOutsideClick(menuRef, () => onClose(), true);
 
   return (

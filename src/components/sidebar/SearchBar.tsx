@@ -20,7 +20,7 @@ export function SearchBar({
   onSelectResult,
   onClear,
 }: SearchBarProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const hasResults = results.length > 0;
 
   useOutsideClick(containerRef, () => onClear(), hasResults);
