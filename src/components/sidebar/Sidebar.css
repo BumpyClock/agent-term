@@ -9,6 +9,9 @@
     height: 100%;
     user-select: none;
     backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding-top: var(--sidebar-content-top-padding);
+    box-sizing: border-box;
 }
 
 .sidebar-header {
@@ -326,7 +329,7 @@
     height: 8px;
     border-radius: var(--radius-pill);
     background-color: var(--color-text-primary);
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.7);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
 }
 
 .tab-status-dot.status-waiting {
@@ -964,7 +967,6 @@
     box-shadow: var(--shadow-popover);
     z-index: 25;
 }
-
 
 .search-result-item {
     padding: 10px var(--space-4);

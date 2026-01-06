@@ -165,6 +165,7 @@ impl SearchEngine {
     }
 
     /// Score a message against query terms (used by tests).
+    #[cfg(test)]
     fn score_message(
         &self,
         msg: &IndexedMessage,

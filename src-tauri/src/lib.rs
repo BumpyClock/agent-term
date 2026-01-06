@@ -1,4 +1,6 @@
 use tauri::{Manager, RunEvent};
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
 
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
@@ -107,8 +109,20 @@ pub fn run() {
             let window = app.get_webview_window("main").expect("failed to get main window");
 
             #[cfg(target_os = "macos")]
+            {
+                // Overlay title bar so the webview can render under it (custom titlebar UI).
+                let _ = window.set_title_bar_style(TitleBarStyle::Overlay);
+            }
+
+            #[cfg(target_os = "macos")]
             apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
                 .expect("Failed to apply vibrancy");
+
+            #[cfg(target_os = "windows")]
+            {
+                // Remove the native Windows title bar so we can render our own in the webview.
+                let _ = window.set_decorations(false);
+            }
 
             #[cfg(target_os = "windows")]
             {

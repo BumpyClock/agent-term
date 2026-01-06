@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef, useState, type MouseEvent as ReactMouse
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Sidebar } from './components/sidebar/Sidebar';
+import { TitleBar } from './components/titlebar/TitleBar';
 import { Terminal } from './components/Terminal';
 import { useTerminalStore, type SessionStatus, type SessionTool } from './store/terminalStore';
 import './App.css';
@@ -202,6 +203,7 @@ function App() {
 
   return (
     <div className="app">
+      <TitleBar />
       <div className="sidebar-shell" style={{ width: sidebarWidth }}>
         <div className="sidebar-wrapper">
           <Sidebar onCreateTerminal={handleCreateTerminal} />

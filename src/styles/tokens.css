@@ -61,11 +61,16 @@
     --shadow-popover: 0 12px 28px rgba(0, 0, 0, 0.4);
     --shadow-dialog: 0 18px 40px rgba(0, 0, 0, 0.45);
 
+    --titlebar-height: 40px;
+    --sidebar-top: calc(var(--titlebar-height) + 12px);
+    --sidebar-content-top-padding: 8px;
+
     --elevation-1: 0 6px 18px rgba(0, 0, 0, 0.22);
     --elevation-2: 0 12px 28px rgba(0, 0, 0, 0.32);
     --elevation-3: 0 18px 45px rgba(0, 0, 0, 0.45);
 
     --z-base: 1;
+    --z-titlebar: 80;
     --z-sidebar: 30;
     --z-popover: 120;
     --z-dialog: 140;
