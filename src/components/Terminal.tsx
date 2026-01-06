@@ -22,6 +22,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const webglAddonRef = useRef<WebglAddon | null>(null);
   const initialCwdRef = useRef<string | null>(null);
   const lastSentSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const isActiveRef = useRef(isActive);
@@ -99,12 +100,29 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
 
       xterm.open(container);
 
-      // Load WebGL addon for GPU-accelerated rendering
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => {
-        webglAddon.dispose();
-      });
-      xterm.loadAddon(webglAddon);
+      // WebGL addon loading/unloading functions
+      const loadWebGL = () => {
+        if (webglAddonRef.current) return; // Already loaded
+        const webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose();
+          webglAddonRef.current = null;
+        });
+        xterm.loadAddon(webglAddon);
+        webglAddonRef.current = webglAddon;
+      };
+
+      const unloadWebGL = () => {
+        if (webglAddonRef.current) {
+          webglAddonRef.current.dispose();
+          webglAddonRef.current = null;
+        }
+      };
+
+      // Load WebGL addon if enabled in settings
+      if (termSettings.useWebGL) {
+        loadWebGL();
+      }
 
       fitAddon.fit();
 
@@ -126,12 +144,23 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       let disposed = false;
 
       // Subscribe to terminal settings changes
+      let prevUseWebGL = termSettings.useWebGL;
       unsubscribeSettings = useTerminalSettings.subscribe((state) => {
         xterm.options.fontSize = state.fontSize;
         xterm.options.fontFamily = state.fontFamily;
         xterm.options.lineHeight = state.lineHeight;
         xterm.options.letterSpacing = state.letterSpacing;
         fitAddon.fit();
+
+        // Handle WebGL toggle
+        if (state.useWebGL !== prevUseWebGL) {
+          if (state.useWebGL) {
+            loadWebGL();
+          } else {
+            unloadWebGL();
+          }
+          prevUseWebGL = state.useWebGL;
+        }
       });
 
       const teardown = () => {
@@ -142,6 +171,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         unsubscribeSettings?.();
         resizeObserver?.disconnect();
         inputDisposable?.dispose();
+        unloadWebGL();
         if (resizeDebounceRef.current) {
           clearTimeout(resizeDebounceRef.current);
           resizeDebounceRef.current = null;

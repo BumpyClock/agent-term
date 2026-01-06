@@ -2,6 +2,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useTerminalSettings, FONT_OPTIONS, DEFAULT_TERMINAL_SETTINGS } from '@/store/terminalSettingsStore';
 import { Button } from '@/components/ui/button';
 
@@ -11,10 +12,12 @@ export function TerminalSettings() {
     fontSize,
     lineHeight,
     letterSpacing,
+    useWebGL,
     setFontFamily,
     setFontSize,
     setLineHeight,
     setLetterSpacing,
+    setUseWebGL,
     resetToDefaults,
   } = useTerminalSettings();
 
@@ -23,7 +26,8 @@ export function TerminalSettings() {
     fontFamily !== DEFAULT_TERMINAL_SETTINGS.fontFamily ||
     fontSize !== DEFAULT_TERMINAL_SETTINGS.fontSize ||
     lineHeight !== DEFAULT_TERMINAL_SETTINGS.lineHeight ||
-    letterSpacing !== DEFAULT_TERMINAL_SETTINGS.letterSpacing;
+    letterSpacing !== DEFAULT_TERMINAL_SETTINGS.letterSpacing ||
+    useWebGL !== DEFAULT_TERMINAL_SETTINGS.useWebGL;
 
   return (
     <Card>
@@ -113,6 +117,17 @@ export function TerminalSettings() {
               onChange={(e) => setLetterSpacing(Number(e.target.value))}
             />
           </div>
+        </div>
+
+        <div className="flex items-center space-x-2 pt-2">
+          <Checkbox
+            id="use-webgl"
+            checked={useWebGL}
+            onCheckedChange={(checked) => setUseWebGL(checked === true)}
+          />
+          <Label htmlFor="use-webgl" className="text-sm font-normal">
+            Use GPU acceleration (WebGL)
+          </Label>
         </div>
       </CardContent>
     </Card>

@@ -6,6 +6,7 @@ export interface TerminalSettings {
   fontSize: number;
   lineHeight: number;
   letterSpacing: number;
+  useWebGL: boolean;
 }
 
 interface TerminalSettingsState extends TerminalSettings {
@@ -13,6 +14,7 @@ interface TerminalSettingsState extends TerminalSettings {
   setFontSize: (fontSize: number) => void;
   setLineHeight: (lineHeight: number) => void;
   setLetterSpacing: (letterSpacing: number) => void;
+  setUseWebGL: (useWebGL: boolean) => void;
   resetToDefaults: () => void;
 }
 
@@ -21,6 +23,7 @@ export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   fontSize: 14,
   lineHeight: 1.2,
   letterSpacing: 0,
+  useWebGL: true,
 };
 
 export const FONT_OPTIONS = [
@@ -43,6 +46,7 @@ export const useTerminalSettings = create<TerminalSettingsState>()(
       setFontSize: (fontSize) => set({ fontSize: Math.min(32, Math.max(8, fontSize)) }),
       setLineHeight: (lineHeight) => set({ lineHeight: Math.min(2.0, Math.max(1.0, lineHeight)) }),
       setLetterSpacing: (letterSpacing) => set({ letterSpacing: Math.min(5, Math.max(-2, letterSpacing)) }),
+      setUseWebGL: (useWebGL) => set({ useWebGL }),
       resetToDefaults: () => set(DEFAULT_TERMINAL_SETTINGS),
     }),
     {
