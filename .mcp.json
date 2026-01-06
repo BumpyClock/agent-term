@@ -7,10 +7,7 @@
     "Exa": {
       "type": "stdio",
       "command": "agentterm-mcp-proxy",
-      "args": [
-        "--name",
-        "Exa"
-      ]
+      "args": ["--name", "Exa", "--debug"]
     }
   }
 }
