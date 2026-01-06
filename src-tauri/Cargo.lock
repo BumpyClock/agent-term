@@ -25,6 +25,7 @@ dependencies = [
  "tempfile",
  "time",
  "toml 0.9.10+spec-1.1.0",
+ "users",
  "uuid",
  "window-vibrancy 0.7.1",
 ]
@@ -4312,6 +4313,16 @@ dependencies = [
  "serde",
  "unic-ucd-ident",
  "url",
+]
+
+[[package]]
+name = "users"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24cc0f6d6f267b73e5a2cadf007ba8f9bc39c6a6f9666f8cf25ea809a153b032"
+dependencies = [
+ "libc",
+ "log",
 ]
 
 [[package]]

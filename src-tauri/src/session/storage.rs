@@ -1,6 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
+use parking_lot::Mutex as PLMutex;
 use serde::{Deserialize, Serialize};
 
 use super::error::{StorageError, StorageResult};
@@ -89,20 +94,41 @@ impl Storage {
     }
 
     fn rotate_backups(&self, path: &Path) {
+        use crate::diagnostics;
+
         if !path.exists() {
             return;
         }
+
         let bak2 = path.with_extension("json.bak.2");
         let bak1 = path.with_extension("json.bak.1");
         let bak = path.with_extension("json.bak");
-        let _ = fs::remove_file(&bak2);
+
+        // Remove oldest backup (log non-NotFound errors)
+        if let Err(e) = fs::remove_file(&bak2) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                diagnostics::log(format!("backup_warning: remove bak2 failed: {}", e));
+            }
+        }
+
+        // Rotate bak.1 -> bak.2
         if bak1.exists() {
-            let _ = fs::rename(&bak1, &bak2);
+            if let Err(e) = fs::rename(&bak1, &bak2) {
+                diagnostics::log(format!("backup_warning: rotate bak1->bak2 failed: {}", e));
+            }
         }
+
+        // Rotate bak -> bak.1
         if bak.exists() {
-            let _ = fs::rename(&bak, &bak1);
+            if let Err(e) = fs::rename(&bak, &bak1) {
+                diagnostics::log(format!("backup_warning: rotate bak->bak1 failed: {}", e));
+            }
         }
-        let _ = fs::copy(path, &bak);
+
+        // O(1) rename instead of O(n) copy
+        if let Err(e) = fs::rename(path, &bak) {
+            diagnostics::log(format!("backup_warning: create backup failed: {}", e));
+        }
     }
 
     fn file_path(&self) -> PathBuf {
@@ -115,6 +141,116 @@ pub fn default_storage_root() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| Path::new("/").to_path_buf())
         .join(".agent-term")
+}
+
+enum SaveMessage {
+    Save(StorageSnapshot),
+    Shutdown,
+}
+
+/// Debounced storage wrapper that coalesces rapid saves
+pub struct DebouncedStorage {
+    storage: Storage,
+    sender: Sender<SaveMessage>,
+    pending: Arc<PLMutex<Option<StorageSnapshot>>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl DebouncedStorage {
+    /// Create a new debounced storage with the given debounce delay in milliseconds
+    pub fn new(storage: Storage, debounce_ms: u64) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        let pending: Arc<PLMutex<Option<StorageSnapshot>>> = Arc::new(PLMutex::new(None));
+        let pending_clone = pending.clone();
+        let storage_clone = storage.clone();
+        let debounce = Duration::from_millis(debounce_ms);
+
+        let worker = thread::spawn(move || {
+            Self::worker_loop(receiver, storage_clone, pending_clone, debounce);
+        });
+
+        Self {
+            storage,
+            sender,
+            pending,
+            worker: Some(worker),
+        }
+    }
+
+    /// Queue a save operation (will be debounced)
+    pub fn save(&self, snapshot: &StorageSnapshot) -> StorageResult<()> {
+        *self.pending.lock() = Some(snapshot.clone());
+        let _ = self.sender.send(SaveMessage::Save(snapshot.clone()));
+        Ok(())
+    }
+
+    /// Load from storage (delegates to inner Storage)
+    pub fn load(&self) -> StorageResult<StorageSnapshot> {
+        self.storage.load()
+    }
+
+    /// Flush any pending save immediately
+    pub fn flush(&self) -> StorageResult<()> {
+        if let Some(snapshot) = self.pending.lock().take() {
+            self.storage.save(&snapshot)?;
+        }
+        Ok(())
+    }
+
+    fn worker_loop(
+        receiver: Receiver<SaveMessage>,
+        storage: Storage,
+        pending: Arc<PLMutex<Option<StorageSnapshot>>>,
+        debounce: Duration,
+    ) {
+        use crate::diagnostics;
+        let mut last_request: Option<Instant> = None;
+
+        loop {
+            let timeout = if last_request.is_some() {
+                debounce
+            } else {
+                Duration::from_secs(60)
+            };
+
+            match receiver.recv_timeout(timeout) {
+                Ok(SaveMessage::Save(_)) => {
+                    last_request = Some(Instant::now());
+                }
+                Ok(SaveMessage::Shutdown) => {
+                    if let Some(snap) = pending.lock().take() {
+                        let _ = storage.save(&snap);
+                    }
+                    break;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(t) = last_request {
+                        if t.elapsed() >= debounce {
+                            if let Some(snap) = pending.lock().take() {
+                                if let Err(e) = storage.save(&snap) {
+                                    diagnostics::log(format!("debounced_save_error: {}", e));
+                                }
+                            }
+                            last_request = None;
+                        }
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    }
+}
+
+impl Drop for DebouncedStorage {
+    fn drop(&mut self) {
+        let _ = self.sender.send(SaveMessage::Shutdown);
+        if let Some(snap) = self.pending.lock().take() {
+            let _ = self.storage.save(&snap);
+        }
+        if let Some(w) = self.worker.take() {
+            let _ = w.join();
+        }
+    }
 }
 
 #[cfg(test)]

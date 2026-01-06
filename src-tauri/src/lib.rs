@@ -248,33 +248,30 @@ fn get_home_dir() -> Option<String> {
 fn detect_default_shell() -> String {
     #[cfg(not(target_os = "windows"))]
     {
+        use users::os::unix::UserExt;
+
+        // Priority 1: SHELL env var (fastest, most common)
         if let Ok(shell) = std::env::var("SHELL") {
             if !shell.trim().is_empty() {
                 return shell;
             }
         }
-        if let Ok(user) = std::env::var("USER") {
-            if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
-                for line in passwd.lines() {
-                    if line.starts_with(&format!("{}:", user)) {
-                        let parts: Vec<&str> = line.split(':').collect();
-                        if let Some(shell) = parts.get(6) {
-                            if !shell.trim().is_empty() {
-                                return shell.to_string();
-                            }
-                        }
-                    }
+
+        // Priority 2: O(1) getpwuid() via users crate
+        if let Some(user) = users::get_user_by_uid(users::get_current_uid()) {
+            if let Some(shell_path) = user.shell().to_str() {
+                if !shell_path.is_empty() {
+                    return shell_path.to_string();
                 }
             }
         }
+
+        "/bin/bash".to_string()
     }
+
     #[cfg(target_os = "windows")]
     {
         std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        "/bin/bash".to_string()
     }
 }
 
@@ -331,7 +328,6 @@ pub fn run() {
             session::stop_session,
             session::restart_session,
             session::write_session_input,
-            session::write_session_input_base64,
             session::resize_session,
             session::acknowledge_session,
             session::set_tool_session_id,

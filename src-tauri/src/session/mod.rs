@@ -23,7 +23,7 @@ mod tools;
 pub use model::{NewSessionInput, SectionRecord, SessionRecord, SessionStatus};
 use runtime::SessionRuntime;
 use status::{extract_session_id, prompt_detector, status_tracker, ExtractedSessionId};
-use storage::{default_storage_root, Storage, StorageSnapshot};
+use storage::{default_storage_root, DebouncedStorage, Storage, StorageSnapshot};
 use tools::build_command;
 
 #[derive(Clone, Serialize)]
@@ -62,7 +62,7 @@ struct ToolSessionIdEvent {
 /// let sessions = manager.list_sessions();
 /// ```
 pub struct SessionManager {
-    storage: Storage,
+    storage: DebouncedStorage,
     snapshot: Mutex<StorageSnapshot>,
     runtimes: Mutex<HashMap<String, SessionRuntime>>,
 }
@@ -70,8 +70,10 @@ pub struct SessionManager {
 pub fn build_session_manager() -> Result<SessionManager, String> {
     let storage = Storage::new(default_storage_root(), "default".to_string());
     let snapshot = storage.load()?;
+    let debounced = DebouncedStorage::new(storage, 500); // 500ms debounce
+
     Ok(SessionManager {
-        storage,
+        storage: debounced,
         snapshot: Mutex::new(snapshot),
         runtimes: Mutex::new(HashMap::new()),
     })
@@ -836,23 +838,6 @@ pub fn write_session_input(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn write_session_input_base64(
-    state: State<'_, SessionManager>,
-    id: String,
-    data_base64: String,
-) -> Result<(), String> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(&data_base64)
-        .map_err(|e| format!("invalid base64: {}", e))?;
-    diagnostics::log(format!(
-        "write_session_input_base64 id={} bytes={}",
-        id,
-        bytes.len()
-    ));
-    state.write_session_input(&id, &bytes)
-}
-
-#[tauri::command(rename_all = "camelCase")]
 pub fn resize_session(
     state: State<'_, SessionManager>,
     id: String,
@@ -892,8 +877,9 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let storage = Storage::new(temp.path().to_path_buf(), "test".to_string());
         let snapshot = storage.load().unwrap();
+        let debounced = DebouncedStorage::new(storage, 50); // 50ms debounce for tests
         let manager = SessionManager {
-            storage,
+            storage: debounced,
             snapshot: Mutex::new(snapshot),
             runtimes: Mutex::new(HashMap::new()),
         };
