@@ -32,6 +32,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     updateSessionTitle,
     updateSessionCommand,
     updateSessionIcon,
+    getSessionsBySection,
   } = useTerminalStore();
 
   const [isAddingSection, setIsAddingSection] = useState(false);
@@ -169,7 +170,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
 
   const saveEditDialog = async () => {
     if (!editSessionId) return;
-    const session = sessions.find((s) => s.id === editSessionId);
+    const session = sessions[editSessionId];
     if (!session) {
       closeEditDialog();
       return;
@@ -229,10 +230,6 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     closeSectionEditDialog();
   };
 
-  const getSessionsBySection = (sectionId: string): Session[] => {
-    return sessions.filter((s) => s.sectionId === sectionId);
-  };
-
   const openMenuAt = (sessionId: string, position: PopoverPosition) => {
     setMenuSectionId(null);
     setMenuSectionPosition(null);
@@ -274,9 +271,9 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     [sections]
   );
 
-  const menuSession = menuSessionId ? sessions.find((s) => s.id === menuSessionId) : null;
+  const menuSession = menuSessionId ? sessions[menuSessionId] : null;
   const menuSection = menuSectionId ? sections.find((s) => s.id === menuSectionId) : null;
-  const mcpSession = mcpSessionId ? sessions.find((s) => s.id === mcpSessionId) : null;
+  const mcpSession = mcpSessionId ? sessions[mcpSessionId] : null;
   const canManageMcp = (session: Session) => session.tool !== 'shell';
 
   return (

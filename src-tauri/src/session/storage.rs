@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
@@ -84,11 +85,13 @@ impl Storage {
             fs::create_dir_all(parent).map_err(|e| StorageError::WriteError(e.to_string()))?;
         }
         self.rotate_backups(&path);
-        let payload = serde_json::to_string_pretty(snapshot)
-            .map_err(|e| StorageError::SerializeError(e.to_string()))?;
         let tmp_path = path.with_extension("json.tmp");
-        fs::write(&tmp_path, payload.as_bytes())
+        // Stream directly to file to avoid large intermediate String allocation
+        let file = fs::File::create(&tmp_path)
             .map_err(|e| StorageError::WriteError(e.to_string()))?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, snapshot)
+            .map_err(|e| StorageError::SerializeError(e.to_string()))?;
         fs::rename(&tmp_path, &path).map_err(|e| StorageError::WriteError(e.to_string()))?;
         Ok(())
     }

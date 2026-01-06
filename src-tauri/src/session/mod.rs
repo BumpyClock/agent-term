@@ -531,13 +531,16 @@ impl SessionManager {
     ) -> Result<(), String> {
         if let Ok(record) = self.get_session(id) {
             if matches!(record.tool, model::SessionTool::Claude) {
-                let _ = self.regenerate_local_mcp_config(mcp_manager, &record);
+                // Use block_on to call async MCP methods from sync context
+                let _ = tauri::async_runtime::block_on(
+                    self.regenerate_local_mcp_config(mcp_manager, &record)
+                );
             }
         }
         self.restart_session(app, id, rows, cols)
     }
 
-    fn regenerate_local_mcp_config(
+    async fn regenerate_local_mcp_config(
         &self,
         mcp_manager: &McpManager,
         record: &SessionRecord,
@@ -553,6 +556,7 @@ impl SessionManager {
 
         let attached = mcp_manager
             .get_attached_mcps(McpScope::Local, Some(project_path))
+            .await
             .map_err(|e| e.to_string())?;
 
         if attached.is_empty() {
@@ -561,6 +565,7 @@ impl SessionManager {
 
         let available = mcp_manager
             .get_available_mcps()
+            .await
             .map_err(|e| e.to_string())?;
 
         let filtered: Vec<String> = attached
@@ -570,6 +575,7 @@ impl SessionManager {
 
         mcp_manager
             .set_mcps(McpScope::Local, Some(project_path), &filtered)
+            .await
             .map_err(|e| e.to_string())?;
         diagnostics::log(format!(
             "mcp_regenerate_completed session_id={} count={}",

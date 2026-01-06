@@ -103,24 +103,24 @@ impl From<(String, MCPDef)> for McpInfo {
 }
 
 /// Build a new MCP manager instance
-pub fn build_mcp_manager() -> McpResult<McpManager> {
+pub async fn build_mcp_manager() -> McpResult<McpManager> {
     let manager = McpManager::new();
-    manager.create_example_config()?;
+    manager.create_example_config().await?;
     Ok(manager)
 }
 
 /// List all available MCPs from user config
 #[tauri::command(rename_all = "camelCase")]
-pub fn mcp_list(state: State<'_, McpManager>) -> Result<Vec<McpInfo>, String> {
-    let mcps = state.get_available_mcps().map_err(|e| e.to_string())?;
+pub async fn mcp_list(state: State<'_, McpManager>) -> Result<Vec<McpInfo>, String> {
+    let mcps = state.get_available_mcps().await.map_err(|e| e.to_string())?;
     let mut result: Vec<McpInfo> = mcps.into_iter().map(McpInfo::from).collect();
     result.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(result)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn mcp_get_settings(state: State<'_, McpManager>) -> Result<McpSettings, String> {
-    let config = state.load_config().map_err(|e| e.to_string())?;
+pub async fn mcp_get_settings(state: State<'_, McpManager>) -> Result<McpSettings, String> {
+    let config = state.load_config().await.map_err(|e| e.to_string())?;
     Ok(McpSettings {
         mcps: config.mcps,
         mcp_pool: McpPoolSettingsDto::from(config.mcp_pool),
@@ -128,14 +128,14 @@ pub fn mcp_get_settings(state: State<'_, McpManager>) -> Result<McpSettings, Str
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn mcp_set_settings(
+pub async fn mcp_set_settings(
     state: State<'_, McpManager>,
     settings: McpSettings,
 ) -> Result<(), String> {
-    let mut config = state.load_config().map_err(|e| e.to_string())?;
+    let mut config = state.load_config().await.map_err(|e| e.to_string())?;
     config.mcps = settings.mcps;
     config.mcp_pool = config::MCPPoolSettings::from(settings.mcp_pool);
-    state.write_config(&config).map_err(|e| e.to_string())?;
+    state.write_config(&config).await.map_err(|e| e.to_string())?;
 
     if cfg!(unix) {
         let _ = pool_manager::shutdown_global_pool();
@@ -149,19 +149,20 @@ pub fn mcp_set_settings(
 
 /// Get attached MCPs for a scope
 #[tauri::command(rename_all = "camelCase")]
-pub fn mcp_attached(
+pub async fn mcp_attached(
     state: State<'_, McpManager>,
     scope: McpScope,
     project_path: Option<String>,
 ) -> Result<Vec<String>, String> {
     state
         .get_attached_mcps(scope, project_path.as_deref())
+        .await
         .map_err(|e| e.to_string())
 }
 
 /// Attach an MCP to a scope
 #[tauri::command(rename_all = "camelCase")]
-pub fn mcp_attach(
+pub async fn mcp_attach(
     app: tauri::AppHandle,
     mcp_state: State<'_, McpManager>,
     session_state: State<'_, crate::session::SessionManager>,
@@ -171,6 +172,7 @@ pub fn mcp_attach(
 ) -> Result<(), String> {
     mcp_state
         .attach_mcp(scope, project_path.as_deref(), &mcp_name)
+        .await
         .map_err(|e| e.to_string())?;
 
     let affected_sessions = match scope {
@@ -189,7 +191,7 @@ pub fn mcp_attach(
 
 /// Detach an MCP from a scope
 #[tauri::command(rename_all = "camelCase")]
-pub fn mcp_detach(
+pub async fn mcp_detach(
     app: tauri::AppHandle,
     mcp_state: State<'_, McpManager>,
     session_state: State<'_, crate::session::SessionManager>,
@@ -199,6 +201,7 @@ pub fn mcp_detach(
 ) -> Result<(), String> {
     mcp_state
         .detach_mcp(scope, project_path.as_deref(), &mcp_name)
+        .await
         .map_err(|e| e.to_string())?;
 
     let affected_sessions = match scope {

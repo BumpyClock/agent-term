@@ -50,9 +50,9 @@ impl SearchEngine {
         }
     }
 
-    /// Search indexed messages with fuzzy matching.
+    /// Search indexed messages using inverted index for efficient lookup.
     ///
-    /// Uses case-insensitive substring matching for MVP.
+    /// Uses case-insensitive term matching with OR semantics.
     /// Returns results sorted by relevance score.
     pub fn search(&self, index: &SearchIndex, query: &str, limit: usize) -> Vec<SearchResult> {
         if query.trim().is_empty() {
@@ -66,18 +66,33 @@ impl SearchEngine {
             return vec![];
         }
 
-        let mut results: Vec<SearchResult> = index
-            .messages()
+        let candidate_indices = self.get_candidates(index, &query_terms);
+
+        let mut results: Vec<SearchResult> = candidate_indices
             .iter()
-            .filter_map(|msg| self.score_message(msg, &query_terms))
+            .filter_map(|&idx| {
+                index
+                    .get_message(idx)
+                    .and_then(|msg| self.score_message(msg, &query_terms))
+            })
             .collect();
 
-        // Sort by score descending
         results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Limit results
         results.truncate(limit);
         results
+    }
+
+    /// Get candidate message indices from inverted index using OR semantics.
+    fn get_candidates(&self, index: &SearchIndex, query_terms: &[&str]) -> Vec<usize> {
+        use std::collections::HashSet;
+
+        let mut all: HashSet<usize> = HashSet::new();
+        for term in query_terms {
+            if let Some(indices) = index.get_term_indices(term) {
+                all.extend(indices.iter().copied());
+            }
+        }
+        all.into_iter().collect()
     }
 
     /// Score a message against query terms.

@@ -35,7 +35,9 @@ export interface Section {
 
 interface TerminalState {
   sections: Section[];
-  sessions: Session[];
+  sessions: Record<string, Session>;
+  sessionsBySection: Record<string, string[]>;
+  sessionOrder: string[];
   activeSessionId: string | null;
   activatedSessionIds: Set<string>;
   hasHydrated: boolean;
@@ -65,6 +67,8 @@ interface TerminalState {
   loadFromBackend: () => Promise<void>;
   setHasHydrated: (value: boolean) => void;
 
+  getSession: (id: string) => Session | undefined;
+  getAllSessions: () => Session[];
   getSessionsBySection: (sectionId: string) => Session[];
   getDefaultSection: () => Section | undefined;
 }
@@ -137,7 +141,9 @@ export const useTerminalStore = create<TerminalState>()(
           isDefault: true,
         },
       ],
-      sessions: [],
+      sessions: {},
+      sessionsBySection: {},
+      sessionOrder: [],
       activeSessionId: null,
       activatedSessionIds: new Set<string>(),
       hasHydrated: false,
@@ -158,14 +164,25 @@ export const useTerminalStore = create<TerminalState>()(
         await invoke('delete_section', { id });
         set((state) => {
           const defaultSection = state.sections.find((s) => s.isDefault);
-          const updatedSessions = state.sessions.map((session) =>
-            session.sectionId === id
-              ? { ...session, sectionId: defaultSection?.id || DEFAULT_SECTION_ID }
-              : session
-          );
+          const defaultSectionId = defaultSection?.id || DEFAULT_SECTION_ID;
+          const sessionIdsToMove = state.sessionsBySection[id] || [];
+
+          const newSessions = { ...state.sessions };
+          sessionIdsToMove.forEach((sessionId) => {
+            if (newSessions[sessionId]) {
+              newSessions[sessionId] = { ...newSessions[sessionId], sectionId: defaultSectionId };
+            }
+          });
+
+          const newSessionsBySection = { ...state.sessionsBySection };
+          delete newSessionsBySection[id];
+          const defaultSessionIds = newSessionsBySection[defaultSectionId] || [];
+          newSessionsBySection[defaultSectionId] = [...defaultSessionIds, ...sessionIdsToMove];
+
           return {
             sections: state.sections.filter((s) => s.id !== id),
-            sessions: updatedSessions,
+            sessions: newSessions,
+            sessionsBySection: newSessionsBySection,
           };
         });
       },
@@ -199,8 +216,9 @@ export const useTerminalStore = create<TerminalState>()(
 
       addSession: async (sectionId: string, options?: { title?: string; tool?: SessionTool }) => {
         const section = get().sections.find((s) => s.id === sectionId);
-        const sessions = get().sessions;
-        const sectionSessions = sessions.filter((s) => s.sectionId === sectionId);
+        const state = get();
+        const sectionSessionIds = state.sessionsBySection[sectionId] || [];
+        const sectionSessions = sectionSessionIds.map((id) => state.sessions[id]).filter(Boolean);
         const tool = options?.tool ?? 'shell';
         const toolTitle = getToolTitle(tool);
         const toolCount = sectionSessions.filter((s) =>
@@ -232,8 +250,15 @@ export const useTerminalStore = create<TerminalState>()(
         set((state) => {
           const newActivated = new Set(state.activatedSessionIds);
           newActivated.add(session.id);
+
+          const newSessionsBySection = { ...state.sessionsBySection };
+          const sectionIds = newSessionsBySection[sectionId] || [];
+          newSessionsBySection[sectionId] = [...sectionIds, session.id];
+
           return {
-            sessions: [...state.sessions, session],
+            sessions: { ...state.sessions, [session.id]: session },
+            sessionsBySection: newSessionsBySection,
+            sessionOrder: [...state.sessionOrder, session.id],
             activeSessionId: session.id,
             activatedSessionIds: newActivated,
           };
@@ -244,21 +269,35 @@ export const useTerminalStore = create<TerminalState>()(
       removeSession: async (id: string) => {
         await invoke('delete_session', { id });
         set((state) => {
-          const newSessions = state.sessions.filter((s) => s.id !== id);
+          const session = state.sessions[id];
+          if (!session) return state;
+
+          const { [id]: removed, ...newSessions } = state.sessions;
+
+          const newSessionsBySection = { ...state.sessionsBySection };
+          const sectionIds = newSessionsBySection[session.sectionId] || [];
+          newSessionsBySection[session.sectionId] = sectionIds.filter((sid) => sid !== id);
+
+          const newSessionOrder = state.sessionOrder.filter((sid) => sid !== id);
+
           let newActiveSessionId = state.activeSessionId;
           if (state.activeSessionId === id) {
-            const sessionIndex = state.sessions.findIndex((s) => s.id === id);
-            if (newSessions.length > 0) {
+            const currentIndex = state.sessionOrder.indexOf(id);
+            if (newSessionOrder.length > 0) {
               newActiveSessionId =
-                newSessions[Math.min(sessionIndex, newSessions.length - 1)]?.id || null;
+                newSessionOrder[Math.min(currentIndex, newSessionOrder.length - 1)] || null;
             } else {
               newActiveSessionId = null;
             }
           }
+
           const newActivated = new Set(state.activatedSessionIds);
           newActivated.delete(id);
+
           return {
             sessions: newSessions,
+            sessionsBySection: newSessionsBySection,
+            sessionOrder: newSessionOrder,
             activeSessionId: newActiveSessionId,
             activatedSessionIds: newActivated,
           };
@@ -272,61 +311,83 @@ export const useTerminalStore = create<TerminalState>()(
 
       updateSessionTitle: async (id: string, title: string) => {
         await invoke('rename_session', { id, title });
-        set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === id ? { ...s, title } : s
-          ),
-        }));
+        set((state) => {
+          const session = state.sessions[id];
+          if (!session) return state;
+          return {
+            sessions: { ...state.sessions, [id]: { ...session, title } },
+          };
+        });
       },
 
       updateSessionCommand: async (id: string, command: string) => {
         await invoke('set_session_command', { id, command });
-        set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === id ? { ...s, command } : s
-          ),
-        }));
+        set((state) => {
+          const session = state.sessions[id];
+          if (!session) return state;
+          return {
+            sessions: { ...state.sessions, [id]: { ...session, command } },
+          };
+        });
       },
 
       updateSessionIcon: async (id: string, icon: string | null) => {
         await invoke('set_session_icon', { id, icon });
-        set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === id ? { ...s, icon } : s
-          ),
-        }));
+        set((state) => {
+          const session = state.sessions[id];
+          if (!session) return state;
+          return {
+            sessions: { ...state.sessions, [id]: { ...session, icon } },
+          };
+        });
       },
 
       moveSessionToSection: async (sessionId: string, sectionId: string) => {
         await invoke('move_session', { id: sessionId, sectionId });
-        set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === sessionId ? { ...s, sectionId } : s
-          ),
-        }));
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return state;
+
+          const oldSectionId = session.sectionId;
+          const newSessionsBySection = { ...state.sessionsBySection };
+          const oldSectionIds = newSessionsBySection[oldSectionId] || [];
+          newSessionsBySection[oldSectionId] = oldSectionIds.filter((id) => id !== sessionId);
+          const newSectionIds = newSessionsBySection[sectionId] || [];
+          newSessionsBySection[sectionId] = [...newSectionIds, sessionId];
+
+          return {
+            sessions: { ...state.sessions, [sessionId]: { ...session, sectionId } },
+            sessionsBySection: newSessionsBySection,
+          };
+        });
       },
 
       updateSessionStatus: (id: string, status: SessionStatus) => {
-        set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === id ? { ...s, status } : s
-          ),
-        }));
+        set((state) => {
+          const session = state.sessions[id];
+          if (!session) return state;
+          return {
+            sessions: { ...state.sessions, [id]: { ...session, status } },
+          };
+        });
       },
 
       updateToolSessionId: (id: string, tool: string, toolSessionId: string) => {
-        set((state) => ({
-          sessions: state.sessions.map((s) => {
-            if (s.id !== id) return s;
-            if (tool === 'claude') {
-              return { ...s, claudeSessionId: toolSessionId };
-            } else if (tool === 'gemini') {
-              return { ...s, geminiSessionId: toolSessionId };
-            }
-            return s;
-          }),
-        }));
-        // Persist to backend
+        set((state) => {
+          const session = state.sessions[id];
+          if (!session) return state;
+          let updated: Session;
+          if (tool === 'claude') {
+            updated = { ...session, claudeSessionId: toolSessionId };
+          } else if (tool === 'gemini') {
+            updated = { ...session, geminiSessionId: toolSessionId };
+          } else {
+            return state;
+          }
+          return {
+            sessions: { ...state.sessions, [id]: updated },
+          };
+        });
         invoke('set_tool_session_id', { id, tool, toolSessionId }).catch(console.error);
       },
 
@@ -346,7 +407,7 @@ export const useTerminalStore = create<TerminalState>()(
 
       loadFromBackend: async () => {
         try {
-          const [sessions, sections] = await Promise.all([
+          const [sessionsArray, sections] = await Promise.all([
             invoke<Session[]>('list_sessions'),
             invoke<Section[]>('list_sections'),
           ]);
@@ -371,10 +432,25 @@ export const useTerminalStore = create<TerminalState>()(
             ];
           }
 
-          const initialActiveId = sessions.find((s) => s.isOpen)?.id || null;
+          const sessionsMap: Record<string, Session> = {};
+          const sessionsBySection: Record<string, string[]> = {};
+          const sessionOrder: string[] = [];
+
+          sessionsArray.forEach((session) => {
+            sessionsMap[session.id] = session;
+            sessionOrder.push(session.id);
+            if (!sessionsBySection[session.sectionId]) {
+              sessionsBySection[session.sectionId] = [];
+            }
+            sessionsBySection[session.sectionId].push(session.id);
+          });
+
+          const initialActiveId = sessionsArray.find((s) => s.isOpen)?.id || null;
           const initialActivated = initialActiveId ? new Set([initialActiveId]) : new Set<string>();
           set({
-            sessions,
+            sessions: sessionsMap,
+            sessionsBySection,
+            sessionOrder,
             sections: mergedSections,
             activeSessionId: initialActiveId,
             activatedSessionIds: initialActivated,
@@ -388,8 +464,19 @@ export const useTerminalStore = create<TerminalState>()(
         set({ hasHydrated: value });
       },
 
+      getSession: (id: string) => {
+        return get().sessions[id];
+      },
+
+      getAllSessions: () => {
+        const state = get();
+        return state.sessionOrder.map((id) => state.sessions[id]).filter(Boolean);
+      },
+
       getSessionsBySection: (sectionId: string) => {
-        return get().sessions.filter((s) => s.sectionId === sectionId);
+        const state = get();
+        const sessionIds = state.sessionsBySection[sectionId] || [];
+        return sessionIds.map((id) => state.sessions[id]).filter(Boolean);
       },
 
       getDefaultSection: () => {

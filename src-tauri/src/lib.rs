@@ -57,7 +57,7 @@ pub fn run() {
     let session_manager = session::build_session_manager()
         .expect("failed to build session manager");
 
-    let mcp_manager = mcp::build_mcp_manager()
+    let mcp_manager = tauri::async_runtime::block_on(mcp::build_mcp_manager())
         .expect("failed to build mcp manager");
 
     let search_manager = search::build_search_manager()
@@ -115,14 +115,17 @@ pub fn run() {
                 .expect("Failed to apply blur");
 
             if cfg!(unix) {
-                if let Ok(config) = app.state::<mcp::McpManager>().load_config() {
-                    if config.mcp_pool.enabled {
-                        if let Err(err) = mcp::pool_manager::initialize_global_pool(&config) {
-                            let msg = err.to_string().replace('.', "");
-                            diagnostics::log(format!("pool_init_failed error={}", msg));
+                let mcp_manager = app.state::<mcp::McpManager>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(config) = mcp_manager.load_config().await {
+                        if config.mcp_pool.enabled {
+                            if let Err(err) = mcp::pool_manager::initialize_global_pool(&config) {
+                                let msg = err.to_string().replace('.', "");
+                                diagnostics::log(format!("pool_init_failed error={}", msg));
+                            }
                         }
                     }
-                }
+                });
             }
 
             Ok(())
@@ -132,7 +135,9 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
-            if let Ok(config) = app_handle.state::<mcp::McpManager>().load_config() {
+            let mcp_manager = app_handle.state::<mcp::McpManager>();
+            // Use block_on for cleanup since we're in a sync context during shutdown
+            if let Ok(config) = tauri::async_runtime::block_on(mcp_manager.load_config()) {
                 if config.mcp_pool.shutdown_on_exit {
                     let _ = mcp::pool_manager::shutdown_global_pool();
                 }

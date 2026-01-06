@@ -10,6 +10,7 @@ function App() {
   const {
     sections,
     sessions,
+    sessionOrder,
     activeSessionId,
     activatedSessionIds,
     addSession,
@@ -56,8 +57,8 @@ function App() {
         }
       }
 
-      const currentSessions = useTerminalStore.getState().sessions;
-      if (!cancelled && currentSessions.length === 0) {
+      const currentSessionOrder = useTerminalStore.getState().sessionOrder;
+      if (!cancelled && currentSessionOrder.length === 0) {
         await addSession(defaultSection.id, { tool: 'shell' });
       }
     };
@@ -111,27 +112,27 @@ function App() {
       if (event.key >= '1' && event.key <= '9') {
         event.preventDefault();
         const index = parseInt(event.key, 10) - 1;
-        if (index < sessions.length) {
-          setActiveSession(sessions[index].id);
+        if (index < sessionOrder.length) {
+          setActiveSession(sessionOrder[index]);
         }
         return;
       }
 
       if (event.key === '[' || event.key === '{') {
         event.preventDefault();
-        if (sessions.length === 0) return;
-        const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
-        const prevIndex = currentIndex <= 0 ? sessions.length - 1 : currentIndex - 1;
-        setActiveSession(sessions[prevIndex].id);
+        if (sessionOrder.length === 0) return;
+        const currentIndex = sessionOrder.indexOf(activeSessionId || '');
+        const prevIndex = currentIndex <= 0 ? sessionOrder.length - 1 : currentIndex - 1;
+        setActiveSession(sessionOrder[prevIndex]);
         return;
       }
 
       if (event.key === ']' || event.key === '}') {
         event.preventDefault();
-        if (sessions.length === 0) return;
-        const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
-        const nextIndex = currentIndex >= sessions.length - 1 ? 0 : currentIndex + 1;
-        setActiveSession(sessions[nextIndex].id);
+        if (sessionOrder.length === 0) return;
+        const currentIndex = sessionOrder.indexOf(activeSessionId || '');
+        const nextIndex = currentIndex >= sessionOrder.length - 1 ? 0 : currentIndex + 1;
+        setActiveSession(sessionOrder[nextIndex]);
         return;
       }
 
@@ -149,7 +150,7 @@ function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [sessions, activeSessionId, setActiveSession, getDefaultSection, addSession]);
+  }, [sessionOrder, activeSessionId, setActiveSession, getDefaultSection, addSession]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -212,26 +213,29 @@ function App() {
         />
       </div>
       <div className="terminal-container" style={{ paddingLeft: terminalPaddingLeft }}>
-        {sessions.length === 0 ? (
+        {sessionOrder.length === 0 ? (
           <div className="no-terminals">
             <p>No terminals open</p>
             <p>Click + on a project to create a new terminal</p>
           </div>
         ) : (
-          sessions
-            .filter((session) => activatedSessionIds.has(session.id))
-            .map((session) => {
+          sessionOrder
+            .filter((sessionId) => activatedSessionIds.has(sessionId))
+            .map((sessionId) => {
+              const session = sessions[sessionId];
+              if (!session) return null;
               const section = sections.find((item) => item.id === session.sectionId);
               return (
                 <Terminal
-                  key={session.id}
-                  id={session.id}
-                  sessionId={session.id}
+                  key={sessionId}
+                  id={sessionId}
+                  sessionId={sessionId}
                   cwd={section?.path ?? ''}
-                  isActive={activeSessionId === session.id}
+                  isActive={activeSessionId === sessionId}
                 />
               );
             })
+            .filter(Boolean)
         )}
       </div>
     </div>

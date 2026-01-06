@@ -1,5 +1,5 @@
 use super::config::{
-    expand_tilde, get_claude_config_path, get_config_path, ClaudeJsonConfig, MCPServerConfig,
+    get_claude_config_path, get_config_path, ClaudeJsonConfig, MCPServerConfig,
     McpJsonConfig, UserConfig,
 };
 use super::error::{McpError, McpResult};
@@ -7,12 +7,12 @@ use super::pool_manager;
 use crate::diagnostics;
 use parking_lot::Mutex;
 use serde_json;
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::io::Write;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 /// MCP attachment scope
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -43,7 +43,7 @@ impl McpManager {
 
     /// Load user configuration from ~/.agent-term/config.toml
     /// Returns cached config after first load
-    pub fn load_config(&self) -> McpResult<UserConfig> {
+    pub async fn load_config(&self) -> McpResult<UserConfig> {
         // Check cache first
         {
             let cache = self.config_cache.lock();
@@ -63,8 +63,9 @@ impl McpManager {
             return Ok(default_config);
         }
 
-        // Read and parse config
+        // Read and parse config (async)
         let contents = fs::read_to_string(&config_path)
+            .await
             .map_err(|e| McpError::ConfigReadError(format!("{}: {}", config_path.display(), e)))?;
 
         let config: UserConfig = toml::from_str(&contents)
@@ -77,19 +78,20 @@ impl McpManager {
     }
 
     /// Force reload of user configuration
-    pub fn reload_config(&self) -> McpResult<UserConfig> {
+    pub async fn reload_config(&self) -> McpResult<UserConfig> {
         // Clear cache
         *self.config_cache.lock() = None;
-        self.load_config()
+        self.load_config().await
     }
 
     /// Write user configuration to ~/.agent-term/config.toml
-    pub fn write_config(&self, config: &UserConfig) -> McpResult<()> {
+    pub async fn write_config(&self, config: &UserConfig) -> McpResult<()> {
         let config_path = get_config_path()?;
 
         // Ensure directory exists
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)
+                .await
                 .map_err(|e| McpError::ConfigWriteError(format!("create_dir_all: {}", e)))?;
         }
 
@@ -101,13 +103,16 @@ impl McpManager {
         let temp_path = config_path.with_extension("toml.tmp");
         {
             let mut file = fs::File::create(&temp_path)
+                .await
                 .map_err(|e| McpError::ConfigWriteError(format!("create tmp: {}", e)))?;
             file.write_all(toml_str.as_bytes())
+                .await
                 .map_err(|e| McpError::ConfigWriteError(format!("write tmp: {}", e)))?;
         }
 
         // Atomic rename
         fs::rename(&temp_path, &config_path)
+            .await
             .map_err(|e| McpError::ConfigWriteError(format!("rename: {}", e)))?;
 
         // Update cache
@@ -117,22 +122,22 @@ impl McpManager {
     }
 
     /// Get all available MCP definitions from config
-    pub fn get_available_mcps(&self) -> McpResult<HashMap<String, super::config::MCPDef>> {
-        let config = self.load_config()?;
+    pub async fn get_available_mcps(&self) -> McpResult<HashMap<String, super::config::MCPDef>> {
+        let config = self.load_config().await?;
         Ok(config.mcps)
     }
 
     /// Get list of available MCP names (sorted)
-    pub fn get_available_mcp_names(&self) -> McpResult<Vec<String>> {
-        let mcps = self.get_available_mcps()?;
+    pub async fn get_available_mcp_names(&self) -> McpResult<Vec<String>> {
+        let mcps = self.get_available_mcps().await?;
         let mut names: Vec<String> = mcps.keys().cloned().collect();
         names.sort();
         Ok(names)
     }
 
     /// Get MCP definition by name
-    pub fn get_mcp_def(&self, name: &str) -> McpResult<super::config::MCPDef> {
-        let config = self.load_config()?;
+    pub async fn get_mcp_def(&self, name: &str) -> McpResult<super::config::MCPDef> {
+        let config = self.load_config().await?;
         config
             .mcps
             .get(name)
@@ -145,28 +150,28 @@ impl McpManager {
     /// # Arguments
     /// * `scope` - Attachment scope (Global, Project, or Local)
     /// * `project_path` - Project directory path (required for Project and Local scopes)
-    pub fn get_attached_mcps(
+    pub async fn get_attached_mcps(
         &self,
         scope: McpScope,
         project_path: Option<&str>,
     ) -> McpResult<Vec<String>> {
         match scope {
-            McpScope::Global => self.get_global_mcps(),
+            McpScope::Global => self.get_global_mcps().await,
             McpScope::Project => {
                 let path = project_path
                     .ok_or_else(|| McpError::InvalidInput("project_path required".to_string()))?;
-                self.get_local_mcps(path)
+                self.get_local_mcps(path).await
             }
             McpScope::Local => {
                 let path = project_path
                     .ok_or_else(|| McpError::InvalidInput("project_path required".to_string()))?;
-                self.get_local_mcps(path)
+                self.get_local_mcps(path).await
             }
         }
     }
 
     /// Get globally attached MCPs (from Claude's mcpServers)
-    fn get_global_mcps(&self) -> McpResult<Vec<String>> {
+    async fn get_global_mcps(&self) -> McpResult<Vec<String>> {
         let config_path = get_claude_config_path()?;
 
         if !config_path.exists() {
@@ -174,6 +179,7 @@ impl McpManager {
         }
 
         let contents = fs::read_to_string(&config_path)
+            .await
             .map_err(|e| McpError::ClaudeConfigReadError(e.to_string()))?;
 
         let config: ClaudeJsonConfig = serde_json::from_str(&contents)
@@ -185,7 +191,7 @@ impl McpManager {
     }
 
     /// Get project-specific MCPs (from Claude's projects[path].mcpServers)
-    fn get_project_mcps(&self, project_path: &str) -> McpResult<Vec<String>> {
+    async fn get_project_mcps(&self, project_path: &str) -> McpResult<Vec<String>> {
         let config_path = get_claude_config_path()?;
 
         if !config_path.exists() {
@@ -193,6 +199,7 @@ impl McpManager {
         }
 
         let contents = fs::read_to_string(&config_path)
+            .await
             .map_err(|e| McpError::ClaudeConfigReadError(e.to_string()))?;
 
         let config: ClaudeJsonConfig = serde_json::from_str(&contents)
@@ -210,14 +217,14 @@ impl McpManager {
     }
 
     /// Get local MCPs (from .mcp.json in project directory)
-    fn get_local_mcps(&self, project_path: &str) -> McpResult<Vec<String>> {
+    async fn get_local_mcps(&self, project_path: &str) -> McpResult<Vec<String>> {
         let mcp_json_path = PathBuf::from(project_path).join(".mcp.json");
 
         if !mcp_json_path.exists() {
             return Ok(Vec::new());
         }
 
-        let contents = fs::read_to_string(&mcp_json_path).map_err(|e| {
+        let contents = fs::read_to_string(&mcp_json_path).await.map_err(|e| {
             diagnostics::log(format!(
                 "mcp_local_read_failed path={} error={}",
                 mcp_json_path.display(),
@@ -246,55 +253,55 @@ impl McpManager {
     /// * `scope` - Attachment scope (Global, Project, or Local)
     /// * `project_path` - Project directory path (required for Project and Local scopes)
     /// * `mcp_name` - Name of MCP to attach
-    pub fn attach_mcp(
+    pub async fn attach_mcp(
         &self,
         scope: McpScope,
         project_path: Option<&str>,
         mcp_name: &str,
     ) -> McpResult<()> {
         // Verify MCP exists
-        let mcp_def = self.get_mcp_def(mcp_name)?;
+        let mcp_def = self.get_mcp_def(mcp_name).await?;
 
         match scope {
-            McpScope::Global => self.attach_mcp_global(mcp_name, &mcp_def),
+            McpScope::Global => self.attach_mcp_global(mcp_name, &mcp_def).await,
             McpScope::Project => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for project scope".to_string())
                 })?;
-                self.attach_mcp_local(path, mcp_name, &mcp_def)
+                self.attach_mcp_local(path, mcp_name, &mcp_def).await
             }
             McpScope::Local => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for local scope".to_string())
                 })?;
-                self.attach_mcp_local(path, mcp_name, &mcp_def)
+                self.attach_mcp_local(path, mcp_name, &mcp_def).await
             }
         }
     }
 
     /// Attach MCP to global scope
-    fn attach_mcp_global(&self, mcp_name: &str, mcp_def: &super::config::MCPDef) -> McpResult<()> {
+    async fn attach_mcp_global(&self, mcp_name: &str, mcp_def: &super::config::MCPDef) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
 
-        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def)?;
+        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def).await?;
         let mcp_servers = self.ensure_object_field(&mut config, "mcpServers")?;
         mcp_servers.insert(mcp_name.to_string(), serde_json::to_value(server_config)?);
 
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Attach MCP to project scope
-    fn attach_mcp_project(
+    async fn attach_mcp_project(
         &self,
         project_path: &str,
         mcp_name: &str,
         mcp_def: &super::config::MCPDef,
     ) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
 
-        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def)?;
+        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def).await?;
         let projects = self.ensure_object_field(&mut config, "projects")?;
         let project_entry = projects
             .entry(project_path.to_string())
@@ -316,11 +323,11 @@ impl McpManager {
             .ok_or_else(|| McpError::InvalidConfig("project mcpServers is not an object".to_string()))?;
         mcp_servers_obj.insert(mcp_name.to_string(), serde_json::to_value(server_config)?);
 
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Attach MCP to local scope (.mcp.json in project directory)
-    fn attach_mcp_local(
+    async fn attach_mcp_local(
         &self,
         project_path: &str,
         mcp_name: &str,
@@ -331,6 +338,7 @@ impl McpManager {
         // Read existing .mcp.json or create new
         let mut config = if mcp_json_path.exists() {
             let contents = fs::read_to_string(&mcp_json_path)
+                .await
                 .map_err(|e| McpError::McpJsonWriteError(e.to_string()))?;
             serde_json::from_str(&contents)
                 .map_err(|e| McpError::McpJsonWriteError(e.to_string()))?
@@ -339,7 +347,7 @@ impl McpManager {
         };
 
         // Convert MCPDef to MCPServerConfig
-        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def)?;
+        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def).await?;
 
         // Add to mcpServers
         config
@@ -347,7 +355,7 @@ impl McpManager {
             .insert(mcp_name.to_string(), server_config);
 
         // Write back atomically
-        self.write_mcp_json(&mcp_json_path, &config)
+        self.write_mcp_json(&mcp_json_path, &config).await
     }
 
     /// Detach an MCP from a scope
@@ -356,50 +364,50 @@ impl McpManager {
     /// * `scope` - Attachment scope (Global, Project, or Local)
     /// * `project_path` - Project directory path (required for Project and Local scopes)
     /// * `mcp_name` - Name of MCP to detach
-    pub fn detach_mcp(
+    pub async fn detach_mcp(
         &self,
         scope: McpScope,
         project_path: Option<&str>,
         mcp_name: &str,
     ) -> McpResult<()> {
         match scope {
-            McpScope::Global => self.detach_mcp_global(mcp_name),
+            McpScope::Global => self.detach_mcp_global(mcp_name).await,
             McpScope::Project => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for project scope".to_string())
                 })?;
-                self.detach_mcp_local(path, mcp_name)
+                self.detach_mcp_local(path, mcp_name).await
             }
             McpScope::Local => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for local scope".to_string())
                 })?;
-                self.detach_mcp_local(path, mcp_name)
+                self.detach_mcp_local(path, mcp_name).await
             }
         }
     }
 
     /// Detach MCP from global scope
-    fn detach_mcp_global(&self, mcp_name: &str) -> McpResult<()> {
+    async fn detach_mcp_global(&self, mcp_name: &str) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
 
         if !config_path.exists() {
             return Ok(()); // Nothing to detach
         }
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
         let mcp_servers = self.ensure_object_field(&mut config, "mcpServers")?;
         mcp_servers.remove(mcp_name);
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Detach MCP from project scope
-    fn detach_mcp_project(&self, project_path: &str, mcp_name: &str) -> McpResult<()> {
+    async fn detach_mcp_project(&self, project_path: &str, mcp_name: &str) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
 
         if !config_path.exists() {
             return Ok(()); // Nothing to detach
         }
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
         let projects = self.ensure_object_field(&mut config, "projects")?;
         if let Some(project_entry) = projects.get_mut(project_path) {
             if !project_entry.is_object() {
@@ -413,11 +421,11 @@ impl McpManager {
                 }
             }
         }
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Detach MCP from local scope
-    fn detach_mcp_local(&self, project_path: &str, mcp_name: &str) -> McpResult<()> {
+    async fn detach_mcp_local(&self, project_path: &str, mcp_name: &str) -> McpResult<()> {
         let mcp_json_path = PathBuf::from(project_path).join(".mcp.json");
 
         if !mcp_json_path.exists() {
@@ -425,6 +433,7 @@ impl McpManager {
         }
 
         let contents = fs::read_to_string(&mcp_json_path)
+            .await
             .map_err(|e| McpError::IoError(e.to_string()))?;
 
         let mut config: McpJsonConfig = serde_json::from_str(&contents)
@@ -432,11 +441,11 @@ impl McpManager {
 
         config.mcp_servers.remove(mcp_name);
 
-        self.write_mcp_json(&mcp_json_path, &config)
+        self.write_mcp_json(&mcp_json_path, &config).await
     }
 
     /// Convert MCPDef to MCPServerConfig
-    fn mcp_def_to_server_config(
+    async fn mcp_def_to_server_config(
         &self,
         mcp_name: &str,
         mcp_def: &super::config::MCPDef,
@@ -454,7 +463,7 @@ impl McpManager {
             });
         }
 
-        let config = self.load_config()?;
+        let config = self.load_config().await?;
         if config.mcp_pool.enabled && cfg!(unix) {
             let pool = pool_manager::ensure_global_pool(&config)?;
             if let Some(pool) = pool.as_ref() {
@@ -522,12 +531,13 @@ impl McpManager {
     }
 
     /// Read Claude config as raw JSON (preserves unknown fields)
-    fn read_claude_config_value(&self, path: &PathBuf) -> McpResult<serde_json::Value> {
+    async fn read_claude_config_value(&self, path: &PathBuf) -> McpResult<serde_json::Value> {
         if !path.exists() {
             return Ok(serde_json::Value::Object(serde_json::Map::new()));
         }
 
         let contents = fs::read_to_string(path)
+            .await
             .map_err(|e| McpError::ClaudeConfigReadError(e.to_string()))?;
         let value: serde_json::Value = serde_json::from_str(&contents)
             .map_err(|e| McpError::ClaudeConfigReadError(e.to_string()))?;
@@ -562,10 +572,11 @@ impl McpManager {
     }
 
     /// Write Claude config atomically
-    fn write_claude_config(&self, path: &PathBuf, config: &serde_json::Value) -> McpResult<()> {
+    async fn write_claude_config(&self, path: &PathBuf, config: &serde_json::Value) -> McpResult<()> {
         // Ensure directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
+                .await
                 .map_err(|e| McpError::ClaudeConfigWriteError(format!("create_dir_all: {}", e)))?;
         }
 
@@ -577,22 +588,26 @@ impl McpManager {
         let temp_path = path.with_extension("json.tmp");
         {
             let mut file = fs::File::create(&temp_path)
+                .await
                 .map_err(|e| McpError::ClaudeConfigWriteError(format!("create tmp: {}", e)))?;
             file.write_all(json_str.as_bytes())
+                .await
                 .map_err(|e| McpError::ClaudeConfigWriteError(format!("write tmp: {}", e)))?;
         }
 
         fs::rename(&temp_path, path)
+            .await
             .map_err(|e| McpError::ClaudeConfigWriteError(format!("rename: {}", e)))?;
 
         Ok(())
     }
 
     /// Write .mcp.json atomically
-    fn write_mcp_json(&self, path: &PathBuf, config: &McpJsonConfig) -> McpResult<()> {
+    async fn write_mcp_json(&self, path: &PathBuf, config: &McpJsonConfig) -> McpResult<()> {
         // Ensure directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
+                .await
                 .map_err(|e| McpError::McpJsonWriteError(format!("create_dir_all: {}", e)))?;
         }
 
@@ -604,12 +619,15 @@ impl McpManager {
         let temp_path = path.with_extension("json.tmp");
         {
             let mut file = fs::File::create(&temp_path)
+                .await
                 .map_err(|e| McpError::McpJsonWriteError(format!("create tmp: {}", e)))?;
             file.write_all(json_str.as_bytes())
+                .await
                 .map_err(|e| McpError::McpJsonWriteError(format!("write tmp: {}", e)))?;
         }
 
         fs::rename(&temp_path, path)
+            .await
             .map_err(|e| McpError::McpJsonWriteError(format!("rename: {}", e)))?;
 
         Ok(())
@@ -621,14 +639,14 @@ impl McpManager {
     /// * `scope` - Attachment scope (Global, Project, or Local)
     /// * `project_path` - Project directory path (required for Project and Local scopes)
     /// * `mcp_names` - Names of MCPs to attach
-    pub fn set_mcps(
+    pub async fn set_mcps(
         &self,
         scope: McpScope,
         project_path: Option<&str>,
         mcp_names: &[String],
     ) -> McpResult<()> {
         // Verify all MCPs exist
-        let config = self.load_config()?;
+        let config = self.load_config().await?;
         let mcp_defs: HashMap<String, super::config::MCPDef> = mcp_names
             .iter()
             .filter_map(|name| config.mcps.get(name).map(|def| (name.clone(), def.clone())))
@@ -643,30 +661,30 @@ impl McpManager {
         }
 
         match scope {
-            McpScope::Global => self.set_mcps_global(&mcp_defs),
+            McpScope::Global => self.set_mcps_global(&mcp_defs).await,
             McpScope::Project => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for project scope".to_string())
                 })?;
-                self.set_mcps_local(path, &mcp_defs)
+                self.set_mcps_local(path, &mcp_defs).await
             }
             McpScope::Local => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for local scope".to_string())
                 })?;
-                self.set_mcps_local(path, &mcp_defs)
+                self.set_mcps_local(path, &mcp_defs).await
             }
         }
     }
 
     /// Set global MCPs
-    fn set_mcps_global(&self, mcp_defs: &HashMap<String, super::config::MCPDef>) -> McpResult<()> {
+    async fn set_mcps_global(&self, mcp_defs: &HashMap<String, super::config::MCPDef>) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
 
         let mut mcp_servers = serde_json::Map::new();
         for (name, mcp_def) in mcp_defs {
-            let server_config = self.mcp_def_to_server_config(name, mcp_def)?;
+            let server_config = self.mcp_def_to_server_config(name, mcp_def).await?;
             mcp_servers.insert(
                 name.clone(),
                 serde_json::to_value(server_config)
@@ -684,17 +702,17 @@ impl McpManager {
             .expect("checked is_object")
             .insert("mcpServers".to_string(), serde_json::Value::Object(mcp_servers));
 
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Set project MCPs
-    fn set_mcps_project(
+    async fn set_mcps_project(
         &self,
         project_path: &str,
         mcp_defs: &HashMap<String, super::config::MCPDef>,
     ) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
 
         let projects = self.ensure_object_field(&mut config, "projects")?;
         let project_entry = projects
@@ -709,7 +727,7 @@ impl McpManager {
 
         let mut mcp_servers = serde_json::Map::new();
         for (name, mcp_def) in mcp_defs {
-            let server_config = self.mcp_def_to_server_config(name, mcp_def)?;
+            let server_config = self.mcp_def_to_server_config(name, mcp_def).await?;
             mcp_servers.insert(
                 name.clone(),
                 serde_json::to_value(server_config)
@@ -721,11 +739,11 @@ impl McpManager {
             serde_json::Value::Object(mcp_servers),
         );
 
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Set local MCPs
-    fn set_mcps_local(
+    async fn set_mcps_local(
         &self,
         project_path: &str,
         mcp_defs: &HashMap<String, super::config::MCPDef>,
@@ -737,11 +755,11 @@ impl McpManager {
 
         // Build mcpServers
         for (name, mcp_def) in mcp_defs {
-            let server_config = self.mcp_def_to_server_config(name, mcp_def)?;
+            let server_config = self.mcp_def_to_server_config(name, mcp_def).await?;
             config.mcp_servers.insert(name.clone(), server_config);
         }
 
-        self.write_mcp_json(&mcp_json_path, &config)
+        self.write_mcp_json(&mcp_json_path, &config).await
     }
 
     /// Clear all MCPs from a scope
@@ -749,32 +767,32 @@ impl McpManager {
     /// # Arguments
     /// * `scope` - Attachment scope (Global, Project, or Local)
     /// * `project_path` - Project directory path (required for Project and Local scopes)
-    pub fn clear_mcps(&self, scope: McpScope, project_path: Option<&str>) -> McpResult<()> {
+    pub async fn clear_mcps(&self, scope: McpScope, project_path: Option<&str>) -> McpResult<()> {
         match scope {
-            McpScope::Global => self.clear_mcps_global(),
+            McpScope::Global => self.clear_mcps_global().await,
             McpScope::Project => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for project scope".to_string())
                 })?;
-                self.clear_mcps_local(path)
+                self.clear_mcps_local(path).await
             }
             McpScope::Local => {
                 let path = project_path.ok_or_else(|| {
                     McpError::InvalidInput("project_path required for local scope".to_string())
                 })?;
-                self.clear_mcps_local(path)
+                self.clear_mcps_local(path).await
             }
         }
     }
 
     /// Clear global MCPs
-    fn clear_mcps_global(&self) -> McpResult<()> {
+    async fn clear_mcps_global(&self) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
         if !config_path.exists() {
             return Ok(());
         }
 
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
         let root = config
             .as_object_mut()
             .ok_or_else(|| McpError::InvalidConfig("claude config root is not an object".to_string()))?;
@@ -782,17 +800,17 @@ impl McpManager {
             "mcpServers".to_string(),
             serde_json::Value::Object(serde_json::Map::new()),
         );
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Clear project MCPs
-    fn clear_mcps_project(&self, project_path: &str) -> McpResult<()> {
+    async fn clear_mcps_project(&self, project_path: &str) -> McpResult<()> {
         let config_path = get_claude_config_path()?;
         if !config_path.exists() {
             return Ok(());
         }
 
-        let mut config = self.read_claude_config_value(&config_path)?;
+        let mut config = self.read_claude_config_value(&config_path).await?;
         let projects = self.ensure_object_field(&mut config, "projects")?;
         if let Some(project_entry) = projects.get_mut(project_path) {
             if !project_entry.is_object() {
@@ -806,15 +824,16 @@ impl McpManager {
             }
         }
 
-        self.write_claude_config(&config_path, &config)
+        self.write_claude_config(&config_path, &config).await
     }
 
     /// Clear local MCPs (delete .mcp.json)
-    fn clear_mcps_local(&self, project_path: &str) -> McpResult<()> {
+    async fn clear_mcps_local(&self, project_path: &str) -> McpResult<()> {
         let mcp_json_path = PathBuf::from(project_path).join(".mcp.json");
 
         if mcp_json_path.exists() {
             fs::remove_file(&mcp_json_path)
+                .await
                 .map_err(|e| McpError::IoError(format!("remove .mcp.json: {}", e)))?;
         }
 
@@ -822,7 +841,7 @@ impl McpManager {
     }
 
     /// Create example config.toml if it doesn't exist
-    pub fn create_example_config(&self) -> McpResult<()> {
+    pub async fn create_example_config(&self) -> McpResult<()> {
         let config_path = get_config_path()?;
 
         if config_path.exists() {
@@ -832,6 +851,7 @@ impl McpManager {
         // Ensure directory exists
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)
+                .await
                 .map_err(|e| McpError::ConfigWriteError(format!("create_dir_all: {}", e)))?;
         }
 
@@ -899,6 +919,7 @@ impl McpManager {
 "#;
 
         fs::write(&config_path, example_config)
+            .await
             .map_err(|e| McpError::ConfigWriteError(format!("write: {}", e)))?;
 
         Ok(())
@@ -914,6 +935,7 @@ impl Default for McpManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::config::expand_tilde;
     use tempfile::TempDir;
 
     fn test_manager() -> (TempDir, McpManager) {
@@ -922,10 +944,10 @@ mod tests {
         (temp, manager)
     }
 
-    #[test]
-    fn test_load_config_default() {
+    #[tokio::test]
+    async fn test_load_config_default() {
         let (_temp, manager) = test_manager();
-        let config = manager.load_config().unwrap();
+        let config = manager.load_config().await.unwrap();
         assert!(config.mcps.is_empty());
         assert!(config.tools.is_empty());
     }

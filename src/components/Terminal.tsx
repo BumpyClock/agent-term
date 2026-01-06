@@ -7,6 +7,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "../store/terminalStore";
 import "@xterm/xterm/css/xterm.css";
 
+const RESIZE_DEBOUNCE_MS = 150;
+
 interface TerminalProps {
   id: string;
   sessionId: string;
@@ -21,6 +23,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const initialCwdRef = useRef<string | null>(null);
   const lastSentSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const isActiveRef = useRef(isActive);
+  const resizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setLastKnownSize = useTerminalStore((state) => state.setLastKnownSize);
 
   const syncSize = useCallback(() => {
@@ -116,6 +119,10 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         unlistenExit?.();
         resizeObserver?.disconnect();
         inputDisposable?.dispose();
+        if (resizeDebounceRef.current) {
+          clearTimeout(resizeDebounceRef.current);
+          resizeDebounceRef.current = null;
+        }
         invoke("stop_session", { id: sessionId }).catch(console.error);
         xterm.dispose();
       };
@@ -170,7 +177,14 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
           if (container.clientWidth === 0 || container.clientHeight === 0) {
             return;
           }
-          syncSize();
+          // Debounce resize events to prevent IPC flooding during rapid window resizing
+          if (resizeDebounceRef.current) {
+            clearTimeout(resizeDebounceRef.current);
+          }
+          resizeDebounceRef.current = setTimeout(() => {
+            resizeDebounceRef.current = null;
+            syncSize();
+          }, RESIZE_DEBOUNCE_MS);
         });
 
         resizeObserver.observe(container);

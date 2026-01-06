@@ -5,7 +5,9 @@
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -41,10 +43,11 @@ pub struct IndexStatus {
     pub last_indexed_at: Option<String>,
 }
 
-/// In-memory search index.
+/// In-memory search index with inverted index for efficient term lookup.
 pub struct SearchIndex {
     messages: Vec<IndexedMessage>,
     status: IndexStatus,
+    inverted_index: HashMap<String, Vec<usize>>,
 }
 
 impl SearchIndex {
@@ -52,13 +55,25 @@ impl SearchIndex {
         Self {
             messages: Vec::new(),
             status: IndexStatus::default(),
+            inverted_index: HashMap::new(),
         }
+    }
+
+    /// Get message indices containing a specific term.
+    pub fn get_term_indices(&self, term: &str) -> Option<&Vec<usize>> {
+        self.inverted_index.get(term)
+    }
+
+    /// Get a message by index.
+    pub fn get_message(&self, idx: usize) -> Option<&IndexedMessage> {
+        self.messages.get(idx)
     }
 
     pub fn status(&self) -> IndexStatus {
         self.status.clone()
     }
 
+    #[allow(dead_code)]
     pub fn messages(&self) -> &[IndexedMessage] {
         &self.messages
     }
@@ -136,6 +151,7 @@ impl SearchIndex {
 
         let message_count = messages.len();
         self.messages = messages;
+        self.inverted_index = build_inverted_index(&self.messages);
         self.status = IndexStatus {
             indexed: true,
             message_count,
@@ -159,6 +175,22 @@ fn is_jsonl_file(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e == "jsonl")
         .unwrap_or(false)
+}
+
+/// Tokenize normalized content into terms for indexing.
+fn tokenize(content: &str) -> impl Iterator<Item = &str> {
+    content.split_whitespace().filter(|term| term.len() >= 2)
+}
+
+/// Build an inverted index mapping terms to message indices.
+fn build_inverted_index(messages: &[IndexedMessage]) -> HashMap<String, Vec<usize>> {
+    let mut index: HashMap<String, Vec<usize>> = HashMap::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        for term in tokenize(&msg.content_normalized) {
+            index.entry(term.to_string()).or_default().push(idx);
+        }
+    }
+    index
 }
 
 /// JSONL entry structure matching Claude's log format.
@@ -191,26 +223,30 @@ struct JsonlContentPart {
     text: Option<String>,
 }
 
-/// Parse a JSONL file and extract messages.
+/// Parse a JSONL file and extract messages using buffered streaming.
 fn parse_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<IndexedMessage>, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let file = File::open(path)
+        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
 
+    let reader = BufReader::new(file);
     let file_path = path.to_string_lossy().to_string();
     let mut messages = Vec::new();
 
-    for line in content.lines() {
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
         if line.trim().is_empty() {
             continue;
         }
 
-        // Parse the JSON line
-        let entry: JsonlEntry = match serde_json::from_str(line) {
+        let entry: JsonlEntry = match serde_json::from_str(&line) {
             Ok(e) => e,
-            Err(_) => continue, // Skip malformed lines
+            Err(_) => continue,
         };
 
-        // Extract message content
         let (message_type, content_text) = match (&entry.entry_type, &entry.message) {
             (Some(t), Some(msg)) if t == "user" || t == "assistant" => {
                 let role = msg.role.as_deref().unwrap_or(t.as_str());
