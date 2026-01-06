@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar } from './components/sidebar/Sidebar';
 import { Terminal } from './components/Terminal';
 import { useTerminalStore, type SessionStatus, type SessionTool } from './store/terminalStore';
 import './App.css';
