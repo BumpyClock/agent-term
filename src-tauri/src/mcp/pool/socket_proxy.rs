@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::{create_dir_all, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -341,6 +341,8 @@ fn handle_client(
     let mut reader = BufReader::new(stream);
     let mut buffer = String::new();
     let mut parse_failures = 0u32;
+    let mut pending: VecDeque<Vec<u8>> = VecDeque::new();
+    let mut pending_offset: usize = 0;
     while !shutdown.load(Ordering::SeqCst) {
         let mut did_work = false;
         buffer.clear();
@@ -406,16 +408,46 @@ fn handle_client(
             }
         }
 
-        let mut wrote_any = false;
         while let Ok(message) = rx.try_recv() {
-            wrote_any = true;
             did_work = true;
-            if !write_line(reader.get_mut(), message.as_bytes(), &client_id) {
-                diagnostics::log(format!(
-                    "pool_client_write_failed client_id={}",
-                    client_id
-                ));
-                break;
+            let mut bytes = message.into_bytes();
+            bytes.push(b'\n');
+            pending.push_back(bytes);
+        }
+
+        let mut wrote_any = false;
+        while let Some(front) = pending.front() {
+            let slice = &front[pending_offset..];
+            if slice.is_empty() {
+                pending.pop_front();
+                pending_offset = 0;
+                continue;
+            }
+            match reader.get_mut().write(slice) {
+                Ok(0) => {
+                    break;
+                }
+                Ok(n) => {
+                    wrote_any = true;
+                    did_work = true;
+                    pending_offset += n;
+                    if pending_offset >= front.len() {
+                        pending.pop_front();
+                        pending_offset = 0;
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    break;
+                }
+                Err(err) => {
+                    diagnostics::log(format!(
+                        "pool_client_write_failed client_id={} error={}",
+                        client_id, err
+                    ));
+                    pending.clear();
+                    pending_offset = 0;
+                    break;
+                }
             }
         }
 
@@ -482,43 +514,6 @@ fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, ClientSender
     ));
 }
 
-fn write_line(stream: &mut LocalStream, data: &[u8], client_id: &str) -> bool {
-    let mut attempt: u64 = 0;
-    loop {
-        match stream.write_all(data) {
-            Ok(()) => {
-                if let Err(err) = stream.write_all(b"\n") {
-                    diagnostics::log(format!(
-                        "pool_client_write_failed client_id={} error={}",
-                        client_id, err
-                    ));
-                    return false;
-                }
-                return true;
-            }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                attempt += 1;
-                if attempt % 10 == 0 {
-                    diagnostics::log(format!(
-                        "pool_client_write_blocked client_id={} attempts={} bytes={}",
-                        client_id,
-                        attempt,
-                        data.len()
-                    ));
-                }
-                thread::sleep(Duration::from_millis(10));
-                continue;
-            }
-            Err(err) => {
-                diagnostics::log(format!(
-                    "pool_client_write_failed client_id={} error={}",
-                    client_id, err
-                ));
-                return false;
-            }
-        }
-    }
-}
 
 fn id_key(value: &Value) -> Option<String> {
     match value {
