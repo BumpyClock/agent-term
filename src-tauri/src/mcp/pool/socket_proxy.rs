@@ -20,10 +20,10 @@ pub struct SocketProxy {
     command: String,
     args: Vec<String>,
     env: HashMap<String, String>,
-    status: Mutex<ServerStatus>,
+    status: Arc<Mutex<ServerStatus>>,
     owned: bool,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
-    child: Mutex<Option<Child>>,
+    child: Arc<Mutex<Option<Child>>>,
     listener: Mutex<Option<Arc<UnixListener>>>,
     clients: Arc<Mutex<HashMap<String, UnixStream>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
@@ -45,10 +45,10 @@ impl SocketProxy {
             command,
             args,
             env,
-            status: Mutex::new(ServerStatus::Stopped),
+            status: Arc::new(Mutex::new(ServerStatus::Stopped)),
             owned,
             stdin: Arc::new(Mutex::new(None)),
-            child: Mutex::new(None),
+            child: Arc::new(Mutex::new(None)),
             listener: Mutex::new(None),
             clients: Arc::new(Mutex::new(HashMap::new())),
             request_map: Arc::new(Mutex::new(HashMap::new())),
@@ -83,6 +83,10 @@ impl SocketProxy {
 
         *self.status.lock().unwrap() = ServerStatus::Starting;
 
+        diagnostics::log(format!(
+            "pool_proxy_starting name={} command={} args={:?}",
+            self.name, self.command, self.args
+        ));
         let mut child = Command::new(&self.command)
             .args(&self.args)
             .envs(self.env.clone())
@@ -125,6 +129,7 @@ impl SocketProxy {
             self.name,
             self.socket_path.display()
         ));
+        self.spawn_child_monitor();
         Ok(())
     }
 
@@ -158,6 +163,11 @@ impl SocketProxy {
         let pool_dir = log_dir.join("mcppool");
         create_dir_all(&pool_dir)?;
         let log_path = pool_dir.join(format!("{}_socket.log", self.name));
+        diagnostics::log(format!(
+            "pool_proxy_stderr_log name={} path={}",
+            self.name,
+            log_path.display()
+        ));
         let mut file = File::create(log_path)?;
         thread::spawn(move || {
             let mut reader = BufReader::new(stderr);
@@ -190,6 +200,8 @@ impl SocketProxy {
                     Ok((stream, _)) => {
                         let client_id = format!("{}-client-{}", name, counter);
                         counter += 1;
+                        let mut stream = stream;
+                        let _ = stream.set_nonblocking(false);
                         if let Ok(write_stream) = stream.try_clone() {
                             clients.lock().unwrap().insert(client_id.clone(), write_stream);
                             diagnostics::log(format!(
@@ -218,7 +230,11 @@ impl SocketProxy {
                     Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(50));
                     }
-                    Err(_) => {
+                    Err(err) => {
+                        diagnostics::log(format!(
+                            "pool_accept_error name={} error={}",
+                            name, err
+                        ));
                         thread::sleep(Duration::from_millis(50));
                     }
                 }
@@ -230,6 +246,7 @@ impl SocketProxy {
         let clients = self.clients.clone();
         let request_map = self.request_map.clone();
         let shutdown = self.shutdown.clone();
+        let name = self.name.clone();
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut buffer = String::new();
@@ -244,9 +261,42 @@ impl SocketProxy {
                         }
                         route_response(&line, &clients, &request_map);
                     }
-                    Err(_) => break,
+                    Err(err) => {
+                        diagnostics::log(format!(
+                            "pool_stdout_read_error name={} error={}",
+                            name, err
+                        ));
+                        break;
+                    }
                 }
             }
+            diagnostics::log(format!("pool_stdout_closed name={}", name));
+        });
+    }
+
+    fn spawn_child_monitor(&self) {
+        let child = self.child.clone();
+        let status = self.status.clone();
+        let shutdown = self.shutdown.clone();
+        let name = self.name.clone();
+        thread::spawn(move || loop {
+            {
+                let mut guard = child.lock().unwrap();
+                if let Some(proc) = guard.as_mut() {
+                    if let Ok(Some(exit)) = proc.try_wait() {
+                        *status.lock().unwrap() = ServerStatus::Stopped;
+                        shutdown.store(true, Ordering::SeqCst);
+                        diagnostics::log(format!(
+                            "pool_child_exited name={} status={}",
+                            name, exit
+                        ));
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(250));
         });
     }
 }
@@ -261,10 +311,17 @@ fn handle_client(
 ) {
     let mut reader = BufReader::new(stream.try_clone().unwrap_or(stream));
     let mut buffer = String::new();
+    let mut parse_failures = 0u32;
     while !shutdown.load(Ordering::SeqCst) {
         buffer.clear();
         match reader.read_line(&mut buffer) {
-            Ok(0) => break,
+            Ok(0) => {
+                diagnostics::log(format!(
+                    "pool_client_disconnected client_id={}",
+                    client_id
+                ));
+                break;
+            }
             Ok(_) => {
                 let line = buffer.trim_end_matches('\n').to_string();
                 if line.is_empty() {
@@ -274,18 +331,50 @@ fn handle_client(
                     if let Some(id) = value.get("id").and_then(id_key) {
                         request_map.lock().unwrap().insert(id, client_id.clone());
                     }
+                } else if parse_failures < 3 {
+                    parse_failures += 1;
+                    diagnostics::log(format!(
+                        "pool_request_parse_failed client_id={} bytes={}",
+                        client_id,
+                        line.len()
+                    ));
                 }
                 if let Some(stdin) = stdin.lock().unwrap().as_mut() {
-                    let _ = stdin.write_all(line.as_bytes());
-                    let _ = stdin.write_all(b"\n");
+                    if let Err(err) = stdin.write_all(line.as_bytes()) {
+                        diagnostics::log(format!(
+                            "pool_request_write_failed client_id={} error={}",
+                            client_id, err
+                        ));
+                    }
+                    if let Err(err) = stdin.write_all(b"\n") {
+                        diagnostics::log(format!(
+                            "pool_request_write_failed client_id={} error={}",
+                            client_id, err
+                        ));
+                    }
                     diagnostics::log(format!(
                         "pool_request_forwarded client_id={} bytes={}",
                         client_id,
                         line.len()
                     ));
+                } else {
+                    diagnostics::log(format!(
+                        "pool_stdin_missing client_id={}",
+                        client_id
+                    ));
                 }
             }
-            Err(_) => break,
+            Err(err) => {
+                if err.kind() == io::ErrorKind::WouldBlock {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                diagnostics::log(format!(
+                    "pool_client_read_error client_id={} error={}",
+                    client_id, err
+                ));
+                break;
+            }
         }
     }
 
@@ -298,16 +387,32 @@ fn route_response(
     request_map: &Arc<Mutex<HashMap<String, String>>>,
 ) {
     let mut target = None;
-    if let Ok(value) = serde_json::from_str::<Value>(line) {
+    let parsed = serde_json::from_str::<Value>(line);
+    if let Ok(value) = parsed {
         if let Some(id) = value.get("id").and_then(id_key) {
             target = request_map.lock().unwrap().remove(&id);
         }
+    } else {
+        diagnostics::log(format!(
+            "pool_response_parse_failed bytes={}",
+            line.len()
+        ));
     }
 
     if let Some(client_id) = target {
         if let Some(stream) = clients.lock().unwrap().get_mut(&client_id) {
-            let _ = stream.write_all(line.as_bytes());
-            let _ = stream.write_all(b"\n");
+            if let Err(err) = stream.write_all(line.as_bytes()) {
+                diagnostics::log(format!(
+                    "pool_response_write_failed client_id={} error={}",
+                    client_id, err
+                ));
+            }
+            if let Err(err) = stream.write_all(b"\n") {
+                diagnostics::log(format!(
+                    "pool_response_write_failed client_id={} error={}",
+                    client_id, err
+                ));
+            }
             diagnostics::log(format!(
                 "pool_response_routed client_id={} bytes={}",
                 client_id,

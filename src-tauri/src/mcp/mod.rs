@@ -11,6 +11,7 @@ mod pool;
 pub(crate) mod pool_manager;
 
 pub use config::MCPDef;
+pub use config::get_claude_config_dir;
 pub use error::McpResult;
 pub use manager::{McpManager, McpScope};
 pub use pool::PoolConfig;

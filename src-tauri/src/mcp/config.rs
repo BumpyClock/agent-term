@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 
 use super::error::{McpError, McpResult};
@@ -364,23 +365,23 @@ fn default_notify_in_cli() -> bool {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MCPServerConfig {
     /// Transport type
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub server_type: Option<String>,
 
     /// Command to run
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub command: String,
 
     /// Command arguments
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
 
     /// Environment variables
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
 
     /// URL for HTTP/SSE transport
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub url: String,
 }
 
@@ -470,6 +471,20 @@ pub fn get_claude_config_dir() -> McpResult<PathBuf> {
     // Check environment variable first
     if let Ok(custom_dir) = std::env::var("CLAUDE_CONFIG_DIR") {
         return Ok(PathBuf::from(custom_dir));
+    }
+
+    // Check user config for an explicit Claude config dir
+    if let Ok(config_path) = get_config_path() {
+        if config_path.exists() {
+            if let Ok(contents) = fs::read_to_string(&config_path) {
+                if let Ok(config) = toml::from_str::<UserConfig>(&contents) {
+                    let configured = config.claude.config_dir.trim();
+                    if !configured.is_empty() {
+                        return Ok(expand_tilde(configured));
+                    }
+                }
+            }
+        }
     }
 
     // Default to ~/.claude

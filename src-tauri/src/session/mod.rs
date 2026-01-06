@@ -281,6 +281,16 @@ impl SessionManager {
                 .map(|(key, _)| key.as_str())
                 .collect::<Vec<_>>()
         ));
+        if let Some((_, value)) = cmd_spec
+            .env
+            .iter()
+            .find(|(key, _)| key == "CLAUDE_CONFIG_DIR")
+        {
+            diagnostics::log(format!(
+                "start_session id={} claude_config_dir={}",
+                id, value
+            ));
+        }
         let pty_system = NativePtySystem::default();
         let size = PtySize {
             rows: rows.unwrap_or(24),

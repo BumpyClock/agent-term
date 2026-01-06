@@ -1,12 +1,15 @@
 {
   "mcpServers": {
     "Exa": {
-      "type": "stdio",
-      "command": "pnpx",
-      "args": ["exa-mcp-server"],
-      "env": {
-        "EXA_API_KEY": "0b3e8d1c-6330-45d9-be1f-0c4d2c0e1989"
-      }
+      "command": "nc",
+      "args": [
+        "-U",
+        "/tmp/agentterm-mcp-Exa.sock"
+      ]
+    },
+    "Ptolemy": {
+      "type": "http",
+      "url": "http://localhost:8051/mcp"
     }
   }
 }

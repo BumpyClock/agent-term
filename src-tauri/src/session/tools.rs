@@ -1,4 +1,5 @@
 use super::model::{SessionRecord, SessionTool};
+use crate::mcp::get_claude_config_dir;
 
 /// Command specification for launching a session tool.
 ///
@@ -41,10 +42,17 @@ fn build_claude_command(record: &SessionRecord) -> Result<CommandSpec, String> {
     } else {
         args.clear();
     }
+    let mut env = Vec::new();
+    if let Ok(config_dir) = get_claude_config_dir() {
+        env.push((
+            "CLAUDE_CONFIG_DIR".to_string(),
+            config_dir.display().to_string(),
+        ));
+    }
     Ok(CommandSpec {
         program: record.command.clone(),
         args,
-        env: Vec::new(),
+        env,
     })
 }
 

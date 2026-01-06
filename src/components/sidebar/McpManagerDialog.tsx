@@ -44,6 +44,12 @@ function normalizeMcpInfo(name: string, info?: McpInfo): McpItem {
   };
 }
 
+function resolveErrorMessage(err: unknown, fallback: string): string {
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
+
 export function McpManagerDialog({ session, onClose }: McpManagerDialogProps) {
   const [scope, setScope] = useState<McpScope>('global');
   const [available, setAvailable] = useState<McpInfo[]>([]);
@@ -76,7 +82,7 @@ export function McpManagerDialog({ session, onClose }: McpManagerDialogProps) {
       setAttachedLocal(localNames);
     } catch (err) {
       console.error('Failed to load MCPs:', err);
-      setError('Failed to load MCPs');
+      setError(resolveErrorMessage(err, 'Failed to load MCPs'));
     } finally {
       setIsLoading(false);
     }
@@ -122,7 +128,7 @@ export function McpManagerDialog({ session, onClose }: McpManagerDialogProps) {
       await loadData();
     } catch (err) {
       console.error('Failed to attach MCP:', err);
-      setError('Failed to attach MCP');
+      setError(resolveErrorMessage(err, 'Failed to attach MCP'));
     } finally {
       setIsWorking(false);
     }
@@ -144,7 +150,7 @@ export function McpManagerDialog({ session, onClose }: McpManagerDialogProps) {
       await loadData();
     } catch (err) {
       console.error('Failed to detach MCP:', err);
-      setError('Failed to detach MCP');
+      setError(resolveErrorMessage(err, 'Failed to detach MCP'));
     } finally {
       setIsWorking(false);
     }
