@@ -4,7 +4,7 @@ use tauri::{Manager, RunEvent};
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
 #[cfg(target_os = "windows")]
-use window_vibrancy::apply_blur;
+use window_vibrancy::{apply_acrylic, apply_mica};
 
 mod diagnostics;
 mod mcp;
@@ -111,8 +111,13 @@ pub fn run() {
                 .expect("Failed to apply vibrancy");
 
             #[cfg(target_os = "windows")]
-            apply_blur(&window, Some((18, 18, 18, 125)))
-                .expect("Failed to apply blur");
+            {
+                // Try Mica first (Windows 11), fall back to Acrylic (Windows 10)
+                if apply_mica(&window, Some(true)).is_err() {
+                    apply_acrylic(&window, Some((18, 18, 18, 125)))
+                        .expect("Failed to apply acrylic");
+                }
+            }
 
             if cfg!(unix) {
                 let mcp_manager = app.state::<mcp::McpManager>().inner().clone();
