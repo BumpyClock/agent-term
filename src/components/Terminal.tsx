@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "../store/terminalStore";
+import { useTerminalSettings } from "../store/terminalSettingsStore";
 import "@xterm/xterm/css/xterm.css";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -56,11 +57,13 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       }
       const decoder = new TextDecoder("utf-8");
 
+      const termSettings = useTerminalSettings.getState();
       const xterm = new XTerm({
         cursorBlink: true,
-        fontSize: 14,
-        fontFamily:
-          '"FiraCode Nerd Font", Menlo, Monaco, "Courier New", monospace',
+        fontSize: termSettings.fontSize,
+        fontFamily: termSettings.fontFamily,
+        lineHeight: termSettings.lineHeight,
+        letterSpacing: termSettings.letterSpacing,
         allowTransparency: true,
         theme: {
           background: "#00000000",
@@ -109,14 +112,25 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       let resizeObserver: ResizeObserver | null = null;
       let unlistenOutput: (() => void) | null = null;
       let unlistenExit: (() => void) | null = null;
+      let unsubscribeSettings: (() => void) | null = null;
       let cancelled = false;
       let disposed = false;
+
+      // Subscribe to terminal settings changes
+      unsubscribeSettings = useTerminalSettings.subscribe((state) => {
+        xterm.options.fontSize = state.fontSize;
+        xterm.options.fontFamily = state.fontFamily;
+        xterm.options.lineHeight = state.lineHeight;
+        xterm.options.letterSpacing = state.letterSpacing;
+        fitAddon.fit();
+      });
 
       const teardown = () => {
         if (disposed) return;
         disposed = true;
         unlistenOutput?.();
         unlistenExit?.();
+        unsubscribeSettings?.();
         resizeObserver?.disconnect();
         inputDisposable?.dispose();
         if (resizeDebounceRef.current) {
