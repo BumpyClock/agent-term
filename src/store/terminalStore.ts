@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { immer } from 'zustand/middleware/immer';
+import { enableMapSet } from 'immer';
 import { invoke } from '@tauri-apps/api/core';
+
+enableMapSet();
 
 export type SessionTool = 'shell' | 'claude' | 'gemini' | 'codex' | 'openCode' | { custom: string };
 export type SessionStatus = 'running' | 'waiting' | 'idle' | 'error' | 'starting';
@@ -129,7 +133,7 @@ function getToolTitle(tool: SessionTool): string {
 
 export const useTerminalStore = create<TerminalState>()(
   persist(
-    (set, get) => ({
+    immer((set, get) => ({
       sections: [
         {
           id: DEFAULT_SECTION_ID,
@@ -152,9 +156,9 @@ export const useTerminalStore = create<TerminalState>()(
 
       addSection: async (name: string, path: string) => {
         const section = await invoke<Section>('create_section', { name, path });
-        set((state) => ({
-          sections: [...state.sections, { ...section, isDefault: false }],
-        }));
+        set((state) => {
+          state.sections.push({ ...section, isDefault: false });
+        });
         return section;
       },
 
@@ -167,32 +171,32 @@ export const useTerminalStore = create<TerminalState>()(
           const defaultSectionId = defaultSection?.id || DEFAULT_SECTION_ID;
           const sessionIdsToMove = state.sessionsBySection[id] || [];
 
-          const newSessions = { ...state.sessions };
           sessionIdsToMove.forEach((sessionId) => {
-            if (newSessions[sessionId]) {
-              newSessions[sessionId] = { ...newSessions[sessionId], sectionId: defaultSectionId };
+            if (state.sessions[sessionId]) {
+              state.sessions[sessionId].sectionId = defaultSectionId;
             }
           });
 
-          const newSessionsBySection = { ...state.sessionsBySection };
-          delete newSessionsBySection[id];
-          const defaultSessionIds = newSessionsBySection[defaultSectionId] || [];
-          newSessionsBySection[defaultSectionId] = [...defaultSessionIds, ...sessionIdsToMove];
+          delete state.sessionsBySection[id];
+          if (!state.sessionsBySection[defaultSectionId]) {
+            state.sessionsBySection[defaultSectionId] = [];
+          }
+          state.sessionsBySection[defaultSectionId].push(...sessionIdsToMove);
 
-          return {
-            sections: state.sections.filter((s) => s.id !== id),
-            sessions: newSessions,
-            sessionsBySection: newSessionsBySection,
-          };
+          const idx = state.sections.findIndex((s) => s.id === id);
+          if (idx !== -1) {
+            state.sections.splice(idx, 1);
+          }
         });
       },
 
       updateSection: (id: string, updates: Partial<Section>) => {
-        set((state) => ({
-          sections: state.sections.map((s) =>
-            s.id === id ? { ...s, ...updates } : s
-          ),
-        }));
+        set((state) => {
+          const section = state.sections.find((s) => s.id === id);
+          if (section) {
+            Object.assign(section, updates);
+          }
+        });
         if (updates.name) {
           invoke('rename_section', { id, name: updates.name }).catch(console.error);
         }
@@ -205,13 +209,14 @@ export const useTerminalStore = create<TerminalState>()(
       },
 
       toggleSectionCollapse: (id: string) => {
-        const section = get().sections.find((s) => s.id === id);
-        if (section?.isDefault) return;
-        set((state) => ({
-          sections: state.sections.map((s) =>
-            s.id === id ? { ...s, collapsed: !s.collapsed } : s
-          ),
-        }));
+        const sectionCheck = get().sections.find((s) => s.id === id);
+        if (sectionCheck?.isDefault) return;
+        set((state) => {
+          const section = state.sections.find((s) => s.id === id);
+          if (section) {
+            section.collapsed = !section.collapsed;
+          }
+        });
       },
 
       addSession: async (sectionId: string, options?: { title?: string; tool?: SessionTool }) => {
@@ -248,20 +253,14 @@ export const useTerminalStore = create<TerminalState>()(
         });
 
         set((state) => {
-          const newActivated = new Set(state.activatedSessionIds);
-          newActivated.add(session.id);
-
-          const newSessionsBySection = { ...state.sessionsBySection };
-          const sectionIds = newSessionsBySection[sectionId] || [];
-          newSessionsBySection[sectionId] = [...sectionIds, session.id];
-
-          return {
-            sessions: { ...state.sessions, [session.id]: session },
-            sessionsBySection: newSessionsBySection,
-            sessionOrder: [...state.sessionOrder, session.id],
-            activeSessionId: session.id,
-            activatedSessionIds: newActivated,
-          };
+          state.sessions[session.id] = session;
+          if (!state.sessionsBySection[sectionId]) {
+            state.sessionsBySection[sectionId] = [];
+          }
+          state.sessionsBySection[sectionId].push(session.id);
+          state.sessionOrder.push(session.id);
+          state.activeSessionId = session.id;
+          state.activatedSessionIds.add(session.id);
         });
         return session;
       },
@@ -270,37 +269,29 @@ export const useTerminalStore = create<TerminalState>()(
         await invoke('delete_session', { id });
         set((state) => {
           const session = state.sessions[id];
-          if (!session) return state;
+          if (!session) return;
 
-          const { [id]: removed, ...newSessions } = state.sessions;
+          delete state.sessions[id];
 
-          const newSessionsBySection = { ...state.sessionsBySection };
-          const sectionIds = newSessionsBySection[session.sectionId] || [];
-          newSessionsBySection[session.sectionId] = sectionIds.filter((sid) => sid !== id);
+          const sectionSessions = state.sessionsBySection[session.sectionId];
+          if (sectionSessions) {
+            const idx = sectionSessions.indexOf(id);
+            if (idx !== -1) sectionSessions.splice(idx, 1);
+          }
 
-          const newSessionOrder = state.sessionOrder.filter((sid) => sid !== id);
+          const orderIdx = state.sessionOrder.indexOf(id);
+          if (orderIdx !== -1) state.sessionOrder.splice(orderIdx, 1);
 
-          let newActiveSessionId = state.activeSessionId;
           if (state.activeSessionId === id) {
-            const currentIndex = state.sessionOrder.indexOf(id);
-            if (newSessionOrder.length > 0) {
-              newActiveSessionId =
-                newSessionOrder[Math.min(currentIndex, newSessionOrder.length - 1)] || null;
+            if (state.sessionOrder.length > 0) {
+              state.activeSessionId =
+                state.sessionOrder[Math.min(orderIdx, state.sessionOrder.length - 1)] || null;
             } else {
-              newActiveSessionId = null;
+              state.activeSessionId = null;
             }
           }
 
-          const newActivated = new Set(state.activatedSessionIds);
-          newActivated.delete(id);
-
-          return {
-            sessions: newSessions,
-            sessionsBySection: newSessionsBySection,
-            sessionOrder: newSessionOrder,
-            activeSessionId: newActiveSessionId,
-            activatedSessionIds: newActivated,
-          };
+          state.activatedSessionIds.delete(id);
         });
       },
 
@@ -312,33 +303,27 @@ export const useTerminalStore = create<TerminalState>()(
       updateSessionTitle: async (id: string, title: string) => {
         await invoke('rename_session', { id, title });
         set((state) => {
-          const session = state.sessions[id];
-          if (!session) return state;
-          return {
-            sessions: { ...state.sessions, [id]: { ...session, title } },
-          };
+          if (state.sessions[id]) {
+            state.sessions[id].title = title;
+          }
         });
       },
 
       updateSessionCommand: async (id: string, command: string) => {
         await invoke('set_session_command', { id, command });
         set((state) => {
-          const session = state.sessions[id];
-          if (!session) return state;
-          return {
-            sessions: { ...state.sessions, [id]: { ...session, command } },
-          };
+          if (state.sessions[id]) {
+            state.sessions[id].command = command;
+          }
         });
       },
 
       updateSessionIcon: async (id: string, icon: string | null) => {
         await invoke('set_session_icon', { id, icon });
         set((state) => {
-          const session = state.sessions[id];
-          if (!session) return state;
-          return {
-            sessions: { ...state.sessions, [id]: { ...session, icon } },
-          };
+          if (state.sessions[id]) {
+            state.sessions[id].icon = icon;
+          }
         });
       },
 
@@ -346,47 +331,41 @@ export const useTerminalStore = create<TerminalState>()(
         await invoke('move_session', { id: sessionId, sectionId });
         set((state) => {
           const session = state.sessions[sessionId];
-          if (!session) return state;
+          if (!session) return;
 
           const oldSectionId = session.sectionId;
-          const newSessionsBySection = { ...state.sessionsBySection };
-          const oldSectionIds = newSessionsBySection[oldSectionId] || [];
-          newSessionsBySection[oldSectionId] = oldSectionIds.filter((id) => id !== sessionId);
-          const newSectionIds = newSessionsBySection[sectionId] || [];
-          newSessionsBySection[sectionId] = [...newSectionIds, sessionId];
+          const oldSectionSessions = state.sessionsBySection[oldSectionId];
+          if (oldSectionSessions) {
+            const idx = oldSectionSessions.indexOf(sessionId);
+            if (idx !== -1) oldSectionSessions.splice(idx, 1);
+          }
 
-          return {
-            sessions: { ...state.sessions, [sessionId]: { ...session, sectionId } },
-            sessionsBySection: newSessionsBySection,
-          };
+          if (!state.sessionsBySection[sectionId]) {
+            state.sessionsBySection[sectionId] = [];
+          }
+          state.sessionsBySection[sectionId].push(sessionId);
+
+          session.sectionId = sectionId;
         });
       },
 
       updateSessionStatus: (id: string, status: SessionStatus) => {
         set((state) => {
-          const session = state.sessions[id];
-          if (!session) return state;
-          return {
-            sessions: { ...state.sessions, [id]: { ...session, status } },
-          };
+          if (state.sessions[id]) {
+            state.sessions[id].status = status;
+          }
         });
       },
 
       updateToolSessionId: (id: string, tool: string, toolSessionId: string) => {
         set((state) => {
           const session = state.sessions[id];
-          if (!session) return state;
-          let updated: Session;
+          if (!session) return;
           if (tool === 'claude') {
-            updated = { ...session, claudeSessionId: toolSessionId };
+            session.claudeSessionId = toolSessionId;
           } else if (tool === 'gemini') {
-            updated = { ...session, geminiSessionId: toolSessionId };
-          } else {
-            return state;
+            session.geminiSessionId = toolSessionId;
           }
-          return {
-            sessions: { ...state.sessions, [id]: updated },
-          };
         });
         invoke('set_tool_session_id', { id, tool, toolSessionId }).catch(console.error);
       },
@@ -398,10 +377,7 @@ export const useTerminalStore = create<TerminalState>()(
 
       markSessionActivated: (id: string) => {
         set((state) => {
-          if (state.activatedSessionIds.has(id)) return state;
-          const newSet = new Set(state.activatedSessionIds);
-          newSet.add(id);
-          return { activatedSessionIds: newSet };
+          state.activatedSessionIds.add(id);
         });
       },
 
@@ -482,7 +458,7 @@ export const useTerminalStore = create<TerminalState>()(
       getDefaultSection: () => {
         return get().sections.find((s) => s.isDefault);
       },
-    }),
+    })),
     {
       name: 'terminal-storage',
       partialize: (state) => ({
