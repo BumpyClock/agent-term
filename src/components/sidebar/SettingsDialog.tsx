@@ -2,6 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { MCPDef } from './settingsTypes';
 import type { MCPPoolSettings } from './settingsTypes';
+import { useTheme } from '../theme-provider';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
 type SettingsDialogProps = {
   onClose: () => void;
@@ -79,6 +87,7 @@ const textToEnv = (value: string) => {
 };
 
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
+  const { theme, setTheme } = useTheme();
   const [mcps, setMcps] = useState<McpItem[]>([]);
   const [pool, setPool] = useState<MCPPoolSettings>(emptyPool);
   const [envText, setEnvText] = useState<Record<string, string>>({});
@@ -199,279 +208,332 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog settings-dialog" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-title">Settings</div>
-        {isLoading ? (
-          <div className="settings-loading">Loading MCP settings...</div>
-        ) : (
-          <>
-            <section className="settings-section">
-              <header className="settings-section-header">
-                <div>
-                  <div className="settings-section-title">MCP servers</div>
-                  <div className="settings-section-subtitle">
-                    Configure MCP definitions shared across all projects
-                  </div>
-                </div>
-                <button className="settings-add-btn" type="button" onClick={addMcp}>
-                  + Add MCP
-                </button>
-              </header>
-              <div className="settings-mcp-list">
-                {mcps.length === 0 && (
-                  <div className="settings-empty">No MCPs configured yet</div>
-                )}
-                {mcps.map((item, index) => (
-                  <div key={item.id} className="settings-mcp-card">
-                    <div className="settings-mcp-row">
-                      <label>
-                        Name
-                        <input
-                          value={item.name}
-                          onChange={(event) =>
-                            updateMcp(index, { name: event.target.value })
-                          }
-                          placeholder="exa"
-                        />
-                      </label>
-                      <label>
-                        Description
-                        <input
-                          value={item.description}
-                          onChange={(event) =>
-                            updateMcp(index, { description: event.target.value })
-                          }
-                          placeholder="Web search via Exa"
-                        />
-                      </label>
+      <div className="settings-dialog" onClick={(event) => event.stopPropagation()}>
+        <Card className="border-0 shadow-none bg-transparent">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-xl">Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {isLoading ? (
+              <div className="text-muted-foreground">Loading MCP settings...</div>
+            ) : (
+              <>
+                {/* Appearance Section */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Appearance</CardTitle>
+                    <CardDescription>Choose how the app looks</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex gap-2">
+                      <Button
+                        variant={theme === 'system' ? 'default' : 'outline'}
+                        className="flex-1"
+                        onClick={() => setTheme('system')}
+                      >
+                        System
+                      </Button>
+                      <Button
+                        variant={theme === 'light' ? 'default' : 'outline'}
+                        className="flex-1"
+                        onClick={() => setTheme('light')}
+                      >
+                        Light
+                      </Button>
+                      <Button
+                        variant={theme === 'dark' ? 'default' : 'outline'}
+                        className="flex-1"
+                        onClick={() => setTheme('dark')}
+                      >
+                        Dark
+                      </Button>
                     </div>
-                    <div className="settings-mcp-row">
-                      <label>
-                        Command
-                        <input
-                          value={item.command}
-                          onChange={(event) =>
-                            updateMcp(index, { command: event.target.value })
-                          }
-                          placeholder="npx"
-                        />
-                      </label>
-                      <label>
-                        Args
-                        <input
-                          value={joinList(item.args || [])}
-                          onChange={(event) =>
-                            updateMcp(index, { args: parseList(event.target.value) })
-                          }
-                          placeholder="-y, exa-mcp-server"
-                        />
-                      </label>
+                  </CardContent>
+                </Card>
+
+                {/* MCP Servers Section */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base">MCP servers</CardTitle>
+                        <CardDescription>Configure MCP definitions shared across all projects</CardDescription>
+                      </div>
+                      <Button size="sm" onClick={addMcp}>
+                        + Add MCP
+                      </Button>
                     </div>
-                    <div className="settings-mcp-row">
-                      <label>
-                        URL
-                        <input
-                          value={item.url}
-                          onChange={(event) =>
-                            updateMcp(index, { url: event.target.value })
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {mcps.length === 0 && (
+                      <div className="text-muted-foreground text-sm">No MCPs configured yet</div>
+                    )}
+                    {mcps.map((item, index) => (
+                      <Card key={item.id} className="bg-muted/50">
+                        <CardContent className="pt-4 space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor={`mcp-name-${item.id}`}>Name</Label>
+                              <Input
+                                id={`mcp-name-${item.id}`}
+                                value={item.name}
+                                onChange={(e) => updateMcp(index, { name: e.target.value })}
+                                placeholder="exa"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor={`mcp-desc-${item.id}`}>Description</Label>
+                              <Input
+                                id={`mcp-desc-${item.id}`}
+                                value={item.description}
+                                onChange={(e) => updateMcp(index, { description: e.target.value })}
+                                placeholder="Web search via Exa"
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor={`mcp-cmd-${item.id}`}>Command</Label>
+                              <Input
+                                id={`mcp-cmd-${item.id}`}
+                                value={item.command}
+                                onChange={(e) => updateMcp(index, { command: e.target.value })}
+                                placeholder="npx"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor={`mcp-args-${item.id}`}>Args</Label>
+                              <Input
+                                id={`mcp-args-${item.id}`}
+                                value={joinList(item.args || [])}
+                                onChange={(e) => updateMcp(index, { args: parseList(e.target.value) })}
+                                placeholder="-y, exa-mcp-server"
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor={`mcp-url-${item.id}`}>URL</Label>
+                              <Input
+                                id={`mcp-url-${item.id}`}
+                                value={item.url}
+                                onChange={(e) => updateMcp(index, { url: e.target.value })}
+                                placeholder="http://localhost:8000/mcp"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor={`mcp-transport-${item.id}`}>Transport</Label>
+                              <NativeSelect
+                                id={`mcp-transport-${item.id}`}
+                                value={item.transport}
+                                onChange={(e) => updateMcp(index, { transport: e.target.value })}
+                              >
+                                <NativeSelectOption value="">Auto</NativeSelectOption>
+                                <NativeSelectOption value="stdio">stdio</NativeSelectOption>
+                                <NativeSelectOption value="http">http</NativeSelectOption>
+                                <NativeSelectOption value="sse">sse</NativeSelectOption>
+                              </NativeSelect>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor={`mcp-env-${item.id}`}>Env (KEY=VALUE per line)</Label>
+                              <Textarea
+                                id={`mcp-env-${item.id}`}
+                                value={envText[item.id] || ''}
+                                onChange={(e) => handleEnvChange(item.id, e.target.value)}
+                                placeholder="EXA_API_KEY=..."
+                                className="min-h-[80px]"
+                              />
+                            </div>
+                            <div className="flex items-end justify-end">
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => removeMcp(index)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                {/* MCP Socket Pool Section */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">MCP socket pool</CardTitle>
+                    <CardDescription>Share MCP processes across agents to save memory</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="pool-enabled"
+                          checked={pool.enabled}
+                          onCheckedChange={(checked) =>
+                            setPool((prev) => ({ ...prev, enabled: checked === true }))
                           }
-                          placeholder="http://localhost:8000/mcp"
                         />
-                      </label>
-                      <label>
-                        Transport
-                        <select
-                          value={item.transport}
-                          onChange={(event) =>
-                            updateMcp(index, { transport: event.target.value })
+                        <Label htmlFor="pool-enabled" className="text-sm font-normal">
+                          Enable socket pool
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="pool-autostart"
+                          checked={pool.autoStart}
+                          onCheckedChange={(checked) =>
+                            setPool((prev) => ({ ...prev, autoStart: checked === true }))
                           }
-                        >
-                          <option value="">Auto</option>
-                          <option value="stdio">stdio</option>
-                          <option value="http">http</option>
-                          <option value="sse">sse</option>
-                        </select>
-                      </label>
-                    </div>
-                    <div className="settings-mcp-row">
-                      <label className="settings-mcp-env">
-                        Env (KEY=VALUE per line)
-                        <textarea
-                          value={envText[item.id] || ''}
-                          onChange={(event) => handleEnvChange(item.id, event.target.value)}
-                          placeholder="EXA_API_KEY=..."
                         />
-                      </label>
-                      <div className="settings-mcp-actions">
-                        <button
-                          className="settings-remove-btn"
-                          type="button"
-                          onClick={() => removeMcp(index)}
-                        >
-                          Remove
-                        </button>
+                        <Label htmlFor="pool-autostart" className="text-sm font-normal">
+                          Auto-start pool
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="pool-ondemand"
+                          checked={pool.startOnDemand}
+                          onCheckedChange={(checked) =>
+                            setPool((prev) => ({ ...prev, startOnDemand: checked === true }))
+                          }
+                        />
+                        <Label htmlFor="pool-ondemand" className="text-sm font-normal">
+                          Start on demand
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="pool-shutdown"
+                          checked={pool.shutdownOnExit}
+                          onCheckedChange={(checked) =>
+                            setPool((prev) => ({ ...prev, shutdownOnExit: checked === true }))
+                          }
+                        />
+                        <Label htmlFor="pool-shutdown" className="text-sm font-normal">
+                          Shutdown on exit
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="pool-all"
+                          checked={pool.poolAll}
+                          onCheckedChange={(checked) =>
+                            setPool((prev) => ({ ...prev, poolAll: checked === true }))
+                          }
+                        />
+                        <Label htmlFor="pool-all" className="text-sm font-normal">
+                          Pool all MCPs
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="pool-fallback"
+                          checked={pool.fallbackToStdio}
+                          onCheckedChange={(checked) =>
+                            setPool((prev) => ({ ...prev, fallbackToStdio: checked === true }))
+                          }
+                        />
+                        <Label htmlFor="pool-fallback" className="text-sm font-normal">
+                          Fallback to stdio
+                        </Label>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="pool-mcps">Pool MCPs (comma or newline separated)</Label>
+                        <Input
+                          id="pool-mcps"
+                          value={poolMcpsText}
+                          onChange={(e) =>
+                            setPool((prev) => ({
+                              ...prev,
+                              poolMcps: parseList(e.target.value),
+                            }))
+                          }
+                          placeholder="exa, memory, firecrawl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="exclude-mcps">Exclude MCPs</Label>
+                        <Input
+                          id="exclude-mcps"
+                          value={excludeMcpsText}
+                          onChange={(e) =>
+                            setPool((prev) => ({
+                              ...prev,
+                              excludeMcps: parseList(e.target.value),
+                            }))
+                          }
+                          placeholder="chrome-devtools"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="port-start">Port start</Label>
+                        <Input
+                          id="port-start"
+                          type="number"
+                          value={pool.portStart}
+                          onChange={(e) =>
+                            setPool((prev) => ({
+                              ...prev,
+                              portStart: Number(e.target.value || 0),
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="port-end">Port end</Label>
+                        <Input
+                          id="port-end"
+                          type="number"
+                          value={pool.portEnd}
+                          onChange={(e) =>
+                            setPool((prev) => ({
+                              ...prev,
+                              portEnd: Number(e.target.value || 0),
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center space-x-2 pb-2">
+                        <Checkbox
+                          id="pool-status"
+                          checked={pool.showPoolStatus}
+                          onCheckedChange={(checked) =>
+                            setPool((prev) => ({ ...prev, showPoolStatus: checked === true }))
+                          }
+                        />
+                        <Label htmlFor="pool-status" className="text-sm font-normal">
+                          Show pool status
+                        </Label>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-            <section className="settings-section">
-              <header className="settings-section-header">
-                <div>
-                  <div className="settings-section-title">MCP socket pool</div>
-                  <div className="settings-section-subtitle">
-                    Share MCP processes across agents to save memory
-                  </div>
+                {error && (
+                  <div className="text-destructive text-sm">{error}</div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button variant="outline" onClick={onClose}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSave} disabled={isSaving}>
+                    Save settings
+                  </Button>
                 </div>
-              </header>
-              <div className="settings-pool-grid">
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={pool.enabled}
-                    onChange={(event) =>
-                      setPool((prev) => ({ ...prev, enabled: event.target.checked }))
-                    }
-                  />
-                  Enable socket pool
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={pool.autoStart}
-                    onChange={(event) =>
-                      setPool((prev) => ({ ...prev, autoStart: event.target.checked }))
-                    }
-                  />
-                  Auto-start pool
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={pool.startOnDemand}
-                    onChange={(event) =>
-                      setPool((prev) => ({ ...prev, startOnDemand: event.target.checked }))
-                    }
-                  />
-                  Start on demand
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={pool.shutdownOnExit}
-                    onChange={(event) =>
-                      setPool((prev) => ({ ...prev, shutdownOnExit: event.target.checked }))
-                    }
-                  />
-                  Shutdown on exit
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={pool.poolAll}
-                    onChange={(event) =>
-                      setPool((prev) => ({ ...prev, poolAll: event.target.checked }))
-                    }
-                  />
-                  Pool all MCPs
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={pool.fallbackToStdio}
-                    onChange={(event) =>
-                      setPool((prev) => ({ ...prev, fallbackToStdio: event.target.checked }))
-                    }
-                  />
-                  Fallback to stdio
-                </label>
-              </div>
-              <div className="settings-pool-row">
-                <label>
-                  Pool MCPs (comma or newline separated)
-                  <input
-                    value={poolMcpsText}
-                    onChange={(event) =>
-                      setPool((prev) => ({
-                        ...prev,
-                        poolMcps: parseList(event.target.value),
-                      }))
-                    }
-                    placeholder="exa, memory, firecrawl"
-                  />
-                </label>
-                <label>
-                  Exclude MCPs
-                  <input
-                    value={excludeMcpsText}
-                    onChange={(event) =>
-                      setPool((prev) => ({
-                        ...prev,
-                        excludeMcps: parseList(event.target.value),
-                      }))
-                    }
-                    placeholder="chrome-devtools"
-                  />
-                </label>
-              </div>
-              <div className="settings-pool-row">
-                <label>
-                  Port start
-                  <input
-                    type="number"
-                    value={pool.portStart}
-                    onChange={(event) =>
-                      setPool((prev) => ({
-                        ...prev,
-                        portStart: Number(event.target.value || 0),
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  Port end
-                  <input
-                    type="number"
-                    value={pool.portEnd}
-                    onChange={(event) =>
-                      setPool((prev) => ({
-                        ...prev,
-                        portEnd: Number(event.target.value || 0),
-                      }))
-                    }
-                  />
-                </label>
-                <label className="settings-checkbox settings-checkbox-inline">
-                  <input
-                    type="checkbox"
-                    checked={pool.showPoolStatus}
-                    onChange={(event) =>
-                      setPool((prev) => ({ ...prev, showPoolStatus: event.target.checked }))
-                    }
-                  />
-                  Show pool status
-                </label>
-              </div>
-            </section>
-
-            {error && <div className="settings-error">{error}</div>}
-            <div className="dialog-actions">
-              <button className="dialog-secondary" type="button" onClick={onClose}>
-                Cancel
-              </button>
-              <button
-                className="dialog-primary"
-                type="button"
-                onClick={handleSave}
-                disabled={isSaving}
-              >
-                Save settings
-              </button>
-            </div>
-          </>
-        )}
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

@@ -684,149 +684,10 @@
     width: min(860px, 94vw);
     max-height: 84vh;
     overflow: auto;
-}
-
-.settings-loading {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-md);
-}
-
-.settings-section {
+    background-color: var(--color-surface-1);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     padding: var(--space-4);
-    background-color: var(--color-surface-2);
-    margin-bottom: var(--space-4);
-}
-
-.settings-section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--space-3);
-    gap: var(--space-4);
-}
-
-.settings-section-title {
-    font-size: var(--font-size-md);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text-primary);
-}
-
-.settings-section-subtitle {
-    font-size: var(--font-size-xs);
-    color: var(--color-text-muted);
-    margin-top: 4px;
-}
-
-.settings-add-btn {
-    background-color: var(--color-accent);
-    border: none;
-    color: #ffffff;
-    padding: 6px 12px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: var(--font-size-sm);
-    white-space: nowrap;
-}
-
-.settings-mcp-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-
-.settings-mcp-card {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-3);
-    background-color: rgba(0, 0, 0, 0.2);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-
-.settings-mcp-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: var(--space-3);
-}
-
-.settings-mcp-row label {
-    display: flex;
-    flex-direction: column;
-    font-size: var(--font-size-xs);
-    color: var(--color-text-muted);
-    gap: 6px;
-}
-
-.settings-mcp-row input,
-.settings-mcp-row select,
-.settings-mcp-row textarea {
-    background-color: var(--color-surface-1);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    color: var(--color-text-primary);
-    padding: 8px 10px;
-    font-size: var(--font-size-sm);
-}
-
-.settings-mcp-row textarea {
-    min-height: 80px;
-    resize: vertical;
-}
-
-.settings-mcp-actions {
-    display: flex;
-    align-items: flex-end;
-    justify-content: flex-end;
-}
-
-.settings-remove-btn {
-    background-color: transparent;
-    border: 1px solid rgba(255, 120, 120, 0.5);
-    color: #f5a3a3;
-    padding: 6px 12px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: var(--font-size-sm);
-}
-
-.settings-empty {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-sm);
-}
-
-.settings-pool-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--space-3);
-    margin-bottom: var(--space-3);
-}
-
-.settings-pool-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--space-3);
-    margin-top: var(--space-3);
-}
-
-.settings-checkbox {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--font-size-sm);
-    color: var(--color-text-primary);
-}
-
-.settings-checkbox-inline {
-    margin-top: 24px;
-}
-
-.settings-error {
-    color: #f97171;
-    font-size: var(--font-size-sm);
-    margin-bottom: var(--space-3);
 }
 
 .dialog-label {
@@ -904,30 +765,6 @@
     border-color: var(--color-accent);
 }
 
-.dialog-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-3);
-}
-
-.dialog-secondary,
-.dialog-primary {
-    border: none;
-    border-radius: var(--radius-md);
-    padding: var(--space-2) var(--space-4);
-    font-size: var(--font-size-sm);
-    cursor: pointer;
-}
-
-.dialog-secondary {
-    background-color: var(--color-surface-2);
-    color: var(--color-text-primary);
-}
-
-.dialog-primary {
-    background-color: var(--color-accent);
-    color: #ffffff;
-}
 
 .search-container {
     position: relative;
@@ -1023,3 +860,4 @@
     font-size: var(--font-size-sm);
     font-style: italic;
 }
+
