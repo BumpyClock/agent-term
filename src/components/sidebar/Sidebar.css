@@ -8,8 +8,8 @@
     flex-direction: column;
     height: 100%;
     user-select: none;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     padding-top: var(--sidebar-content-top-padding);
     box-sizing: border-box;
 }

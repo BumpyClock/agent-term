@@ -23,7 +23,7 @@
     --color-text-subtle: #a6a6a6;
     --color-text-faint: #5a5a5a;
 
-    --color-surface-sidebar: rgba(37, 37, 38, 0.62);
+    --color-surface-sidebar: rgba(37, 37, 38, 0.32);
     --color-surface-panel: rgba(45, 45, 45, 0.82);
     --color-surface-panel-strong: rgba(45, 45, 45, 0.88);
     --color-surface-1: #1f1f1f;
@@ -57,13 +57,13 @@
     --space-5: 16px;
 
     --shadow-sidebar:
-        0 18px 45px rgba(0, 0, 0, 0.45), 0 6px 18px rgba(0, 0, 0, 0.35);
+        0 18px 45px rgba(0, 0, 0, 0.25), 0 6px 18px rgba(0, 0, 0, 0.15);
     --shadow-popover: 0 12px 28px rgba(0, 0, 0, 0.4);
     --shadow-dialog: 0 18px 40px rgba(0, 0, 0, 0.45);
 
-	    --titlebar-height: 40px;
-	    --sidebar-top: calc(var(--titlebar-height) + 8px);
-	    --sidebar-content-top-padding: 8px;
+    --titlebar-height: 40px;
+    --sidebar-top: calc(var(--titlebar-height) + 8px);
+    --sidebar-content-top-padding: 8px;
 
     --elevation-1: 0 6px 18px rgba(0, 0, 0, 0.22);
     --elevation-2: 0 12px 28px rgba(0, 0, 0, 0.32);

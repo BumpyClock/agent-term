@@ -21,7 +21,7 @@
 .titlebar-drag {
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    padding: 0 28px;
     user-select: none;
 }
 
