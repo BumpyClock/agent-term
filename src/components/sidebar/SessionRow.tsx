@@ -1,3 +1,6 @@
+// ABOUTME: Renders a single sidebar session tab with title, status, and actions.
+// ABOUTME: Provides UI events for selecting, editing, and closing a terminal session.
+
 import type { MouseEvent } from 'react';
 import type { Session } from '../../store/terminalStore';
 import { getStatusTitle, getToolTitle, needsAttention, resolveSessionIcon } from './utils';

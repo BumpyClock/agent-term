@@ -1,3 +1,6 @@
+// ABOUTME: Renders the sidebar with project sections, terminal tabs, and related menus.
+// ABOUTME: Manages session selection, creation, and closure interactions for the UI.
+
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -34,6 +37,10 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     updateSessionIcon,
     getSessionsBySection,
   } = useTerminalStore();
+  const platformInfo =
+    typeof navigator !== 'undefined'
+      ? navigator.userAgent ?? 'unknown-platform'
+      : 'unknown-platform';
 
   const [isAddingSection, setIsAddingSection] = useState(false);
   const [newSectionName, setNewSectionName] = useState('');
@@ -389,7 +396,26 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
             }}
             onCloseSession={async (session, event) => {
               event.stopPropagation();
-              await removeSession(session.id);
+              console.debug('[tab-close][sidebar] request', {
+                sessionId: session.id,
+                sectionId: section.id,
+                platform: platformInfo,
+              });
+              try {
+                await removeSession(session.id);
+                console.debug('[tab-close][sidebar] removed', {
+                  sessionId: session.id,
+                  sectionId: section.id,
+                  platform: platformInfo,
+                });
+              } catch (err) {
+                console.error('[tab-close][sidebar] removeSession failed', {
+                  sessionId: session.id,
+                  sectionId: section.id,
+                  platform: platformInfo,
+                  error: err,
+                });
+              }
             }}
             onEditingTitleChange={setEditingSessionTitle}
             onSaveSessionEdit={handleSaveSessionEdit}
@@ -428,7 +454,28 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                 }}
                 onCloseSession={(session, event) => {
                   event.stopPropagation();
-                  removeSession(session.id);
+                  console.debug('[tab-close][sidebar] request', {
+                    sessionId: session.id,
+                    sectionId: defaultSection.id,
+                    platform: platformInfo,
+                  });
+                  removeSession(session.id).then(
+                    () => {
+                      console.debug('[tab-close][sidebar] removed', {
+                        sessionId: session.id,
+                        sectionId: defaultSection.id,
+                        platform: platformInfo,
+                      });
+                    },
+                    (err) => {
+                      console.error('[tab-close][sidebar] removeSession failed', {
+                        sessionId: session.id,
+                        sectionId: defaultSection.id,
+                        platform: platformInfo,
+                        error: err,
+                      });
+                    }
+                  );
                 }}
               />
             </div>

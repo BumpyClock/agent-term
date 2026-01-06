@@ -1,3 +1,6 @@
+// ABOUTME: Maintains terminal sections and sessions plus their persistence across app runs.
+// ABOUTME: Exposes actions to create, update, move, and remove sessions and sections.
+
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
@@ -266,33 +269,54 @@ export const useTerminalStore = create<TerminalState>()(
       },
 
       removeSession: async (id: string) => {
-        await invoke('delete_session', { id });
-        set((state) => {
-          const session = state.sessions[id];
-          if (!session) return;
+        const platformInfo =
+          typeof navigator !== 'undefined'
+            ? navigator.userAgent ?? 'unknown-platform'
+            : 'unknown-platform';
+        console.debug('[tab-close][store] delete_session invoke', { id, platform: platformInfo });
+        try {
+          await invoke('delete_session', { id });
+          set((state) => {
+            const session = state.sessions[id];
+            if (!session) return;
 
-          delete state.sessions[id];
+            delete state.sessions[id];
 
-          const sectionSessions = state.sessionsBySection[session.sectionId];
-          if (sectionSessions) {
-            const idx = sectionSessions.indexOf(id);
-            if (idx !== -1) sectionSessions.splice(idx, 1);
-          }
-
-          const orderIdx = state.sessionOrder.indexOf(id);
-          if (orderIdx !== -1) state.sessionOrder.splice(orderIdx, 1);
-
-          if (state.activeSessionId === id) {
-            if (state.sessionOrder.length > 0) {
-              state.activeSessionId =
-                state.sessionOrder[Math.min(orderIdx, state.sessionOrder.length - 1)] || null;
-            } else {
-              state.activeSessionId = null;
+            const sectionSessions = state.sessionsBySection[session.sectionId];
+            if (sectionSessions) {
+              const idx = sectionSessions.indexOf(id);
+              if (idx !== -1) sectionSessions.splice(idx, 1);
             }
-          }
 
-          state.activatedSessionIds.delete(id);
-        });
+            const orderIdx = state.sessionOrder.indexOf(id);
+            if (orderIdx !== -1) state.sessionOrder.splice(orderIdx, 1);
+
+            if (state.activeSessionId === id) {
+              if (state.sessionOrder.length > 0) {
+                state.activeSessionId =
+                  state.sessionOrder[Math.min(orderIdx, state.sessionOrder.length - 1)] || null;
+              } else {
+                state.activeSessionId = null;
+              }
+            }
+
+            state.activatedSessionIds.delete(id);
+          });
+          const nextState = get();
+          console.debug('[tab-close][store] removeSession complete', {
+            id,
+            activeSessionId: nextState.activeSessionId,
+            remainingSessions: Object.keys(nextState.sessions).length,
+            platform: platformInfo,
+          });
+        } catch (err) {
+          console.error('[tab-close][store] removeSession failed', {
+            id,
+            platform: platformInfo,
+            error: err,
+          });
+          throw err;
+        }
       },
 
       setActiveSession: (id: string) => {

@@ -1,7 +1,11 @@
+// ABOUTME: Manages the live PTY runtime for a session, including the child process and I/O threads.
+// ABOUTME: Handles shutdown and cleanup of session resources when stopped or dropped.
+
 use std::io::Write;
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 
+use crate::diagnostics;
 use portable_pty::{Child, MasterPty, PtySize};
 
 /// Runtime state for a live PTY-backed session.
@@ -17,11 +21,13 @@ use portable_pty::{Child, MasterPty, PtySize};
 /// );
 /// ```
 pub struct SessionRuntime {
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    id: String,
+    master: Option<Box<dyn MasterPty + Send>>,
+    writer: Option<Box<dyn Write + Send>>,
     child: Box<dyn Child + Send + Sync>,
     reader_thread: Option<JoinHandle<()>>,
     shutdown_tx: Sender<()>,
+    shutdown_called: bool,
 }
 
 impl SessionRuntime {
@@ -31,21 +37,28 @@ impl SessionRuntime {
         child: Box<dyn Child + Send + Sync>,
         reader_thread: JoinHandle<()>,
         shutdown_tx: Sender<()>,
+        id: String,
     ) -> Self {
         Self {
-            master,
-            writer,
+            id,
+            master: Some(master),
+            writer: Some(writer),
             child,
             reader_thread: Some(reader_thread),
             shutdown_tx,
+            shutdown_called: false,
         }
     }
 
     pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
-        self.writer
+        let writer = self
+            .writer
+            .as_mut()
+            .ok_or_else(|| "writer unavailable".to_string())?;
+        writer
             .write_all(data)
             .map_err(|e| format!("failed to write: {}", e))?;
-        self.writer
+        writer
             .flush()
             .map_err(|e| format!("failed to flush: {}", e))?;
         Ok(())
@@ -53,6 +66,8 @@ impl SessionRuntime {
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<(), String> {
         self.master
+            .as_mut()
+            .ok_or_else(|| "master unavailable".to_string())?
             .resize(PtySize {
                 rows,
                 cols,
@@ -63,14 +78,99 @@ impl SessionRuntime {
     }
 
     pub fn shutdown(&mut self) {
+        if self.shutdown_called {
+            diagnostics::log(format!(
+                "session_runtime_shutdown id={} status=already-called os={}",
+                self.id,
+                std::env::consts::OS
+            ));
+            return;
+        }
+        self.shutdown_called = true;
+        diagnostics::log(format!(
+            "session_runtime_shutdown id={} status=begin os={}",
+            self.id,
+            std::env::consts::OS
+        ));
+        // Close writer/master early to unblock reader thread on Windows.
+        if let Some(writer) = self.writer.take() {
+            drop(writer);
+            diagnostics::log(format!(
+                "session_runtime_shutdown id={} writer_dropped os={}",
+                self.id,
+                std::env::consts::OS
+            ));
+        }
+        if let Some(master) = self.master.take() {
+            drop(master);
+            diagnostics::log(format!(
+                "session_runtime_shutdown id={} master_dropped os={}",
+                self.id,
+                std::env::consts::OS
+            ));
+        }
         let _ = self.shutdown_tx.send(());
         if let Err(e) = self.child.kill() {
-            let _ = e;
+            diagnostics::log(format!(
+                "session_runtime_shutdown id={} kill_error={} os={}",
+                self.id,
+                e,
+                std::env::consts::OS
+            ));
+        } else {
+            diagnostics::log(format!(
+                "session_runtime_shutdown id={} kill_sent os={}",
+                self.id,
+                std::env::consts::OS
+            ));
         }
-        let _ = self.child.try_wait();
+        diagnostics::log(format!(
+            "session_runtime_shutdown id={} before_try_wait os={}",
+            self.id,
+            std::env::consts::OS
+        ));
+        match self.child.try_wait() {
+            Ok(status) => {
+                diagnostics::log(format!(
+                    "session_runtime_shutdown id={} try_wait={:?} os={}",
+                    self.id,
+                    status,
+                    std::env::consts::OS
+                ));
+            }
+            Err(e) => {
+                diagnostics::log(format!(
+                    "session_runtime_shutdown id={} try_wait_error={} os={}",
+                    self.id,
+                    e,
+                    std::env::consts::OS
+                ));
+            }
+        }
+        diagnostics::log(format!(
+            "session_runtime_shutdown id={} before_join os={}",
+            self.id,
+            std::env::consts::OS
+        ));
         if let Some(handle) = self.reader_thread.take() {
-            let _ = handle.join();
+            match handle.join() {
+                Ok(_) => diagnostics::log(format!(
+                    "session_runtime_shutdown id={} reader_thread_joined os={}",
+                    self.id,
+                    std::env::consts::OS
+                )),
+                Err(_) => diagnostics::log(format!(
+                    "session_runtime_shutdown id={} reader_thread_panic os={}",
+                    self.id,
+                    std::env::consts::OS
+                )),
+            };
         }
+        diagnostics::log(format!(
+            "session_runtime_shutdown id={} status=end os={}",
+            self.id,
+            std::env::consts::OS
+        ));
     }
 }
 

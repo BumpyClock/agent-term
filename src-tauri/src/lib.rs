@@ -56,6 +56,32 @@ fn get_default_shell() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install a panic hook to capture unexpected crashes in diagnostics logs.
+    std::panic::set_hook(Box::new(|panic_info| {
+        let location = panic_info
+            .location()
+            .map(|loc| format!("{}:{}", loc.file(), loc.line()))
+            .unwrap_or_else(|| "unknown:0".to_string());
+        let msg = match panic_info.payload().downcast_ref::<&str>() {
+            Some(s) => *s,
+            None => panic_info
+                .payload()
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .unwrap_or("<unknown panic payload>"),
+        };
+        diagnostics::log(format!(
+            "panic_hook message={} location={} os={} thread={:?}",
+            msg,
+            location,
+            std::env::consts::OS,
+            std::thread::current().name()
+        ));
+        // Capture backtrace if enabled via RUST_BACKTRACE
+        let bt = std::backtrace::Backtrace::force_capture();
+        diagnostics::log(format!("panic_hook backtrace={:?}", bt));
+    }));
+
     let session_manager = session::build_session_manager()
         .expect("failed to build session manager");
 

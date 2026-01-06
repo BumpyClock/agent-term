@@ -19,7 +19,7 @@ $prev = $env:AGENT_TERM_DIAG
 
 try {
     $env:AGENT_TERM_DIAG = "1"
-
+    $env:RUST_BACKTRACE = "1"
     # Start the Tauri dev server
     pnpm tauri dev
 }

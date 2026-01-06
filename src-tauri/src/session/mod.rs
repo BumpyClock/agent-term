@@ -1,3 +1,6 @@
+// ABOUTME: Coordinates session metadata, runtime management, and Tauri commands for terminals.
+// ABOUTME: Starts, stops, and persists sessions while emitting events to the frontend.
+
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::mpsc;
@@ -167,10 +170,46 @@ impl SessionManager {
     }
 
     pub fn delete_session(&self, id: &str) -> Result<(), String> {
-        self.runtimes.lock().remove(id);
+        diagnostics::log(format!(
+            "delete_session begin id={} os={}",
+            id,
+            std::env::consts::OS
+        ));
+
+        if let Some(mut runtime) = self.runtimes.lock().remove(id) {
+            diagnostics::log(format!(
+                "delete_session runtime_found id={} os={}",
+                id,
+                std::env::consts::OS
+            ));
+            runtime.shutdown();
+        } else {
+            diagnostics::log(format!(
+                "delete_session runtime_missing id={} os={}",
+                id,
+                std::env::consts::OS
+            ));
+        }
+
         let mut snapshot = self.snapshot.lock();
         snapshot.sessions.retain(|session| session.id != id);
-        self.storage.save(&snapshot).map_err(|e| e.to_string())
+        let result = self.storage.save(&snapshot).map_err(|e| e.to_string());
+        if let Err(ref err) = result {
+            diagnostics::log(format!(
+                "delete_session save_error id={} os={} err={}",
+                id,
+                std::env::consts::OS,
+                err
+            ));
+        } else {
+            diagnostics::log(format!(
+                "delete_session complete id={} os={}",
+                id,
+                std::env::consts::OS
+            ));
+        }
+
+        result
     }
 
     pub fn move_session(&self, id: &str, section_id: String) -> Result<(), String> {
@@ -498,6 +537,7 @@ impl SessionManager {
             child,
             reader_thread,
             shutdown_tx,
+            id.to_string(),
         );
 
         self.runtimes.lock().insert(id.to_string(), runtime);
@@ -506,8 +546,43 @@ impl SessionManager {
     }
 
     pub fn stop_session(&self, id: &str) -> Result<(), String> {
-        self.runtimes.lock().remove(id);
-        self.update_session_status(id, SessionStatus::Idle)
+        diagnostics::log(format!(
+            "stop_session begin id={} os={}",
+            id,
+            std::env::consts::OS
+        ));
+
+        let runtime = {
+            let mut runtimes = self.runtimes.lock();
+            runtimes.remove(id)
+        };
+
+        if let Some(mut runtime) = runtime {
+            diagnostics::log(format!(
+                "stop_session runtime_found id={} os={}",
+                id,
+                std::env::consts::OS
+            ));
+            runtime.shutdown();
+        } else {
+            diagnostics::log(format!(
+                "stop_session runtime_missing id={} os={}",
+                id,
+                std::env::consts::OS
+            ));
+        }
+
+        let status_result = self.update_session_status(id, SessionStatus::Idle);
+        if let Err(ref err) = status_result {
+            diagnostics::log(format!(
+                "stop_session update_status_error id={} os={} err={}",
+                id,
+                std::env::consts::OS,
+                err
+            ));
+        }
+
+        status_result
     }
 
     pub fn restart_session(

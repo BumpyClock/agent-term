@@ -1,3 +1,6 @@
+// ABOUTME: Renders the xterm.js terminal instance bound to a backend session.
+// ABOUTME: Manages lifecycle of terminal IPC, sizing, and teardown handling.
+
 import { useEffect, useRef, useCallback } from "react";
 import { Terminal as XTerm, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -28,6 +31,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const isActiveRef = useRef(isActive);
   const resizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setLastKnownSize = useTerminalStore((state) => state.setLastKnownSize);
+  const logPrefix = `[terminal ${sessionId}]`;
 
   const syncSize = useCallback(() => {
     const fitAddon = fitAddonRef.current;
@@ -176,12 +180,22 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
           clearTimeout(resizeDebounceRef.current);
           resizeDebounceRef.current = null;
         }
-        invoke("stop_session", { id: sessionId }).catch(console.error);
+        console.debug(`${logPrefix} teardown`, {
+          cancelled,
+          disposed,
+          active: isActiveRef.current,
+        });
+        invoke("stop_session", { id: sessionId })
+          .then(() => {
+            console.debug(`${logPrefix} stop_session sent`);
+          })
+          .catch((err) => {
+            console.error(`${logPrefix} stop_session failed`, err);
+          });
         xterm.dispose();
       };
 
       const start = async () => {
-        const logPrefix = `[terminal ${sessionId}]`;
         let outputEvents = 0;
         // Set up event listeners BEFORE starting the session to avoid missing early output
         inputDisposable = xterm.onData((data) => {
