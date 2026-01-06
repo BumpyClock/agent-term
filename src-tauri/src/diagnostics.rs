@@ -24,6 +24,15 @@ fn diagnostics_path() -> Option<PathBuf> {
     .clone()
 }
 
+pub fn log_dir() -> Option<PathBuf> {
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let home = dirs::home_dir()?;
+        Some(home.join(".agent-term").join("logs"))
+    })
+    .clone()
+}
+
 pub fn log(message: impl AsRef<str>) {
     if !diagnostics_enabled() {
         return;

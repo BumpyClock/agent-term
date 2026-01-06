@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::thread;
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, Manager, RunEvent, State};
 use uuid::Uuid;
 
 #[cfg(target_os = "macos")]
@@ -298,7 +298,7 @@ pub fn run() {
     let search_manager = search::build_search_manager()
         .expect("failed to build search manager");
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .manage(session_manager)
@@ -336,6 +336,8 @@ pub fn run() {
             session::acknowledge_session,
             session::set_tool_session_id,
             mcp::mcp_list,
+            mcp::mcp_get_settings,
+            mcp::mcp_set_settings,
             mcp::mcp_attached,
             mcp::mcp_attach,
             mcp::mcp_detach,
@@ -354,8 +356,29 @@ pub fn run() {
             apply_blur(&window, Some((18, 18, 18, 125)))
                 .expect("Failed to apply blur");
 
+            if cfg!(unix) {
+                if let Ok(config) = app.state::<mcp::McpManager>().load_config() {
+                    if config.mcp_pool.enabled {
+                        if let Err(err) = mcp::pool_manager::initialize_global_pool(&config) {
+                            let msg = err.to_string().replace('.', "");
+                            diagnostics::log(format!("pool_init_failed error={}", msg));
+                        }
+                    }
+                }
+            }
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+            if let Ok(config) = app_handle.state::<mcp::McpManager>().load_config() {
+                if config.mcp_pool.shutdown_on_exit {
+                    let _ = mcp::pool_manager::shutdown_global_pool();
+                }
+            }
+        }
+    });
 }

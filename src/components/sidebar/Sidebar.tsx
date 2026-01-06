@@ -4,9 +4,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { useTerminalStore, type Section, type Session, type SessionTool } from '../../store/terminalStore';
 import { EditProjectDialog } from './EditProjectDialog';
 import { EditTabDialog } from './EditTabDialog';
+import { McpManagerDialog } from './McpManagerDialog';
 import { MenuPopover } from './MenuPopover';
 import { ProjectSection } from './ProjectSection';
 import { SearchBar } from './SearchBar';
+import { SettingsDialog } from './SettingsDialog';
 import { TabPicker } from './TabPicker';
 import { TabsList } from './TabsList';
 import type { PopoverPosition, SearchResult } from './types';
@@ -49,10 +51,12 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const [editTitle, setEditTitle] = useState('');
   const [editCommand, setEditCommand] = useState('');
   const [editIcon, setEditIcon] = useState<string | null>(null);
+  const [mcpSessionId, setMcpSessionId] = useState<string | null>(null);
   const [editSectionId, setEditSectionId] = useState<string | null>(null);
   const [editSectionName, setEditSectionName] = useState('');
   const [editSectionPath, setEditSectionPath] = useState('');
   const [editSectionIcon, setEditSectionIcon] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -144,6 +148,16 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     setEditIcon(session.icon ?? null);
     setMenuSessionId(null);
     setMenuPosition(null);
+  };
+
+  const openMcpDialog = (session: Session) => {
+    setMcpSessionId(session.id);
+    setMenuSessionId(null);
+    setMenuPosition(null);
+  };
+
+  const closeMcpDialog = () => {
+    setMcpSessionId(null);
   };
 
   const closeEditDialog = () => {
@@ -262,6 +276,8 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
 
   const menuSession = menuSessionId ? sessions.find((s) => s.id === menuSessionId) : null;
   const menuSection = menuSectionId ? sections.find((s) => s.id === menuSectionId) : null;
+  const mcpSession = mcpSessionId ? sessions.find((s) => s.id === mcpSessionId) : null;
+  const canManageMcp = (session: Session) => session.tool !== 'shell';
 
   return (
     <div className="sidebar">
@@ -279,13 +295,23 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
 
       <div className="sidebar-header">
         <h2>Projects</h2>
-        <button
-          className="add-section-btn"
-          onClick={() => setIsAddingSection(true)}
-          title="Add Project"
-        >
-          +
-        </button>
+        <div className="sidebar-header-actions">
+          <button
+            className="settings-btn"
+            onClick={() => setShowSettings(true)}
+            title="Settings"
+            aria-label="Settings"
+          >
+            ⚙
+          </button>
+          <button
+            className="add-section-btn"
+            onClick={() => setIsAddingSection(true)}
+            title="Add Project"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {isAddingSection && (
@@ -378,8 +404,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
           />
         ))}
         {defaultSection && (
-          <div className="default-tabs">
-            <div className="tabs-divider" aria-hidden="true" />
+          <div className="section section-default">
             <div className="tabs-list">
               <TabsList
                 sessions={getSessionsBySection(defaultSection.id)}
@@ -433,6 +458,14 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
             position={menuPosition}
             onClose={closeMenuPopover}
             items={[
+              ...(canManageMcp(menuSession)
+                ? [
+                    {
+                      label: 'MCP Manager',
+                      onSelect: () => openMcpDialog(menuSession),
+                    },
+                  ]
+                : []),
               {
                 label: 'Restart session',
                 onSelect: () => handleRestartSession(menuSession),
@@ -486,6 +519,14 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
           onSave={saveSectionEditDialog}
         />
       )}
+
+      {mcpSession && <McpManagerDialog session={mcpSession} onClose={closeMcpDialog} />}
+
+      {showSettings &&
+        createPortal(
+          <SettingsDialog onClose={() => setShowSettings(false)} />,
+          document.body
+        )}
     </div>
   );
 }

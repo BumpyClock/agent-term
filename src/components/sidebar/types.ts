@@ -13,3 +13,5 @@ export type IconDescriptor =
   | { kind: 'lucide'; id: string };
 
 export type PopoverPosition = { x: number; y: number };
+
+export type McpScope = 'global' | 'local';

@@ -3,6 +3,8 @@ use super::config::{
     MCPServerConfig, McpJsonConfig, UserConfig,
 };
 use super::error::{McpError, McpResult};
+use super::pool_manager;
+use crate::diagnostics;
 use parking_lot::Mutex;
 use serde_json;
 use std::collections::{HashMap, HashSet};
@@ -10,6 +12,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// MCP attachment scope
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -81,7 +84,7 @@ impl McpManager {
     }
 
     /// Write user configuration to ~/.agent-term/config.toml
-    fn write_config(&self, config: &UserConfig) -> McpResult<()> {
+    pub fn write_config(&self, config: &UserConfig) -> McpResult<()> {
         let config_path = get_config_path()?;
 
         // Ensure directory exists
@@ -272,7 +275,7 @@ impl McpManager {
         };
 
         // Convert MCPDef to MCPServerConfig
-        let server_config = self.mcp_def_to_server_config(mcp_def);
+        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def)?;
 
         // Add to global mcpServers
         config
@@ -303,7 +306,7 @@ impl McpManager {
         };
 
         // Convert MCPDef to MCPServerConfig
-        let server_config = self.mcp_def_to_server_config(mcp_def);
+        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def)?;
 
         // Get or create project config
         let project = config
@@ -340,7 +343,7 @@ impl McpManager {
         };
 
         // Convert MCPDef to MCPServerConfig
-        let server_config = self.mcp_def_to_server_config(mcp_def);
+        let server_config = self.mcp_def_to_server_config(mcp_name, mcp_def)?;
 
         // Add to mcpServers
         config
@@ -440,30 +443,89 @@ impl McpManager {
     }
 
     /// Convert MCPDef to MCPServerConfig
-    fn mcp_def_to_server_config(&self, mcp_def: &super::config::MCPDef) -> MCPServerConfig {
-        // Check if this is an HTTP/SSE MCP
+    fn mcp_def_to_server_config(
+        &self,
+        mcp_name: &str,
+        mcp_def: &super::config::MCPDef,
+    ) -> McpResult<MCPServerConfig> {
         if !mcp_def.url.is_empty() {
             let transport = if mcp_def.transport.is_empty() {
                 "http".to_string()
             } else {
                 mcp_def.transport.clone()
             };
-
-            return MCPServerConfig {
+            return Ok(MCPServerConfig {
                 server_type: Some(transport),
                 url: mcp_def.url.clone(),
                 ..Default::default()
-            };
+            });
         }
 
-        // STDIO MCP
-        MCPServerConfig {
+        let config = self.load_config()?;
+        if config.mcp_pool.enabled && cfg!(unix) {
+            let pool = pool_manager::ensure_global_pool(&config)?;
+            if let Some(pool) = pool.as_ref() {
+                if pool.should_pool(mcp_name) {
+                    if config.mcp_pool.start_on_demand {
+                        pool_manager::start_pool_mcp(pool, mcp_name, mcp_def)?;
+                    }
+
+                    if !pool.is_running(mcp_name) {
+                        let _ = pool_manager::wait_for_socket_ready(
+                            pool,
+                            mcp_name,
+                            Duration::from_secs(3),
+                        );
+                    }
+
+                    if pool.is_running(mcp_name) {
+                        if let Some(socket_path) = pool.socket_path(mcp_name) {
+                            diagnostics::log(format!(
+                                "mcp_pool_socket_used name={} socket={}",
+                                mcp_name,
+                                socket_path.display()
+                            ));
+                            return Ok(MCPServerConfig {
+                                command: "nc".to_string(),
+                                args: vec!["-U".to_string(), socket_path.display().to_string()],
+                                ..Default::default()
+                            });
+                        }
+                    }
+
+                    if !config.mcp_pool.fallback_to_stdio {
+                        return Err(McpError::InvalidConfig(format!(
+                            "mcp socket not ready and fallback disabled for {}",
+                            mcp_name
+                        )));
+                    }
+                }
+            } else if let Some(socket_path) = pool_manager::get_external_socket_path(mcp_name) {
+                diagnostics::log(format!(
+                    "mcp_pool_socket_used name={} socket={}",
+                    mcp_name,
+                    socket_path.display()
+                ));
+                return Ok(MCPServerConfig {
+                    command: "nc".to_string(),
+                    args: vec!["-U".to_string(), socket_path.display().to_string()],
+                    ..Default::default()
+                });
+            } else if !config.mcp_pool.fallback_to_stdio {
+                return Err(McpError::InvalidConfig(format!(
+                    "mcp socket not available and fallback disabled for {}",
+                    mcp_name
+                )));
+            }
+        }
+
+        Ok(MCPServerConfig {
             server_type: Some("stdio".to_string()),
             command: mcp_def.command.clone(),
             args: mcp_def.args.clone(),
             env: mcp_def.env.clone(),
             ..Default::default()
-        }
+        })
     }
 
     /// Write Claude config atomically
@@ -581,7 +643,7 @@ impl McpManager {
         // Clear and rebuild mcpServers
         config.mcp_servers.clear();
         for (name, mcp_def) in mcp_defs {
-            let server_config = self.mcp_def_to_server_config(mcp_def);
+            let server_config = self.mcp_def_to_server_config(name, mcp_def)?;
             config.mcp_servers.insert(
                 name.clone(),
                 serde_json::to_value(server_config)
@@ -619,7 +681,7 @@ impl McpManager {
         // Clear and rebuild mcpServers
         project.mcp_servers.clear();
         for (name, mcp_def) in mcp_defs {
-            let server_config = self.mcp_def_to_server_config(mcp_def);
+            let server_config = self.mcp_def_to_server_config(name, mcp_def)?;
             project.mcp_servers.insert(
                 name.clone(),
                 serde_json::to_value(server_config)
@@ -643,7 +705,7 @@ impl McpManager {
 
         // Build mcpServers
         for (name, mcp_def) in mcp_defs {
-            let server_config = self.mcp_def_to_server_config(mcp_def);
+            let server_config = self.mcp_def_to_server_config(name, mcp_def)?;
             config.mcp_servers.insert(name.clone(), server_config);
         }
 

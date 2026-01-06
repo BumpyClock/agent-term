@@ -7,13 +7,17 @@
 mod config;
 mod error;
 mod manager;
+mod pool;
+pub(crate) mod pool_manager;
 
 pub use config::MCPDef;
 pub use error::McpResult;
 pub use manager::{McpManager, McpScope};
+pub use pool::PoolConfig;
 
 use serde::Serialize;
 use tauri::State;
+use std::collections::HashMap;
 
 /// MCP info returned to frontend
 #[derive(Debug, Clone, Serialize)]
@@ -24,6 +28,65 @@ pub struct McpInfo {
     pub command: String,
     pub url: String,
     pub transport: String,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPoolSettingsDto {
+    pub enabled: bool,
+    pub auto_start: bool,
+    pub port_start: i32,
+    pub port_end: i32,
+    pub start_on_demand: bool,
+    pub shutdown_on_exit: bool,
+    pub pool_mcps: Vec<String>,
+    pub fallback_to_stdio: bool,
+    pub show_pool_status: bool,
+    pub pool_all: bool,
+    pub exclude_mcps: Vec<String>,
+}
+
+impl From<config::MCPPoolSettings> for McpPoolSettingsDto {
+    fn from(settings: config::MCPPoolSettings) -> Self {
+        Self {
+            enabled: settings.enabled,
+            auto_start: settings.auto_start,
+            port_start: settings.port_start,
+            port_end: settings.port_end,
+            start_on_demand: settings.start_on_demand,
+            shutdown_on_exit: settings.shutdown_on_exit,
+            pool_mcps: settings.pool_mcps,
+            fallback_to_stdio: settings.fallback_to_stdio,
+            show_pool_status: settings.show_pool_status,
+            pool_all: settings.pool_all,
+            exclude_mcps: settings.exclude_mcps,
+        }
+    }
+}
+
+impl From<McpPoolSettingsDto> for config::MCPPoolSettings {
+    fn from(settings: McpPoolSettingsDto) -> Self {
+        Self {
+            enabled: settings.enabled,
+            auto_start: settings.auto_start,
+            port_start: settings.port_start,
+            port_end: settings.port_end,
+            start_on_demand: settings.start_on_demand,
+            shutdown_on_exit: settings.shutdown_on_exit,
+            pool_mcps: settings.pool_mcps,
+            fallback_to_stdio: settings.fallback_to_stdio,
+            show_pool_status: settings.show_pool_status,
+            pool_all: settings.pool_all,
+            exclude_mcps: settings.exclude_mcps,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSettings {
+    pub mcps: HashMap<String, MCPDef>,
+    pub mcp_pool: McpPoolSettingsDto,
 }
 
 impl From<(String, MCPDef)> for McpInfo {
@@ -52,6 +115,35 @@ pub fn mcp_list(state: State<'_, McpManager>) -> Result<Vec<McpInfo>, String> {
     let mut result: Vec<McpInfo> = mcps.into_iter().map(McpInfo::from).collect();
     result.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(result)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn mcp_get_settings(state: State<'_, McpManager>) -> Result<McpSettings, String> {
+    let config = state.load_config().map_err(|e| e.to_string())?;
+    Ok(McpSettings {
+        mcps: config.mcps,
+        mcp_pool: McpPoolSettingsDto::from(config.mcp_pool),
+    })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn mcp_set_settings(
+    state: State<'_, McpManager>,
+    settings: McpSettings,
+) -> Result<(), String> {
+    let mut config = state.load_config().map_err(|e| e.to_string())?;
+    config.mcps = settings.mcps;
+    config.mcp_pool = config::MCPPoolSettings::from(settings.mcp_pool);
+    state.write_config(&config).map_err(|e| e.to_string())?;
+
+    if cfg!(unix) {
+        let _ = pool_manager::shutdown_global_pool();
+        if config.mcp_pool.enabled {
+            pool_manager::initialize_global_pool(&config).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Get attached MCPs for a scope
@@ -88,7 +180,7 @@ pub fn mcp_attach(
     };
 
     for session_id in affected_sessions {
-        let _ = session_state.restart_session(&app, &session_id, None, None);
+        let _ = session_state.restart_session_with_mcp(&app, &session_id, None, None, &mcp_state);
     }
 
     Ok(())
@@ -116,7 +208,7 @@ pub fn mcp_detach(
     };
 
     for session_id in affected_sessions {
-        let _ = session_state.restart_session(&app, &session_id, None, None);
+        let _ = session_state.restart_session_with_mcp(&app, &session_id, None, None, &mcp_state);
     }
 
     Ok(())

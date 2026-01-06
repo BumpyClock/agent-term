@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::diagnostics;
+use crate::mcp::{McpManager, McpScope};
 
 mod error;
 mod model;
@@ -509,6 +510,64 @@ impl SessionManager {
         self.start_session(app, id, rows, cols)
     }
 
+    pub fn restart_session_with_mcp(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        rows: Option<u16>,
+        cols: Option<u16>,
+        mcp_manager: &McpManager,
+    ) -> Result<(), String> {
+        if let Ok(record) = self.get_session(id) {
+            if matches!(record.tool, model::SessionTool::Claude) {
+                let _ = self.regenerate_local_mcp_config(mcp_manager, &record);
+            }
+        }
+        self.restart_session(app, id, rows, cols)
+    }
+
+    fn regenerate_local_mcp_config(
+        &self,
+        mcp_manager: &McpManager,
+        record: &SessionRecord,
+    ) -> Result<(), String> {
+        diagnostics::log(format!(
+            "mcp_regenerate_requested session_id={} project_path={}",
+            record.id, record.project_path
+        ));
+        let project_path = record.project_path.trim();
+        if project_path.is_empty() {
+            return Ok(());
+        }
+
+        let attached = mcp_manager
+            .get_attached_mcps(McpScope::Local, Some(project_path))
+            .map_err(|e| e.to_string())?;
+
+        if attached.is_empty() {
+            return Ok(());
+        }
+
+        let available = mcp_manager
+            .get_available_mcps()
+            .map_err(|e| e.to_string())?;
+
+        let filtered: Vec<String> = attached
+            .into_iter()
+            .filter(|name| available.contains_key(name))
+            .collect();
+
+        mcp_manager
+            .set_mcps(McpScope::Local, Some(project_path), &filtered)
+            .map_err(|e| e.to_string())?;
+        diagnostics::log(format!(
+            "mcp_regenerate_completed session_id={} count={}",
+            record.id,
+            filtered.len()
+        ));
+        Ok(())
+    }
+
     pub fn write_session_input(&self, id: &str, data: &[u8]) -> Result<(), String> {
         if data.len() > 4096 {
             diagnostics::log(format!(
@@ -749,11 +808,12 @@ pub fn stop_session(state: State<'_, SessionManager>, id: String) -> Result<(), 
 pub fn restart_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
+    mcp_state: State<'_, crate::mcp::McpManager>,
     id: String,
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> Result<(), String> {
-    state.restart_session(&app, &id, rows, cols)
+    state.restart_session_with_mcp(&app, &id, rows, cols, &mcp_state)
 }
 
 #[tauri::command(rename_all = "camelCase")]
