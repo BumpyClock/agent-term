@@ -133,6 +133,14 @@ pub fn run() {
                 }
             }
 
+            #[cfg(target_os = "linux")]
+            {
+                // Remove native decorations for custom titlebar (same approach as Windows)
+                let _ = window.set_decorations(false);
+                // Note: window-vibrancy does NOT support Linux
+                // Blur effects achieved via CSS backdrop-filter (compositor-dependent)
+            }
+
             if cfg!(unix) {
                 let mcp_manager = app.state::<mcp::McpManager>().inner().clone();
                 tauri::async_runtime::spawn(async move {

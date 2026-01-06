@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { Terminal as XTerm, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "../store/terminalStore";
@@ -97,6 +98,14 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       xterm.loadAddon(webLinksAddon);
 
       xterm.open(container);
+
+      // Load WebGL addon for GPU-accelerated rendering
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+      });
+      xterm.loadAddon(webglAddon);
+
       fitAddon.fit();
 
       xtermRef.current = xterm;

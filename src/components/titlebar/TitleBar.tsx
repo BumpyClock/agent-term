@@ -8,11 +8,12 @@ function detectPlatform() {
   const platform = (navigator.platform || "").toLowerCase();
   const isMac = platform.includes("mac") || ua.includes("mac os");
   const isWindows = ua.includes("windows");
-  return { isMac, isWindows };
+  const isLinux = !isMac && !isWindows && (platform.includes("linux") || ua.includes("linux"));
+  return { isMac, isWindows, isLinux };
 }
 
 export function TitleBar() {
-  const { isMac, isWindows } = detectPlatform();
+  const { isMac, isWindows, isLinux } = detectPlatform();
   const appWindow = useMemo(() => getCurrentWindow(), []);
 
   useEffect(() => {
@@ -42,14 +43,15 @@ export function TitleBar() {
   }, [isMac]);
 
   const handleDoubleClick = () => {
-    if (!isWindows) return;
-    void appWindow.toggleMaximize();
+    if (isWindows || isLinux) {
+      void appWindow.toggleMaximize();
+    }
   };
 
   return (
     <div
       className="titlebar"
-      data-platform={isMac ? "mac" : isWindows ? "windows" : "other"}
+      data-platform={isMac ? "mac" : isWindows ? "windows" : "linux"}
     >
       <div
         className="titlebar-drag"
@@ -61,7 +63,7 @@ export function TitleBar() {
         </div>
       </div>
 
-      {isWindows ? (
+      {(isWindows || isLinux) && (
         <div className="titlebar-controls">
           <button
             className="titlebar-btn"
@@ -88,7 +90,7 @@ export function TitleBar() {
             <X size={14} />
           </button>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
