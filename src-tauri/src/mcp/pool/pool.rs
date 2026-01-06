@@ -1,13 +1,15 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 
+use agentterm_shared::socket_path::socket_path_for;
 use crate::diagnostics;
+use crate::mcp::config::get_agent_term_mcp_run_dir;
 use super::socket_proxy::SocketProxy;
+use super::transport;
 use super::types::ServerStatus;
 
 #[derive(Debug, Clone)]
@@ -103,7 +105,11 @@ impl Pool {
 
     pub fn discover_existing_sockets(&self) -> usize {
         let mut discovered = 0;
-        if let Ok(entries) = std::fs::read_dir("/tmp") {
+        if cfg!(windows) {
+            return 0;
+        }
+        let base = get_agent_term_mcp_run_dir().unwrap_or_else(|_| PathBuf::from("/tmp"));
+        if let Ok(entries) = std::fs::read_dir(base) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = socket_name_from_path(&path) {
@@ -145,11 +151,7 @@ impl Pool {
     }
 }
 
-pub fn socket_path_for(name: &str) -> PathBuf {
-    PathBuf::from(format!("/tmp/agentterm-mcp-{}.sock", name))
-}
-
-pub fn socket_name_from_path(path: &PathBuf) -> Option<String> {
+pub fn socket_name_from_path(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_string_lossy();
     if !file_name.starts_with("agentterm-mcp-") || !file_name.ends_with(".sock") {
         return None;
@@ -159,8 +161,5 @@ pub fn socket_name_from_path(path: &PathBuf) -> Option<String> {
 }
 
 pub fn socket_alive(path: &PathBuf) -> bool {
-    if !path.exists() {
-        return false;
-    }
-    UnixStream::connect(path).is_ok()
+    transport::connect(path).is_ok()
 }

@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.adityasharma.agent-term-app",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "node src-tauri/scripts/dev.mjs",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && node src-tauri/scripts/build-sidecar.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -29,6 +29,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "bin/agentterm-mcp-proxy"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

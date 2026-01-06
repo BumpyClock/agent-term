@@ -1,5 +1,11 @@
 use super::model::{SessionRecord, SessionTool};
+use crate::diagnostics;
+use crate::mcp::config::{
+    get_managed_global_mcp_path,
+    get_user_project_mcp_path,
+};
 use crate::mcp::get_claude_config_dir;
+use crate::mcp::proxy::proxy_bin_dir;
 
 /// Command specification for launching a session tool.
 ///
@@ -23,26 +29,25 @@ pub fn build_command(record: &SessionRecord) -> Result<CommandSpec, String> {
         SessionTool::Shell => Ok(CommandSpec {
             program: record.command.clone(),
             args: vec!["-l".to_string(), "-i".to_string()],
-            env: Vec::new(),
+            env: append_proxy_path_env(Vec::new()),
         }),
         SessionTool::Claude => build_claude_command(record),
         SessionTool::Gemini => build_gemini_command(record),
         SessionTool::Codex | SessionTool::OpenCode | SessionTool::Custom(_) => Ok(CommandSpec {
             program: record.command.clone(),
             args: Vec::new(),
-            env: Vec::new(),
+            env: append_proxy_path_env(Vec::new()),
         }),
     }
 }
 
 fn build_claude_command(record: &SessionRecord) -> Result<CommandSpec, String> {
-    let mut args = vec!["--resume".to_string()];
+    let mut args = build_mcp_config_args(record);
     if let Some(session_id) = &record.claude_session_id {
+        args.push("--resume".to_string());
         args.push(session_id.clone());
-    } else {
-        args.clear();
     }
-    let mut env = Vec::new();
+    let mut env = append_proxy_path_env(Vec::new());
     if let Ok(config_dir) = get_claude_config_dir() {
         env.push((
             "CLAUDE_CONFIG_DIR".to_string(),
@@ -65,6 +70,70 @@ fn build_gemini_command(record: &SessionRecord) -> Result<CommandSpec, String> {
     Ok(CommandSpec {
         program: record.command.clone(),
         args,
-        env: Vec::new(),
+        env: append_proxy_path_env(Vec::new()),
     })
+}
+
+fn build_mcp_config_args(record: &SessionRecord) -> Vec<String> {
+    let mut paths = Vec::new();
+
+    if let Ok(global_path) = get_managed_global_mcp_path() {
+        if global_path.exists() {
+            paths.push(global_path.display().to_string());
+        }
+    }
+
+    if !record.project_path.is_empty() {
+        let user_path = get_user_project_mcp_path(&record.project_path);
+        if user_path.exists() {
+            paths.push(user_path.display().to_string());
+        }
+    }
+
+    if paths.is_empty() {
+        diagnostics::log("mcp_config_paths none");
+        return Vec::new();
+    }
+
+    let mut args = Vec::with_capacity(paths.len() + 1);
+    args.push("--mcp-config".to_string());
+    args.extend(paths);
+    diagnostics::log(format!("mcp_config_paths count={} paths={}", args.len() - 1, args[1..].join(";")));
+    args
+}
+
+fn append_proxy_path_env(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
+    let bin_dir = match proxy_bin_dir() {
+        Ok(dir) => dir,
+        Err(_) => return env,
+    };
+
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    let bin_dir_str = bin_dir.to_string_lossy().to_string();
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let mut has_entry = false;
+    for entry in existing.split(separator) {
+        if entry == bin_dir_str {
+            has_entry = true;
+            break;
+        }
+    }
+
+    let updated = if has_entry {
+        existing
+    } else if existing.is_empty() {
+        bin_dir_str
+    } else {
+        format!("{}{}{}", bin_dir_str, separator, existing)
+    };
+
+    for (key, value) in env.iter_mut() {
+        if key == "PATH" {
+            *value = updated;
+            return env;
+        }
+    }
+
+    env.push(("PATH".to_string(), updated));
+    env
 }

@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use interprocess::local_socket::traits::Listener as _;
+use interprocess::TryClone;
 use serde_json::Value;
 
 use crate::diagnostics;
+use super::transport::{self, LocalListener, LocalStream};
 use super::types::ServerStatus;
 
 pub struct SocketProxy {
@@ -24,8 +26,8 @@ pub struct SocketProxy {
     owned: bool,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     child: Arc<Mutex<Option<Child>>>,
-    listener: Mutex<Option<Arc<UnixListener>>>,
-    clients: Arc<Mutex<HashMap<String, UnixStream>>>,
+    listener: Mutex<Option<Arc<LocalListener>>>,
+    clients: Arc<Mutex<HashMap<String, LocalStream>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
     shutdown: Arc<AtomicBool>,
 }
@@ -103,13 +105,14 @@ impl SocketProxy {
             self.spawn_stdout_router(stdout);
         }
 
-        if Path::new(&self.socket_path).exists() {
-            let _ = std::fs::remove_file(&self.socket_path);
+        #[cfg(unix)]
+        {
+            if Path::new(&self.socket_path).exists() {
+                let _ = std::fs::remove_file(&self.socket_path);
+            }
         }
 
-        let listener = UnixListener::bind(&self.socket_path)?;
-        listener.set_nonblocking(true)?;
-        let listener = Arc::new(listener);
+        let listener = Arc::new(transport::bind(&self.socket_path)?);
         *self.listener.lock().unwrap() = Some(listener.clone());
 
         self.spawn_accept_loop(listener);
@@ -136,7 +139,10 @@ impl SocketProxy {
                 let _ = child.kill();
                 let _ = child.wait();
             }
-            let _ = std::fs::remove_file(&self.socket_path);
+            #[cfg(unix)]
+            {
+                let _ = std::fs::remove_file(&self.socket_path);
+            }
         }
 
         *self.stdin.lock().unwrap() = None;
@@ -175,7 +181,7 @@ impl SocketProxy {
         Ok(())
     }
 
-    fn spawn_accept_loop(&self, listener: Arc<UnixListener>) {
+    fn spawn_accept_loop(&self, listener: Arc<LocalListener>) {
         let clients = self.clients.clone();
         let request_map = self.request_map.clone();
         let stdin = self.stdin.clone();
@@ -186,10 +192,9 @@ impl SocketProxy {
             let mut counter = 0;
             while !shutdown.load(Ordering::SeqCst) {
                 match listener.accept() {
-                    Ok((stream, _)) => {
+                    Ok(stream) => {
                         let client_id = format!("{}-client-{}", name, counter);
                         counter += 1;
-                        let _ = stream.set_nonblocking(false);
                         if let Ok(write_stream) = stream.try_clone() {
                             clients.lock().unwrap().insert(client_id.clone(), write_stream);
                             diagnostics::log(format!(
@@ -290,14 +295,15 @@ impl SocketProxy {
 }
 
 fn handle_client(
-    stream: UnixStream,
+    stream: LocalStream,
     client_id: String,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
-    clients: Arc<Mutex<HashMap<String, UnixStream>>>,
+    clients: Arc<Mutex<HashMap<String, LocalStream>>>,
     shutdown: Arc<AtomicBool>,
 ) {
-    let mut reader = BufReader::new(stream.try_clone().unwrap_or(stream));
+    let reader_stream = stream.try_clone().unwrap_or(stream);
+    let mut reader = BufReader::new(reader_stream);
     let mut buffer = String::new();
     let mut parse_failures = 0u32;
     while !shutdown.load(Ordering::SeqCst) {
@@ -371,7 +377,7 @@ fn handle_client(
 
 fn route_response(
     line: &str,
-    clients: &Arc<Mutex<HashMap<String, UnixStream>>>,
+    clients: &Arc<Mutex<HashMap<String, LocalStream>>>,
     request_map: &Arc<Mutex<HashMap<String, String>>>,
 ) {
     let mut target = None;
@@ -414,7 +420,7 @@ fn route_response(
     }
 }
 
-fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, UnixStream>>>) {
+fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, LocalStream>>>) {
     let mut clients_guard = clients.lock().unwrap();
     for stream in clients_guard.values_mut() {
         let _ = stream.write_all(line.as_bytes());
@@ -436,3 +442,5 @@ fn id_key(value: &Value) -> Option<String> {
         _ => Some(value.to_string()),
     }
 }
+#[cfg(unix)]
+use std::path::Path;

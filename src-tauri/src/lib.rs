@@ -8,8 +8,8 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 #[cfg(target_os = "windows")]
 use window_vibrancy::{apply_acrylic, apply_mica};
 
-mod diagnostics;
-mod mcp;
+pub mod diagnostics;
+pub mod mcp;
 mod search;
 mod session;
 
@@ -167,19 +167,22 @@ pub fn run() {
                 // Blur effects achieved via CSS backdrop-filter (compositor-dependent)
             }
 
-            if cfg!(unix) {
-                let mcp_manager = app.state::<mcp::McpManager>().inner().clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Ok(config) = mcp_manager.load_config().await {
-                        if config.mcp_pool.enabled {
-                            if let Err(err) = mcp::pool_manager::initialize_global_pool(&config) {
-                                let msg = err.to_string().replace('.', "");
-                                diagnostics::log(format!("pool_init_failed error={}", msg));
-                            }
+            if let Err(err) = mcp::proxy::ensure_proxy_installed(&app.handle()) {
+                let msg = err.to_string().replace('.', "");
+                diagnostics::log(format!("proxy_install_error error={}", msg));
+            }
+
+            let mcp_manager = app.state::<mcp::McpManager>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(config) = mcp_manager.load_config().await {
+                    if config.mcp_pool.enabled {
+                        if let Err(err) = mcp::pool_manager::initialize_global_pool(&config) {
+                            let msg = err.to_string().replace('.', "");
+                            diagnostics::log(format!("pool_init_failed error={}", msg));
                         }
                     }
-                });
-            }
+                }
+            });
 
             Ok(())
         })

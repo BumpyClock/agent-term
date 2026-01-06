@@ -1,0 +1,12 @@
+[package]
+name = "agentterm-mcp-proxy"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "agentterm-mcp-proxy"
+path = "src/main.rs"
+
+[dependencies]
+agentterm-shared = { path = "../agentterm-shared" }
+interprocess = { workspace = true }

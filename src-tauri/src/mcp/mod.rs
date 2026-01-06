@@ -1,13 +1,14 @@
 //! MCP (Model Context Protocol) management module.
 //!
 //! Provides configuration and attachment management for MCP servers.
-//! Supports three scopes: Global (Claude's global config), Project (Claude's per-project config),
-//! and Local (.mcp.json in project directory).
+//! Supports three scopes: Global (Agent Term managed config), Project (project .mcp.json),
+//! and Local (project .mcp.json).
 
-mod config;
+pub(crate) mod config;
 mod error;
 mod manager;
-mod pool;
+pub mod pool;
+pub(crate) mod proxy;
 pub(crate) mod pool_manager;
 
 pub use config::MCPDef;
@@ -136,11 +137,9 @@ pub async fn mcp_set_settings(
     config.mcp_pool = config::MCPPoolSettings::from(settings.mcp_pool);
     state.write_config(&config).await.map_err(|e| e.to_string())?;
 
-    if cfg!(unix) {
-        let _ = pool_manager::shutdown_global_pool();
-        if config.mcp_pool.enabled {
-            pool_manager::initialize_global_pool(&config).map_err(|e| e.to_string())?;
-        }
+    let _ = pool_manager::shutdown_global_pool();
+    if config.mcp_pool.enabled {
+        pool_manager::initialize_global_pool(&config).map_err(|e| e.to_string())?;
     }
 
     Ok(())

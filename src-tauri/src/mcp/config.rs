@@ -413,43 +413,6 @@ impl Default for McpJsonConfig {
     }
 }
 
-/// Claude's .claude.json structure
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ClaudeJsonConfig {
-    /// MCP servers (global scope)
-    #[serde(rename = "mcpServers", default)]
-    pub mcp_servers: HashMap<String, serde_json::Value>,
-
-    /// Project-specific configurations
-    #[serde(default)]
-    pub projects: HashMap<String, ClaudeProjectConfig>,
-}
-
-impl Default for ClaudeJsonConfig {
-    fn default() -> Self {
-        Self {
-            mcp_servers: HashMap::new(),
-            projects: HashMap::new(),
-        }
-    }
-}
-
-/// Claude project-specific configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ClaudeProjectConfig {
-    /// MCP servers for this project
-    #[serde(rename = "mcpServers", default)]
-    pub mcp_servers: HashMap<String, serde_json::Value>,
-}
-
-impl Default for ClaudeProjectConfig {
-    fn default() -> Self {
-        Self {
-            mcp_servers: HashMap::new(),
-        }
-    }
-}
-
 /// Get the path to the agent-term config directory
 pub fn get_agent_term_dir() -> McpResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| McpError::ConfigNotFound(
@@ -457,6 +420,22 @@ pub fn get_agent_term_dir() -> McpResult<PathBuf> {
     ))?;
 
     Ok(home.join(".agent-term"))
+}
+
+pub fn get_agent_term_mcp_dir() -> McpResult<PathBuf> {
+    Ok(get_agent_term_dir()?.join("mcp"))
+}
+
+pub fn get_agent_term_mcp_run_dir() -> McpResult<PathBuf> {
+    Ok(get_agent_term_dir()?.join("run").join("mcp"))
+}
+
+pub fn get_managed_global_mcp_path() -> McpResult<PathBuf> {
+    Ok(get_agent_term_mcp_dir()?.join("global.mcp.json"))
+}
+
+pub fn get_user_project_mcp_path(project_path: &str) -> PathBuf {
+    PathBuf::from(project_path).join(".mcp.json")
 }
 
 /// Get the path to the agent-term config.toml file
@@ -493,12 +472,6 @@ pub fn get_claude_config_dir() -> McpResult<PathBuf> {
     ))?;
 
     Ok(home.join(".claude"))
-}
-
-/// Get the path to Claude's .claude.json file
-pub fn get_claude_config_path() -> McpResult<PathBuf> {
-    let dir = get_claude_config_dir()?;
-    Ok(dir.join(".claude.json"))
 }
 
 /// Expand tilde in path
