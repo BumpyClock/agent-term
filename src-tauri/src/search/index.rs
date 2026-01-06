@@ -3,6 +3,7 @@
 //! Scans `~/.claude/projects/*/` for JSONL conversation logs,
 //! parses them to extract messages, and stores indexed content in memory.
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -21,6 +22,8 @@ pub struct IndexedMessage {
     pub timestamp: Option<String>,
     /// The actual message content (text only).
     pub content: String,
+    /// Pre-computed lowercase content for efficient searching.
+    pub content_normalized: String,
     /// UUID of this message entry.
     pub uuid: Option<String>,
 }
@@ -72,51 +75,63 @@ impl SearchIndex {
             .map(|d| d.as_secs().saturating_sub(recent_days as u64 * 24 * 60 * 60))
             .unwrap_or(0);
 
-        let mut messages = Vec::new();
-        let mut file_count = 0;
-
-        // Scan all project directories
         let entries = fs::read_dir(root_path)
             .map_err(|e| format!("Failed to read log root: {}", e))?;
 
-        for entry in entries.flatten() {
-            let project_path = entry.path();
-            if !project_path.is_dir() {
-                continue;
-            }
+        let files_to_process: Vec<(std::path::PathBuf, String)> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let project_path = entry.path();
+                if !project_path.is_dir() {
+                    return None;
+                }
+                let project_name = project_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
 
-            let project_name = project_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-
-            // Find all JSONL files in this project directory
-            if let Ok(files) = fs::read_dir(&project_path) {
-                for file_entry in files.flatten() {
-                    let file_path = file_entry.path();
-                    if !is_jsonl_file(&file_path) {
-                        continue;
-                    }
-
-                    // Check file modification time against cutoff
-                    if let Ok(metadata) = file_path.metadata() {
-                        if let Ok(modified) = metadata.modified() {
-                            if let Ok(duration) = modified.duration_since(SystemTime::UNIX_EPOCH) {
-                                if duration.as_secs() < cutoff {
-                                    continue;
+                let files: Vec<_> = fs::read_dir(&project_path)
+                    .ok()?
+                    .flatten()
+                    .filter_map(|file_entry| {
+                        let file_path = file_entry.path();
+                        if !is_jsonl_file(&file_path) {
+                            return None;
+                        }
+                        if let Ok(metadata) = file_path.metadata() {
+                            if let Ok(modified) = metadata.modified() {
+                                if let Ok(duration) = modified.duration_since(SystemTime::UNIX_EPOCH)
+                                {
+                                    if duration.as_secs() < cutoff {
+                                        return None;
+                                    }
                                 }
                             }
                         }
-                    }
+                        Some((file_path, project_name.clone()))
+                    })
+                    .collect();
+                Some(files)
+            })
+            .flatten()
+            .collect();
 
-                    // Parse the JSONL file
-                    if let Ok(parsed) = parse_jsonl_file(&file_path, &project_name) {
-                        messages.extend(parsed);
-                        file_count += 1;
-                    }
-                }
+        let results: Vec<(Vec<IndexedMessage>, bool)> = files_to_process
+            .par_iter()
+            .map(|(file_path, project_name)| match parse_jsonl_file(file_path, project_name) {
+                Ok(msgs) => (msgs, true),
+                Err(_) => (Vec::new(), false),
+            })
+            .collect();
+
+        let mut messages = Vec::new();
+        let mut file_count = 0;
+        for (msgs, success) in results {
+            if success {
+                file_count += 1;
             }
+            messages.extend(msgs);
         }
 
         let message_count = messages.len();
@@ -213,6 +228,7 @@ fn parse_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<IndexedMessag
             project_name: project_name.to_string(),
             message_type,
             timestamp: entry.timestamp,
+            content_normalized: content_text.to_lowercase(),
             content: content_text,
             uuid: entry.uuid,
         });

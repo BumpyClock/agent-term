@@ -86,7 +86,7 @@ impl SearchEngine {
         msg: &IndexedMessage,
         query_terms: &[&str],
     ) -> Option<SearchResult> {
-        let content_lower = msg.content.to_lowercase();
+        let content_lower = &msg.content_normalized;
 
         // Find all matches for all terms
         let mut all_matches: Vec<SnippetMatch> = Vec::new();
@@ -231,6 +231,7 @@ mod tests {
             project_name: "test-project".to_string(),
             message_type: "user".to_string(),
             timestamp: Some("2025-01-01T00:00:00Z".to_string()),
+            content_normalized: content.to_lowercase(),
             content: content.to_string(),
             uuid: None,
         }
