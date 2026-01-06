@@ -3,10 +3,9 @@ import { invoke } from '@tauri-apps/api/core';
 import type { MCPDef } from './settingsTypes';
 import type { MCPPoolSettings } from './settingsTypes';
 import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AppearanceSettings, MCPSettings } from './settings';
-import type { McpItem } from './settings';
+import { AppearanceSettings, MCPSettings } from '@/components/settings';
+import type { McpItem } from '@/components/settings';
 
 type SettingsDialogProps = {
   onClose: () => void;
@@ -190,51 +189,50 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="settings-dialog" onClick={(event) => event.stopPropagation()}>
-        <Card className="border-0 shadow-none bg-transparent">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-xl">Settings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="text-muted-foreground">Loading settings...</div>
-            ) : (
-              <Tabs defaultValue="general" className="w-full">
-                <TabsList className="mb-4">
-                  <TabsTrigger value="general">General</TabsTrigger>
-                  <TabsTrigger value="mcp">MCP Servers</TabsTrigger>
-                </TabsList>
+        <div className="flex-shrink-0 pb-4">
+          <h2 className="text-xl font-semibold">Settings</h2>
+        </div>
 
-                <TabsContent value="general" className="space-y-6">
-                  <AppearanceSettings />
-                </TabsContent>
+        <div className="flex-1 flex flex-col min-h-0">
+          {isLoading ? (
+            <div className="text-muted-foreground">Loading settings...</div>
+          ) : (
+            <Tabs defaultValue="general" className="w-full flex-1 flex flex-col min-h-0">
+              <TabsList className="mb-4 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                <TabsTrigger value="general">General</TabsTrigger>
+                <TabsTrigger value="mcp">MCP Servers</TabsTrigger>
+              </TabsList>
 
-                <TabsContent value="mcp" className="space-y-6">
-                  <MCPSettings
-                    mcps={mcps}
-                    pool={pool}
-                    envText={envText}
-                    onMcpsChange={setMcps}
-                    onPoolChange={handlePoolChange}
-                    onEnvTextChange={handleEnvChange}
-                    onAddMcp={addMcp}
-                    onRemoveMcp={removeMcp}
-                  />
-                </TabsContent>
+              <TabsContent value="general" className="space-y-6 flex-1 overflow-y-auto">
+                <AppearanceSettings />
+              </TabsContent>
 
-                {error && <div className="text-destructive text-sm">{error}</div>}
+              <TabsContent value="mcp" className="space-y-6 flex-1 overflow-y-auto">
+                <MCPSettings
+                  mcps={mcps}
+                  pool={pool}
+                  envText={envText}
+                  onMcpsChange={setMcps}
+                  onPoolChange={handlePoolChange}
+                  onEnvTextChange={handleEnvChange}
+                  onAddMcp={addMcp}
+                  onRemoveMcp={removeMcp}
+                />
+              </TabsContent>
+            </Tabs>
+          )}
+        </div>
 
-                <div className="flex justify-end gap-3 pt-4">
-                  <Button variant="outline" onClick={onClose}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleSave} disabled={isSaving}>
-                    Save settings
-                  </Button>
-                </div>
-              </Tabs>
-            )}
-          </CardContent>
-        </Card>
+        {error && <div className="text-destructive text-sm flex-shrink-0">{error}</div>}
+
+        <div className="flex justify-end gap-3 pt-4 flex-shrink-0">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            Save settings
+          </Button>
+        </div>
       </div>
     </div>
   );

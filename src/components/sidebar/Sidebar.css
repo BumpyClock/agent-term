@@ -682,8 +682,10 @@
 
 .settings-dialog {
     width: min(860px, 94vw);
-    max-height: 84vh;
-    overflow: auto;
+    height: min(600px, 84vh);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     background-color: var(--background);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
