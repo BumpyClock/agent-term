@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { useTerminalStore, Section, Session, SessionStatus, SessionTool } from '../store/terminalStore';
 import './Sidebar.css';
@@ -89,6 +90,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingSessionTitle, setEditingSessionTitle] = useState('');
   const [tabPickerSectionId, setTabPickerSectionId] = useState<string | null>(null);
+  const [tabPickerPosition, setTabPickerPosition] = useState<{ x: number; y: number } | null>(null);
   const tabPickerRef = useRef<HTMLDivElement | null>(null);
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -163,6 +165,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
       if (!tabPickerRef.current) return;
       if (!tabPickerRef.current.contains(event.target as Node)) {
         setTabPickerSectionId(null);
+        setTabPickerPosition(null);
       }
     };
     window.addEventListener('mousedown', handleMouseDown);
@@ -649,6 +652,8 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                   className="action-btn"
                   onClick={(e) => {
                     e.stopPropagation();
+                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                    setTabPickerPosition({ x: Math.round(rect.left), y: Math.round(rect.bottom + 6) });
                     setTabPickerSectionId((prev) => (prev === section.id ? null : section.id));
                   }}
                   title="New Terminal"
@@ -676,50 +681,61 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
               </div>
             </div>
 
-            {menuSectionId === section.id && menuSectionPosition && (
-              <div
-                className="tab-menu-popover"
-                ref={sectionMenuRef}
-                style={{ left: menuSectionPosition.x, top: menuSectionPosition.y }}
-              >
-                <button
-                  className="tab-menu-item"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openSectionEditDialog(section);
-                  }}
+            {menuSectionId === section.id &&
+              menuSectionPosition &&
+              createPortal(
+                <div
+                  className="tab-menu-popover"
+                  ref={sectionMenuRef}
+                  style={{ left: menuSectionPosition.x, top: menuSectionPosition.y }}
                 >
-                  Edit
-                </button>
-              </div>
-            )}
-
-            {tabPickerSectionId === section.id && (
-              <div className="tab-picker" ref={tabPickerRef}>
-                <div className="tab-picker-title">Create tab</div>
-                {toolOptions.map((option) => (
                   <button
-                    key={typeof option.tool === 'string' ? option.tool : option.tool.custom}
-                    className="tab-picker-option"
-                    onClick={() => {
-                      onCreateTerminal(section.id, option.tool);
-                      setTabPickerSectionId(null);
+                    className="tab-menu-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openSectionEditDialog(section);
                     }}
                   >
-                    {option.icon ? (
-                      <img
-                        className="tab-picker-icon"
-                        src={option.icon}
-                        alt={option.title}
-                      />
-                    ) : (
-                      <span className="tab-picker-shell">{option.title.slice(0, 1)}</span>
-                    )}
-                    <span className="tab-picker-label">{option.title}</span>
+                    Edit
                   </button>
-                ))}
-              </div>
-            )}
+                </div>,
+                document.body
+              )}
+
+            {tabPickerSectionId === section.id &&
+              tabPickerPosition &&
+              createPortal(
+                <div
+                  className="tab-picker"
+                  ref={tabPickerRef}
+                  style={{ left: tabPickerPosition.x, top: tabPickerPosition.y }}
+                >
+                  <div className="tab-picker-title">Create tab</div>
+                  {toolOptions.map((option) => (
+                    <button
+                      key={typeof option.tool === 'string' ? option.tool : option.tool.custom}
+                      className="tab-picker-option"
+                      onClick={() => {
+                        onCreateTerminal(section.id, option.tool);
+                        setTabPickerSectionId(null);
+                        setTabPickerPosition(null);
+                      }}
+                    >
+                      {option.icon ? (
+                        <img
+                          className="tab-picker-icon"
+                          src={option.icon}
+                          alt={option.title}
+                        />
+                      ) : (
+                        <span className="tab-picker-shell">{option.title.slice(0, 1)}</span>
+                      )}
+                      <span className="tab-picker-label">{option.title}</span>
+                    </button>
+                  ))}
+                </div>,
+                document.body
+              )}
 
             {!isCollapsed && (
               <div className="tabs-list">
@@ -818,32 +834,35 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                         ×
                       </button>
                     </div>
-                    {menuSessionId === session.id && menuPosition && (
-                      <div
-                        className="tab-menu-popover"
-                        ref={menuRef}
-                        style={{ left: menuPosition.x, top: menuPosition.y }}
-                      >
-                        <button
-                          className="tab-menu-item"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRestartSession(session);
-                          }}
+                    {menuSessionId === session.id &&
+                      menuPosition &&
+                      createPortal(
+                        <div
+                          className="tab-menu-popover"
+                          ref={menuRef}
+                          style={{ left: menuPosition.x, top: menuPosition.y }}
                         >
-                          Restart session
-                        </button>
-                        <button
-                          className="tab-menu-item"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditDialog(session);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    )}
+                          <button
+                            className="tab-menu-item"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRestartSession(session);
+                            }}
+                          >
+                            Restart session
+                          </button>
+                          <button
+                            className="tab-menu-item"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditDialog(session);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        </div>,
+                        document.body
+                      )}
                   </div>
                 ))}
                 {getSessionsBySection(section.id).length === 0 && (
@@ -856,6 +875,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
         })}
         {defaultSection && (
           <div className="default-tabs">
+            <div className="tabs-divider" aria-hidden="true" />
             <div className="tabs-list">
               {getSessionsBySection(defaultSection.id).map((session) => (
                 <div
@@ -952,32 +972,35 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                       ×
                     </button>
                   </div>
-                  {menuSessionId === session.id && menuPosition && (
-                    <div
-                      className="tab-menu-popover"
-                      ref={menuRef}
-                      style={{ left: menuPosition.x, top: menuPosition.y }}
-                    >
-                      <button
-                        className="tab-menu-item"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRestartSession(session);
-                        }}
+                  {menuSessionId === session.id &&
+                    menuPosition &&
+                    createPortal(
+                      <div
+                        className="tab-menu-popover"
+                        ref={menuRef}
+                        style={{ left: menuPosition.x, top: menuPosition.y }}
                       >
-                        Restart session
-                      </button>
-                      <button
-                        className="tab-menu-item"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditDialog(session);
-                        }}
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  )}
+                        <button
+                          className="tab-menu-item"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRestartSession(session);
+                          }}
+                        >
+                          Restart session
+                        </button>
+                        <button
+                          className="tab-menu-item"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditDialog(session);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </div>,
+                      document.body
+                    )}
                 </div>
               ))}
             </div>
