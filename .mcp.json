@@ -1,13 +1,13 @@
 {
   "mcpServers": {
-    "Ptolemy": {
-      "type": "http",
-      "url": "http://localhost:8051/mcp"
-    },
     "Exa": {
       "type": "stdio",
       "command": "agentterm-mcp-proxy",
-      "args": ["--name", "Exa", "--debug"]
+      "args": [
+        "--name",
+        "Exa",
+        "--debug"
+      ]
     }
   }
 }

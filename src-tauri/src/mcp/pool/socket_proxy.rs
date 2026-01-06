@@ -81,6 +81,24 @@ impl SocketProxy {
             "pool_proxy_starting name={} command={} args={:?}",
             self.name, self.command, self.args
         ));
+
+        // On Windows, commands like pnpx/npx/npm are .cmd batch files.
+        // Rust's Command::new("pnpx") looks for pnpx.exe which doesn't exist.
+        // We must spawn via "cmd /c pnpx ..." to resolve .cmd files.
+        #[cfg(windows)]
+        let mut child = {
+            let mut cmd_args = vec!["/c".to_string(), self.command.clone()];
+            cmd_args.extend(self.args.clone());
+            Command::new("cmd")
+                .args(&cmd_args)
+                .envs(self.env.clone())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?
+        };
+
+        #[cfg(not(windows))]
         let mut child = Command::new(&self.command)
             .args(&self.args)
             .envs(self.env.clone())
@@ -201,18 +219,26 @@ impl SocketProxy {
                         }
                         let client_id = format!("{}-client-{}", name, counter);
                         counter += 1;
-                        if let Ok(write_stream) = stream.try_clone() {
-                            if let Err(err) = write_stream.set_nonblocking(false) {
+                        match stream.try_clone() {
+                            Ok(write_stream) => {
+                                if let Err(err) = write_stream.set_nonblocking(false) {
+                                    diagnostics::log(format!(
+                                        "pool_client_set_blocking_failed name={} error={}",
+                                        name, err
+                                    ));
+                                }
+                                clients.lock().unwrap().insert(client_id.clone(), write_stream);
                                 diagnostics::log(format!(
-                                    "pool_client_set_blocking_failed name={} error={}",
-                                    name, err
+                                    "pool_client_connected name={} client_id={}",
+                                    name, client_id
                                 ));
                             }
-                            clients.lock().unwrap().insert(client_id.clone(), write_stream);
-                            diagnostics::log(format!(
-                                "pool_client_connected name={} client_id={}",
-                                name, client_id
-                            ));
+                            Err(err) => {
+                                diagnostics::log(format!(
+                                    "pool_client_clone_failed name={} client_id={} error={}",
+                                    name, client_id, err
+                                ));
+                            }
                         }
 
                         let clients_for_drop = clients.clone();
@@ -314,8 +340,26 @@ fn handle_client(
     clients: Arc<Mutex<HashMap<String, LocalStream>>>,
     shutdown: Arc<AtomicBool>,
 ) {
-    let reader_stream = stream.try_clone().unwrap_or(stream);
-    let _ = reader_stream.set_nonblocking(false);
+    let reader_stream = match stream.try_clone() {
+        Ok(s) => s,
+        Err(err) => {
+            diagnostics::log(format!(
+                "pool_handle_client_clone_failed client_id={} error={}",
+                client_id, err
+            ));
+            stream
+        }
+    };
+    if let Err(err) = reader_stream.set_nonblocking(false) {
+        diagnostics::log(format!(
+            "pool_handle_client_set_blocking_failed client_id={} error={}",
+            client_id, err
+        ));
+    }
+    diagnostics::log(format!(
+        "pool_handle_client_started client_id={}",
+        client_id
+    ));
     let mut reader = BufReader::new(reader_stream);
     let mut buffer = String::new();
     let mut parse_failures = 0u32;

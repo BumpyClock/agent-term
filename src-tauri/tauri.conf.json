@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "node src-tauri/scripts/dev.mjs",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build && node src-tauri/scripts/build-sidecar.mjs",
+    "beforeBuildCommand": "npm run build && node src-tauri/scripts/build-sidecar.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -18,7 +18,10 @@
         "height": 600,
         "transparent": true,
         "titleBarStyle": "Overlay",
-        "trafficLightPosition": { "x": 24, "y": 28 },
+        "trafficLightPosition": {
+          "x": 24,
+          "y": 28
+        },
         "hiddenTitle": true
       }
     ],
