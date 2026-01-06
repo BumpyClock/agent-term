@@ -1,15 +1,3 @@
 {
-  "mcpServers": {
-    "Exa": {
-      "command": "nc",
-      "args": [
-        "-U",
-        "/tmp/agentterm-mcp-Exa.sock"
-      ]
-    },
-    "Ptolemy": {
-      "type": "http",
-      "url": "http://localhost:8051/mcp"
-    }
-  }
+  "mcpServers": {}
 }

@@ -30,14 +30,6 @@
     padding-left: 72px;
 }
 
-.titlebar-title {
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium);
-    color: rgba(230, 230, 230, 0.9);
-    letter-spacing: 0.2px;
-    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.35);
-}
-
 .titlebar[data-platform="mac"] {
     grid-template-columns: 1fr;
     /* Let the native vibrancy show through for an immersive, Finder-like titlebar. */
@@ -45,10 +37,6 @@
     border-bottom: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-}
-
-.titlebar[data-platform="mac"] .titlebar-title {
-    display: none;
 }
 
 /* Linux: CSS-only frosted glass (compositor-dependent) */
