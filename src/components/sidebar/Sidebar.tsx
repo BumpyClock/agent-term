@@ -517,7 +517,11 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
         />
       )}
 
-      {mcpSession && <McpManagerDialog session={mcpSession} onClose={closeMcpDialog} />}
+      {mcpSession &&
+        createPortal(
+          <McpManagerDialog session={mcpSession} onClose={closeMcpDialog} />,
+          document.body
+        )}
 
       {showSettings &&
         createPortal(

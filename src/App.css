@@ -29,9 +29,9 @@ body,
 
 .sidebar-shell {
     position: absolute;
-    left: 12px;
+    left: 8px;
     top: var(--sidebar-top);
-    bottom: 12px;
+    bottom: 8px;
     z-index: var(--z-sidebar);
     display: flex;
     align-items: stretch;

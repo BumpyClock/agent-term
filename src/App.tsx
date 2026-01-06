@@ -32,7 +32,7 @@ function App() {
   const resizeStartWidthRef = useRef(250);
   const minSidebarWidth = 200;
   const maxSidebarWidth = 420;
-  const sidebarInset = 12;
+  const sidebarInset = 8;
   const sidebarGap = 16;
   const initializedRef = useRef(false);
 

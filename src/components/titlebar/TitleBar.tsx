@@ -1,13 +1,13 @@
-import { useEffect, useMemo } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { Minus, Square, X } from 'lucide-react';
-import './TitleBar.css';
+import { useEffect, useMemo } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Minus, Square, X } from "lucide-react";
+import "./TitleBar.css";
 
 function detectPlatform() {
   const ua = navigator.userAgent.toLowerCase();
-  const platform = (navigator.platform || '').toLowerCase();
-  const isMac = platform.includes('mac') || ua.includes('mac os');
-  const isWindows = ua.includes('windows');
+  const platform = (navigator.platform || "").toLowerCase();
+  const isMac = platform.includes("mac") || ua.includes("mac os");
+  const isWindows = ua.includes("windows");
   return { isMac, isWindows };
 }
 
@@ -16,19 +16,28 @@ export function TitleBar() {
   const appWindow = useMemo(() => getCurrentWindow(), []);
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--titlebar-height', isMac ? '28px' : '40px');
     document.documentElement.style.setProperty(
-      '--sidebar-top',
-      isMac ? '0px' : 'calc(var(--titlebar-height) + 12px)'
+      "--titlebar-height",
+      isMac ? "18px" : "40px",
     );
+	    document.documentElement.style.setProperty(
+	      "--sidebar-top",
+	      isMac ? "8px" : "calc(var(--titlebar-height) + 8px)",
+	    );
     document.documentElement.style.setProperty(
-      '--sidebar-content-top-padding',
-      isMac ? '40px' : '0px'
+      "--sidebar-content-top-padding",
+      isMac ? "18px" : "0px",
     );
-    return () => {
-      document.documentElement.style.setProperty('--titlebar-height', '40px');
-      document.documentElement.style.setProperty('--sidebar-top', 'calc(var(--titlebar-height) + 12px)');
-      document.documentElement.style.setProperty('--sidebar-content-top-padding', '0px');
+	    return () => {
+	      document.documentElement.style.setProperty("--titlebar-height", "40px");
+	      document.documentElement.style.setProperty(
+	        "--sidebar-top",
+	        "calc(var(--titlebar-height) + 8px)",
+	      );
+	      document.documentElement.style.setProperty(
+	        "--sidebar-content-top-padding",
+	        "0px",
+      );
     };
   }, [isMac]);
 
@@ -38,10 +47,17 @@ export function TitleBar() {
   };
 
   return (
-    <div className="titlebar" data-platform={isMac ? 'mac' : isWindows ? 'windows' : 'other'}>
-      <div className="titlebar-drag" data-tauri-drag-region onDoubleClick={handleDoubleClick}>
+    <div
+      className="titlebar"
+      data-platform={isMac ? "mac" : isWindows ? "windows" : "other"}
+    >
+      <div
+        className="titlebar-drag"
+        data-tauri-drag-region
+        onDoubleClick={handleDoubleClick}
+      >
         <div className="titlebar-title" data-tauri-drag-region>
-          {isMac ? null : 'Agent Term'}
+          {isMac ? null : "Agent Term"}
         </div>
       </div>
 
