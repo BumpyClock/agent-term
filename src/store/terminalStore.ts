@@ -37,6 +37,7 @@ interface TerminalState {
   sections: Section[];
   sessions: Session[];
   activeSessionId: string | null;
+  activatedSessionIds: Set<string>;
   hasHydrated: boolean;
   lastKnownRows: number;
   lastKnownCols: number;
@@ -59,6 +60,7 @@ interface TerminalState {
   updateSessionStatus: (id: string, status: SessionStatus) => void;
   updateToolSessionId: (id: string, tool: string, toolSessionId: string) => void;
   setLastKnownSize: (rows: number, cols: number) => void;
+  markSessionActivated: (id: string) => void;
 
   loadFromBackend: () => Promise<void>;
   setHasHydrated: (value: boolean) => void;
@@ -137,6 +139,7 @@ export const useTerminalStore = create<TerminalState>()(
       ],
       sessions: [],
       activeSessionId: null,
+      activatedSessionIds: new Set<string>(),
       hasHydrated: false,
       lastKnownRows: 24,
       lastKnownCols: 80,
@@ -226,10 +229,15 @@ export const useTerminalStore = create<TerminalState>()(
           },
         });
 
-        set((state) => ({
-          sessions: [...state.sessions, session],
-          activeSessionId: session.id,
-        }));
+        set((state) => {
+          const newActivated = new Set(state.activatedSessionIds);
+          newActivated.add(session.id);
+          return {
+            sessions: [...state.sessions, session],
+            activeSessionId: session.id,
+            activatedSessionIds: newActivated,
+          };
+        });
         return session;
       },
 
@@ -247,9 +255,12 @@ export const useTerminalStore = create<TerminalState>()(
               newActiveSessionId = null;
             }
           }
+          const newActivated = new Set(state.activatedSessionIds);
+          newActivated.delete(id);
           return {
             sessions: newSessions,
             activeSessionId: newActiveSessionId,
+            activatedSessionIds: newActivated,
           };
         });
       },
@@ -324,6 +335,15 @@ export const useTerminalStore = create<TerminalState>()(
         set({ lastKnownRows: rows, lastKnownCols: cols });
       },
 
+      markSessionActivated: (id: string) => {
+        set((state) => {
+          if (state.activatedSessionIds.has(id)) return state;
+          const newSet = new Set(state.activatedSessionIds);
+          newSet.add(id);
+          return { activatedSessionIds: newSet };
+        });
+      },
+
       loadFromBackend: async () => {
         try {
           const [sessions, sections] = await Promise.all([
@@ -351,10 +371,13 @@ export const useTerminalStore = create<TerminalState>()(
             ];
           }
 
+          const initialActiveId = sessions.find((s) => s.isOpen)?.id || null;
+          const initialActivated = initialActiveId ? new Set([initialActiveId]) : new Set<string>();
           set({
             sessions,
             sections: mergedSections,
-            activeSessionId: sessions.find((s) => s.isOpen)?.id || null,
+            activeSessionId: initialActiveId,
+            activatedSessionIds: initialActivated,
           });
         } catch (err) {
           console.error('Failed to load from backend:', err);

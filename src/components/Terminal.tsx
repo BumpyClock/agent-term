@@ -5,7 +5,6 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "../store/terminalStore";
-import { useShallow } from "zustand/shallow";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
@@ -22,13 +21,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const initialCwdRef = useRef<string | null>(null);
   const lastSentSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const isActiveRef = useRef(isActive);
-  const { lastKnownRows, lastKnownCols, setLastKnownSize } = useTerminalStore(
-    useShallow((state) => ({
-      lastKnownRows: state.lastKnownRows,
-      lastKnownCols: state.lastKnownCols,
-      setLastKnownSize: state.setLastKnownSize,
-    })),
-  );
+  const setLastKnownSize = useTerminalStore((state) => state.setLastKnownSize);
 
   const syncSize = useCallback(() => {
     const fitAddon = fitAddonRef.current;
@@ -36,6 +29,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
     fitAddon.fit();
     const dims = fitAddon.proposeDimensions();
     if (dims && dims.rows > 0 && dims.cols > 0) {
+      const { lastKnownRows, lastKnownCols } = useTerminalStore.getState();
       const lastSent = lastSentSizeRef.current;
       if (lastSent && lastSent.rows === dims.rows && lastSent.cols === dims.cols) {
         return;
@@ -50,7 +44,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         setLastKnownSize(dims.rows, dims.cols);
       }
     }
-  }, [sessionId, setLastKnownSize, lastKnownRows, lastKnownCols]);
+  }, [sessionId, setLastKnownSize]);
 
   const initTerminal = useCallback(
     (container: HTMLDivElement) => {
@@ -66,7 +60,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
           '"FiraCode Nerd Font", Menlo, Monaco, "Courier New", monospace',
         allowTransparency: true,
         theme: {
-          background: "transparent",
+          background: "#00000000",
           foreground: "#d4d4d4",
           cursor: "#d4d4d4",
           cursorAccent: "#1e1e1e",
@@ -102,6 +96,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       xtermRef.current = xterm;
       fitAddonRef.current = fitAddon;
       const initialDims = fitAddon.proposeDimensions();
+      const { lastKnownRows, lastKnownCols } = useTerminalStore.getState();
       const initialRows =
         initialDims && initialDims.rows > 0 ? initialDims.rows : lastKnownRows;
       const initialCols =
@@ -222,7 +217,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         teardown();
       };
     },
-    [sessionId, syncSize, lastKnownRows, lastKnownCols],
+    [sessionId, syncSize],
   );
 
   useEffect(() => {

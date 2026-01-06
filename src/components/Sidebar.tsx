@@ -494,6 +494,9 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     setSearchQuery('');
   };
 
+  const defaultSection = sections.find((section) => section.isDefault);
+  const nonDefaultSections = sections.filter((section) => !section.isDefault);
+
   return (
     <div className="sidebar">
       <div className="search-container" ref={searchRef}>
@@ -564,9 +567,9 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
       )}
 
       <div className="sections-list">
-        {sections.map((section) => {
-          const isDefault = !!section.isDefault;
-          const isCollapsed = isDefault ? false : section.collapsed;
+        {nonDefaultSections.map((section) => {
+          const isDefault = false;
+          const isCollapsed = section.collapsed;
           return (
             <div key={section.id} className="section">
             <div
@@ -628,9 +631,6 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                   title={section.path || 'Home Directory'}
                 >
                   {section.name}
-                  {section.isDefault && (
-                    <span className="default-badge">default</span>
-                  )}
                 </span>
               )}
               <div className="section-actions">
@@ -851,9 +851,138 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                 )}
               </div>
             )}
-            </div>
+          </div>
           );
         })}
+        {defaultSection && (
+          <div className="default-tabs">
+            <div className="tabs-list">
+              {getSessionsBySection(defaultSection.id).map((session) => (
+                <div
+                  key={session.id}
+                  className={`tab ${activeSessionId === session.id ? 'active' : ''} status-${session.status}`}
+                  onClick={() => setActiveSession(session.id)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    openMenuAt(session.id, event.clientX, event.clientY);
+                  }}
+                >
+                  {(() => {
+                    const icon = resolveSessionIcon(session);
+                    if (!icon) return null;
+                    if (icon.kind === 'lucide') {
+                      const svg = lucideIcons.find((item) => item.id === icon.id)?.svg;
+                      if (!svg) return null;
+                      return (
+                        <span className="tab-tool-icon tab-tool-icon--lucide" title="Custom icon">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            {svg}
+                          </svg>
+                        </span>
+                      );
+                    }
+                    return (
+                      <img
+                        className="tab-tool-icon"
+                        src={icon.src}
+                        alt={getToolTitle(session.tool)}
+                        title={getToolTitle(session.tool)}
+                      />
+                    );
+                  })()}
+                  {editingSessionId === session.id ? (
+                    <input
+                      className="tab-title-input"
+                      type="text"
+                      value={editingSessionTitle}
+                      onChange={(e) => setEditingSessionTitle(e.target.value)}
+                      onBlur={() => handleSaveSessionEdit(session.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveSessionEdit(session.id);
+                        if (e.key === 'Escape') {
+                          setEditingSessionId(null);
+                          setEditingSessionTitle('');
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      autoFocus
+                    />
+                  ) : (
+                    <span className="tab-title-wrap">
+                      <span
+                        className="tab-title"
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          handleStartSessionEdit(session);
+                        }}
+                        title={session.title}
+                      >
+                        {session.title}
+                      </span>
+                      {needsAttention(session.status) && (
+                        <span
+                          className={`tab-status-dot status-${session.status}`}
+                          title={getStatusTitle(session.status)}
+                        />
+                      )}
+                    </span>
+                  )}
+                  <div className="tab-actions">
+                    <button
+                      className="tab-menu"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                        openMenuAt(session.id, Math.round(rect.right), Math.round(rect.bottom));
+                      }}
+                      title="Tab menu"
+                      aria-label="Tab menu"
+                    >
+                      ⋯
+                    </button>
+                    <button
+                      className="tab-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeSession(session.id);
+                      }}
+                      title="Close Terminal"
+                      aria-label="Close Terminal"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {menuSessionId === session.id && menuPosition && (
+                    <div
+                      className="tab-menu-popover"
+                      ref={menuRef}
+                      style={{ left: menuPosition.x, top: menuPosition.y }}
+                    >
+                      <button
+                        className="tab-menu-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRestartSession(session);
+                        }}
+                      >
+                        Restart session
+                      </button>
+                      <button
+                        className="tab-menu-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditDialog(session);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       {editSessionId && (
         <div className="dialog-overlay" onClick={closeEditDialog}>

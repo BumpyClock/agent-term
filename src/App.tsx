@@ -11,11 +11,13 @@ function App() {
     sections,
     sessions,
     activeSessionId,
+    activatedSessionIds,
     addSession,
     updateSection,
     updateSessionStatus,
     updateToolSessionId,
     setActiveSession,
+    markSessionActivated,
     getDefaultSection,
     loadFromBackend,
     hasHydrated,
@@ -28,6 +30,8 @@ function App() {
   const resizeStartWidthRef = useRef(250);
   const minSidebarWidth = 200;
   const maxSidebarWidth = 420;
+  const sidebarInset = 12;
+  const sidebarGap = 16;
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -91,6 +95,13 @@ function App() {
   useEffect(() => {
     sidebarWidthRef.current = sidebarWidth;
   }, [sidebarWidth]);
+
+  // Mark the active session as activated when it changes
+  useEffect(() => {
+    if (activeSessionId) {
+      markSessionActivated(activeSessionId);
+    }
+  }, [activeSessionId, markSessionActivated]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -186,31 +197,41 @@ function App() {
     []
   );
 
+  const terminalPaddingLeft = sidebarWidth + sidebarInset + sidebarGap;
+
   return (
     <div className="app">
-      <div className="sidebar-wrapper" style={{ width: sidebarWidth }}>
-        <Sidebar onCreateTerminal={handleCreateTerminal} />
+      <div className="sidebar-shell" style={{ width: sidebarWidth }}>
+        <div className="sidebar-wrapper">
+          <Sidebar onCreateTerminal={handleCreateTerminal} />
+        </div>
+        <div
+          className="sidebar-resizer"
+          onMouseDown={handleResizeStart}
+          style={{ left: sidebarWidth - 3 }}
+        />
       </div>
-      <div className="sidebar-resizer" onMouseDown={handleResizeStart} />
-      <div className="terminal-container">
+      <div className="terminal-container" style={{ paddingLeft: terminalPaddingLeft }}>
         {sessions.length === 0 ? (
           <div className="no-terminals">
             <p>No terminals open</p>
             <p>Click + on a project to create a new terminal</p>
           </div>
         ) : (
-          sessions.map((session) => {
-            const section = sections.find((item) => item.id === session.sectionId);
-            return (
-              <Terminal
-                key={session.id}
-                id={session.id}
-                sessionId={session.id}
-                cwd={section?.path ?? ''}
-                isActive={activeSessionId === session.id}
-              />
-            );
-          })
+          sessions
+            .filter((session) => activatedSessionIds.has(session.id))
+            .map((session) => {
+              const section = sections.find((item) => item.id === session.sectionId);
+              return (
+                <Terminal
+                  key={session.id}
+                  id={session.id}
+                  sessionId={session.id}
+                  cwd={section?.path ?? ''}
+                  isActive={activeSessionId === session.id}
+                />
+              );
+            })
         )}
       </div>
     </div>
