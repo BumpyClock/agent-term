@@ -57,18 +57,6 @@ impl IndexedMessage {
     pub fn content_normalized(&self) -> String {
         self.content.to_lowercase()
     }
-
-    /// Create from MessageRef by loading content from file.
-    pub fn from_ref(msg_ref: &MessageRef, content: String) -> Self {
-        Self {
-            file_path: msg_ref.file_path.clone(),
-            project_name: msg_ref.project_name.clone(),
-            message_type: msg_ref.message_type.clone(),
-            timestamp: msg_ref.timestamp.clone(),
-            content,
-            uuid: msg_ref.uuid.clone(),
-        }
-    }
 }
 
 /// Status of the search index.
@@ -201,13 +189,6 @@ impl SearchIndex {
         Ok(extract_content_text(
             &entry.message.and_then(|m| m.content),
         ))
-    }
-
-    /// Get a full IndexedMessage by loading content from disk.
-    pub fn get_message(&self, idx: usize) -> Option<IndexedMessage> {
-        let msg_ref = self.message_refs.get(idx)?;
-        let content = self.load_content(msg_ref).ok()?;
-        Some(IndexedMessage::from_ref(msg_ref, content))
     }
 
     pub fn status(&self) -> IndexStatus {
@@ -366,15 +347,6 @@ impl SearchIndex {
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
-    }
-
-    /// Check if a file is unchanged based on stored metadata.
-    fn is_file_unchanged(&self, file_path: &str, current_mtime: u64) -> bool {
-        self.metadata
-            .file_states
-            .get(file_path)
-            .map(|(stored_mtime, _)| *stored_mtime >= current_mtime)
-            .unwrap_or(false)
     }
 
     /// Perform reindex of JSONL logs.

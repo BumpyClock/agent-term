@@ -4,7 +4,9 @@
 //! snippet previews showing context around matches.
 //! Content is loaded on-demand from source files.
 
-use super::index::{IndexedMessage, MessageRef, SearchIndex};
+use super::index::{MessageRef, SearchIndex};
+#[cfg(test)]
+use super::index::IndexedMessage;
 use serde::{Deserialize, Serialize};
 
 /// A search result with snippet and metadata.

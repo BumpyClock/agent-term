@@ -186,9 +186,18 @@ pub fn search_query(
 mod tests {
     use super::*;
 
+    fn fresh_manager() -> SearchManager {
+        // Use config without persistence to avoid loading existing index
+        SearchManager::with_config(SearchConfig {
+            recent_days: 90,
+            log_root: None,
+            metadata_path: None,
+        })
+    }
+
     #[test]
     fn test_search_manager_creation() {
-        let manager = SearchManager::new();
+        let manager = fresh_manager();
         let status = manager.status();
         assert!(!status.indexed);
         assert_eq!(status.message_count, 0);
@@ -196,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_empty_query_returns_empty() {
-        let manager = SearchManager::new();
+        let manager = fresh_manager();
         let results = manager.search("", 10);
         assert!(results.is_empty());
 
