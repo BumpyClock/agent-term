@@ -154,6 +154,12 @@ function App() {
         }
         return;
       }
+
+      if (event.key === 'k') {
+        event.preventDefault();
+        window.dispatchEvent(new CustomEvent('toggle-command-bar'));
+        return;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);

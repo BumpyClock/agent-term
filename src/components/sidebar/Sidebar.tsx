@@ -4,16 +4,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { Search, Settings } from 'lucide-react';
 import { useTerminalStore, type Section, type Session, type SessionTool } from '../../store/terminalStore';
 import { DndContext, DragOverlay, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent, type DragCancelEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { SortableSection, DragOverlayContent, type DragData, type DragItemType } from './dnd';
+import { CommandBar } from './CommandBar';
 import { EditProjectDialog } from './EditProjectDialog';
 import { EditTabDialog } from './EditTabDialog';
 import { McpManagerDialog } from './McpManagerDialog';
 import { MenuPopover } from './MenuPopover';
 import { ProjectSection } from './ProjectSection';
-import { SearchBar } from './SearchBar';
 import { SettingsDialog } from './SettingsDialog';
 import { TabPicker } from './TabPicker';
 import { TabsList } from './TabsList';
@@ -71,9 +72,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const [editSectionPath, setEditSectionPath] = useState('');
   const [editSectionIcon, setEditSectionIcon] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const [isCommandBarOpen, setIsCommandBarOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<DragItemType | null>(null);
   const [collapsedBeforeDrag, setCollapsedBeforeDrag] = useState<Record<string, boolean>>({});
@@ -85,31 +84,10 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   }, []);
 
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    setIsSearching(true);
-    const timeoutId = setTimeout(() => {
-      invoke<SearchResult[]>('search_query', { query: searchQuery, limit: 10 })
-        .then((results) => {
-          setSearchResults(results);
-        })
-        .catch((err) => {
-          console.error('Search failed:', err);
-          setSearchResults([]);
-        })
-        .finally(() => {
-          setIsSearching(false);
-        });
-    }, 300);
-
-    return () => {
-      clearTimeout(timeoutId);
-      setIsSearching(false);
-    };
-  }, [searchQuery]);
+    const handleToggleCommandBar = () => setIsCommandBarOpen((prev) => !prev);
+    window.addEventListener('toggle-command-bar', handleToggleCommandBar);
+    return () => window.removeEventListener('toggle-command-bar', handleToggleCommandBar);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -331,10 +309,41 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     setMenuSectionPosition(position);
   };
 
-  const handleSearchResultClick = (result: SearchResult) => {
-    console.log('Selected file:', result.filePath);
-    setSearchResults([]);
-    setSearchQuery('');
+  const handleSearchResultClick = async (result: SearchResult) => {
+    const match = result.filePath.match(/\/([^/]+)\.jsonl$/);
+    const claudeSessionId = match ? match[1] : null;
+
+    if (claudeSessionId) {
+      const existingSession = Object.values(sessions).find(
+        (s) => s.claudeSessionId === claudeSessionId
+      );
+
+      if (existingSession) {
+        setActiveSession(existingSession.id);
+      } else {
+        const defaultSect = sections[0];
+        if (defaultSect) {
+          try {
+            const newSession = await invoke<{ id: string }>('create_session', {
+              input: {
+                sectionId: defaultSect.id,
+                title: result.projectName || 'Claude Session',
+                projectPath: defaultSect.path,
+                tool: 'claude',
+                command: `claude --resume ${claudeSessionId}`,
+              },
+            });
+            if (newSession?.id) {
+              setActiveSession(newSession.id);
+            }
+          } catch (err) {
+            console.error('Failed to create resume session:', err);
+          }
+        }
+      }
+    }
+
+    setIsCommandBarOpen(false);
   };
 
   const closeTabPicker = () => {
@@ -379,38 +388,33 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <SearchBar
-          query={searchQuery}
-          results={searchResults}
-          isSearching={isSearching}
-          onQueryChange={setSearchQuery}
-          onSelectResult={handleSearchResultClick}
-          onClear={() => {
-            setSearchResults([]);
-            setSearchQuery('');
-          }}
-        />
-
-      <div className="sidebar-header">
-        <h2>Projects</h2>
-        <div className="sidebar-header-actions">
-          <button
-            className="settings-btn"
-            onClick={() => setShowSettings(true)}
-            title="Settings"
-            aria-label="Settings"
-          >
-            ⚙
-          </button>
-          <button
-            className="add-section-btn"
-            onClick={() => setIsAddingSection(true)}
-            title="Add Project"
-          >
-            +
-          </button>
+        <div className="sidebar-header">
+          <span className="sidebar-header-title">AGENT TERM</span>
+          <div className="sidebar-header-actions">
+            <button
+              className="sidebar-header-btn"
+              onClick={() => setIsCommandBarOpen(true)}
+              title="Search (⌘K)"
+              aria-label="Search"
+            >
+              <Search size={16} />
+            </button>
+            <button
+              className="sidebar-header-btn"
+              onClick={() => setShowSettings(true)}
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings size={16} />
+            </button>
+          </div>
         </div>
-      </div>
+
+        <CommandBar
+          isOpen={isCommandBarOpen}
+          onClose={() => setIsCommandBarOpen(false)}
+          onSelectResult={handleSearchResultClick}
+        />
 
       {isAddingSection && (
         <div className="add-section-form">
@@ -435,6 +439,15 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
       )}
 
       <div className="sections-list">
+        {!isAddingSection && (
+          <button
+            className="add-project-btn"
+            onClick={() => setIsAddingSection(true)}
+            title="Add Project"
+          >
+            + Add Project
+          </button>
+        )}
         <SortableContext items={nonDefaultSectionIds} strategy={verticalListSortingStrategy}>
           {nonDefaultSections.map((section) => (
             <SortableSection
