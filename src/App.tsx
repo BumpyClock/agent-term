@@ -15,6 +15,7 @@ function App() {
     activeSessionId,
     activatedSessionIds,
     addSession,
+    removeSession,
     updateSection,
     updateSessionStatus,
     updateToolSessionId,
@@ -145,13 +146,21 @@ function App() {
         }
         return;
       }
+
+      if (event.key === 'w' && !event.shiftKey) {
+        event.preventDefault();
+        if (activeSessionId) {
+          removeSession(activeSessionId);
+        }
+        return;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [sessionOrder, activeSessionId, setActiveSession, getDefaultSection, addSession]);
+  }, [sessionOrder, activeSessionId, setActiveSession, getDefaultSection, addSession, removeSession]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
