@@ -172,6 +172,7 @@ pub async fn tools_set_settings(
     config.shell = ShellSettings {
         default_shell: settings.shell.default_shell,
         default_shell_args: settings.shell.default_shell_args,
+        pinned_shells: config.shell.pinned_shells,
     };
 
     state

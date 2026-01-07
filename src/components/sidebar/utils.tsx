@@ -1,7 +1,10 @@
+// ABOUTME: Provides sidebar utility helpers for rendering, icons, and status labels.
+// ABOUTME: Normalizes icon descriptors and text highlights for sidebar components.
 import type { ReactNode } from 'react';
 import type { Session, SessionStatus, SessionTool, Section } from '../../store/terminalStore';
 import { toolOptions } from './constants';
 import type { IconDescriptor } from './types';
+import { isMonochromeToolIcon } from './useToolIcons';
 
 export function getStatusTitle(status: SessionStatus): string {
   switch (status) {
@@ -80,11 +83,11 @@ export function resolveSessionIcon(session: Session): IconDescriptor | null {
     if (session.icon.startsWith('lucide:')) {
       return { kind: 'lucide', id: session.icon.slice('lucide:'.length) };
     }
-    return { kind: 'img', src: session.icon };
+    return { kind: 'img', src: session.icon, monochrome: isMonochromeToolIcon(session.icon) };
   }
   const fallback = getToolIcon(session.tool);
   if (fallback) {
-    return { kind: 'img', src: fallback };
+    return { kind: 'img', src: fallback, monochrome: isMonochromeToolIcon(fallback) };
   }
   return null;
 }
@@ -94,5 +97,5 @@ export function resolveSectionIcon(section: Section): IconDescriptor | null {
   if (section.icon.startsWith('lucide:')) {
     return { kind: 'lucide', id: section.icon.slice('lucide:'.length) };
   }
-  return { kind: 'img', src: section.icon };
+  return { kind: 'img', src: section.icon, monochrome: isMonochromeToolIcon(section.icon) };
 }

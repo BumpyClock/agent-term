@@ -24,7 +24,7 @@ import type { PopoverPosition, SearchResult } from './types';
 import './Sidebar.css';
 
 interface SidebarProps {
-  onCreateTerminal: (sectionId: string, tool: SessionTool) => void;
+  onCreateTerminal: (sectionId: string, tool: SessionTool, options?: { command?: string; icon?: string; title?: string }) => void;
 }
 
 export function Sidebar({ onCreateTerminal }: SidebarProps) {
@@ -633,8 +633,8 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
         createPortal(
           <TabPicker
             position={tabPickerPosition}
-            onSelect={(tool) => {
-              onCreateTerminal(tabPickerSectionId, tool);
+            onSelect={(tool, options) => {
+              onCreateTerminal(tabPickerSectionId, tool, options);
               closeTabPicker();
             }}
             onClose={closeTabPicker}

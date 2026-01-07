@@ -53,8 +53,8 @@ export function MCPServerForm({
   validationError,
 }: MCPServerFormProps) {
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 mb-4">
+    <div className="flex flex-col min-h-0 h-full">
+      <div className="flex items-center gap-2 mb-4 flex-shrink-0">
         <button
           onClick={onBack}
           className="p-1 -ml-1 rounded hover:bg-muted transition-colors"
@@ -66,7 +66,7 @@ export function MCPServerForm({
         </h3>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4">
+      <div className="flex-1 overflow-y-auto min-h-0 space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <label className="dialog-label">
             Name

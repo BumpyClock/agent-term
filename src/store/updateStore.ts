@@ -21,6 +21,8 @@ interface UpdateState {
   error: UpdateError | null;
   settings: UpdateSettings;
   isLoadingSettings: boolean;
+  currentVersion: string | null;
+  showUpToDate: boolean;
 
   // Actions
   checkForUpdate: () => Promise<UpdateInfo | null>;
@@ -33,11 +35,13 @@ interface UpdateState {
   reset: () => void;
   retryCheck: () => Promise<UpdateInfo | null>;
   retryDownload: () => Promise<void>;
+  setCurrentVersion: (version: string) => void;
 
   // Internal
   _setStatus: (status: UpdateStatus) => void;
   _setProgress: (progress: number) => void;
   _unlistenProgress: UnlistenFn | null;
+  _upToDateTimer: ReturnType<typeof setTimeout> | null;
   _setupProgressListener: () => Promise<void>;
   _cleanupProgressListener: () => void;
 }
@@ -50,11 +54,21 @@ export const useUpdateStore = create<UpdateState>()((set, get) => ({
   error: null,
   settings: DEFAULT_UPDATE_SETTINGS,
   isLoadingSettings: false,
+  currentVersion: null,
+  showUpToDate: false,
   _unlistenProgress: null,
+  _upToDateTimer: null,
 
   // Check for available updates
   checkForUpdate: async () => {
-    set({ status: 'checking', error: null });
+    // Clear any existing up-to-date timer
+    const { _upToDateTimer } = get();
+    if (_upToDateTimer) {
+      clearTimeout(_upToDateTimer);
+      set({ _upToDateTimer: null });
+    }
+
+    set({ status: 'checking', error: null, showUpToDate: false });
 
     try {
       const updateInfo = await invoke<UpdateInfo | null>('update_check');
@@ -77,7 +91,14 @@ export const useUpdateStore = create<UpdateState>()((set, get) => ({
 
         return updateInfo;
       } else {
-        set({ status: 'idle', updateInfo: null });
+        // Show "up to date" for 2 seconds, then fade back to idle
+        set({ status: 'idle', updateInfo: null, showUpToDate: true });
+
+        const timer = setTimeout(() => {
+          set({ showUpToDate: false, _upToDateTimer: null });
+        }, 2000);
+
+        set({ _upToDateTimer: timer });
         return null;
       }
     } catch (err) {
@@ -239,6 +260,11 @@ export const useUpdateStore = create<UpdateState>()((set, get) => ({
       set({ status: 'available' });
     }
     return get().downloadUpdate();
+  },
+
+  // Set current app version
+  setCurrentVersion: (version: string) => {
+    set({ currentVersion: version });
   },
 }));
 

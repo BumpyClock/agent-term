@@ -1,3 +1,5 @@
+/* ABOUTME: Styles the sidebar layout, tabs, dialogs, and supporting UI elements. */
+/* ABOUTME: Handles theming, icon presentation, and interactive affordances. */
 .sidebar {
     width: 100%;
     min-width: 100%;
@@ -148,6 +150,7 @@
 
 .sections-list {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
 
@@ -220,9 +223,12 @@
     opacity: 0.85;
 }
 
-.dark img.section-icon {
-    filter: invert(1) hue-rotate(180deg);
+.section-icon--mono,
+.tab-tool-icon--mono,
+.dialog-icon-img--mono {
+    transition: filter 0.15s ease;
 }
+
 
 .section-icon--lucide {
     display: inline-flex;
@@ -338,9 +344,6 @@
     opacity: 0.85;
 }
 
-.dark img.tab-tool-icon {
-    filter: invert(1) hue-rotate(180deg);
-}
 
 .tab-tool-icon--lucide {
     display: inline-flex;
@@ -747,7 +750,8 @@
 
 .settings-dialog {
     width: min(860px, 94vw);
-    height: min(600px, 84vh);
+    max-height: min(600px, 84vh);
+    min-height: min(400px, 70vh);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -755,6 +759,17 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: 12px;
+    box-shadow: var(--shadow-dialog);
+}
+
+.settings-dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding-top: 12px;
+    margin-top: auto;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
 }
 
 .dialog-label {
@@ -790,14 +805,13 @@
 }
 
 .dialog-icon-option {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border: 1px solid var(--border);
     background-color: var(--card);
     border-radius: var(--radius-lg);
     height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--foreground);
     cursor: pointer;
     padding: 0;
 }
@@ -808,9 +822,6 @@
     object-fit: contain;
 }
 
-.dark .dialog-icon-option img {
-    filter: invert(1) hue-rotate(180deg);
-}
 
 .dialog-icon-option svg {
     width: 20px;
@@ -1180,18 +1191,31 @@
     border-radius: var(--radius-sm);
 }
 
-/* Update Notification */
+.dark .sidebar .section-icon--mono,
+.dark .sidebar .tab-tool-icon--mono,
+.dark .sidebar .dialog-icon-img--mono {
+    filter: invert(1);
+}
+
+/* Update Notification / Version Footer */
 .update-notification {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  height: 40px;
+  padding: 0 16px;
   background-color: var(--color-surface-sidebar);
   border-top: 1px solid var(--color-border-soft);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   color: var(--muted-foreground);
   overflow: hidden;
+}
+
+.update-notification-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .update-notification.clickable {
@@ -1208,10 +1232,46 @@
   background-color: var(--accent);
 }
 
+/* Idle state - version with hover icon */
+.update-notification.idle {
+  color: var(--muted-foreground);
+}
+
+.update-notification-refresh-icon {
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+
+.update-notification.idle:hover .update-notification-refresh-icon {
+  opacity: 1;
+}
+
+/* Checking state */
+.update-notification.checking {
+  color: var(--muted-foreground);
+}
+
+/* Up to date state */
+.update-notification.up-to-date {
+  color: var(--muted-foreground);
+}
+
+.update-notification-check {
+  color: oklch(0.7 0.15 145);
+  flex-shrink: 0;
+}
+
+.update-notification-secondary {
+  opacity: 0.7;
+}
+
+/* Available state */
 .update-notification.available {
   color: var(--primary);
 }
 
+/* Ready state */
 .update-notification.ready {
   color: var(--primary);
   background-color: color-mix(in srgb, var(--primary) 10%, transparent);
@@ -1221,6 +1281,15 @@
   background-color: color-mix(in srgb, var(--primary) 20%, transparent);
 }
 
+/* Error state */
+.update-notification.error {
+  color: var(--destructive);
+}
+
+.update-notification.error:hover {
+  background-color: color-mix(in srgb, var(--destructive) 10%, transparent);
+}
+
 .update-notification-text {
   flex: 1;
   white-space: nowrap;
@@ -1228,8 +1297,14 @@
   text-overflow: ellipsis;
 }
 
+.update-notification-progress-text {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
 .update-notification-spinner {
   animation: spin 1s linear infinite;
+  flex-shrink: 0;
 }
 
 @keyframes spin {
@@ -1247,19 +1322,150 @@
   left: 0;
   height: 2px;
   background-color: var(--primary);
-  transition: width 0.2s ease;
-}
-
-.update-notification.error {
-  color: var(--destructive);
-}
-
-.update-notification.error:hover {
-  background-color: color-mix(in srgb, var(--destructive) 10%, transparent);
 }
 
 .update-notification-retry {
   font-size: var(--font-size-xs);
   opacity: 0.7;
   margin-left: auto;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Shell Submenu */
+.tab-picker-submenu-trigger {
+  position: relative;
+}
+
+.tab-picker-chevron {
+  color: var(--muted-foreground);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.shell-submenu {
+  position: fixed;
+  min-width: 220px;
+  padding: 8px;
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    var(--shadow-popover);
+  z-index: calc(var(--z-popover) + 1);
+}
+
+.shell-section-header {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted-foreground);
+  padding: 4px 8px 6px;
+  margin-top: 4px;
+}
+
+.shell-section-header:first-child {
+  margin-top: 0;
+}
+
+.shell-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+  text-align: left;
+}
+
+.shell-option:hover {
+  background-color: var(--muted);
+}
+
+.shell-option-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.shell-option-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.shell-default-badge {
+  font-size: var(--font-size-xs);
+  background-color: var(--muted);
+  color: var(--muted-foreground);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  text-transform: lowercase;
+}
+
+.shell-pin-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.shell-option:hover .shell-pin-btn,
+.tab-picker-option:hover .shell-pin-btn {
+  opacity: 1;
+}
+
+.shell-pin-btn:hover {
+  background-color: var(--accent);
+  color: var(--foreground);
+}
+
+.shell-pin-btn.pinned {
+  opacity: 1;
+  color: var(--primary);
+}
+
+.shell-pin-btn.pinned:hover {
+  color: var(--destructive);
+}
+
+.shell-submenu-separator {
+  height: 1px;
+  background-color: var(--border);
+  margin: 6px 0;
+}
+
+.shell-submenu-empty {
+  padding: 12px 8px;
+  color: var(--muted-foreground);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.shell-submenu-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--muted-foreground);
+  border-top: 1px solid var(--border);
 }

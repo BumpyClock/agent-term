@@ -26,6 +26,7 @@ export function DragOverlayContent({
 
     const icon = resolveSessionIcon(session);
     const toolTitle = getToolTitle(session.tool);
+    const isMonochromeIcon = icon?.kind === 'img' && icon.monochrome;
 
     return (
       <div className="drag-overlay tab active">
@@ -36,7 +37,12 @@ export function DragOverlayContent({
             title="Custom icon"
           />
         ) : icon?.kind === 'img' ? (
-          <img className="tab-tool-icon" src={icon.src} alt={toolTitle} title={toolTitle} />
+          <img
+            className={`tab-tool-icon ${isMonochromeIcon ? 'tab-tool-icon--mono' : ''}`}
+            src={icon.src}
+            alt={toolTitle}
+            title={toolTitle}
+          />
         ) : null}
         <span className="tab-title">{session.title}</span>
       </div>
@@ -48,6 +54,7 @@ export function DragOverlayContent({
     if (!section) return null;
 
     const icon = resolveSectionIcon(section);
+    const isMonochromeIcon = icon?.kind === 'img' && icon.monochrome;
 
     return (
       <div className="drag-overlay section-header">
@@ -58,7 +65,12 @@ export function DragOverlayContent({
             title="Project icon"
           />
         ) : icon?.kind === 'img' ? (
-          <img className="section-icon" src={icon.src} alt={section.name} title={section.name} />
+          <img
+            className={`section-icon ${isMonochromeIcon ? 'section-icon--mono' : ''}`}
+            src={icon.src}
+            alt={section.name}
+            title={section.name}
+          />
         ) : null}
         <span className="section-name">{section.name}</span>
       </div>

@@ -37,6 +37,7 @@ export function SessionRow({
 }: SessionRowProps) {
   const icon = resolveSessionIcon(session);
   const toolTitle = getToolTitle(session.tool);
+  const isMonochromeIcon = icon?.kind === 'img' && icon.monochrome;
 
   return (
     <div
@@ -51,7 +52,12 @@ export function SessionRow({
           title="Custom icon"
         />
       ) : icon?.kind === 'img' ? (
-        <img className="tab-tool-icon" src={icon.src} alt={toolTitle} title={toolTitle} />
+        <img
+          className={`tab-tool-icon ${isMonochromeIcon ? 'tab-tool-icon--mono' : ''}`}
+          src={icon.src}
+          alt={toolTitle}
+          title={toolTitle}
+        />
       ) : null}
       {isEditing ? (
         <input
