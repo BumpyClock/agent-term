@@ -1,50 +1,59 @@
 use std::io;
 use std::path::PathBuf;
 
-use interprocess::local_socket::prelude::*;
-use interprocess::local_socket::{ListenerNonblockingMode, ListenerOptions};
-
 #[cfg(unix)]
-use interprocess::os::unix::local_socket::FilesystemUdSocket;
+use tokio::net::{UnixListener, UnixStream};
 
 #[cfg(windows)]
-use interprocess::os::windows::local_socket::NamedPipe;
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
-pub type LocalListener = LocalSocketListener;
-pub type LocalStream = LocalSocketStream;
+pub struct LocalListener {
+    #[cfg(unix)]
+    inner: UnixListener,
+    #[cfg(windows)]
+    pipe_name: String,
+}
+
+#[cfg(unix)]
+pub type LocalStream = UnixStream;
+
+#[cfg(windows)]
+pub type LocalStream = NamedPipeServer;
 
 pub fn bind(path: &PathBuf) -> io::Result<LocalListener> {
     #[cfg(unix)]
     {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)?;
         }
         if path.exists() {
-            let _ = fs::remove_file(path);
+            let _ = std::fs::remove_file(path);
         }
+        let inner = UnixListener::bind(path)?;
+        return Ok(LocalListener { inner });
     }
 
-    let name = to_local_name(path)?;
-    let listener = ListenerOptions::new().name(name).create_sync()?;
-    listener.set_nonblocking(ListenerNonblockingMode::Accept)?;
-    Ok(listener)
-}
-
-pub fn connect(path: &PathBuf) -> io::Result<LocalStream> {
-    let name = to_local_name(path)?;
-    LocalSocketStream::connect(name)
-}
-
-fn to_local_name(path: &PathBuf) -> io::Result<interprocess::local_socket::Name<'_>> {
-    #[cfg(unix)]
-    {
-        path.as_path().to_fs_name::<FilesystemUdSocket>()
-    }
     #[cfg(windows)]
     {
-        let path_str = path.to_string_lossy().to_string();
-        path_str.to_fs_name::<NamedPipe>()
+        return Ok(LocalListener {
+            pipe_name: path.to_string_lossy().to_string(),
+        });
     }
 }
-#[cfg(unix)]
-use std::fs;
+
+impl LocalListener {
+    pub async fn accept(&self) -> io::Result<LocalStream> {
+        #[cfg(unix)]
+        {
+            let (stream, _) = self.inner.accept().await?;
+            return Ok(stream);
+        }
+
+        #[cfg(windows)]
+        {
+            let server = ServerOptions::new().create(&self.pipe_name)?;
+            server.connect().await?;
+            return Ok(server);
+        }
+    }
+}

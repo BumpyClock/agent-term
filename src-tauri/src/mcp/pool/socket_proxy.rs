@@ -1,15 +1,16 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io;
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
-use interprocess::local_socket::traits::{Listener as _, Stream as _};
 use serde_json::Value;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::{sleep, Duration};
 
 use crate::diagnostics;
 use super::transport::{self, LocalListener, LocalStream};
@@ -25,8 +26,8 @@ pub struct SocketProxy {
     env: HashMap<String, String>,
     status: Arc<Mutex<ServerStatus>>,
     owned: bool,
-    stdin: Arc<Mutex<Option<ChildStdin>>>,
-    child: Arc<Mutex<Option<Child>>>,
+    request_tx: Arc<Mutex<Option<mpsc::Sender<String>>>>,
+    kill_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     listener: Mutex<Option<Arc<LocalListener>>>,
     clients: Arc<Mutex<HashMap<String, ClientSender>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
@@ -50,8 +51,8 @@ impl SocketProxy {
             env,
             status: Arc::new(Mutex::new(ServerStatus::Stopped)),
             owned,
-            stdin: Arc::new(Mutex::new(None)),
-            child: Arc::new(Mutex::new(None)),
+            request_tx: Arc::new(Mutex::new(None)),
+            kill_tx: Arc::new(Mutex::new(None)),
             listener: Mutex::new(None),
             clients: Arc::new(Mutex::new(HashMap::new())),
             request_map: Arc::new(Mutex::new(HashMap::new())),
@@ -112,9 +113,11 @@ impl SocketProxy {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        if let Some(stdin) = stdin {
-            *self.stdin.lock().unwrap() = Some(stdin);
-        }
+        let (request_tx, request_rx) = mpsc::channel::<String>(1024);
+        *self.request_tx.lock().unwrap() = Some(request_tx);
+
+        let (kill_tx, kill_rx) = oneshot::channel();
+        *self.kill_tx.lock().unwrap() = Some(kill_tx);
 
         if let Some(stderr) = stderr {
             self.spawn_stderr_logger(stderr)?;
@@ -124,26 +127,47 @@ impl SocketProxy {
             self.spawn_stdout_router(stdout);
         }
 
-        #[cfg(unix)]
-        {
-            if Path::new(&self.socket_path).exists() {
-                let _ = std::fs::remove_file(&self.socket_path);
-            }
+        if let Some(stdin) = stdin {
+            self.spawn_stdin_writer(stdin, request_rx);
         }
+
+        let status = self.status.clone();
+        let shutdown = self.shutdown.clone();
+        let name = self.name.clone();
+
+        tauri::async_runtime::spawn(async move {
+            let exit = tokio::select! {
+                res = child.wait() => res,
+                signal = kill_rx => {
+                    if signal.is_ok() {
+                        let _ = child.start_kill();
+                    }
+                    child.wait().await
+                }
+            };
+
+            *status.lock().unwrap() = ServerStatus::Stopped;
+            shutdown.store(true, Ordering::SeqCst);
+
+            if let Ok(exit) = exit {
+                diagnostics::log(format!(
+                    "pool_child_exited name={} status={}",
+                    name, exit
+                ));
+            }
+        });
 
         let listener = Arc::new(transport::bind(&self.socket_path)?);
         *self.listener.lock().unwrap() = Some(listener.clone());
 
         self.spawn_accept_loop(listener);
 
-        *self.child.lock().unwrap() = Some(child);
         *self.status.lock().unwrap() = ServerStatus::Running;
         diagnostics::log(format!(
             "pool_proxy_started name={} socket={}",
             self.name,
             self.socket_path.display()
         ));
-        self.spawn_child_monitor();
         Ok(())
     }
 
@@ -154,9 +178,8 @@ impl SocketProxy {
         }
 
         if self.owned {
-            if let Some(mut child) = self.child.lock().unwrap().take() {
-                let _ = child.kill();
-                let _ = child.wait();
+            if let Some(kill_tx) = self.kill_tx.lock().unwrap().take() {
+                let _ = kill_tx.send(());
             }
             #[cfg(unix)]
             {
@@ -164,15 +187,14 @@ impl SocketProxy {
             }
         }
 
-        *self.stdin.lock().unwrap() = None;
+        *self.request_tx.lock().unwrap() = None;
         self.clients.lock().unwrap().clear();
         self.request_map.lock().unwrap().clear();
         *self.status.lock().unwrap() = ServerStatus::Stopped;
         Ok(())
     }
 
-
-    fn spawn_stderr_logger(&self, stderr: std::process::ChildStderr) -> io::Result<()> {
+    fn spawn_stderr_logger(&self, stderr: ChildStderr) -> io::Result<()> {
         let log_dir = diagnostics::log_dir().unwrap_or_else(|| PathBuf::from("."));
         let pool_dir = log_dir.join("mcppool");
         create_dir_all(&pool_dir)?;
@@ -182,19 +204,22 @@ impl SocketProxy {
             self.name,
             log_path.display()
         ));
-        let mut file = File::create(log_path)?;
-        thread::spawn(move || {
+        let file = File::create(log_path)?;
+        tauri::async_runtime::spawn(async move {
+            let mut file = tokio::fs::File::from_std(file);
             let mut reader = BufReader::new(stderr);
             let mut buffer = String::new();
             loop {
                 buffer.clear();
-                if reader.read_line(&mut buffer).is_err() {
-                    break;
+                match reader.read_line(&mut buffer).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if file.write_all(buffer.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
                 }
-                if buffer.is_empty() {
-                    break;
-                }
-                let _ = file.write_all(buffer.as_bytes());
             }
         });
         Ok(())
@@ -203,24 +228,21 @@ impl SocketProxy {
     fn spawn_accept_loop(&self, listener: Arc<LocalListener>) {
         let clients = self.clients.clone();
         let request_map = self.request_map.clone();
-        let stdin = self.stdin.clone();
+        let request_tx = self.request_tx.clone();
         let shutdown = self.shutdown.clone();
         let name = self.name.clone();
 
-        thread::spawn(move || {
+        tauri::async_runtime::spawn(async move {
             let mut counter = 0;
-            while !shutdown.load(Ordering::SeqCst) {
-                match listener.accept() {
+            loop {
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                match listener.accept().await {
                     Ok(stream) => {
-                        if let Err(err) = stream.set_nonblocking(false) {
-                            diagnostics::log(format!(
-                                "pool_client_set_blocking_failed name={} error={}",
-                                name, err
-                            ));
-                        }
                         let client_id = format!("{}-client-{}", name, counter);
                         counter += 1;
-                        let (tx, rx) = mpsc::channel::<String>();
+                        let (tx, rx) = mpsc::channel::<String>(128);
                         clients.lock().unwrap().insert(client_id.clone(), tx);
                         diagnostics::log(format!(
                             "pool_client_connected name={} client_id={}",
@@ -229,31 +251,29 @@ impl SocketProxy {
 
                         let clients_for_drop = clients.clone();
                         let request_map_for_drop = request_map.clone();
-                        let stdin_for_client = stdin.clone();
+                        let request_tx_for_client = request_tx.clone();
                         let shutdown_for_client = shutdown.clone();
                         let client_id_clone = client_id.clone();
 
-                        thread::spawn(move || {
+                        tauri::async_runtime::spawn(async move {
                             handle_client(
                                 stream,
                                 client_id_clone,
-                                stdin_for_client,
+                                request_tx_for_client,
                                 request_map_for_drop,
                                 clients_for_drop,
                                 shutdown_for_client,
                                 rx,
-                            );
+                            )
+                            .await;
                         });
-                    }
-                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(50));
                     }
                     Err(err) => {
                         diagnostics::log(format!(
                             "pool_accept_error name={} error={}",
                             name, err
                         ));
-                        thread::sleep(Duration::from_millis(50));
+                        sleep(Duration::from_millis(50)).await;
                     }
                 }
             }
@@ -265,19 +285,22 @@ impl SocketProxy {
         let request_map = self.request_map.clone();
         let shutdown = self.shutdown.clone();
         let name = self.name.clone();
-        thread::spawn(move || {
+        tauri::async_runtime::spawn(async move {
             let mut reader = BufReader::new(stdout);
             let mut buffer = String::new();
-            while !shutdown.load(Ordering::SeqCst) {
+            loop {
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
                 buffer.clear();
-                match reader.read_line(&mut buffer) {
+                match reader.read_line(&mut buffer).await {
                     Ok(0) => break,
                     Ok(_) => {
                         let line = buffer.trim_end_matches('\n').to_string();
                         if line.is_empty() {
                             continue;
                         }
-                        route_response(&line, &clients, &request_map);
+                        route_response(&line, &clients, &request_map).await;
                     }
                     Err(err) => {
                         diagnostics::log(format!(
@@ -292,176 +315,157 @@ impl SocketProxy {
         });
     }
 
-    fn spawn_child_monitor(&self) {
-        let child = self.child.clone();
-        let status = self.status.clone();
+    fn spawn_stdin_writer(&self, stdin: ChildStdin, mut rx: mpsc::Receiver<String>) {
         let shutdown = self.shutdown.clone();
         let name = self.name.clone();
-        thread::spawn(move || loop {
-            {
-                let mut guard = child.lock().unwrap();
-                if let Some(proc) = guard.as_mut() {
-                    if let Ok(Some(exit)) = proc.try_wait() {
-                        *status.lock().unwrap() = ServerStatus::Stopped;
-                        shutdown.store(true, Ordering::SeqCst);
-                        diagnostics::log(format!(
-                            "pool_child_exited name={} status={}",
-                            name, exit
-                        ));
-                        break;
-                    }
-                } else {
+        tauri::async_runtime::spawn(async move {
+            let mut stdin = stdin;
+            loop {
+                if shutdown.load(Ordering::SeqCst) {
                     break;
                 }
+                tokio::select! {
+                    message = rx.recv() => {
+                        match message {
+                            Some(line) => {
+                                if let Err(err) = stdin.write_all(line.as_bytes()).await {
+                                    diagnostics::log(format!(
+                                        "pool_request_write_failed name={} error={}",
+                                        name, err
+                                    ));
+                                    break;
+                                }
+                                if let Err(err) = stdin.write_all(b"\n").await {
+                                    diagnostics::log(format!(
+                                        "pool_request_write_failed name={} error={}",
+                                        name, err
+                                    ));
+                                    break;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = sleep(Duration::from_millis(50)) => {}
+                }
             }
-            thread::sleep(Duration::from_millis(250));
         });
     }
 }
 
-fn handle_client(
+async fn handle_client(
     stream: LocalStream,
     client_id: String,
-    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    request_tx: Arc<Mutex<Option<mpsc::Sender<String>>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
     clients: Arc<Mutex<HashMap<String, ClientSender>>>,
     shutdown: Arc<AtomicBool>,
-    rx: mpsc::Receiver<String>,
+    mut rx: mpsc::Receiver<String>,
 ) {
     diagnostics::log(format!(
         "pool_handle_client_started client_id={}",
         client_id
     ));
-    if let Err(err) = stream.set_nonblocking(true) {
-        diagnostics::log(format!(
-            "pool_handle_client_set_nonblocking_failed client_id={} error={}",
-            client_id, err
-        ));
-    }
-    let mut reader = BufReader::new(stream);
+
+    let (read_half, mut write_half) = tokio::io::split(stream);
+    let mut reader = BufReader::new(read_half);
     let mut buffer = String::new();
     let mut parse_failures = 0u32;
-    let mut pending: VecDeque<Vec<u8>> = VecDeque::new();
-    let mut pending_offset: usize = 0;
-    while !shutdown.load(Ordering::SeqCst) {
-        let mut did_work = false;
-        buffer.clear();
-        match reader.read_line(&mut buffer) {
-            Ok(0) => {
-                diagnostics::log(format!(
-                    "pool_client_disconnected client_id={}",
-                    client_id
-                ));
-                break;
-            }
-            Ok(_) => {
-                did_work = true;
-                let line = buffer.trim_end_matches('\n').to_string();
-                if line.is_empty() {
-                    continue;
-                }
-                if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                    if let Some(id) = value.get("id").and_then(id_key) {
-                        request_map.lock().unwrap().insert(id, client_id.clone());
-                    }
-                } else if parse_failures < 3 {
-                    parse_failures += 1;
-                    diagnostics::log(format!(
-                        "pool_request_parse_failed client_id={} bytes={}",
-                        client_id,
-                        line.len()
-                    ));
-                }
-                if let Some(stdin) = stdin.lock().unwrap().as_mut() {
-                    if let Err(err) = stdin.write_all(line.as_bytes()) {
+
+    loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::select! {
+            read_result = reader.read_line(&mut buffer) => {
+                match read_result {
+                    Ok(0) => {
                         diagnostics::log(format!(
-                            "pool_request_write_failed client_id={} error={}",
+                            "pool_client_disconnected client_id={}",
+                            client_id
+                        ));
+                        break;
+                    }
+                    Ok(_) => {
+                        let line = buffer.trim_end_matches('\n').to_string();
+                        buffer.clear();
+                        if line.is_empty() {
+                            continue;
+                        }
+                        if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                            if let Some(id) = value.get("id").and_then(id_key) {
+                                request_map.lock().unwrap().insert(id, client_id.clone());
+                            }
+                        } else if parse_failures < 3 {
+                            parse_failures += 1;
+                            diagnostics::log(format!(
+                                "pool_request_parse_failed client_id={} bytes={}",
+                                client_id,
+                                line.len()
+                            ));
+                        }
+                        let sender = request_tx.lock().unwrap().clone();
+                        if let Some(sender) = sender {
+                            if sender.send(line.clone()).await.is_err() {
+                                diagnostics::log(format!(
+                                    "pool_request_write_failed client_id={} error={}",
+                                    client_id,
+                                    "stdin channel closed"
+                                ));
+                                break;
+                            }
+                            diagnostics::log(format!(
+                                "pool_request_forwarded client_id={} bytes={}",
+                                client_id,
+                                line.len()
+                            ));
+                        } else {
+                            diagnostics::log(format!(
+                                "pool_stdin_missing client_id={}",
+                                client_id
+                            ));
+                        }
+                    }
+                    Err(err) => {
+                        diagnostics::log(format!(
+                            "pool_client_read_error client_id={} error={}",
                             client_id, err
                         ));
-                    }
-                    if let Err(err) = stdin.write_all(b"\n") {
-                        diagnostics::log(format!(
-                            "pool_request_write_failed client_id={} error={}",
-                            client_id, err
-                        ));
-                    }
-                    diagnostics::log(format!(
-                        "pool_request_forwarded client_id={} bytes={}",
-                        client_id,
-                        line.len()
-                    ));
-                } else {
-                    diagnostics::log(format!(
-                        "pool_stdin_missing client_id={}",
-                        client_id
-                    ));
-                }
-            }
-            Err(err) => {
-                if err.kind() != io::ErrorKind::WouldBlock {
-                    diagnostics::log(format!(
-                        "pool_client_read_error client_id={} error={}",
-                        client_id, err
-                    ));
-                    break;
-                }
-            }
-        }
-
-        while let Ok(message) = rx.try_recv() {
-            did_work = true;
-            let mut bytes = message.into_bytes();
-            bytes.push(b'\n');
-            pending.push_back(bytes);
-        }
-
-        let mut wrote_any = false;
-        while let Some(front) = pending.front() {
-            let slice = &front[pending_offset..];
-            if slice.is_empty() {
-                pending.pop_front();
-                pending_offset = 0;
-                continue;
-            }
-            match reader.get_mut().write(slice) {
-                Ok(0) => {
-                    break;
-                }
-                Ok(n) => {
-                    wrote_any = true;
-                    did_work = true;
-                    pending_offset += n;
-                    if pending_offset >= front.len() {
-                        pending.pop_front();
-                        pending_offset = 0;
+                        break;
                     }
                 }
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                    break;
-                }
-                Err(err) => {
-                    diagnostics::log(format!(
-                        "pool_client_write_failed client_id={} error={}",
-                        client_id, err
-                    ));
-                    pending.clear();
-                    pending_offset = 0;
-                    break;
+            }
+            message = rx.recv() => {
+                match message {
+                    Some(message) => {
+                        let mut bytes = message.into_bytes();
+                        bytes.push(b'\n');
+                        if let Err(err) = write_half.write_all(&bytes).await {
+                            diagnostics::log(format!(
+                                "pool_client_write_failed client_id={} error={}",
+                                client_id, err
+                            ));
+                            break;
+                        }
+                        if let Err(err) = write_half.flush().await {
+                            diagnostics::log(format!(
+                                "pool_client_flush_failed client_id={} error={}",
+                                client_id, err
+                            ));
+                            break;
+                        }
+                    }
+                    None => break,
                 }
             }
-        }
-
-        if !did_work {
-            thread::sleep(Duration::from_millis(10));
-        } else if wrote_any {
-            let _ = reader.get_mut().flush();
+            _ = sleep(Duration::from_millis(50)) => {}
         }
     }
 
     clients.lock().unwrap().remove(&client_id);
 }
 
-fn route_response(
+async fn route_response(
     line: &str,
     clients: &Arc<Mutex<HashMap<String, ClientSender>>>,
     request_map: &Arc<Mutex<HashMap<String, String>>>,
@@ -482,7 +486,7 @@ fn route_response(
     if let Some(client_id) = target {
         let sender = clients.lock().unwrap().get(&client_id).cloned();
         if let Some(sender) = sender {
-            if sender.send(line.to_string()).is_ok() {
+            if sender.send(line.to_string()).await.is_ok() {
                 diagnostics::log(format!(
                     "pool_response_routed client_id={} bytes={}",
                     client_id,
@@ -495,17 +499,17 @@ fn route_response(
                 ));
             }
         } else {
-            broadcast_to_all(line, clients);
+            broadcast_to_all(line, clients).await;
         }
     } else {
-        broadcast_to_all(line, clients);
+        broadcast_to_all(line, clients).await;
     }
 }
 
-fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, ClientSender>>>) {
+async fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, ClientSender>>>) {
     let senders: Vec<ClientSender> = clients.lock().unwrap().values().cloned().collect();
     for sender in &senders {
-        let _ = sender.send(line.to_string());
+        let _ = sender.send(line.to_string()).await;
     }
     diagnostics::log(format!(
         "pool_response_broadcast bytes={} clients={}",
@@ -513,7 +517,6 @@ fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, ClientSender
         senders.len()
     ));
 }
-
 
 fn id_key(value: &Value) -> Option<String> {
     match value {
@@ -524,5 +527,3 @@ fn id_key(value: &Value) -> Option<String> {
         _ => Some(value.to_string()),
     }
 }
-#[cfg(unix)]
-use std::path::Path;

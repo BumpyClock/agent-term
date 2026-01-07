@@ -1,15 +1,15 @@
 use std::env;
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
 
-use interprocess::TryClone;
 use agentterm_shared::diagnostics;
 use agentterm_shared::socket_path::socket_path_for;
 use agentterm_shared::transport;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::time::{sleep, Duration};
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = parse_args();
     if args.debug {
         env::set_var("AGENT_TERM_DIAG", "1");
@@ -26,7 +26,7 @@ fn main() {
         endpoint.display()
     ));
 
-    let mut stream = match connect_with_retry(&endpoint) {
+    let stream = match connect_with_retry(&endpoint).await {
         Ok(stream) => stream,
         Err(err) => {
             diagnostics::log(format!(
@@ -39,28 +39,19 @@ fn main() {
 
     diagnostics::log(format!("mcp_proxy_connected name={}", name));
 
-    let mut writer = match stream.try_clone() {
-        Ok(writer) => writer,
-        Err(err) => {
-            diagnostics::log(format!(
-                "mcp_proxy_stream_clone_failed name={} error={}",
-                name, err
-            ));
-            std::process::exit(1);
-        }
-    };
+    let (reader, writer) = tokio::io::split(stream);
 
     diagnostics::log(format!("mcp_proxy_pump_start name={} dir=stdin->socket", name));
     let stdin_name = name.clone();
-    let stdin_thread = thread::spawn(move || {
-        let mut stdin = io::stdin();
-        pump(&mut stdin, &mut writer, "stdin->socket", &stdin_name, false);
+    let stdin_task = tokio::spawn(async move {
+        let stdin = tokio::io::stdin();
+        pump(stdin, writer, "stdin->socket", &stdin_name, false).await;
     });
 
     diagnostics::log(format!("mcp_proxy_pump_start name={} dir=socket->stdout", name));
-    let mut stdout = io::stdout();
-    pump(&mut stream, &mut stdout, "socket->stdout", &name, true);
-    let _ = stdin_thread.join();
+    let stdout = tokio::io::stdout();
+    pump(reader, stdout, "socket->stdout", &name, true).await;
+    let _ = stdin_task.await;
     diagnostics::log(format!("mcp_proxy_exit name={}", name));
 }
 
@@ -92,14 +83,14 @@ fn parse_args() -> ProxyArgs {
     ProxyArgs { name, endpoint, debug }
 }
 
-fn connect_with_retry(path: &PathBuf) -> io::Result<transport::LocalStream> {
+async fn connect_with_retry(path: &PathBuf) -> io::Result<transport::LocalStream> {
     let mut last_err = None;
     for _ in 0..30 {
-        match transport::connect(path) {
+        match transport::connect(path).await {
             Ok(stream) => return Ok(stream),
             Err(err) => {
                 last_err = Some(err);
-                thread::sleep(Duration::from_millis(100));
+                sleep(Duration::from_millis(100)).await;
             }
         }
     }
@@ -108,9 +99,9 @@ fn connect_with_retry(path: &PathBuf) -> io::Result<transport::LocalStream> {
     }))
 }
 
-fn pump<R: Read, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
+async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    mut reader: R,
+    mut writer: W,
     direction: &str,
     name: &str,
     flush_after_write: bool,
@@ -118,7 +109,7 @@ fn pump<R: Read, W: Write>(
     let mut buf = [0u8; 8192];
     let mut total: u64 = 0;
     loop {
-        match reader.read(&mut buf) {
+        match reader.read(&mut buf).await {
             Ok(0) => {
                 diagnostics::log(format!(
                     "mcp_proxy_eof name={} dir={} total_bytes={}",
@@ -132,7 +123,7 @@ fn pump<R: Read, W: Write>(
                     "mcp_proxy_read name={} dir={} bytes={}",
                     name, direction, n
                 ));
-                if let Err(err) = writer.write_all(&buf[..n]) {
+                if let Err(err) = writer.write_all(&buf[..n]).await {
                     diagnostics::log(format!(
                         "mcp_proxy_write_failed name={} dir={} error={}",
                         name, direction, err
@@ -140,7 +131,7 @@ fn pump<R: Read, W: Write>(
                     break;
                 }
                 if flush_after_write {
-                    if let Err(err) = writer.flush() {
+                    if let Err(err) = writer.flush().await {
                         diagnostics::log(format!(
                             "mcp_proxy_flush_failed name={} dir={} error={}",
                             name, direction, err

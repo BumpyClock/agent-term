@@ -7,7 +7,6 @@ members = [
 ]
 
 [workspace.dependencies]
-interprocess = "2.2.3"
 dirs = "6.0.0"
 time = { version = "0.3.44", features = ["formatting"] }
 
@@ -43,9 +42,8 @@ parking_lot = "0.12.5"
 rayon = "1.11.0"
 dirs = { workspace = true }
 time = { workspace = true }
-tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 window-vibrancy = "0.7.1"
-interprocess = { workspace = true }
 agentterm-shared = { path = "crates/agentterm-shared" }
 
 [target.'cfg(unix)'.dependencies]

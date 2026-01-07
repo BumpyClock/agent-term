@@ -9,7 +9,6 @@ use agentterm_shared::socket_path::socket_path_for;
 use crate::diagnostics;
 use crate::mcp::config::get_agent_term_mcp_run_dir;
 use super::socket_proxy::SocketProxy;
-use super::transport;
 use super::types::ServerStatus;
 
 #[derive(Debug, Clone)]
@@ -160,6 +159,15 @@ pub fn socket_name_from_path(path: &Path) -> Option<String> {
     Some(trimmed.trim_end_matches(".sock").to_string())
 }
 
+#[cfg(unix)]
 pub fn socket_alive(path: &PathBuf) -> bool {
-    transport::connect(path).is_ok()
+    std::os::unix::net::UnixStream::connect(path).is_ok()
+}
+
+#[cfg(windows)]
+pub fn socket_alive(path: &PathBuf) -> bool {
+    let path_str = path.to_string_lossy().to_string();
+    tokio::net::windows::named_pipe::ClientOptions::new()
+        .open(path_str)
+        .is_ok()
 }

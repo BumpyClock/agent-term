@@ -9,4 +9,4 @@ path = "src/main.rs"
 
 [dependencies]
 agentterm-shared = { path = "../agentterm-shared" }
-interprocess = { workspace = true }
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "time"] }

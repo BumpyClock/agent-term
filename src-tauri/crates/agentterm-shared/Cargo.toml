@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-interprocess = { workspace = true }
 dirs = { workspace = true }
 time = { workspace = true }
+tokio = { version = "1", features = ["net"] }
