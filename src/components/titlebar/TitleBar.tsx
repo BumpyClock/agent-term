@@ -19,7 +19,7 @@ export function TitleBar() {
   useEffect(() => {
     document.documentElement.style.setProperty(
       "--titlebar-height",
-      isMac ? "18px" : "40px",
+      "40px",
     );
     document.documentElement.style.setProperty(
       "--sidebar-top",

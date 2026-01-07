@@ -1,7 +1,9 @@
 import type { MouseEvent } from 'react';
+import { motion } from 'motion/react';
 import type { Section } from '../../store/terminalStore';
 import type { IconDescriptor } from './types';
 import { LucideIcon } from './LucideIcon';
+import { GripVertical } from 'lucide-react';
 
 interface SectionHeaderProps {
   section: Section;
@@ -9,6 +11,7 @@ interface SectionHeaderProps {
   isEditing: boolean;
   editingName: string;
   icon: IconDescriptor | null;
+  dragHandleProps?: Record<string, unknown>;
   onToggleCollapse: () => void;
   onEditingNameChange: (value: string) => void;
   onSaveName: () => void;
@@ -26,6 +29,7 @@ export function SectionHeader({
   isEditing,
   editingName,
   icon,
+  dragHandleProps,
   onToggleCollapse,
   onEditingNameChange,
   onSaveName,
@@ -38,7 +42,18 @@ export function SectionHeader({
 }: SectionHeaderProps) {
   return (
     <div className="section-header" onClick={onToggleCollapse}>
-      <span className="collapse-icon">{isCollapsed ? '▶' : '▼'}</span>
+      {dragHandleProps && !section.isDefault && (
+        <span className="drag-handle" {...dragHandleProps} onClick={(e) => e.stopPropagation()}>
+          <GripVertical size={16} />
+        </span>
+      )}
+      <motion.span
+        className="collapse-icon"
+        animate={{ rotate: isCollapsed ? 0 : 90 }}
+        transition={{ duration: 0.2 }}
+      >
+        ▶
+      </motion.span>
       {icon?.kind === 'lucide' ? (
         <LucideIcon
           id={icon.id}

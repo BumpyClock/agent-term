@@ -5,6 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { useTerminalStore, type Section, type Session, type SessionTool } from '../../store/terminalStore';
+import { DndContext, DragOverlay, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent, type DragCancelEvent } from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableSection, DragOverlayContent, type DragData, type DragItemType } from './dnd';
 import { EditProjectDialog } from './EditProjectDialog';
 import { EditTabDialog } from './EditTabDialog';
 import { McpManagerDialog } from './McpManagerDialog';
@@ -36,6 +39,9 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     updateSessionCommand,
     updateSessionIcon,
     getSessionsBySection,
+    reorderSessionsInSection,
+    reorderSections,
+    moveSessionToSectionAtIndex,
   } = useTerminalStore();
   const platformInfo =
     typeof navigator !== 'undefined'
@@ -68,6 +74,9 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeType, setActiveType] = useState<DragItemType | null>(null);
+  const [collapsedBeforeDrag, setCollapsedBeforeDrag] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     invoke('search_reindex').catch((err) => {
@@ -101,6 +110,77 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
       setIsSearching(false);
     };
   }, [searchQuery]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const data = event.active.data.current as DragData;
+    setActiveId(event.active.id as string);
+    setActiveType(data.type);
+
+    if (data.type === 'section') {
+      const states: Record<string, boolean> = {};
+      sections.forEach((section) => {
+        if (!section.isDefault) {
+          states[section.id] = section.collapsed;
+          if (!section.collapsed) {
+            updateSection(section.id, { collapsed: true });
+          }
+        }
+      });
+      setCollapsedBeforeDrag(states);
+    }
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    const activeData = active.data.current as DragData;
+
+    if (activeData.type === 'section' && Object.keys(collapsedBeforeDrag).length > 0) {
+      Object.entries(collapsedBeforeDrag).forEach(([sectionId, wasCollapsed]) => {
+        if (!wasCollapsed) {
+          updateSection(sectionId, { collapsed: false });
+        }
+      });
+      setCollapsedBeforeDrag({});
+    }
+
+    setActiveId(null);
+    setActiveType(null);
+
+    if (!over || active.id === over.id) return;
+
+    const overData = over.data.current as DragData;
+
+    if (activeData.type === 'section' && overData.type === 'section') {
+      reorderSections(active.id as string, over.id as string);
+    } else if (activeData.type === 'session' && overData.type === 'session') {
+      if (activeData.sectionId === overData.sectionId) {
+        reorderSessionsInSection(activeData.sectionId, active.id as string, over.id as string);
+      } else {
+        const targetSessions = getSessionsBySection(overData.sectionId);
+        const overIndex = targetSessions.findIndex((s) => s.id === over.id);
+        moveSessionToSectionAtIndex(active.id as string, overData.sectionId, overIndex);
+      }
+    }
+  };
+
+  const handleDragCancel = (_event: DragCancelEvent) => {
+    if (Object.keys(collapsedBeforeDrag).length > 0) {
+      Object.entries(collapsedBeforeDrag).forEach(([sectionId, wasCollapsed]) => {
+        if (!wasCollapsed) {
+          updateSection(sectionId, { collapsed: false });
+        }
+      });
+      setCollapsedBeforeDrag({});
+    }
+
+    setActiveId(null);
+    setActiveType(null);
+  };
 
   const handleAddSection = async () => {
     if (newSectionName.trim() && newSectionPath.trim()) {
@@ -272,9 +352,16 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     setMenuSectionPosition(null);
   };
 
-  const defaultSection = sections.find((section) => section.isDefault);
   const nonDefaultSections = useMemo(
-    () => sections.filter((section) => !section.isDefault),
+    () => sections.filter((s) => !s.isDefault),
+    [sections]
+  );
+  const nonDefaultSectionIds = useMemo(
+    () => nonDefaultSections.map((s) => s.id),
+    [nonDefaultSections]
+  );
+  const defaultSection = useMemo(
+    () => sections.find((s) => s.isDefault),
     [sections]
   );
 
@@ -285,17 +372,24 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
 
   return (
     <div className="sidebar">
-      <SearchBar
-        query={searchQuery}
-        results={searchResults}
-        isSearching={isSearching}
-        onQueryChange={setSearchQuery}
-        onSelectResult={handleSearchResultClick}
-        onClear={() => {
-          setSearchResults([]);
-          setSearchQuery('');
-        }}
-      />
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <SearchBar
+          query={searchQuery}
+          results={searchResults}
+          isSearching={isSearching}
+          onQueryChange={setSearchQuery}
+          onSelectResult={handleSearchResultClick}
+          onClear={() => {
+            setSearchResults([]);
+            setSearchQuery('');
+          }}
+        />
 
       <div className="sidebar-header">
         <h2>Projects</h2>
@@ -341,91 +435,98 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
       )}
 
       <div className="sections-list">
-        {nonDefaultSections.map((section) => (
-          <ProjectSection
-            key={section.id}
-            section={section}
-            sessions={getSessionsBySection(section.id)}
-            activeSessionId={activeSessionId}
-            isCollapsed={section.collapsed}
-            isEditing={editingSectionId === section.id}
-            editingName={editingName}
-            editingSessionId={editingSessionId}
-            editingSessionTitle={editingSessionTitle}
-            onEditingNameChange={setEditingName}
-            onSaveSectionEdit={() => handleSaveEdit(section.id)}
-            onCancelSectionEdit={() => {
-              setEditingSectionId(null);
-              setEditingName('');
-            }}
-            onStartSectionEdit={() => handleStartEdit(section)}
-            onToggleCollapse={() => toggleSectionCollapse(section.id)}
-            onOpenSectionMenu={(event) => {
-              event.stopPropagation();
-              const rect = event.currentTarget.getBoundingClientRect();
-              openSectionMenuAt(section.id, { x: Math.round(rect.right), y: Math.round(rect.bottom) });
-            }}
-            onOpenTabPicker={(event) => {
-              event.stopPropagation();
-              const rect = event.currentTarget.getBoundingClientRect();
-              setTabPickerPosition({ x: Math.round(rect.left), y: Math.round(rect.bottom + 6) });
-              setTabPickerSectionId((prev) => (prev === section.id ? null : section.id));
-            }}
-            onDeleteSection={async (event) => {
-              event.stopPropagation();
-              if (
-                confirm(`Delete project "${section.name}"? Terminals will be moved to Default.`)
-              ) {
-                await removeSection(section.id);
-              }
-            }}
-            onSectionContextMenu={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              openSectionMenuAt(section.id, { x: event.clientX, y: event.clientY });
-            }}
-            onSelectSession={(session) => setActiveSession(session.id)}
-            onSessionContextMenu={(session, event) => {
-              event.preventDefault();
-              openMenuAt(session.id, { x: event.clientX, y: event.clientY });
-            }}
-            onSessionMenuClick={(session, event) => {
-              event.stopPropagation();
-              const rect = event.currentTarget.getBoundingClientRect();
-              openMenuAt(session.id, { x: Math.round(rect.right), y: Math.round(rect.bottom) });
-            }}
-            onCloseSession={async (session, event) => {
-              event.stopPropagation();
-              console.debug('[tab-close][sidebar] request', {
-                sessionId: session.id,
-                sectionId: section.id,
-                platform: platformInfo,
-              });
-              try {
-                await removeSession(session.id);
-                console.debug('[tab-close][sidebar] removed', {
-                  sessionId: session.id,
-                  sectionId: section.id,
-                  platform: platformInfo,
-                });
-              } catch (err) {
-                console.error('[tab-close][sidebar] removeSession failed', {
-                  sessionId: session.id,
-                  sectionId: section.id,
-                  platform: platformInfo,
-                  error: err,
-                });
-              }
-            }}
-            onEditingTitleChange={setEditingSessionTitle}
-            onSaveSessionEdit={handleSaveSessionEdit}
-            onCancelSessionEdit={() => {
-              setEditingSessionId(null);
-              setEditingSessionTitle('');
-            }}
-            onStartSessionEdit={handleStartSessionEdit}
-          />
-        ))}
+        <SortableContext items={nonDefaultSectionIds} strategy={verticalListSortingStrategy}>
+          {nonDefaultSections.map((section) => (
+            <SortableSection
+              key={section.id}
+              sectionId={section.id}
+              disabled={editingSectionId === section.id}
+            >
+              <ProjectSection
+                section={section}
+                sessions={getSessionsBySection(section.id)}
+                activeSessionId={activeSessionId}
+                isCollapsed={section.collapsed}
+                isEditing={editingSectionId === section.id}
+                editingName={editingName}
+                editingSessionId={editingSessionId}
+                editingSessionTitle={editingSessionTitle}
+                onEditingNameChange={setEditingName}
+                onSaveSectionEdit={() => handleSaveEdit(section.id)}
+                onCancelSectionEdit={() => {
+                  setEditingSectionId(null);
+                  setEditingName('');
+                }}
+                onStartSectionEdit={() => handleStartEdit(section)}
+                onToggleCollapse={() => toggleSectionCollapse(section.id)}
+                onOpenSectionMenu={(event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openSectionMenuAt(section.id, { x: Math.round(rect.right), y: Math.round(rect.bottom) });
+                }}
+                onOpenTabPicker={(event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setTabPickerPosition({ x: Math.round(rect.left), y: Math.round(rect.bottom + 6) });
+                  setTabPickerSectionId((prev) => (prev === section.id ? null : section.id));
+                }}
+                onDeleteSection={async (event) => {
+                  event.stopPropagation();
+                  if (
+                    confirm(`Delete project "${section.name}"? Terminals will be moved to Default.`)
+                  ) {
+                    await removeSection(section.id);
+                  }
+                }}
+                onSectionContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openSectionMenuAt(section.id, { x: event.clientX, y: event.clientY });
+                }}
+                onSelectSession={(session) => setActiveSession(session.id)}
+                onSessionContextMenu={(session, event) => {
+                  event.preventDefault();
+                  openMenuAt(session.id, { x: event.clientX, y: event.clientY });
+                }}
+                onSessionMenuClick={(session, event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openMenuAt(session.id, { x: Math.round(rect.right), y: Math.round(rect.bottom) });
+                }}
+                onCloseSession={async (session, event) => {
+                  event.stopPropagation();
+                  console.debug('[tab-close][sidebar] request', {
+                    sessionId: session.id,
+                    sectionId: section.id,
+                    platform: platformInfo,
+                  });
+                  try {
+                    await removeSession(session.id);
+                    console.debug('[tab-close][sidebar] removed', {
+                      sessionId: session.id,
+                      sectionId: section.id,
+                      platform: platformInfo,
+                    });
+                  } catch (err) {
+                    console.error('[tab-close][sidebar] removeSession failed', {
+                      sessionId: session.id,
+                      sectionId: section.id,
+                      platform: platformInfo,
+                      error: err,
+                    });
+                  }
+                }}
+                onEditingTitleChange={setEditingSessionTitle}
+                onSaveSessionEdit={handleSaveSessionEdit}
+                onCancelSessionEdit={() => {
+                  setEditingSessionId(null);
+                  setEditingSessionTitle('');
+                }}
+                onStartSessionEdit={handleStartSessionEdit}
+              />
+            </SortableSection>
+          ))}
+        </SortableContext>
         {defaultSection && (
           <div className="section section-default">
             <div className="tabs-list">
@@ -434,6 +535,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                 activeSessionId={activeSessionId}
                 editingSessionId={editingSessionId}
                 editingSessionTitle={editingSessionTitle}
+                sectionId={defaultSection.id}
                 showEmpty={false}
                 onEditingTitleChange={setEditingSessionTitle}
                 onSaveSessionEdit={handleSaveSessionEdit}
@@ -482,6 +584,18 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
           </div>
         )}
       </div>
+
+        <DragOverlay>
+          {activeId && activeType && (
+            <DragOverlayContent
+              activeId={activeId}
+              activeType={activeType}
+              sessions={sessions}
+              sections={sections}
+            />
+          )}
+        </DragOverlay>
+      </DndContext>
 
       {tabPickerSectionId && tabPickerPosition &&
         createPortal(
@@ -538,31 +652,29 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
           document.body
         )}
 
-      {editSessionId && (
-        <EditTabDialog
-          titleValue={editTitle}
-          commandValue={editCommand}
-          iconValue={editIcon}
-          onTitleChange={setEditTitle}
-          onCommandChange={setEditCommand}
-          onIconChange={setEditIcon}
-          onClose={closeEditDialog}
-          onSave={saveEditDialog}
-        />
-      )}
+      <EditTabDialog
+        open={!!editSessionId}
+        onOpenChange={(open) => !open && closeEditDialog()}
+        titleValue={editTitle}
+        commandValue={editCommand}
+        iconValue={editIcon}
+        onTitleChange={setEditTitle}
+        onCommandChange={setEditCommand}
+        onIconChange={setEditIcon}
+        onSave={saveEditDialog}
+      />
 
-      {editSectionId && (
-        <EditProjectDialog
-          nameValue={editSectionName}
-          pathValue={editSectionPath}
-          iconValue={editSectionIcon}
-          onNameChange={setEditSectionName}
-          onPathChange={setEditSectionPath}
-          onIconChange={setEditSectionIcon}
-          onClose={closeSectionEditDialog}
-          onSave={saveSectionEditDialog}
-        />
-      )}
+      <EditProjectDialog
+        open={!!editSectionId}
+        onOpenChange={(open) => !open && closeSectionEditDialog()}
+        nameValue={editSectionName}
+        pathValue={editSectionPath}
+        iconValue={editSectionIcon}
+        onNameChange={setEditSectionName}
+        onPathChange={setEditSectionPath}
+        onIconChange={setEditSectionIcon}
+        onSave={saveSectionEditDialog}
+      />
 
       {mcpSession &&
         createPortal(

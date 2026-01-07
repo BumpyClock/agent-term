@@ -6,6 +6,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { enableMapSet } from 'immer';
 import { invoke } from '@tauri-apps/api/core';
+import { arrayMove } from '@dnd-kit/sortable';
 
 enableMapSet();
 
@@ -66,6 +67,9 @@ interface TerminalState {
   updateSessionCommand: (id: string, command: string) => Promise<void>;
   updateSessionIcon: (id: string, icon: string | null) => Promise<void>;
   moveSessionToSection: (sessionId: string, sectionId: string) => Promise<void>;
+  reorderSessionsInSection: (sectionId: string, activeId: string, overId: string) => void;
+  reorderSections: (activeId: string, overId: string) => void;
+  moveSessionToSectionAtIndex: (sessionId: string, targetSectionId: string, index: number) => void;
   updateSessionStatus: (id: string, status: SessionStatus) => void;
   updateToolSessionId: (id: string, tool: string, toolSessionId: string) => void;
   setLastKnownSize: (rows: number, cols: number) => void;
@@ -371,6 +375,104 @@ export const useTerminalStore = create<TerminalState>()(
 
           session.sectionId = sectionId;
         });
+      },
+
+      reorderSessionsInSection: (sectionId: string, activeId: string, overId: string) => {
+        set((state) => {
+          const sessionIds = state.sessionsBySection[sectionId];
+          if (!sessionIds) return;
+
+          const oldIndex = sessionIds.indexOf(activeId);
+          const newIndex = sessionIds.indexOf(overId);
+
+          if (oldIndex === -1 || newIndex === -1) return;
+
+          state.sessionsBySection[sectionId] = arrayMove(sessionIds, oldIndex, newIndex);
+
+          state.sessionsBySection[sectionId].forEach((id, index) => {
+            if (state.sessions[id]) {
+              state.sessions[id].tabOrder = index;
+            }
+          });
+        });
+      },
+
+      reorderSections: (activeId: string, overId: string) => {
+        set((state) => {
+          const nonDefaultSections = state.sections.filter((s) => !s.isDefault);
+          const sectionIds = nonDefaultSections.map((s) => s.id);
+
+          const oldIndex = sectionIds.indexOf(activeId);
+          const newIndex = sectionIds.indexOf(overId);
+
+          if (oldIndex === -1 || newIndex === -1) return;
+
+          const reorderedIds = arrayMove(sectionIds, oldIndex, newIndex);
+
+          reorderedIds.forEach((id, index) => {
+            const section = state.sections.find((s) => s.id === id);
+            if (section) {
+              section.order = index + 1;
+            }
+          });
+
+          state.sections.sort((a, b) => {
+            if (a.isDefault) return 1;
+            if (b.isDefault) return -1;
+            return a.order - b.order;
+          });
+        });
+      },
+
+      moveSessionToSectionAtIndex: (sessionId: string, targetSectionId: string, index: number) => {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return;
+
+          const oldSectionId = session.sectionId;
+
+          if (oldSectionId !== targetSectionId) {
+            const oldSectionSessions = state.sessionsBySection[oldSectionId];
+            if (oldSectionSessions) {
+              const idx = oldSectionSessions.indexOf(sessionId);
+              if (idx !== -1) oldSectionSessions.splice(idx, 1);
+            }
+
+            if (!state.sessionsBySection[targetSectionId]) {
+              state.sessionsBySection[targetSectionId] = [];
+            }
+
+            const clampedIndex = Math.min(index, state.sessionsBySection[targetSectionId].length);
+            state.sessionsBySection[targetSectionId].splice(clampedIndex, 0, sessionId);
+
+            session.sectionId = targetSectionId;
+          } else {
+            const sectionSessions = state.sessionsBySection[targetSectionId];
+            if (!sectionSessions) return;
+
+            const currentIndex = sectionSessions.indexOf(sessionId);
+            if (currentIndex === -1) return;
+
+            state.sessionsBySection[targetSectionId] = arrayMove(
+              sectionSessions,
+              currentIndex,
+              Math.min(index, sectionSessions.length - 1)
+            );
+          }
+
+          [oldSectionId, targetSectionId].forEach((secId) => {
+            const ids = state.sessionsBySection[secId];
+            if (ids) {
+              ids.forEach((id, i) => {
+                if (state.sessions[id]) {
+                  state.sessions[id].tabOrder = i;
+                }
+              });
+            }
+          });
+        });
+
+        invoke('move_session', { id: sessionId, sectionId: targetSectionId }).catch(console.error);
       },
 
       updateSessionStatus: (id: string, status: SessionStatus) => {

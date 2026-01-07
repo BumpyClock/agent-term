@@ -863,3 +863,59 @@
     font-style: italic;
 }
 
+/* Drag and Drop Styles */
+.drag-overlay {
+    box-shadow: var(--shadow-popover);
+    border-radius: var(--radius-md);
+    background-color: var(--background);
+    opacity: 0.95;
+    cursor: grabbing;
+    pointer-events: none;
+}
+
+.drag-overlay.tab {
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.drag-overlay.section-header {
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.drag-handle {
+    cursor: grab;
+    color: var(--muted-foreground);
+    padding: 2px 4px;
+    margin-right: 2px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.section-header:hover .drag-handle,
+.tab:hover .drag-handle {
+    opacity: 0.6;
+}
+
+.drag-handle:hover {
+    opacity: 1 !important;
+    color: var(--foreground);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.section.drop-target {
+    outline: 2px dashed var(--primary);
+    outline-offset: -2px;
+    border-radius: var(--radius-md);
+}
+

@@ -4,12 +4,15 @@
 import type { MouseEvent } from 'react';
 import type { Session } from '../../store/terminalStore';
 import { SessionRow } from './SessionRow';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableSessionRow } from './dnd';
 
 interface TabsListProps {
   sessions: Session[];
   activeSessionId: string | null;
   editingSessionId: string | null;
   editingSessionTitle: string;
+  sectionId: string;
   showEmpty?: boolean;
   onEditingTitleChange: (value: string) => void;
   onSaveSessionEdit: (session: Session) => void;
@@ -26,6 +29,7 @@ export function TabsList({
   activeSessionId,
   editingSessionId,
   editingSessionTitle,
+  sectionId,
   showEmpty = true,
   onEditingTitleChange,
   onSaveSessionEdit,
@@ -50,34 +54,40 @@ export function TabsList({
   }
 
   return (
-    <>
+    <SortableContext items={sessions.map((s) => s.id)} strategy={verticalListSortingStrategy}>
       {sessions.map((session) => (
-        <SessionRow
+        <SortableSessionRow
           key={session.id}
-          session={session}
-          isActive={activeSessionId === session.id}
-          isEditing={editingSessionId === session.id}
-          editingTitle={editingSessionTitle}
-          onEditingTitleChange={onEditingTitleChange}
-          onEditingTitleCommit={() => onSaveSessionEdit(session)}
-          onEditingTitleCancel={onCancelSessionEdit}
-          onSelect={() => onSelectSession(session)}
-          onContextMenu={(event) => onSessionContextMenu(session, event)}
-          onMenuClick={(event) => onMenuClick(session, event)}
-          onClose={(event) => {
-            console.debug('[tab-close][ui] click', {
-              sessionId: session.id,
-              sectionId: session.sectionId,
-              platform: platformInfo,
-            });
-            onCloseSession(session, event);
-          }}
-          onStartEdit={(event) => {
-            event.stopPropagation();
-            onStartSessionEdit(session);
-          }}
-        />
+          sessionId={session.id}
+          sectionId={sectionId}
+          disabled={editingSessionId === session.id}
+        >
+          <SessionRow
+            session={session}
+            isActive={activeSessionId === session.id}
+            isEditing={editingSessionId === session.id}
+            editingTitle={editingSessionTitle}
+            onEditingTitleChange={onEditingTitleChange}
+            onEditingTitleCommit={() => onSaveSessionEdit(session)}
+            onEditingTitleCancel={onCancelSessionEdit}
+            onSelect={() => onSelectSession(session)}
+            onContextMenu={(event) => onSessionContextMenu(session, event)}
+            onMenuClick={(event) => onMenuClick(session, event)}
+            onClose={(event) => {
+              console.debug('[tab-close][ui] click', {
+                sessionId: session.id,
+                sectionId: session.sectionId,
+                platform: platformInfo,
+              });
+              onCloseSession(session, event);
+            }}
+            onStartEdit={(event) => {
+              event.stopPropagation();
+              onStartSessionEdit(session);
+            }}
+          />
+        </SortableSessionRow>
       ))}
-    </>
+    </SortableContext>
   );
 }

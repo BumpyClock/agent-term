@@ -1,4 +1,5 @@
 import type { MouseEvent } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import type { Section, Session } from '../../store/terminalStore';
 import { resolveSectionIcon } from './utils';
 import { SectionHeader } from './SectionHeader';
@@ -13,6 +14,7 @@ interface ProjectSectionProps {
   editingName: string;
   editingSessionId: string | null;
   editingSessionTitle: string;
+  dragHandleProps?: Record<string, unknown>;
   onEditingNameChange: (value: string) => void;
   onSaveSectionEdit: () => void;
   onCancelSectionEdit: () => void;
@@ -41,6 +43,7 @@ export function ProjectSection({
   editingName,
   editingSessionId,
   editingSessionTitle,
+  dragHandleProps,
   onEditingNameChange,
   onSaveSectionEdit,
   onCancelSectionEdit,
@@ -67,6 +70,7 @@ export function ProjectSection({
         isEditing={isEditing}
         editingName={editingName}
         icon={resolveSectionIcon(section)}
+        dragHandleProps={dragHandleProps}
         onToggleCollapse={onToggleCollapse}
         onEditingNameChange={onEditingNameChange}
         onSaveName={onSaveSectionEdit}
@@ -77,24 +81,34 @@ export function ProjectSection({
         onAddTab={onOpenTabPicker}
         onDelete={onDeleteSection}
       />
-      {!isCollapsed && (
-        <div className="tabs-list">
-          <TabsList
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            editingSessionId={editingSessionId}
-            editingSessionTitle={editingSessionTitle}
-            onEditingTitleChange={onEditingTitleChange}
-            onSaveSessionEdit={onSaveSessionEdit}
-            onCancelSessionEdit={onCancelSessionEdit}
-            onStartSessionEdit={onStartSessionEdit}
-            onSelectSession={onSelectSession}
-            onSessionContextMenu={onSessionContextMenu}
-            onMenuClick={onSessionMenuClick}
-            onCloseSession={onCloseSession}
-          />
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <motion.div
+            className="tabs-list"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            style={{ overflow: 'hidden' }}
+          >
+            <TabsList
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              editingSessionId={editingSessionId}
+              editingSessionTitle={editingSessionTitle}
+              sectionId={section.id}
+              onEditingTitleChange={onEditingTitleChange}
+              onSaveSessionEdit={onSaveSessionEdit}
+              onCancelSessionEdit={onCancelSessionEdit}
+              onStartSessionEdit={onStartSessionEdit}
+              onSelectSession={onSelectSession}
+              onSessionContextMenu={onSessionContextMenu}
+              onMenuClick={onSessionMenuClick}
+              onCloseSession={onCloseSession}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
