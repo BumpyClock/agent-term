@@ -1,0 +1,1 @@
+`Agent Term` is a cross platform terminal emulator optimized for Agentic coding workflows. Users typically run multiple tools like claude-code , codex-cli etc in parallel. Agent term allows them to organize the open tabs by project so that they can easily switch between them and keep track of agent sessions.
