@@ -1,13 +1,17 @@
 {
   "name": "agent-term",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build-arm64": "tauri build --target aarch64-pc-windows-msvc",
+    "build-x64": "tauri build --target x86_64-pc-windows-msvc",
+    "build-x86": "tauri build --target i686-pc-windows-msvc",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "version": "node scripts/sync-version.mjs && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
