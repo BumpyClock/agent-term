@@ -12,23 +12,6 @@ export const toolOptions: Array<{
   { tool: 'gemini', title: 'Gemini', icon: '/tool-icons/google-logo.svg' },
 ];
 
-export const toolIconOptions = [
-  { label: 'Anthropic', value: '/tool-icons/anthropic-logo.svg' },
-  { label: 'Claude', value: '/tool-icons/claude-logo.svg' },
-  { label: 'Cursor', value: '/tool-icons/cursor.svg' },
-  { label: 'FastAPI', value: '/tool-icons/fastapi-seeklogo.svg' },
-  { label: 'Google', value: '/tool-icons/google-logo.svg' },
-  { label: 'Grok', value: '/tool-icons/Grok.png' },
-  { label: 'MCP', value: '/tool-icons/mcp.svg' },
-  { label: 'Ollama', value: '/tool-icons/Ollama.png' },
-  { label: 'OpenAI', value: '/tool-icons/OpenAI.png' },
-  { label: 'OpenRouter', value: '/tool-icons/OpenRouter.png' },
-  { label: 'Python', value: '/tool-icons/Python-logo-notext.svg' },
-  { label: 'React', value: '/tool-icons/React-icon.svg' },
-  { label: 'VS Code', value: '/tool-icons/Visual_Studio_Code_1.35_icon.svg' },
-  { label: 'Windsurf', value: '/tool-icons/windsurf-white-symbol.svg' },
-];
-
 export const lucideIcons = [
   {
     id: 'terminal',

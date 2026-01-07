@@ -10,6 +10,12 @@ use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() {
+    // Handle --version early before full arg parsing
+    if env::args().any(|a| a == "--version" || a == "-V") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        std::process::exit(0);
+    }
+
     let args = parse_args();
     if args.debug {
         env::set_var("AGENT_TERM_DIAG", "1");

@@ -1,4 +1,8 @@
-import { lucideIcons, toolIconOptions } from './constants';
+import { useState } from 'react';
+import { MoreHorizontal } from 'lucide-react';
+import { lucideIcons } from './constants';
+import { getToolIconOptions } from './useToolIcons';
+import { LucideIconSearchModal } from './LucideIconSearchModal';
 
 interface IconPickerProps {
   value: string | null;
@@ -6,6 +10,9 @@ interface IconPickerProps {
 }
 
 export function IconPicker({ value, onChange }: IconPickerProps) {
+  const [lucideModalOpen, setLucideModalOpen] = useState(false);
+  const toolIconOptions = getToolIconOptions();
+
   return (
     <div className="dialog-label">
       Icon
@@ -47,7 +54,22 @@ export function IconPicker({ value, onChange }: IconPickerProps) {
             </svg>
           </button>
         ))}
+
+        <button
+          className="dialog-icon-option dialog-icon-more"
+          onClick={() => setLucideModalOpen(true)}
+          type="button"
+          title="More icons..."
+        >
+          <MoreHorizontal size={20} />
+        </button>
       </div>
+      <LucideIconSearchModal
+        open={lucideModalOpen}
+        onOpenChange={setLucideModalOpen}
+        onSelect={onChange}
+        currentValue={value}
+      />
     </div>
   );
 }

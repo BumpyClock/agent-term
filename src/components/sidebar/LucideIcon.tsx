@@ -1,4 +1,5 @@
 import { lucideIcons } from './constants';
+import { DynamicLucideIcon } from './DynamicLucideIcon';
 
 interface LucideIconProps {
   id: string;
@@ -7,14 +8,21 @@ interface LucideIconProps {
 }
 
 export function LucideIcon({ id, className, title }: LucideIconProps) {
-  const icon = lucideIcons.find((item) => item.id === id);
-  if (!icon) return null;
+  const staticIcon = lucideIcons.find((item) => item.id === id);
+
+  if (staticIcon) {
+    return (
+      <span className={className} title={title}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          {staticIcon.svg}
+        </svg>
+      </span>
+    );
+  }
 
   return (
     <span className={className} title={title}>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        {icon.svg}
-      </svg>
+      <DynamicLucideIcon name={id} />
     </span>
   );
 }

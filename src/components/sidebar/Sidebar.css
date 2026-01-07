@@ -220,6 +220,10 @@
     opacity: 0.85;
 }
 
+.dark img.section-icon {
+    filter: invert(1) hue-rotate(180deg);
+}
+
 .section-icon--lucide {
     display: inline-flex;
     align-items: center;
@@ -332,6 +336,10 @@
     margin-right: 8px;
     object-fit: contain;
     opacity: 0.85;
+}
+
+.dark img.tab-tool-icon {
+    filter: invert(1) hue-rotate(180deg);
 }
 
 .tab-tool-icon--lucide {
@@ -787,6 +795,10 @@
     object-fit: contain;
 }
 
+.dark .dialog-icon-option img {
+    filter: invert(1) hue-rotate(180deg);
+}
+
 .dialog-icon-option svg {
     width: 20px;
     height: 20px;
@@ -1085,5 +1097,73 @@
     font-family: var(--font-mono);
     font-size: 10px;
     margin-right: 4px;
+}
+
+/* Lucide Icon Search Modal */
+.lucide-search-modal {
+    max-width: 500px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.lucide-search-input {
+    width: 100%;
+    padding: 10px 12px;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--foreground);
+    font-size: var(--font-size-md);
+    margin-bottom: 12px;
+    box-sizing: border-box;
+}
+
+.lucide-search-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.lucide-search-input::placeholder {
+    color: var(--muted-foreground);
+}
+
+.lucide-icon-grid-container {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 200px;
+    max-height: 400px;
+}
+
+.dialog-icon-more {
+    background-color: var(--muted);
+    border-style: dashed;
+}
+
+.dialog-icon-more:hover {
+    background-color: var(--accent);
+}
+
+.lucide-icon-loading,
+.lucide-icon-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--muted-foreground);
+    font-size: var(--font-size-sm);
+}
+
+.lucide-search-count {
+    padding-top: 8px;
+    text-align: center;
+    color: var(--muted-foreground);
+    font-size: var(--font-size-xs);
+}
+
+.icon-placeholder {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+    background-color: var(--muted);
+    border-radius: var(--radius-sm);
 }
 

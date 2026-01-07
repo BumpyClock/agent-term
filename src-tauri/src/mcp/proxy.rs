@@ -10,6 +10,37 @@ use super::error::{McpError, McpResult};
 
 const PROXY_COMMAND_ENV: &str = "AGENTTERM_MCP_PROXY_CMD";
 
+/// Version of the bundled proxy binary (from agentterm-mcp-proxy crate).
+/// This should match the version in crates/agentterm-mcp-proxy/Cargo.toml.
+const BUNDLED_PROXY_VERSION: &str = "0.1.0";
+
+/// Query the version of an installed proxy binary.
+/// Returns None if binary doesn't exist or version can't be determined.
+fn get_binary_version(path: &Path) -> Option<String> {
+    use std::process::Command;
+
+    let output = Command::new(path).arg("--version").output().ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Check if installed version differs from bundled version.
+fn needs_update(installed_path: &Path) -> bool {
+    let installed_version = match get_binary_version(installed_path) {
+        Some(v) => v,
+        None => return true, // Can't determine version, assume update needed
+    };
+
+    installed_version != BUNDLED_PROXY_VERSION
+}
+
 pub fn proxy_command() -> String {
     env::var(PROXY_COMMAND_ENV).unwrap_or_else(|_| "agentterm-mcp-proxy".to_string())
 }
@@ -38,8 +69,16 @@ pub fn ensure_proxy_installed(app: &AppHandle) -> McpResult<()> {
             .map_err(|e| McpError::ConfigWriteError(format!("create_dir_all: {}", e)))?;
     }
 
-    if !install_path.exists() {
+    // Check if we need to install or update the proxy binary
+    let should_install = if install_path.exists() {
+        needs_update(&install_path)
+    } else {
+        true
+    };
+
+    if should_install {
         if let Some(source) = resolve_proxy_source(app) {
+            let old_version = get_binary_version(&install_path);
             if let Err(err) = fs::copy(&source, &install_path) {
                 diagnostics::log(format!(
                     "proxy_install_failed source={} dest={} error={}",
@@ -53,11 +92,19 @@ pub fn ensure_proxy_installed(app: &AppHandle) -> McpResult<()> {
                     use std::os::unix::fs::PermissionsExt;
                     let _ = fs::set_permissions(&install_path, fs::Permissions::from_mode(0o755));
                 }
-                diagnostics::log(format!(
-                    "proxy_installed source={} dest={}",
-                    source.display(),
-                    install_path.display()
-                ));
+                match old_version {
+                    Some(old) => diagnostics::log(format!(
+                        "proxy_updated old={} new={} dest={}",
+                        old,
+                        BUNDLED_PROXY_VERSION,
+                        install_path.display()
+                    )),
+                    None => diagnostics::log(format!(
+                        "proxy_installed version={} dest={}",
+                        BUNDLED_PROXY_VERSION,
+                        install_path.display()
+                    )),
+                }
             }
         } else {
             diagnostics::log("proxy_source_not_found");
