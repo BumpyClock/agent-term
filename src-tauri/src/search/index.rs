@@ -136,7 +136,15 @@ impl SearchIndex {
             .par_iter()
             .map(|(file_path, project_name)| match parse_jsonl_file(file_path, project_name) {
                 Ok(msgs) => (msgs, true),
-                Err(_) => (Vec::new(), false),
+                Err(e) => {
+                    crate::diagnostics::log(format!(
+                        "jsonl_parse_error file={} project={} error={}",
+                        file_path.display(),
+                        project_name,
+                        e
+                    ));
+                    (Vec::new(), false)
+                }
             })
             .collect();
 
@@ -235,7 +243,14 @@ fn parse_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<IndexedMessag
     for line_result in reader.lines() {
         let line = match line_result {
             Ok(l) => l,
-            Err(_) => continue,
+            Err(e) => {
+                crate::diagnostics::log(format!(
+                    "jsonl_line_read_error file={} error={}",
+                    path.display(),
+                    e
+                ));
+                continue;
+            }
         };
 
         if line.trim().is_empty() {
@@ -244,7 +259,19 @@ fn parse_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<IndexedMessag
 
         let entry: JsonlEntry = match serde_json::from_str(&line) {
             Ok(e) => e,
-            Err(_) => continue,
+            Err(e) => {
+                static PARSE_ERROR_COUNT: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let count = PARSE_ERROR_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if count < 10 {
+                    crate::diagnostics::log(format!(
+                        "jsonl_entry_parse_error file={} error={}",
+                        path.display(),
+                        e
+                    ));
+                }
+                continue;
+            }
         };
 
         let (message_type, content_text) = match (&entry.entry_type, &entry.message) {

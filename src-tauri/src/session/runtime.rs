@@ -4,6 +4,7 @@
 use std::io::Write;
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use crate::diagnostics;
 use portable_pty::{Child, MasterPty, PtySize};
@@ -110,41 +111,50 @@ impl SessionRuntime {
             ));
         }
         let _ = self.shutdown_tx.send(());
-        if let Err(e) = self.child.kill() {
-            diagnostics::log(format!(
-                "session_runtime_shutdown id={} kill_error={} os={}",
-                self.id,
-                e,
-                std::env::consts::OS
-            ));
-        } else {
-            diagnostics::log(format!(
-                "session_runtime_shutdown id={} kill_sent os={}",
-                self.id,
-                std::env::consts::OS
-            ));
-        }
-        diagnostics::log(format!(
-            "session_runtime_shutdown id={} before_try_wait os={}",
-            self.id,
-            std::env::consts::OS
-        ));
-        match self.child.try_wait() {
-            Ok(status) => {
-                diagnostics::log(format!(
-                    "session_runtime_shutdown id={} try_wait={:?} os={}",
-                    self.id,
-                    status,
-                    std::env::consts::OS
-                ));
+
+        // Retry kill with exponential backoff
+        for attempt in 0..3 {
+            match self.child.kill() {
+                Ok(_) => {
+                    diagnostics::log(format!(
+                        "session_runtime_shutdown id={} kill_sent attempt={} os={}",
+                        self.id, attempt, std::env::consts::OS
+                    ));
+                    break;
+                }
+                Err(e) => {
+                    diagnostics::log(format!(
+                        "session_runtime_shutdown id={} kill_error={} attempt={} os={}",
+                        self.id, e, attempt, std::env::consts::OS
+                    ));
+                    if attempt < 2 {
+                        std::thread::sleep(Duration::from_millis(100 * (1 << attempt)));
+                    }
+                }
             }
-            Err(e) => {
-                diagnostics::log(format!(
-                    "session_runtime_shutdown id={} try_wait_error={} os={}",
-                    self.id,
-                    e,
-                    std::env::consts::OS
-                ));
+        }
+
+        // Wait for process with timeout
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(status)) => {
+                    diagnostics::log(format!(
+                        "session_runtime_shutdown id={} exited={:?} os={}",
+                        self.id, status, std::env::consts::OS
+                    ));
+                    break;
+                }
+                Ok(None) => {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => {
+                    diagnostics::log(format!(
+                        "session_runtime_shutdown id={} try_wait_error={} os={}",
+                        self.id, e, std::env::consts::OS
+                    ));
+                    break;
+                }
             }
         }
         diagnostics::log(format!(

@@ -7,6 +7,11 @@ use crate::mcp::config::{
 use crate::mcp::get_claude_config_dir;
 use crate::mcp::proxy::proxy_bin_dir;
 
+/// Validate session ID contains only safe characters
+fn validate_session_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
 /// Command specification for launching a session tool.
 ///
 /// Example:
@@ -44,6 +49,9 @@ pub fn build_command(record: &SessionRecord) -> Result<CommandSpec, String> {
 fn build_claude_command(record: &SessionRecord) -> Result<CommandSpec, String> {
     let mut args = build_mcp_config_args(record);
     if let Some(session_id) = &record.claude_session_id {
+        if !validate_session_id(session_id) {
+            return Err(format!("Invalid claude session ID: {}", session_id));
+        }
         args.push("--resume".to_string());
         args.push(session_id.clone());
     }
@@ -64,6 +72,9 @@ fn build_claude_command(record: &SessionRecord) -> Result<CommandSpec, String> {
 fn build_gemini_command(record: &SessionRecord) -> Result<CommandSpec, String> {
     let mut args = Vec::new();
     if let Some(session_id) = &record.gemini_session_id {
+        if !validate_session_id(session_id) {
+            return Err(format!("Invalid gemini session ID: {}", session_id));
+        }
         args.push("--resume".to_string());
         args.push(session_id.clone());
     }

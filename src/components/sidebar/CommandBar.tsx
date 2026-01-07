@@ -37,28 +37,37 @@ export function CommandBar({ isOpen, onClose, onSelectResult }: CommandBarProps)
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setIsSearching(false);
       return;
     }
 
+    let cancelled = false;
     setIsSearching(true);
+
     const timeoutId = setTimeout(() => {
       invoke<SearchResult[]>('search_query', { query, limit: 10 })
-        .then((res) => {
-          setResults(res);
-          setSelectedIndex(0);
+        .then((data) => {
+          if (!cancelled) {
+            setResults(data);
+            setSelectedIndex(0);
+          }
         })
         .catch((err) => {
-          console.error('Command bar search failed:', err);
-          setResults([]);
+          if (!cancelled) {
+            console.error('Search failed:', err);
+            setResults([]);
+          }
         })
         .finally(() => {
-          setIsSearching(false);
+          if (!cancelled) {
+            setIsSearching(false);
+          }
         });
     }, 300);
 
     return () => {
+      cancelled = true;
       clearTimeout(timeoutId);
-      setIsSearching(false);
     };
   }, [query]);
 
@@ -129,7 +138,7 @@ export function CommandBar({ isOpen, onClose, onSelectResult }: CommandBarProps)
             <div className="command-bar-results" ref={resultsRef}>
               {results.map((result, idx) => (
                 <motion.div
-                  key={`${result.filePath}-${idx}`}
+                  key={`${result.filePath}-${result.timestamp || idx}`}
                   className={`command-bar-item ${idx === selectedIndex ? 'selected' : ''}`}
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}

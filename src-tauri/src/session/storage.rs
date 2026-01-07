@@ -89,9 +89,14 @@ impl Storage {
         // Stream directly to file to avoid large intermediate String allocation
         let file = fs::File::create(&tmp_path)
             .map_err(|e| StorageError::WriteError(e.to_string()))?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, snapshot)
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut writer, snapshot)
             .map_err(|e| StorageError::SerializeError(e.to_string()))?;
+        // Flush before rename to ensure data is written
+        use std::io::Write;
+        writer
+            .flush()
+            .map_err(|e| StorageError::WriteError(e.to_string()))?;
         fs::rename(&tmp_path, &path).map_err(|e| StorageError::WriteError(e.to_string()))?;
         Ok(())
     }

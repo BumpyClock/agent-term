@@ -78,9 +78,13 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const [collapsedBeforeDrag, setCollapsedBeforeDrag] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    invoke('search_reindex').catch((err) => {
-      console.error('Failed to reindex search:', err);
-    });
+    invoke('search_reindex')
+      .then(() => {
+        console.info('Search index rebuilt');
+      })
+      .catch((err) => {
+        console.error('Failed to reindex search:', err);
+      });
   }, []);
 
   useEffect(() => {

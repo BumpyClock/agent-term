@@ -28,6 +28,28 @@ use status::{extract_session_id, prompt_detector, status_tracker, ExtractedSessi
 use storage::{default_storage_root, DebouncedStorage, Storage, StorageSnapshot};
 use tools::build_command;
 
+/// Validate a path is safe (no traversal, exists)
+fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
+    if path.contains("..") {
+        return Err("Path traversal not allowed".to_string());
+    }
+    if path.is_empty() {
+        return Ok(std::path::PathBuf::new());
+    }
+    std::fs::canonicalize(path)
+        .map_err(|e| format!("Invalid path '{}': {}", path, e))
+}
+
+fn redact_path(path: &str) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| format!(".../{}", n.to_string_lossy()))
+        .unwrap_or_else(|| "[redacted]".to_string())
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionOutput {
@@ -103,6 +125,7 @@ impl SessionManager {
     }
 
     pub fn create_session(&self, input: NewSessionInput) -> Result<SessionRecord, String> {
+        validate_path(&input.project_path)?;
         let id = Uuid::new_v4().to_string();
         let record = SessionRecord {
             id: id.clone(),
@@ -256,6 +279,7 @@ impl SessionManager {
     }
 
     pub fn set_section_path(&self, id: &str, path: String) -> Result<(), String> {
+        validate_path(&path)?;
         let mut snapshot = self.snapshot.lock();
         let section = snapshot
             .sections
@@ -293,7 +317,7 @@ impl SessionManager {
         let record = self.get_session(id)?;
         diagnostics::log(format!(
             "start_session id={} tool={:?} cmd={} rows={:?} cols={:?} project_path={}",
-            id, record.tool, record.command, rows, cols, record.project_path
+            id, record.tool, record.command, rows, cols, redact_path(&record.project_path)
         ));
 
         {

@@ -73,24 +73,48 @@ function App() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let cancelled = false;
+
     listen<{ sessionId: string; status: SessionStatus }>('session-status', (event) => {
       updateSessionStatus(event.payload.sessionId, event.payload.status);
-    }).then((unsub) => {
-      unlisten = unsub;
-    });
+    })
+      .then((unsub) => {
+        if (cancelled) {
+          unsub();
+        } else {
+          unlisten = unsub;
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to listen to session-status:', err);
+      });
+
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, [updateSessionStatus]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let cancelled = false;
+
     listen<{ sessionId: string; toolSessionId: string; tool: string }>('tool-session-id', (event) => {
       updateToolSessionId(event.payload.sessionId, event.payload.tool, event.payload.toolSessionId);
-    }).then((unsub) => {
-      unlisten = unsub;
-    });
+    })
+      .then((unsub) => {
+        if (cancelled) {
+          unsub();
+        } else {
+          unlisten = unsub;
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to listen to tool-session-id:', err);
+      });
+
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, [updateToolSessionId]);

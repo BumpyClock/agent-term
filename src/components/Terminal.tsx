@@ -30,6 +30,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const lastSentSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const isActiveRef = useRef(isActive);
   const resizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevUseWebGLRef = useRef(useTerminalSettings.getState().useWebGL);
   const setLastKnownSize = useTerminalStore((state) => state.setLastKnownSize);
   const logPrefix = `[terminal ${sessionId}]`;
 
@@ -148,7 +149,6 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       let disposed = false;
 
       // Subscribe to terminal settings changes
-      let prevUseWebGL = termSettings.useWebGL;
       unsubscribeSettings = useTerminalSettings.subscribe((state) => {
         xterm.options.fontSize = state.fontSize;
         xterm.options.fontFamily = state.fontFamily;
@@ -157,13 +157,13 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         fitAddon.fit();
 
         // Handle WebGL toggle
-        if (state.useWebGL !== prevUseWebGL) {
+        if (state.useWebGL !== prevUseWebGLRef.current) {
           if (state.useWebGL) {
             loadWebGL();
           } else {
             unloadWebGL();
           }
-          prevUseWebGL = state.useWebGL;
+          prevUseWebGLRef.current = state.useWebGL;
         }
       });
 
@@ -196,20 +196,27 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       };
 
       const start = async () => {
+        if (cancelled) return;
+
         let outputEvents = 0;
         // Set up event listeners BEFORE starting the session to avoid missing early output
         inputDisposable = xterm.onData((data) => {
+          if (cancelled) return;
           invoke("write_session_input", {
             id: sessionId,
             data,
-          }).catch(console.error);
+          }).catch((err) => console.error(`${logPrefix} write_session_input error:`, err));
         });
 
-        unlistenOutput = await listen<{
-          sessionId: string;
-          data: number[];
-        }>("session-output", (event) => {
-          if (event.payload.sessionId === sessionId) {
+        if (cancelled) { teardown(); return; }
+
+        // Setup event listeners with try/catch
+        try {
+          unlistenOutput = await listen<{
+            sessionId: string;
+            data: number[];
+          }>("session-output", (event) => {
+            if (event.payload.sessionId !== sessionId) return;
             const bytes = new Uint8Array(event.payload.data);
             const text = decoder.decode(bytes, { stream: true });
             if (text.length > 0) {
@@ -222,22 +229,34 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
                 events: outputEvents,
               });
             }
-          }
-        });
+          });
+        } catch (err) {
+          console.error(`${logPrefix} Failed to listen to session-output:`, err);
+          xterm.write(`\r\n\x1b[31mFailed to connect to session output\x1b[0m\r\n`);
+          teardown();
+          return;
+        }
 
-        unlistenExit = await listen<{ sessionId: string }>(
-          "session-exit",
-          (event) => {
-            if (event.payload.sessionId === sessionId) {
+        if (cancelled) { teardown(); return; }
+
+        try {
+          unlistenExit = await listen<{ sessionId: string }>(
+            "session-exit",
+            (event) => {
+              if (event.payload.sessionId !== sessionId) return;
               const tail = decoder.decode();
               if (tail.length > 0) {
                 xterm.write(tail);
               }
               xterm.write("\r\n\x1b[33m[Process exited]\x1b[0m\r\n");
               console.info(`${logPrefix} session-exit`);
-            }
-          },
-        );
+            },
+          );
+        } catch (err) {
+          console.error(`${logPrefix} Failed to listen to session-exit:`, err);
+        }
+
+        if (cancelled) { teardown(); return; }
 
         resizeObserver = new ResizeObserver(() => {
           if (!isActiveRef.current) return;
@@ -269,10 +288,13 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
           });
           console.info(`${logPrefix} start_session ok`);
         } catch (err) {
-          console.error("Failed to start session:", err);
-          xterm.write(
-            `\r\n\x1b[31mFailed to start session: ${err}\x1b[0m\r\n`,
-          );
+          if (!cancelled) {
+            console.error(`${logPrefix} Failed to start session:`, err);
+            xterm.write(
+              `\r\n\x1b[31mFailed to start session: ${err}\x1b[0m\r\n`,
+            );
+          }
+          teardown();
           return;
         }
 
@@ -282,7 +304,12 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         }
       };
 
-      start().catch(console.error);
+      start().catch((err) => {
+        if (!cancelled) {
+          console.error(`${logPrefix} start() error:`, err);
+          xterm.write(`\r\n\x1b[31mTerminal initialization failed: ${err}\x1b[0m\r\n`);
+        }
+      });
 
       return () => {
         cancelled = true;
