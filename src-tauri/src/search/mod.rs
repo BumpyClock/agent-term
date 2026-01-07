@@ -5,6 +5,7 @@
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
 
@@ -24,13 +25,17 @@ pub struct SearchConfig {
     pub recent_days: u32,
     /// Root directory for Claude logs (default: ~/.claude/projects).
     pub log_root: Option<String>,
+    /// Path for storing index metadata (enables incremental indexing).
+    pub metadata_path: Option<PathBuf>,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
+        let metadata_path = dirs::home_dir().map(|h| h.join(".agent-term").join("search").join("index_metadata.json"));
         Self {
             recent_days: 90,
             log_root: None,
+            metadata_path,
         }
     }
 }
@@ -50,8 +55,12 @@ impl SearchManager {
 
     /// Create a new SearchManager with custom configuration.
     pub fn with_config(config: SearchConfig) -> Self {
+        let index = match &config.metadata_path {
+            Some(path) => SearchIndex::with_metadata_path(path.clone()),
+            None => SearchIndex::new(),
+        };
         Self {
-            index: Mutex::new(SearchIndex::new()),
+            index: Mutex::new(index),
             engine: SearchEngine::new(),
             config,
         }

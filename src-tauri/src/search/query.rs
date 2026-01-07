@@ -2,8 +2,9 @@
 //!
 //! Provides search functionality over indexed messages with
 //! snippet previews showing context around matches.
+//! Content is loaded on-demand from source files.
 
-use super::index::{IndexedMessage, SearchIndex};
+use super::index::{IndexedMessage, MessageRef, SearchIndex};
 use serde::{Deserialize, Serialize};
 
 /// A search result with snippet and metadata.
@@ -34,10 +35,10 @@ pub struct SnippetMatch {
     pub end: usize,
 }
 
-/// Intermediate result for two-pass search optimization.
-/// Holds scoring data without expensive snippet generation.
-struct ScoredCandidate<'a> {
-    msg: &'a IndexedMessage,
+/// Intermediate result for scoring (owns data for on-demand content loading).
+struct ScoredCandidate {
+    msg_ref: MessageRef,
+    content: String,
     matches: Vec<SnippetMatch>,
     score: f32,
 }
@@ -63,8 +64,7 @@ impl SearchEngine {
     /// Uses case-insensitive term matching with OR semantics.
     /// Returns results sorted by relevance score.
     ///
-    /// Two-pass optimization: scores all candidates first (cheap), then
-    /// builds snippets only for top K results (expensive).
+    /// Content is loaded on-demand from source files for scoring and snippets.
     pub fn search(&self, index: &SearchIndex, query: &str, limit: usize) -> Vec<SearchResult> {
         if query.trim().is_empty() {
             return vec![];
@@ -82,9 +82,9 @@ impl SearchEngine {
         let mut scored: Vec<ScoredCandidate> = candidate_indices
             .iter()
             .filter_map(|&idx| {
-                index
-                    .get_message(idx)
-                    .and_then(|msg| self.score_only(msg, &query_terms))
+                let msg_ref = index.get_message_ref(idx)?;
+                let content = index.load_content(msg_ref).ok()?;
+                self.score_with_content(msg_ref.clone(), content, &query_terms)
             })
             .collect();
 
@@ -107,13 +107,14 @@ impl SearchEngine {
         all.into_iter().collect()
     }
 
-    /// Score a message without building snippet (pass 1 of two-pass search).
-    fn score_only<'a>(
+    /// Score a message with content and build candidate for ranking.
+    fn score_with_content(
         &self,
-        msg: &'a IndexedMessage,
+        msg_ref: MessageRef,
+        content: String,
         query_terms: &[&str],
-    ) -> Option<ScoredCandidate<'a>> {
-        let content_lower = &msg.content_normalized;
+    ) -> Option<ScoredCandidate> {
+        let content_lower = content.to_lowercase();
 
         let mut all_matches: Vec<SnippetMatch> = Vec::new();
         let mut term_match_count = 0;
@@ -139,25 +140,27 @@ impl SearchEngine {
 
         let term_coverage = term_match_count as f32 / query_terms.len() as f32;
         let match_density = (all_matches.len() as f32).min(10.0) / 10.0;
-        let length_factor = 1.0 / (1.0 + (msg.content.len() as f32 / 1000.0).ln());
+        let length_factor = 1.0 / (1.0 + (content.len() as f32 / 1000.0).ln());
         let score = term_coverage * 0.6 + match_density * 0.3 + length_factor * 0.1;
 
         Some(ScoredCandidate {
-            msg,
+            msg_ref,
+            content,
             matches: all_matches,
             score,
         })
     }
 
-    /// Build final result from scored candidate (pass 2 of two-pass search).
+    /// Build final result from scored candidate.
     fn build_result(&self, candidate: ScoredCandidate) -> SearchResult {
-        let (snippet, match_positions) = self.build_snippet(&candidate.msg.content, &candidate.matches);
+        let (snippet, match_positions) =
+            self.build_snippet(&candidate.content, &candidate.matches);
 
         SearchResult {
-            file_path: candidate.msg.file_path.clone(),
-            project_name: candidate.msg.project_name.clone(),
-            message_type: candidate.msg.message_type.clone(),
-            timestamp: candidate.msg.timestamp.clone(),
+            file_path: candidate.msg_ref.file_path,
+            project_name: candidate.msg_ref.project_name,
+            message_type: candidate.msg_ref.message_type,
+            timestamp: candidate.msg_ref.timestamp,
             snippet,
             match_positions,
             score: candidate.score,
@@ -166,12 +169,17 @@ impl SearchEngine {
 
     /// Score a message against query terms (used by tests).
     #[cfg(test)]
-    fn score_message(
-        &self,
-        msg: &IndexedMessage,
-        query_terms: &[&str],
-    ) -> Option<SearchResult> {
-        self.score_only(msg, query_terms)
+    fn score_message(&self, msg: &IndexedMessage, query_terms: &[&str]) -> Option<SearchResult> {
+        let msg_ref = MessageRef {
+            file_path: msg.file_path.clone(),
+            project_name: msg.project_name.clone(),
+            message_type: msg.message_type.clone(),
+            timestamp: msg.timestamp.clone(),
+            uuid: msg.uuid.clone(),
+            file_offset: 0,
+            line_length: 0,
+        };
+        self.score_with_content(msg_ref, msg.content.clone(), query_terms)
             .map(|candidate| self.build_result(candidate))
     }
 
@@ -270,7 +278,6 @@ mod tests {
             project_name: "test-project".to_string(),
             message_type: "user".to_string(),
             timestamp: Some("2025-01-01T00:00:00Z".to_string()),
-            content_normalized: content.to_lowercase(),
             content: content.to_string(),
             uuid: None,
         }
