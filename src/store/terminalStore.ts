@@ -91,10 +91,16 @@ async function getDefaultShell(): Promise<string> {
     return '/bin/bash';
   }
   try {
-    return await invoke<string>('get_default_shell');
+    // Use get_resolved_shell which respects user configuration
+    return await invoke<string>('get_resolved_shell');
   } catch (err) {
-    console.error('Failed to get default shell:', err);
-    return '/bin/bash';
+    console.error('Failed to get resolved shell:', err);
+    // Fallback to auto-detected shell
+    try {
+      return await invoke<string>('get_default_shell');
+    } catch {
+      return '/bin/bash';
+    }
   }
 }
 

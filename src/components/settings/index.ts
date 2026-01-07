@@ -7,4 +7,6 @@ export { MCPServerForm } from './MCPServerForm';
 export { PoolSettings } from './PoolSettings';
 export { PoolDiagnostics } from './PoolDiagnostics';
 export { StatusDot } from './StatusDot';
+export { ToolsSettings } from './ToolsSettings';
 export type { McpItem, MCPPoolSettings } from './types';
+export type { ToolItem } from './ToolsSettings';

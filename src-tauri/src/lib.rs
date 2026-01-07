@@ -12,6 +12,7 @@ pub mod diagnostics;
 pub mod mcp;
 mod search;
 mod session;
+mod tools;
 
 #[tauri::command(rename_all = "camelCase")]
 fn get_home_dir() -> Option<String> {
@@ -45,6 +46,35 @@ fn detect_default_shell() -> String {
 
     #[cfg(target_os = "windows")]
     {
+        // Priority 1: pwsh.exe (PowerShell 7+)
+        if let Ok(output) = std::process::Command::new("where")
+            .arg("pwsh.exe")
+            .output()
+        {
+            if output.status.success() {
+                if let Some(path) = String::from_utf8_lossy(&output.stdout).lines().next() {
+                    if !path.trim().is_empty() {
+                        return path.trim().to_string();
+                    }
+                }
+            }
+        }
+
+        // Priority 2: powershell.exe (Windows PowerShell 5.x)
+        if let Ok(output) = std::process::Command::new("where")
+            .arg("powershell.exe")
+            .output()
+        {
+            if output.status.success() {
+                if let Some(path) = String::from_utf8_lossy(&output.stdout).lines().next() {
+                    if !path.trim().is_empty() {
+                        return path.trim().to_string();
+                    }
+                }
+            }
+        }
+
+        // Priority 3: COMSPEC or cmd.exe
         std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
     }
 }
@@ -134,6 +164,10 @@ pub fn run() {
             search::search_index_status,
             search::search_reindex,
             search::search_query,
+            tools::tools_list,
+            tools::tools_get_settings,
+            tools::tools_set_settings,
+            tools::get_resolved_shell,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("failed to get main window");

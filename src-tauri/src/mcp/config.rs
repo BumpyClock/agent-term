@@ -16,6 +16,10 @@ pub struct UserConfig {
     #[serde(default)]
     pub tools: HashMap<String, ToolDef>,
 
+    /// Shell settings
+    #[serde(default)]
+    pub shell: ShellSettings,
+
     /// MCP server definitions
     #[serde(default)]
     pub mcps: HashMap<String, MCPDef>,
@@ -46,6 +50,7 @@ impl Default for UserConfig {
         Self {
             default_tool: String::new(),
             tools: HashMap::new(),
+            shell: ShellSettings::default(),
             mcps: HashMap::new(),
             claude: ClaudeSettings::default(),
             logs: LogSettings::default(),
@@ -62,13 +67,58 @@ pub struct ToolDef {
     /// Shell command to run
     pub command: String,
 
+    /// Command-line arguments
+    #[serde(default)]
+    pub args: Vec<String>,
+
     /// Icon/symbol to display
     #[serde(default)]
     pub icon: String,
 
+    /// Human-readable description
+    #[serde(default)]
+    pub description: String,
+
     /// Patterns that indicate the tool is busy
     #[serde(default)]
     pub busy_patterns: Vec<String>,
+
+    /// Whether this is a shell (uses shell-specific args like -l -i)
+    #[serde(default)]
+    pub is_shell: bool,
+
+    /// Display order in the picker
+    #[serde(default)]
+    pub order: i32,
+
+    /// Whether this tool is enabled
+    #[serde(default = "default_tool_enabled")]
+    pub enabled: bool,
+}
+
+fn default_tool_enabled() -> bool {
+    true
+}
+
+/// Shell-specific settings
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ShellSettings {
+    /// Override default shell path (empty = auto-detect)
+    #[serde(default)]
+    pub default_shell: String,
+
+    /// Additional shell arguments
+    #[serde(default)]
+    pub default_shell_args: Vec<String>,
+}
+
+impl Default for ShellSettings {
+    fn default() -> Self {
+        Self {
+            default_shell: String::new(),
+            default_shell_args: Vec::new(),
+        }
+    }
 }
 
 /// MCP server definition
@@ -474,11 +524,12 @@ pub fn get_claude_config_dir() -> McpResult<PathBuf> {
     Ok(home.join(".claude"))
 }
 
-/// Expand tilde in path
+/// Expand tilde in path (cross-platform)
 pub fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(path.replacen("~", &home, 1));
+    if path.starts_with("~/") || path.starts_with("~\\") {
+        if let Some(home) = dirs::home_dir() {
+            let rest = &path[2..]; // Skip "~/" or "~\"
+            return home.join(rest);
         }
     }
     PathBuf::from(path)

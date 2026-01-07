@@ -510,6 +510,19 @@
     flex: 1;
 }
 
+.tab-picker-separator {
+    height: 1px;
+    background-color: var(--border);
+    margin: 6px 0;
+}
+
+.tab-picker-loading {
+    padding: 8px;
+    color: var(--muted-foreground);
+    font-size: var(--font-size-sm);
+    text-align: center;
+}
+
 .tab-menu-popover {
     position: fixed;
     min-width: 160px;

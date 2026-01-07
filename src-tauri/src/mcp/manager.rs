@@ -688,9 +688,10 @@ mod tests {
 
     #[test]
     fn test_expand_tilde() {
-        let home = std::env::var("HOME").unwrap();
+        // dirs::home_dir() handles cross-platform home detection
         let expanded = expand_tilde("~/test");
-        assert!(expanded.starts_with(&home));
-        assert!(expanded.ends_with("test"));
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(expanded, home.join("test"));
+        }
     }
 }
