@@ -1,3 +1,7 @@
+// ABOUTME: Terminal font customization section with font family, size, and rendering options.
+// ABOUTME: Uses the terminalSettingsStore for persistence and provides reset functionality.
+
+import { Type } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -6,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useTerminalSettings, FONT_OPTIONS, DEFAULT_TERMINAL_SETTINGS } from '@/store/terminalSettingsStore';
 import { Button } from '@/components/ui/button';
 
-export function TerminalSettings() {
+export function TerminalFontSection() {
   const {
     fontFamily,
     fontSize,
@@ -34,7 +38,10 @@ export function TerminalSettings() {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-base">Terminal Font</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Type size={16} className="text-muted-foreground" />
+              Terminal Font
+            </CardTitle>
             <CardDescription>Customize the terminal appearance</CardDescription>
           </div>
           {hasChanges && (

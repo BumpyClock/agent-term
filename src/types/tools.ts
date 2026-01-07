@@ -28,6 +28,27 @@ export interface ToolDef {
 export interface ShellSettings {
   defaultShell: string;
   defaultShellArgs: string[];
+  // New fields for enhanced shell management
+  defaultShellId?: string;           // ID of default shell (empty = auto-detect)
+  shellOverrides?: ShellOverride[];  // Per-shell argument customizations
+  customShells?: CustomShell[];      // User-added shells
+}
+
+// Per-shell customization (overrides detected shell defaults)
+export interface ShellOverride {
+  shellId: string;      // Reference to detected shell ID
+  args: string[];       // Custom arguments (overrides default)
+  disabled: boolean;    // Hide from tab picker
+}
+
+// User-added custom shell
+export interface CustomShell {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+  icon: string;
+  enabled: boolean;
 }
 
 // Settings payload (matches backend ToolsSettingsDto)
