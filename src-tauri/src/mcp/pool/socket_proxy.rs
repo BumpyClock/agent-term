@@ -3,14 +3,14 @@ use std::fs::{create_dir_all, File};
 use std::io;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 
 use crate::diagnostics;
 use super::transport::{self, LocalListener, LocalStream};
@@ -32,6 +32,10 @@ pub struct SocketProxy {
     clients: Arc<Mutex<HashMap<String, ClientSender>>>,
     request_map: Arc<Mutex<HashMap<String, String>>>,
     shutdown: Arc<AtomicBool>,
+    started_at: Mutex<Option<Instant>>,
+    total_connections: Arc<AtomicU32>,
+    exit_complete_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    exit_complete_rx: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
 impl SocketProxy {
@@ -57,6 +61,10 @@ impl SocketProxy {
             clients: Arc::new(Mutex::new(HashMap::new())),
             request_map: Arc::new(Mutex::new(HashMap::new())),
             shutdown: Arc::new(AtomicBool::new(false)),
+            started_at: Mutex::new(None),
+            total_connections: Arc::new(AtomicU32::new(0)),
+            exit_complete_tx: Arc::new(Mutex::new(None)),
+            exit_complete_rx: Mutex::new(None),
         }
     }
 
@@ -66,6 +74,28 @@ impl SocketProxy {
 
     pub fn socket_path(&self) -> PathBuf {
         self.socket_path.clone()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn is_owned(&self) -> bool {
+        self.owned
+    }
+
+    pub fn uptime_seconds(&self) -> Option<u64> {
+        self.started_at.lock().unwrap().map(|start| start.elapsed().as_secs())
+    }
+
+    pub fn connection_count(&self) -> u32 {
+        self.total_connections.load(Ordering::SeqCst)
+    }
+
+    /// Takes the exit completion receiver, allowing the caller to await process exit.
+    /// Returns None if start() hasn't been called or receiver was already taken.
+    pub fn take_exit_receiver(&self) -> Option<oneshot::Receiver<()>> {
+        self.exit_complete_rx.lock().unwrap().take()
     }
 
     pub fn start(&self) -> io::Result<()> {
@@ -119,6 +149,11 @@ impl SocketProxy {
         let (kill_tx, kill_rx) = oneshot::channel();
         *self.kill_tx.lock().unwrap() = Some(kill_tx);
 
+        // Create exit completion channel for callers to await process exit
+        let (exit_tx, exit_rx) = oneshot::channel::<()>();
+        *self.exit_complete_tx.lock().unwrap() = Some(exit_tx);
+        *self.exit_complete_rx.lock().unwrap() = Some(exit_rx);
+
         if let Some(stderr) = stderr {
             self.spawn_stderr_logger(stderr)?;
         }
@@ -134,6 +169,7 @@ impl SocketProxy {
         let status = self.status.clone();
         let shutdown = self.shutdown.clone();
         let name = self.name.clone();
+        let exit_complete_tx = self.exit_complete_tx.clone();
 
         tauri::async_runtime::spawn(async move {
             let exit = tokio::select! {
@@ -149,6 +185,11 @@ impl SocketProxy {
             *status.lock().unwrap() = ServerStatus::Stopped;
             shutdown.store(true, Ordering::SeqCst);
 
+            // Signal exit completion to any waiting callers
+            if let Some(tx) = exit_complete_tx.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+
             if let Ok(exit) = exit {
                 diagnostics::log(format!(
                     "pool_child_exited name={} status={}",
@@ -163,6 +204,7 @@ impl SocketProxy {
         self.spawn_accept_loop(listener);
 
         *self.status.lock().unwrap() = ServerStatus::Running;
+        *self.started_at.lock().unwrap() = Some(Instant::now());
         diagnostics::log(format!(
             "pool_proxy_started name={} socket={}",
             self.name,
@@ -190,7 +232,12 @@ impl SocketProxy {
         *self.request_tx.lock().unwrap() = None;
         self.clients.lock().unwrap().clear();
         self.request_map.lock().unwrap().clear();
-        *self.status.lock().unwrap() = ServerStatus::Stopped;
+        *self.started_at.lock().unwrap() = None;
+        // For non-owned servers, set status here since there's no background task.
+        // For owned servers, the background task sets Stopped after process exits.
+        if !self.owned {
+            *self.status.lock().unwrap() = ServerStatus::Stopped;
+        }
         Ok(())
     }
 
@@ -231,6 +278,7 @@ impl SocketProxy {
         let request_tx = self.request_tx.clone();
         let shutdown = self.shutdown.clone();
         let name = self.name.clone();
+        let total_connections = self.total_connections.clone();
 
         tauri::async_runtime::spawn(async move {
             let mut counter = 0;
@@ -242,6 +290,7 @@ impl SocketProxy {
                     Ok(stream) => {
                         let client_id = format!("{}-client-{}", name, counter);
                         counter += 1;
+                        total_connections.fetch_add(1, Ordering::SeqCst);
                         let (tx, rx) = mpsc::channel::<String>(128);
                         clients.lock().unwrap().insert(client_id.clone(), tx);
                         diagnostics::log(format!(

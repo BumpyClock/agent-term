@@ -16,6 +16,7 @@ pub use config::get_claude_config_dir;
 pub use error::McpResult;
 pub use manager::{McpManager, McpScope};
 
+use pool::types::PoolStatusResponse;
 use serde::Serialize;
 use tauri::State;
 use std::collections::HashMap;
@@ -214,4 +215,42 @@ pub async fn mcp_detach(
     }
 
     Ok(())
+}
+
+/// Get the current status of all pooled MCP servers
+#[tauri::command(rename_all = "camelCase")]
+pub async fn mcp_pool_status() -> Result<PoolStatusResponse, String> {
+    Ok(pool_manager::get_pool_status())
+}
+
+/// Restart a specific MCP server in the pool
+#[tauri::command(rename_all = "camelCase")]
+pub async fn mcp_restart_server(name: String) -> Result<bool, String> {
+    pool_manager::restart_pool_server(&name).await.map_err(|e| e.to_string())
+}
+
+/// Stop a specific MCP server in the pool
+#[tauri::command(rename_all = "camelCase")]
+pub async fn mcp_stop_server(name: String) -> Result<bool, String> {
+    pool_manager::stop_pool_server(&name).map_err(|e| e.to_string())
+}
+
+/// Start a specific MCP server in the pool (if configured)
+#[tauri::command(rename_all = "camelCase")]
+pub async fn mcp_start_server(
+    state: State<'_, McpManager>,
+    name: String,
+) -> Result<bool, String> {
+    let config = state.load_config().await.map_err(|e| e.to_string())?;
+    let pool = match pool_manager::get_global_pool() {
+        Some(p) => p,
+        None => return Ok(false),
+    };
+
+    if let Some(def) = config.mcps.get(&name) {
+        pool_manager::start_pool_mcp(&pool, &name, def).map_err(|e| e.to_string())?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }

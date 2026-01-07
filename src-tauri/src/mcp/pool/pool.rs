@@ -9,7 +9,7 @@ use agentterm_shared::socket_path::socket_path_for;
 use crate::diagnostics;
 use crate::mcp::config::get_agent_term_mcp_run_dir;
 use super::socket_proxy::SocketProxy;
-use super::types::ServerStatus;
+use super::types::{McpServerStatus, PoolStatusResponse, ServerStatus};
 
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
@@ -147,6 +147,68 @@ impl Pool {
             std::thread::sleep(Duration::from_millis(100));
         }
         false
+    }
+
+    /// Get status of all servers in the pool
+    pub fn get_status(&self) -> PoolStatusResponse {
+        let proxies = self.proxies.read();
+        let servers: Vec<McpServerStatus> = proxies
+            .iter()
+            .map(|(name, proxy)| McpServerStatus {
+                name: name.clone(),
+                status: proxy.status(),
+                socket_path: proxy.socket_path().display().to_string(),
+                uptime_seconds: proxy.uptime_seconds(),
+                connection_count: proxy.connection_count(),
+                owned: proxy.is_owned(),
+            })
+            .collect();
+
+        PoolStatusResponse {
+            enabled: self.config.enabled,
+            server_count: servers.len(),
+            servers,
+        }
+    }
+
+    /// Restart a specific MCP server by name
+    pub async fn restart(&self, name: &str) -> std::io::Result<bool> {
+        let (proxy, exit_rx) = {
+            let proxies = self.proxies.read();
+            match proxies.get(name).cloned() {
+                Some(p) => (p.clone(), p.take_exit_receiver()),
+                None => return Ok(false),
+            }
+        };
+
+        if !proxy.is_owned() {
+            return Ok(false);
+        }
+
+        proxy.stop()?;
+
+        // Wait for actual process exit instead of arbitrary sleep
+        if let Some(rx) = exit_rx {
+            let _ = rx.await;
+        }
+
+        proxy.start()?;
+        Ok(true)
+    }
+
+    /// Stop a specific MCP server by name
+    pub fn stop_server(&self, name: &str) -> std::io::Result<bool> {
+        let proxy = {
+            let proxies = self.proxies.read();
+            proxies.get(name).cloned()
+        };
+
+        if let Some(proxy) = proxy {
+            proxy.stop()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 

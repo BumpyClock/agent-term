@@ -1,7 +1,7 @@
 // ABOUTME: Dedicated dialog for MCP server configuration
 // ABOUTME: Manages MCP servers and pool settings independent of the main settings dialog
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { MCPDef, MCPPoolSettings } from './settingsTypes';
 import { Button } from '@/components/ui/button';
@@ -23,17 +23,6 @@ const makeId = () => {
   }
   return `mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
-
-const emptyMcp = (): McpItem => ({
-  id: makeId(),
-  name: '',
-  command: '',
-  args: [],
-  env: {},
-  description: '',
-  url: '',
-  transport: '',
-});
 
 const emptyPool: MCPPoolSettings = {
   enabled: false,
@@ -80,6 +69,7 @@ export function MCPDialog({ onClose }: MCPDialogProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+  const [settingsView, setSettingsView] = useState<'list' | 'form'>('list');
 
   const loadSettings = useCallback(async () => {
     setIsLoading(true);
@@ -113,25 +103,6 @@ export function MCPDialog({ onClose }: MCPDialogProps) {
     loadSettings();
   }, [loadSettings]);
 
-  const addMcp = () => {
-    setMcps((prev) => [...prev, emptyMcp()]);
-  };
-
-  const removeMcp = (index: number) => {
-    setMcps((prev) => {
-      const next = [...prev];
-      const [removed] = next.splice(index, 1);
-      if (removed) {
-        setEnvText((env) => {
-          const updated = { ...env };
-          delete updated[removed.id];
-          return updated;
-        });
-      }
-      return next;
-    });
-  };
-
   const handleEnvChange = (id: string, value: string) => {
     setEnvText((prev) => ({ ...prev, [id]: value }));
   };
@@ -140,23 +111,7 @@ export function MCPDialog({ onClose }: MCPDialogProps) {
     setPool((prev) => ({ ...prev, ...updates }));
   };
 
-  const validationError = useMemo(() => {
-    const names = mcps.map((item) => item.name.trim()).filter(Boolean);
-    const duplicates = names.filter((name, idx) => names.indexOf(name) !== idx);
-    if (duplicates.length > 0) {
-      return 'MCP names must be unique';
-    }
-    if (mcps.some((item) => !item.name.trim())) {
-      return 'MCP name is required';
-    }
-    return '';
-  }, [mcps]);
-
   const handleSave = async () => {
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
     setIsSaving(true);
     setError('');
     try {
@@ -164,6 +119,7 @@ export function MCPDialog({ onClose }: MCPDialogProps) {
       mcps.forEach((item) => {
         const name = item.name.trim();
         map[name] = {
+          enabled: item.enabled,
           command: item.command.trim(),
           args: item.args,
           env: textToEnv(envText[item.id] || ''),
@@ -205,22 +161,23 @@ export function MCPDialog({ onClose }: MCPDialogProps) {
               onMcpsChange={setMcps}
               onPoolChange={handlePoolChange}
               onEnvTextChange={handleEnvChange}
-              onAddMcp={addMcp}
-              onRemoveMcp={removeMcp}
+              onViewChange={setSettingsView}
             />
           )}
         </div>
 
         {error && <div className="text-destructive text-sm flex-shrink-0 pt-2">{error}</div>}
 
-        <div className="flex justify-end gap-3 pt-4 flex-shrink-0">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving}>
-            Save settings
-          </Button>
-        </div>
+        {settingsView === 'list' && (
+          <div className="flex justify-end gap-3 pt-4 flex-shrink-0">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={isSaving}>
+              Save settings
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

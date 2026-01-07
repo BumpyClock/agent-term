@@ -9,6 +9,7 @@ use crate::diagnostics;
 
 use super::config::{MCPDef, UserConfig};
 use super::error::{McpError, McpResult};
+use super::pool::types::PoolStatusResponse;
 use super::pool::{socket_alive, socket_path_for, Pool, PoolConfig};
 
 static GLOBAL_POOL: OnceLock<Mutex<Option<Arc<Pool>>>> = OnceLock::new();
@@ -120,4 +121,37 @@ fn start_pool_mcps(pool: &Pool, mcps: &HashMap<String, MCPDef>) -> McpResult<()>
         }
     }
     Ok(())
+}
+
+/// Get the current global pool instance (if enabled)
+pub fn get_global_pool() -> Option<Arc<Pool>> {
+    global_pool_state().lock().clone()
+}
+
+/// Get status of all pooled MCP servers
+pub fn get_pool_status() -> PoolStatusResponse {
+    match get_global_pool() {
+        Some(pool) => pool.get_status(),
+        None => PoolStatusResponse {
+            enabled: false,
+            server_count: 0,
+            servers: vec![],
+        },
+    }
+}
+
+/// Restart a specific MCP server in the pool
+pub async fn restart_pool_server(name: &str) -> McpResult<bool> {
+    match get_global_pool() {
+        Some(pool) => pool.restart(name).await.map_err(|e| McpError::IoError(e.to_string())),
+        None => Ok(false),
+    }
+}
+
+/// Stop a specific MCP server in the pool
+pub fn stop_pool_server(name: &str) -> McpResult<bool> {
+    match get_global_pool() {
+        Some(pool) => pool.stop_server(name).map_err(|e| McpError::IoError(e.to_string())),
+        None => Ok(false),
+    }
 }
