@@ -79,10 +79,6 @@ impl SocketProxy {
         self.socket_path.clone()
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     pub fn is_owned(&self) -> bool {
         self.owned
     }
