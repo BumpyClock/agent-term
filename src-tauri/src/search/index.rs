@@ -94,7 +94,7 @@ impl IndexMetadata {
 }
 
 /// Persisted index data for fast startup.
-/// Stored using bincode for efficient serialization.
+/// Stored using JSON for compatibility and simplicity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedIndex {
     /// Schema version for future migrations.
@@ -111,7 +111,7 @@ const PERSISTED_INDEX_SCHEMA_VERSION: u32 = 1;
 
 /// In-memory search index with inverted index for efficient term lookup.
 /// Stores lightweight MessageRef instead of full content to minimize memory usage.
-/// Can persist to disk for fast startup using bincode serialization.
+/// Can persist to disk for fast startup using rkyv serialization.
 pub struct SearchIndex {
     message_refs: Vec<MessageRef>,
     status: IndexStatus,
@@ -274,7 +274,7 @@ impl SearchIndex {
             }
         };
 
-        let persisted: PersistedIndex = match bincode::deserialize(&data) {
+        let persisted: PersistedIndex = match serde_json::from_slice(&data) {
             Ok(p) => p,
             Err(e) => {
                 crate::diagnostics::log(format!("persisted_index_deserialize_error: {}", e));
@@ -303,7 +303,7 @@ impl SearchIndex {
         true
     }
 
-    /// Save persisted index to disk atomically using bincode.
+    /// Save persisted index to disk atomically using rkyv.
     fn save_persisted_index(&self) {
         let Some(path) = &self.index_path else {
             return;
@@ -322,7 +322,7 @@ impl SearchIndex {
             metadata: self.metadata.clone(),
         };
 
-        let data = match bincode::serialize(&persisted) {
+        let data = match serde_json::to_vec(&persisted) {
             Ok(d) => d,
             Err(e) => {
                 crate::diagnostics::log(format!("persisted_index_serialize_error: {}", e));
