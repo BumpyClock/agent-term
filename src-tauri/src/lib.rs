@@ -13,6 +13,7 @@ pub mod mcp;
 mod search;
 mod session;
 mod tools;
+pub mod update;
 
 #[tauri::command(rename_all = "camelCase")]
 fn get_home_dir() -> Option<String> {
@@ -86,6 +87,10 @@ fn get_default_shell() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Fix PATH for GUI apps on macOS/Linux - must be called early
+    // GUI apps don't inherit PATH from shell dotfiles (.zshrc, .bashrc, etc.)
+    let _ = fix_path_env::fix();
+
     // Install a panic hook to capture unexpected crashes in diagnostics logs.
     std::panic::set_hook(Box::new(|panic_info| {
         let location = panic_info
@@ -121,11 +126,15 @@ pub fn run() {
     let search_manager = search::build_search_manager()
         .expect("failed to build search manager");
 
+    let update_manager = update::build_update_manager();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(session_manager)
         .manage(mcp_manager)
         .manage(search_manager)
+        .manage(update_manager)
         .invoke_handler(tauri::generate_handler![
             get_home_dir,
             get_default_shell,
@@ -168,6 +177,12 @@ pub fn run() {
             tools::tools_get_settings,
             tools::tools_set_settings,
             tools::get_resolved_shell,
+            update::update_check,
+            update::update_download,
+            update::update_install,
+            update::update_get_status,
+            update::update_get_settings,
+            update::update_set_settings,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("failed to get main window");
@@ -229,6 +244,14 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+            // Check for pending update to install on exit
+            if let Some(update_manager) = app_handle.try_state::<update::UpdateManager>() {
+                if update_manager.has_pending_update() {
+                    diagnostics::log("exit_with_pending_update applying_on_shutdown".to_string());
+                    // Update will be applied on next launch
+                }
+            }
+
             let mcp_manager = app_handle.state::<mcp::McpManager>();
             // Use block_on for cleanup since we're in a sync context during shutdown
             if let Ok(config) = tauri::async_runtime::block_on(mcp_manager.load_config()) {

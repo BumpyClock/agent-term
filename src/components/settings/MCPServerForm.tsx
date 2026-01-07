@@ -1,6 +1,7 @@
 import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Switch } from '@/components/ui/switch';
 
 type MCPServerFormProps = {
   mode: 'add' | 'edit';
@@ -11,6 +12,8 @@ type MCPServerFormProps = {
   url: string;
   transport: string;
   envText: string;
+  isPooled: boolean;
+  isPoolAllEnabled: boolean;
   onNameChange: (value: string) => void;
   onCommandChange: (value: string) => void;
   onArgsChange: (value: string) => void;
@@ -18,6 +21,7 @@ type MCPServerFormProps = {
   onUrlChange: (value: string) => void;
   onTransportChange: (value: string) => void;
   onEnvTextChange: (value: string) => void;
+  onIsPooledChange: (value: boolean) => void;
   onSave: () => void;
   onBack: () => void;
   onDelete?: () => void;
@@ -33,6 +37,8 @@ export function MCPServerForm({
   url,
   transport,
   envText,
+  isPooled,
+  isPoolAllEnabled,
   onNameChange,
   onCommandChange,
   onArgsChange,
@@ -40,6 +46,7 @@ export function MCPServerForm({
   onUrlChange,
   onTransportChange,
   onEnvTextChange,
+  onIsPooledChange,
   onSave,
   onBack,
   onDelete,
@@ -136,6 +143,22 @@ export function MCPServerForm({
             className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
         </label>
+
+        <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/50">
+          <div className="flex-1">
+            <div className="font-medium">MCP Pool</div>
+            <div className="text-sm text-muted-foreground">
+              {isPoolAllEnabled
+                ? 'All MCPs are pooled (configured in pool settings)'
+                : 'Include in MCP socket pool'}
+            </div>
+          </div>
+          <Switch
+            checked={isPooled}
+            onCheckedChange={onIsPooledChange}
+            disabled={isPoolAllEnabled}
+          />
+        </div>
 
         {validationError && (
           <div className="text-destructive text-sm">{validationError}</div>

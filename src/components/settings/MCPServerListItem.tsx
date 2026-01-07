@@ -30,11 +30,6 @@ export function MCPServerListItem({
     <div
       className="flex items-center gap-3 p-3 rounded-lg border bg-muted/50 hover:bg-muted transition-colors"
     >
-      <Switch
-        checked={enabled}
-        onCheckedChange={onToggle}
-        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-      />
       {poolStatus && <StatusDot status={poolStatus} />}
       <div
         className="flex-1 min-w-0 cursor-pointer"
@@ -43,6 +38,11 @@ export function MCPServerListItem({
         <div className="font-medium truncate">{name || 'Unnamed MCP'}</div>
         <div className="text-sm text-muted-foreground truncate">{subtitle}</div>
       </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onToggle}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      />
       <ChevronRight
         className="h-4 w-4 text-muted-foreground flex-shrink-0 cursor-pointer"
         onClick={onClick}

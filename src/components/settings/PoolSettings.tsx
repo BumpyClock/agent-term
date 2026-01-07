@@ -19,7 +19,6 @@ const parseList = (value: string) =>
     .filter(Boolean);
 
 export function PoolSettings({ pool, onPoolChange }: PoolSettingsProps) {
-  const poolMcpsText = useMemo(() => joinList(pool.poolMcps || []), [pool.poolMcps]);
   const excludeMcpsText = useMemo(() => joinList(pool.excludeMcps || []), [pool.excludeMcps]);
 
   return (
@@ -31,85 +30,74 @@ export function PoolSettings({ pool, onPoolChange }: PoolSettingsProps) {
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <div className="flex items-center space-x-2">
+            <Label htmlFor="pool-enabled" className="text-sm font-normal">
+              Enable socket pool
+            </Label>
             <Checkbox
               id="pool-enabled"
               checked={pool.enabled}
               onCheckedChange={(checked) => onPoolChange({ enabled: checked === true })}
             />
-            <Label htmlFor="pool-enabled" className="text-sm font-normal">
-              Enable socket pool
-            </Label>
           </div>
           <div className="flex items-center space-x-2">
+            <Label htmlFor="pool-autostart" className="text-sm font-normal">
+              Auto-start pool
+            </Label>
             <Checkbox
               id="pool-autostart"
               checked={pool.autoStart}
               onCheckedChange={(checked) => onPoolChange({ autoStart: checked === true })}
             />
-            <Label htmlFor="pool-autostart" className="text-sm font-normal">
-              Auto-start pool
-            </Label>
           </div>
           <div className="flex items-center space-x-2">
+            <Label htmlFor="pool-ondemand" className="text-sm font-normal">
+              Start on demand
+            </Label>
             <Checkbox
               id="pool-ondemand"
               checked={pool.startOnDemand}
               onCheckedChange={(checked) => onPoolChange({ startOnDemand: checked === true })}
             />
-            <Label htmlFor="pool-ondemand" className="text-sm font-normal">
-              Start on demand
-            </Label>
           </div>
           <div className="flex items-center space-x-2">
+            <Label htmlFor="pool-shutdown" className="text-sm font-normal">
+              Shutdown on exit
+            </Label>
             <Checkbox
               id="pool-shutdown"
               checked={pool.shutdownOnExit}
               onCheckedChange={(checked) => onPoolChange({ shutdownOnExit: checked === true })}
             />
-            <Label htmlFor="pool-shutdown" className="text-sm font-normal">
-              Shutdown on exit
-            </Label>
           </div>
           <div className="flex items-center space-x-2">
+            <Label htmlFor="pool-all" className="text-sm font-normal">
+              Pool all MCPs
+            </Label>
             <Checkbox
               id="pool-all"
               checked={pool.poolAll}
               onCheckedChange={(checked) => onPoolChange({ poolAll: checked === true })}
             />
-            <Label htmlFor="pool-all" className="text-sm font-normal">
-              Pool all MCPs
-            </Label>
           </div>
           <div className="flex items-center space-x-2">
+            <Label htmlFor="pool-fallback" className="text-sm font-normal">
+              Fallback to stdio
+            </Label>
             <Checkbox
               id="pool-fallback"
               checked={pool.fallbackToStdio}
               onCheckedChange={(checked) => onPoolChange({ fallbackToStdio: checked === true })}
             />
-            <Label htmlFor="pool-fallback" className="text-sm font-normal">
-              Fallback to stdio
-            </Label>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="pool-mcps">Pool MCPs (comma or newline separated)</Label>
-            <Input
-              id="pool-mcps"
-              value={poolMcpsText}
-              onChange={(e) => onPoolChange({ poolMcps: parseList(e.target.value) })}
-              placeholder="exa, memory, firecrawl"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="exclude-mcps">Exclude MCPs</Label>
-            <Input
-              id="exclude-mcps"
-              value={excludeMcpsText}
-              onChange={(e) => onPoolChange({ excludeMcps: parseList(e.target.value) })}
-              placeholder="chrome-devtools"
-            />
-          </div>
+        <div className="space-y-2">
+          <Label htmlFor="exclude-mcps">Exclude MCPs (used with "Pool all MCPs")</Label>
+          <Input
+            id="exclude-mcps"
+            value={excludeMcpsText}
+            onChange={(e) => onPoolChange({ excludeMcps: parseList(e.target.value) })}
+            placeholder="chrome-devtools"
+          />
         </div>
         <div className="grid grid-cols-3 gap-4 items-end">
           <div className="space-y-2">
@@ -131,14 +119,14 @@ export function PoolSettings({ pool, onPoolChange }: PoolSettingsProps) {
             />
           </div>
           <div className="flex items-center space-x-2 pb-2">
+            <Label htmlFor="pool-status" className="text-sm font-normal">
+              Show pool status
+            </Label>
             <Checkbox
               id="pool-status"
               checked={pool.showPoolStatus}
               onCheckedChange={(checked) => onPoolChange({ showPoolStatus: checked === true })}
             />
-            <Label htmlFor="pool-status" className="text-sm font-normal">
-              Show pool status
-            </Label>
           </div>
         </div>
       </CardContent>

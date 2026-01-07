@@ -19,6 +19,7 @@ import { ProjectSection } from './ProjectSection';
 import { SettingsDialog } from './SettingsDialog';
 import { TabPicker } from './TabPicker';
 import { TabsList } from './TabsList';
+import { UpdateNotification } from './UpdateNotification';
 import type { PopoverPosition, SearchResult } from './types';
 import './Sidebar.css';
 
@@ -613,6 +614,8 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
           </div>
         )}
       </div>
+
+        <UpdateNotification />
 
         <DragOverlay>
           {activeId && activeType && (

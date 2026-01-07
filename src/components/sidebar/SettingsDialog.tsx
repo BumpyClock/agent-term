@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { AppearanceSettings, ToolsSettings } from '@/components/settings';
+import { AppearanceSettings, ToolsSettings, GeneralSettings } from '@/components/settings';
 import type { ToolItem } from '@/components/settings';
 import type { ToolsSettings as ToolsSettingsPayload, ShellSettings, ToolDef } from '@/types/tools';
 
@@ -16,7 +16,7 @@ const emptyShell: ShellSettings = {
 };
 
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState('appearance');
+  const [activeTab, setActiveTab] = useState('general');
   const [tools, setTools] = useState<ToolItem[]>([]);
   const [shell, setShell] = useState<ShellSettings>(emptyShell);
   const [detectedShell, setDetectedShell] = useState('');
@@ -99,9 +99,14 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
           <TabsList className="flex-shrink-0 mb-4">
+            <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
             <TabsTrigger value="tools">Tools & Shells</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="general" className="flex-1 overflow-y-auto">
+            <GeneralSettings />
+          </TabsContent>
 
           <TabsContent value="appearance" className="flex-1 overflow-y-auto">
             <AppearanceSettings />

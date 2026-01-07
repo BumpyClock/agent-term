@@ -45,6 +45,8 @@ time = { workspace = true }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 window-vibrancy = "0.7.1"
 agentterm-shared = { path = "crates/agentterm-shared" }
+tauri-plugin-updater = "2"
+fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 
 [target.'cfg(unix)'.dependencies]
 users = "0.11"

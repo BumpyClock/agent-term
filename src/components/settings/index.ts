@@ -8,5 +8,6 @@ export { PoolSettings } from './PoolSettings';
 export { PoolDiagnostics } from './PoolDiagnostics';
 export { StatusDot } from './StatusDot';
 export { ToolsSettings } from './ToolsSettings';
+export { GeneralSettings } from './GeneralSettings';
 export type { McpItem, MCPPoolSettings } from './types';
 export type { ToolItem } from './ToolsSettings';

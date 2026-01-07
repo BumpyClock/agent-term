@@ -371,7 +371,7 @@ fn default_show_pool_status() -> bool {
 /// Update settings
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UpdateSettings {
-    /// Auto-update without prompting
+    /// Auto-update without prompting (auto-download when update available)
     #[serde(default)]
     pub auto_update: bool,
 
@@ -386,6 +386,10 @@ pub struct UpdateSettings {
     /// Notify in CLI
     #[serde(default = "default_notify_in_cli")]
     pub notify_in_cli: bool,
+
+    /// Last time we checked for updates (ISO 8601 string)
+    #[serde(default)]
+    pub last_check_time: Option<String>,
 }
 
 impl Default for UpdateSettings {
@@ -395,6 +399,7 @@ impl Default for UpdateSettings {
             check_enabled: default_check_enabled(),
             check_interval_hours: default_check_interval_hours(),
             notify_in_cli: default_notify_in_cli(),
+            last_check_time: None,
         }
     }
 }

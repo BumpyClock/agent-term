@@ -5,8 +5,7 @@
       "command": "agentterm-mcp-proxy",
       "args": [
         "--name",
-        "Exa",
-        "--debug"
+        "Exa"
       ]
     }
   }

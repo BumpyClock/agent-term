@@ -63,6 +63,7 @@ export function MCPSettings({
   const [formUrl, setFormUrl] = useState('');
   const [formTransport, setFormTransport] = useState('');
   const [formEnvText, setFormEnvText] = useState('');
+  const [formIsPooled, setFormIsPooled] = useState(false);
   const [validationError, setValidationError] = useState('');
 
   const {
@@ -87,6 +88,7 @@ export function MCPSettings({
     setFormUrl('');
     setFormTransport('');
     setFormEnvText('');
+    setFormIsPooled(false);
     setDialogMode('add');
     setEditingIndex(null);
     setValidationError('');
@@ -103,6 +105,7 @@ export function MCPSettings({
     setFormUrl(item.url);
     setFormTransport(item.transport);
     setFormEnvText(envText[item.id] || '');
+    setFormIsPooled(pool.poolMcps.includes(item.name));
     setDialogMode('edit');
     setEditingIndex(index);
     setValidationError('');
@@ -129,6 +132,8 @@ export function MCPSettings({
       return;
     }
 
+    let updatedPoolMcps = [...pool.poolMcps];
+
     if (dialogMode === 'add') {
       const newId = makeId();
       const newMcp: McpItem = {
@@ -144,8 +149,28 @@ export function MCPSettings({
       };
       onMcpsChange([...mcps, newMcp]);
       onEnvTextChange(newId, formEnvText);
+      // Add to poolMcps if pooled
+      if (formIsPooled && !updatedPoolMcps.includes(trimmedName)) {
+        updatedPoolMcps.push(trimmedName);
+        onPoolChange({ poolMcps: updatedPoolMcps });
+      }
     } else if (editingIndex !== null) {
       const item = mcps[editingIndex];
+      const oldName = item.name;
+      // Handle name change in poolMcps
+      if (oldName !== trimmedName) {
+        updatedPoolMcps = updatedPoolMcps.filter(name => name !== oldName);
+        if (formIsPooled && !updatedPoolMcps.includes(trimmedName)) {
+          updatedPoolMcps.push(trimmedName);
+        }
+      } else {
+        // Same name, just update pooled state
+        if (formIsPooled && !updatedPoolMcps.includes(trimmedName)) {
+          updatedPoolMcps.push(trimmedName);
+        } else if (!formIsPooled) {
+          updatedPoolMcps = updatedPoolMcps.filter(name => name !== trimmedName);
+        }
+      }
       const updated = mcps.map((m, i) =>
         i === editingIndex
           ? {
@@ -162,6 +187,7 @@ export function MCPSettings({
       );
       onMcpsChange(updated);
       onEnvTextChange(item.id, formEnvText);
+      onPoolChange({ poolMcps: updatedPoolMcps });
     }
     setView('list');
     onViewChange?.('list');
@@ -173,6 +199,9 @@ export function MCPSettings({
       onMcpsChange(mcps.filter((_, i) => i !== editingIndex));
       if (removed) {
         onEnvTextChange(removed.id, '');
+        // Remove from poolMcps
+        const updatedPoolMcps = pool.poolMcps.filter(name => name !== removed.name);
+        onPoolChange({ poolMcps: updatedPoolMcps });
       }
     }
     setView('list');
@@ -256,6 +285,9 @@ export function MCPSettings({
             onUrlChange={setFormUrl}
             onTransportChange={setFormTransport}
             onEnvTextChange={setFormEnvText}
+            isPooled={formIsPooled}
+            isPoolAllEnabled={pool.poolAll}
+            onIsPooledChange={setFormIsPooled}
             onSave={handleFormSave}
             onBack={handleBack}
             onDelete={dialogMode === 'edit' ? handleFormDelete : undefined}

@@ -5,6 +5,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { TitleBar } from './components/titlebar/TitleBar';
 import { Terminal } from './components/Terminal';
 import { useTerminalStore, type SessionStatus, type SessionTool } from './store/terminalStore';
+import { useUpdateStore, shouldCheckForUpdates } from './store/updateStore';
 import './App.css';
 
 function App() {
@@ -129,6 +130,27 @@ function App() {
       markSessionActivated(activeSessionId);
     }
   }, [activeSessionId, markSessionActivated]);
+
+  // Initialize update checking
+  useEffect(() => {
+    const initializeUpdateCheck = async () => {
+      const { loadSettings, checkForUpdate } = useUpdateStore.getState();
+
+      try {
+        await loadSettings();
+        const settings = useUpdateStore.getState().settings;
+
+        if (shouldCheckForUpdates(settings)) {
+          // Check in background, don't block app startup
+          checkForUpdate().catch(console.error);
+        }
+      } catch (err) {
+        console.error('Failed to initialize update check:', err);
+      }
+    };
+
+    initializeUpdateCheck();
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
