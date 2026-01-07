@@ -2,6 +2,31 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Custom native scrollbar styling */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: oklch(from var(--foreground) l c h / 25%);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: oklch(from var(--foreground) l c h / 40%);
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(from var(--foreground) l c h / 25%) transparent;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 html,

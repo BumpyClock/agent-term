@@ -1,7 +1,9 @@
+// ABOUTME: Provides icon selection UI for sidebar projects and sessions.
+// ABOUTME: Lets users choose from bundled tool icons or Lucide icons.
 import { useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import { lucideIcons } from './constants';
-import { getToolIconOptions } from './useToolIcons';
+import { getToolIconOptions, isMonochromeToolIcon } from './useToolIcons';
 import { LucideIconSearchModal } from './LucideIconSearchModal';
 
 interface IconPickerProps {
@@ -35,7 +37,11 @@ export function IconPicker({ value, onChange }: IconPickerProps) {
             type="button"
             title={icon.label}
           >
-            <img src={icon.value} alt={icon.label} />
+            <img
+              className={`dialog-icon-img ${isMonochromeToolIcon(icon.value) ? 'dialog-icon-img--mono' : ''}`}
+              src={icon.value}
+              alt={icon.label}
+            />
           </button>
         ))}
       </div>

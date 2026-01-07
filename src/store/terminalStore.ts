@@ -59,7 +59,7 @@ interface TerminalState {
 
   addSession: (
     sectionId: string,
-    options?: { title?: string; tool?: SessionTool }
+    options?: { title?: string; tool?: SessionTool; command?: string; args?: string[]; icon?: string }
   ) => Promise<Session>;
   removeSession: (id: string) => Promise<void>;
   setActiveSession: (id: string) => void;
@@ -232,7 +232,7 @@ export const useTerminalStore = create<TerminalState>()(
         });
       },
 
-      addSession: async (sectionId: string, options?: { title?: string; tool?: SessionTool }) => {
+      addSession: async (sectionId: string, options?: { title?: string; tool?: SessionTool; command?: string; args?: string[]; icon?: string }) => {
         const section = get().sections.find((s) => s.id === sectionId);
         const state = get();
         const sectionSessionIds = state.sessionsBySection[sectionId] || [];
@@ -252,7 +252,9 @@ export const useTerminalStore = create<TerminalState>()(
               ? toolTitle
               : `${toolTitle} ${toolCount + 1}`);
         const projectPath = section?.path || '';
-        const command = await getCommandForTool(tool);
+        const command = options?.command ?? await getCommandForTool(tool);
+        const args = options?.args ?? null;
+        const icon = options?.icon ?? null;
 
         const session = await invoke<Session>('create_session', {
           input: {
@@ -261,7 +263,8 @@ export const useTerminalStore = create<TerminalState>()(
             sectionId,
             tool,
             command,
-            icon: null,
+            args,
+            icon,
           },
         });
 

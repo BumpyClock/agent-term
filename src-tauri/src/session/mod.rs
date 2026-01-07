@@ -134,6 +134,7 @@ impl SessionManager {
             section_id: input.section_id,
             tool: input.tool,
             command: input.command,
+            args: input.args.unwrap_or_default(),
             icon: input.icon,
             status: SessionStatus::Idle,
             created_at: chrono_now(),

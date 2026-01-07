@@ -31,22 +31,74 @@ pub struct CommandSpec {
 
 pub fn build_command(record: &SessionRecord) -> Result<CommandSpec, String> {
     match &record.tool {
-        SessionTool::Shell => Ok(CommandSpec {
-            program: record.command.clone(),
-            args: vec!["-l".to_string(), "-i".to_string()],
-            env: append_proxy_path_env(Vec::new()),
-        }),
-        SessionTool::Claude => build_claude_command(record),
-        SessionTool::Gemini => build_gemini_command(record),
-        SessionTool::Codex | SessionTool::OpenCode | SessionTool::Custom(_) => Ok(CommandSpec {
-            program: record.command.clone(),
-            args: Vec::new(),
-            env: append_proxy_path_env(Vec::new()),
-        }),
+        SessionTool::Shell => {
+            // Shells already handle their own profile init
+            let args = if record.args.is_empty() {
+                vec!["-l".to_string(), "-i".to_string()]
+            } else {
+                record.args.clone()
+            };
+            Ok(CommandSpec {
+                program: record.command.clone(),
+                args,
+                env: append_proxy_path_env(Vec::new()),
+            })
+        }
+        SessionTool::Claude => {
+            let (args, env) = build_claude_args_env(record)?;
+            Ok(wrap_in_shell(&record.command, &args, env))
+        }
+        SessionTool::Gemini => {
+            let args = build_gemini_args(record)?;
+            Ok(wrap_in_shell(&record.command, &args, Vec::new()))
+        }
+        SessionTool::Codex | SessionTool::OpenCode | SessionTool::Custom(_) => {
+            Ok(wrap_in_shell(&record.command, &record.args, Vec::new()))
+        }
     }
 }
 
-fn build_claude_command(record: &SessionRecord) -> Result<CommandSpec, String> {
+/// Wrap a command in the system's default shell for profile initialization
+fn wrap_in_shell(program: &str, args: &[String], env: Vec<(String, String)>) -> CommandSpec {
+    let shell = crate::detect_default_shell();
+
+    // Build the full command string
+    let full_cmd = if args.is_empty() {
+        program.to_string()
+    } else {
+        format!("{} {}", program, args.join(" "))
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        CommandSpec {
+            program: shell,
+            args: vec!["-l".to_string(), "-i".to_string(), "-c".to_string(), full_cmd],
+            env: append_proxy_path_env(env),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let shell_lower = shell.to_lowercase();
+        if shell_lower.contains("pwsh") || shell_lower.contains("powershell") {
+            CommandSpec {
+                program: shell,
+                args: vec!["-NoLogo".to_string(), "-Command".to_string(), format!("& {}", full_cmd)],
+                env: append_proxy_path_env(env),
+            }
+        } else {
+            // CMD
+            CommandSpec {
+                program: shell,
+                args: vec!["/c".to_string(), full_cmd],
+                env: append_proxy_path_env(env),
+            }
+        }
+    }
+}
+
+fn build_claude_args_env(record: &SessionRecord) -> Result<(Vec<String>, Vec<(String, String)>), String> {
     let mut args = build_mcp_config_args(record);
     if let Some(session_id) = &record.claude_session_id {
         if !validate_session_id(session_id) {
@@ -55,21 +107,17 @@ fn build_claude_command(record: &SessionRecord) -> Result<CommandSpec, String> {
         args.push("--resume".to_string());
         args.push(session_id.clone());
     }
-    let mut env = append_proxy_path_env(Vec::new());
+    let mut env = Vec::new();
     if let Ok(config_dir) = get_claude_config_dir() {
         env.push((
             "CLAUDE_CONFIG_DIR".to_string(),
             config_dir.display().to_string(),
         ));
     }
-    Ok(CommandSpec {
-        program: record.command.clone(),
-        args,
-        env,
-    })
+    Ok((args, env))
 }
 
-fn build_gemini_command(record: &SessionRecord) -> Result<CommandSpec, String> {
+fn build_gemini_args(record: &SessionRecord) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
     if let Some(session_id) = &record.gemini_session_id {
         if !validate_session_id(session_id) {
@@ -78,11 +126,7 @@ fn build_gemini_command(record: &SessionRecord) -> Result<CommandSpec, String> {
         args.push("--resume".to_string());
         args.push(session_id.clone());
     }
-    Ok(CommandSpec {
-        program: record.command.clone(),
-        args,
-        env: append_proxy_path_env(Vec::new()),
-    })
+    Ok(args)
 }
 
 fn build_mcp_config_args(record: &SessionRecord) -> Vec<String> {

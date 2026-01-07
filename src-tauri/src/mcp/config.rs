@@ -110,6 +110,10 @@ pub struct ShellSettings {
     /// Additional shell arguments
     #[serde(default)]
     pub default_shell_args: Vec<String>,
+
+    /// IDs of shells pinned to the top-level menu
+    #[serde(default)]
+    pub pinned_shells: Vec<String>,
 }
 
 impl Default for ShellSettings {
@@ -117,6 +121,7 @@ impl Default for ShellSettings {
         Self {
             default_shell: String::new(),
             default_shell_args: Vec::new(),
+            pinned_shells: Vec::new(),
         }
     }
 }
@@ -370,6 +375,7 @@ fn default_show_pool_status() -> bool {
 
 /// Update settings
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateSettings {
     /// Auto-update without prompting (auto-download when update available)
     #[serde(default)]

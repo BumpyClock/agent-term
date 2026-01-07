@@ -97,22 +97,22 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
           <h2 className="text-xl font-semibold">Settings</h2>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
           <TabsList className="flex-shrink-0 mb-4">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
             <TabsTrigger value="tools">Tools & Shells</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="general" className="flex-1 overflow-y-auto">
+          <TabsContent value="general" className="flex-1 overflow-y-auto min-h-0">
             <GeneralSettings />
           </TabsContent>
 
-          <TabsContent value="appearance" className="flex-1 overflow-y-auto">
+          <TabsContent value="appearance" className="flex-1 overflow-y-auto min-h-0">
             <AppearanceSettings />
           </TabsContent>
 
-          <TabsContent value="tools" className="flex-1 overflow-y-auto">
+          <TabsContent value="tools" className="flex-1 overflow-y-auto min-h-0">
             {isLoading ? (
               <div className="text-muted-foreground">Loading settings...</div>
             ) : (
@@ -130,7 +130,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
         {error && <div className="text-destructive text-sm flex-shrink-0 pt-2">{error}</div>}
 
-        <div className="flex justify-end gap-3 pt-4 flex-shrink-0">
+        <div className="settings-dialog-footer">
           <Button variant="outline" onClick={onClose}>
             {showSaveButton ? 'Cancel' : 'Close'}
           </Button>

@@ -3,6 +3,7 @@ import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { IconPicker } from '@/components/sidebar/IconPicker';
 import type { ToolDef, ShellSettings } from '@/types/tools';
 
 export type ToolItem = ToolDef & { id: string; name: string };
@@ -46,7 +47,7 @@ export function ToolsSettings({
   const [formName, setFormName] = useState('');
   const [formCommand, setFormCommand] = useState('');
   const [formArgs, setFormArgs] = useState('');
-  const [formIcon, setFormIcon] = useState('');
+  const [formIcon, setFormIcon] = useState<string | null>(null);
   const [formDescription, setFormDescription] = useState('');
   const [formIsShell, setFormIsShell] = useState(false);
   const [formEnabled, setFormEnabled] = useState(true);
@@ -56,7 +57,7 @@ export function ToolsSettings({
     setFormName('');
     setFormCommand('');
     setFormArgs('');
-    setFormIcon('');
+    setFormIcon(null);
     setFormDescription('');
     setFormIsShell(false);
     setFormEnabled(true);
@@ -72,7 +73,7 @@ export function ToolsSettings({
     setFormName(tool.name);
     setFormCommand(tool.command);
     setFormArgs(joinList(tool.args));
-    setFormIcon(tool.icon);
+    setFormIcon(tool.icon || null);
     setFormDescription(tool.description);
     setFormIsShell(tool.isShell);
     setFormEnabled(tool.enabled);
@@ -115,7 +116,7 @@ export function ToolsSettings({
         name: trimmedName,
         command: formCommand.trim(),
         args,
-        icon: formIcon.trim(),
+        icon: formIcon ?? '',
         description: formDescription.trim(),
         busyPatterns: [],
         isShell: formIsShell,
@@ -131,7 +132,7 @@ export function ToolsSettings({
               name: trimmedName,
               command: formCommand.trim(),
               args,
-              icon: formIcon.trim(),
+              icon: formIcon ?? '',
               description: formDescription.trim(),
               isShell: formIsShell,
               enabled: formEnabled,
@@ -222,9 +223,9 @@ export function ToolsSettings({
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       {tool.icon ? (
-                        <img src={tool.icon} alt="" className="w-5 h-5 flex-shrink-0" />
+                        <img src={tool.icon} alt="" className="w-5 h-5 shrink-0" />
                       ) : (
-                        <div className="w-5 h-5 rounded bg-muted flex items-center justify-center text-xs font-medium flex-shrink-0">
+                        <div className="w-5 h-5 rounded bg-muted flex items-center justify-center text-xs font-medium shrink-0">
                           {tool.name.slice(0, 1).toUpperCase()}
                         </div>
                       )}
@@ -253,8 +254,8 @@ export function ToolsSettings({
 
       {/* Form View */}
       {view === 'form' && (
-        <div className="animate-in slide-in-from-right duration-200 flex flex-col h-full">
-          <div className="flex items-center gap-2 mb-4">
+        <div className="animate-in slide-in-from-right duration-200 flex flex-col min-h-0 h-full">
+          <div className="flex items-center gap-2 mb-4 flex-shrink-0">
             <button
               onClick={handleBack}
               className="p-1 -ml-1 rounded hover:bg-muted transition-colors"
@@ -266,7 +267,7 @@ export function ToolsSettings({
             </h3>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-4">
+          <div className="flex-1 overflow-y-auto min-h-0 space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <label className="dialog-label">
                 Name
@@ -289,26 +290,17 @@ export function ToolsSettings({
               </label>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <label className="dialog-label">
-                Arguments (comma-separated)
-                <input
-                  type="text"
-                  value={formArgs}
-                  onChange={(e) => setFormArgs(e.target.value)}
-                  placeholder="-l, -i"
-                />
-              </label>
-              <label className="dialog-label">
-                Icon (path or URL)
-                <input
-                  type="text"
-                  value={formIcon}
-                  onChange={(e) => setFormIcon(e.target.value)}
-                  placeholder="/tool-icons/nushell.svg"
-                />
-              </label>
-            </div>
+            <label className="dialog-label">
+              Arguments (comma-separated)
+              <input
+                type="text"
+                value={formArgs}
+                onChange={(e) => setFormArgs(e.target.value)}
+                placeholder="-l, -i"
+              />
+            </label>
+
+            <IconPicker value={formIcon} onChange={setFormIcon} />
 
             <label className="dialog-label">
               Description
@@ -345,7 +337,7 @@ export function ToolsSettings({
             )}
           </div>
 
-          <div className="flex justify-between pt-4 flex-shrink-0 border-t border-border mt-4">
+          <div className="flex justify-between pt-4 shrink-0 border-t border-border mt-4">
             <div>
               {dialogMode === 'edit' && (
                 <Button variant="destructive" onClick={handleFormDelete}>

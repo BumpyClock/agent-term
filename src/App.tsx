@@ -1,12 +1,15 @@
 import { useEffect, useCallback, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getVersion } from '@tauri-apps/api/app';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { TitleBar } from './components/titlebar/TitleBar';
 import { Terminal } from './components/Terminal';
 import { useTerminalStore, type SessionStatus, type SessionTool } from './store/terminalStore';
 import { useUpdateStore, shouldCheckForUpdates } from './store/updateStore';
 import './App.css';
+import "overlayscrollbars/overlayscrollbars.css";
+
 
 function App() {
   const {
@@ -131,10 +134,18 @@ function App() {
     }
   }, [activeSessionId, markSessionActivated]);
 
-  // Initialize update checking
+  // Initialize update checking and fetch version
   useEffect(() => {
     const initializeUpdateCheck = async () => {
-      const { loadSettings, checkForUpdate } = useUpdateStore.getState();
+      const { loadSettings, checkForUpdate, setCurrentVersion } = useUpdateStore.getState();
+
+      // Fetch and store current version
+      try {
+        const version = await getVersion();
+        setCurrentVersion(version);
+      } catch (err) {
+        console.error('Failed to get app version:', err);
+      }
 
       try {
         await loadSettings();
@@ -241,10 +252,10 @@ function App() {
   }, []);
 
   const handleCreateTerminal = useCallback(
-    async (sectionId: string, tool: SessionTool) => {
+    async (sectionId: string, tool: SessionTool, options?: { command?: string; icon?: string; title?: string }) => {
       const section = sections.find((s) => s.id === sectionId);
       if (!section) return;
-      await addSession(sectionId, { tool });
+      await addSession(sectionId, { tool, ...options });
     },
     [sections, addSession]
   );

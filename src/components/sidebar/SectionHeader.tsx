@@ -1,3 +1,5 @@
+// ABOUTME: Renders a sidebar section header with icon, title, and actions.
+// ABOUTME: Supports editing, collapse toggles, and drag handles for sections.
 import type { MouseEvent } from 'react';
 import { motion } from 'motion/react';
 import type { Section } from '../../store/terminalStore';
@@ -61,7 +63,12 @@ export function SectionHeader({
           title="Project icon"
         />
       ) : icon?.kind === 'img' ? (
-        <img className="section-icon" src={icon.src} alt={section.name} title={section.name} />
+        <img
+          className={`section-icon ${icon.monochrome ? 'section-icon--mono' : ''}`}
+          src={icon.src}
+          alt={section.name}
+          title={section.name}
+        />
       ) : null}
       {isEditing ? (
         <input

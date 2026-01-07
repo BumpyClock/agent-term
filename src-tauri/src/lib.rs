@@ -12,6 +12,7 @@ pub mod diagnostics;
 pub mod mcp;
 mod search;
 mod session;
+mod shells;
 mod tools;
 pub mod update;
 
@@ -177,6 +178,9 @@ pub fn run() {
             tools::tools_get_settings,
             tools::tools_set_settings,
             tools::get_resolved_shell,
+            shells::available_shells,
+            shells::get_pinned_shells,
+            shells::toggle_pin_shell,
             update::update_check,
             update::update_download,
             update::update_install,

@@ -30,6 +30,9 @@ pub struct SessionRecord {
     pub section_id: String,
     pub tool: SessionTool,
     pub command: String,
+    /// Shell-specific arguments (e.g., ["-d", "Ubuntu"] for WSL)
+    #[serde(default)]
+    pub args: Vec<String>,
     #[serde(default)]
     pub icon: Option<String>,
     pub status: SessionStatus,
@@ -120,6 +123,9 @@ pub struct NewSessionInput {
     pub section_id: String,
     pub tool: SessionTool,
     pub command: String,
+    /// Shell-specific arguments (e.g., ["-d", "Ubuntu"] for WSL)
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
     #[serde(default)]
     pub icon: Option<String>,
 }

@@ -1,3 +1,5 @@
+// ABOUTME: Defines shared sidebar types used by components and utils.
+// ABOUTME: Includes icon descriptors and search result shapes.
 export interface SearchResult {
   filePath: string;
   projectName: string;
@@ -9,7 +11,7 @@ export interface SearchResult {
 }
 
 export type IconDescriptor =
-  | { kind: 'img'; src: string }
+  | { kind: 'img'; src: string; monochrome?: boolean }
   | { kind: 'lucide'; id: string };
 
 export type PopoverPosition = { x: number; y: number };
