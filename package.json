@@ -11,7 +11,8 @@
     "build:x86": "tauri build --target i686-pc-windows-msvc",
     "preview": "vite preview",
     "tauri": "tauri",
-    "version": "node scripts/sync-version.mjs && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml"
+    "version": "node scripts/sync-version.mjs && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml",
+    "postversion": "git push && git push --tags"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
