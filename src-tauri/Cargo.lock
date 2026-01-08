@@ -52,6 +52,7 @@ version = "0.1.0"
 dependencies = [
  "agentterm_mcp",
  "agentterm_session",
+ "agentterm_tools",
  "anyhow",
  "gpui",
  "gpui_term",
@@ -101,6 +102,15 @@ dependencies = [
  "tempfile",
  "time",
  "uuid",
+]
+
+[[package]]
+name = "agentterm_tools"
+version = "0.1.0"
+dependencies = [
+ "agentterm_mcp",
+ "serde",
+ "users",
 ]
 
 [[package]]

@@ -12,9 +12,9 @@ path = "src/main.rs"
 [dependencies]
 agentterm_mcp = { path = "../agentterm_mcp" }
 agentterm_session = { path = "../agentterm_session" }
+agentterm_tools = { path = "../agentterm_tools" }
 anyhow.workspace = true
 gpui.workspace = true
 gpui_term = { path = "../gpui_term" }
 parking_lot.workspace = true
 tokio.workspace = true
-
