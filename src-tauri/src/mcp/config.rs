@@ -475,7 +475,13 @@ impl Default for McpJsonConfig {
 }
 
 /// Get the path to the agent-term config directory
+/// Checks AGENT_TERM_HOME env var first for testing, then defaults to ~/.agent-term
 pub fn get_agent_term_dir() -> McpResult<PathBuf> {
+    // Allow tests to override via env var
+    if let Ok(custom_dir) = std::env::var("AGENT_TERM_HOME") {
+        return Ok(PathBuf::from(custom_dir));
+    }
+
     let home = dirs::home_dir().ok_or_else(|| McpError::ConfigNotFound(
         "Home directory not found".to_string(),
     ))?;

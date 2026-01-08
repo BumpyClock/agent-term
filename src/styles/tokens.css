@@ -19,10 +19,10 @@
 
     /* Light theme custom text colors */
     --color-text-subtle: oklch(0.45 0.01 270);
-    --color-text-faint: oklch(0.60 0.01 270);
+    --color-text-faint: oklch(0.6 0.01 270);
 
     /* Light theme custom surface colors with alpha */
-    --color-surface-root: oklch(0.98 0.002 270 / 10%);
+    --color-surface-root: oklch(0.98 0.002 270 / 20%);
     --color-surface-sidebar: oklch(0.97 0.005 270 / 85%);
     --color-surface-panel: oklch(0.95 0.005 270 / 90%);
     --color-surface-panel-strong: oklch(0.93 0.005 270 / 95%);
@@ -58,7 +58,7 @@
     --color-text-faint: oklch(0.418 0 0); /* #5a5a5a */
 
     /* Dark theme custom surface colors with alpha */
-    --color-surface-root: oklch(0.1 0 0 / 10%);
+    --color-surface-root: oklch(0.1 0 0 / 5%);
     --color-surface-sidebar: oklch(0.213 0 0 / 32%);
     --color-surface-panel: oklch(0.255 0 0 / 82%);
     --color-surface-panel-strong: oklch(0.255 0 0 / 88%);

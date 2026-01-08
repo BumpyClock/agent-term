@@ -20,6 +20,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "shell-words",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
