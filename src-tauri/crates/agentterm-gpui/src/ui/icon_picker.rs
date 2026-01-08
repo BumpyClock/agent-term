@@ -10,7 +10,7 @@ use gpui::{
     ParentElement, Styled, Window,
 };
 
-use crate::icons::{Icon, IconDescriptor, IconSize, TOOL_ICONS, tool_icon_path};
+use crate::icons::{Icon, IconDescriptor, IconSize, TOOL_ICONS};
 
 /// Colors for the icon picker
 const SECTION_TITLE: u32 = 0xa0a0a0;
@@ -167,7 +167,7 @@ fn render_tool_icons_grid(
             render_icon_button(
                 format!("tool-{}", idx),
                 IconDescriptor::tool(info.id),
-                Icon::from_file(tool_icon_path(info.filename)),
+                Icon::tool(info.id),
                 value,
                 on_change.clone(),
             )
