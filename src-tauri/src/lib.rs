@@ -231,18 +231,6 @@ pub fn run() {
                 diagnostics::log(format!("proxy_install_error error={}", msg));
             }
 
-            let mcp_manager = app.state::<mcp::McpManager>().inner().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Ok(config) = mcp_manager.load_config().await {
-                    if config.mcp_pool.enabled {
-                        if let Err(err) = mcp::pool_manager::initialize_global_pool(&config) {
-                            let msg = err.to_string().replace('.', "");
-                            diagnostics::log(format!("pool_init_failed error={}", msg));
-                        }
-                    }
-                }
-            });
-
             Ok(())
         })
         .build(tauri::generate_context!())

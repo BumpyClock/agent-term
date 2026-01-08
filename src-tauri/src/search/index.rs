@@ -5,6 +5,7 @@
 //! Supports incremental indexing by tracking file modification times.
 
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -399,24 +400,35 @@ impl SearchIndex {
             .flatten()
             .collect();
 
-        let parse_results: Vec<(String, u64, Vec<ParsedMessage>, bool)> = all_files
-            .par_iter()
-            .map(|(file_path, project_name, mtime)| {
-                let path_str = file_path.to_string_lossy().to_string();
-                match parse_jsonl_file_with_offsets(file_path, project_name) {
-                    Ok(msgs) => (path_str, *mtime, msgs, true),
-                    Err(e) => {
-                        crate::diagnostics::log(format!(
-                            "jsonl_parse_error file={} project={} error={}",
-                            file_path.display(),
-                            project_name,
-                            e
-                        ));
-                        (path_str, *mtime, Vec::new(), false)
+        let available = std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(1);
+        let max_threads = std::cmp::max(1, available / 2);
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(max_threads)
+            .build()
+            .map_err(|e| format!("Failed to build search index pool: {}", e))?;
+
+        let parse_results: Vec<(String, u64, Vec<ParsedMessage>, bool)> = pool.install(|| {
+            all_files
+                .par_iter()
+                .map(|(file_path, project_name, mtime)| {
+                    let path_str = file_path.to_string_lossy().to_string();
+                    match parse_jsonl_file_with_offsets(file_path, project_name) {
+                        Ok(msgs) => (path_str, *mtime, msgs, true),
+                        Err(e) => {
+                            crate::diagnostics::log(format!(
+                                "jsonl_parse_error file={} project={} error={}",
+                                file_path.display(),
+                                project_name,
+                                e
+                            ));
+                            (path_str, *mtime, Vec::new(), false)
+                        }
                     }
-                }
-            })
-            .collect();
+                })
+                .collect()
+        });
 
         let mut all_refs: Vec<MessageRef> = Vec::new();
         let mut inverted_index: HashMap<String, Vec<usize>> = HashMap::new();
