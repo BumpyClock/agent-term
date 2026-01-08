@@ -1,9 +1,6 @@
-//! Tool icon loading from disk.
+//! Tool icon metadata.
 //!
-//! Tool icons are loaded at runtime from the config directory,
-//! allowing them to be updated without recompiling.
-
-use std::path::PathBuf;
+//! Tool icons are embedded at compile time in assets/tool-icons/.
 
 /// Metadata for a tool icon.
 #[derive(Debug, Clone)]
@@ -42,44 +39,13 @@ pub const TOOL_ICONS: &[ToolIconInfo] = &[
     ToolIconInfo { id: "debian", label: "Debian", filename: "debian.svg", monochrome: false },
     ToolIconInfo { id: "fedora", label: "Fedora", filename: "fedora.svg", monochrome: false },
     ToolIconInfo { id: "bash", label: "Bash", filename: "bash.svg", monochrome: true },
+    ToolIconInfo { id: "zsh", label: "Zsh", filename: "zsh.svg", monochrome: true },
     ToolIconInfo { id: "powershell", label: "PowerShell", filename: "powershell.svg", monochrome: false },
     ToolIconInfo { id: "linux", label: "Linux", filename: "linux.svg", monochrome: true },
     ToolIconInfo { id: "bun", label: "Bun", filename: "Bun.svg", monochrome: false },
 ];
 
-/// Get the tool icons directory path.
-/// Checks app bundle resources first, then falls back to config directory.
-pub fn tool_icons_dir() -> PathBuf {
-    // Check app bundle resources first (for packaged macOS app)
-    #[cfg(target_os = "macos")]
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            if let Some(grandparent) = parent.parent() {
-                let resources = grandparent.join("Resources/tool-icons");
-                if resources.exists() {
-                    return resources;
-                }
-            }
-        }
-    }
-
-    // Fall back to config directory
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("agentterm/tool-icons")
-}
-
-/// Get the full path to a tool icon file.
-pub fn tool_icon_path(filename: &str) -> PathBuf {
-    tool_icons_dir().join(filename)
-}
-
 /// Find tool icon info by ID.
 pub fn find_tool_icon(id: &str) -> Option<&'static ToolIconInfo> {
     TOOL_ICONS.iter().find(|t| t.id == id)
-}
-
-/// Check if a tool icon file exists.
-pub fn tool_icon_exists(filename: &str) -> bool {
-    tool_icon_path(filename).exists()
 }

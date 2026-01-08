@@ -157,6 +157,7 @@ struct AgentTermApp {
     project_editor_section_id: Option<String>,
     project_editor_name_input: Option<Entity<TextInput>>,
     project_editor_path_input: Option<Entity<TextInput>>,
+    project_editor_icon: Option<String>,
     project_editor_error: Option<SharedString>,
 
     session_menu_open: bool,
@@ -216,6 +217,7 @@ impl AgentTermApp {
             project_editor_section_id: None,
             project_editor_name_input: None,
             project_editor_path_input: None,
+            project_editor_icon: None,
             project_editor_error: None,
             session_menu_open: false,
             session_menu_session_id: None,
@@ -326,6 +328,7 @@ impl AgentTermApp {
 
         self.project_editor_open = true;
         self.project_editor_section_id = Some(section_id);
+        self.project_editor_icon = section.icon.clone();
         self.project_editor_error = None;
         self.session_menu_open = false;
         self.session_rename_open = false;
@@ -345,6 +348,7 @@ impl AgentTermApp {
         self.project_editor_section_id = None;
         self.project_editor_name_input = None;
         self.project_editor_path_input = None;
+        self.project_editor_icon = None;
         self.project_editor_error = None;
         cx.notify();
     }
@@ -803,11 +807,11 @@ impl AgentTermApp {
 
     fn handle_edit_section(
         &mut self,
-        _action: &EditSection,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        action: &EditSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
-        // TODO: Implement section editing
+        self.open_project_editor(action.0.clone(), window, cx);
     }
 
     fn handle_remove_section(
@@ -1128,6 +1132,8 @@ impl AgentTermApp {
             .collect();
 
         let section_id = section.section.id.clone();
+        let is_collapsed = section.section.collapsed;
+        let section_icon = section.section.icon.clone();
 
         let section_header = div()
             .id(format!("section-header-{}", section.section.id))
@@ -1137,12 +1143,38 @@ impl AgentTermApp {
             .items_center()
             .gap(px(6.0))
             .rounded(px(6.0))
+            .cursor_pointer()
             .hover(|s| s.bg(rgba(0xffffff10)))
+            .on_click(cx.listener({
+                let section_id = section.section.id.clone();
+                move |this, _, _, cx| {
+                    this.toggle_section_collapsed(section_id.clone(), cx);
+                    cx.notify();
+                }
+            }))
+            .child(
+                Icon::new(if is_collapsed {
+                    IconName::ChevronRight
+                } else {
+                    IconName::ChevronDown
+                })
+                .size(IconSize::Small)
+                .color(rgb(TEXT_SUBTLE)),
+            )
+            .child(
+                section_icon
+                    .as_ref()
+                    .map(|s| icon_from_string(s))
+                    .unwrap_or_else(|| Icon::new(IconName::Folder))
+                    .size(IconSize::Medium)
+                    .color(rgb(TEXT_PRIMARY)),
+            )
             .child(
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(TEXT_PRIMARY))
+                    .flex_1()
                     .child(section.section.name.clone()),
             )
             .context_menu({
@@ -1155,6 +1187,10 @@ impl AgentTermApp {
             });
 
         let mut container = div().py(px(4.0)).child(section_header);
+
+        if is_collapsed {
+            return container;
+        }
 
         if sessions.is_empty() {
             container = container.child(
@@ -1884,6 +1920,185 @@ impl AgentTermApp {
 
         col
     }
+
+    fn render_project_editor_dialog(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let name_input = self.project_editor_name_input.clone();
+        let path_input = self.project_editor_path_input.clone();
+        let current_icon = self.project_editor_icon.clone();
+        let error = self.project_editor_error.clone();
+
+        div()
+            .id("project-editor-overlay")
+            .absolute()
+            .inset_0()
+            .bg(rgba(0x00000080))
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                this.close_project_editor(cx);
+            }))
+            .child(
+                div()
+                    .id("project-editor-dialog")
+                    .w(px(400.))
+                    .bg(rgb(0x1a1a1a))
+                    .border_1()
+                    .border_color(rgb(0x3a3a3a))
+                    .rounded(px(8.))
+                    .flex()
+                    .flex_col()
+                    .overflow_hidden()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .child(
+                        div()
+                            .px(px(16.))
+                            .py(px(12.))
+                            .border_b_1()
+                            .border_color(rgb(0x3a3a3a))
+                            .text_lg()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xd8d8d8))
+                            .child("Edit Project"),
+                    )
+                    .child(
+                        div()
+                            .px(px(16.))
+                            .py(px(16.))
+                            .flex()
+                            .flex_col()
+                            .gap(px(16.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(8.))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(rgb(0xa0a0a0))
+                                            .child("Icon"),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.))
+                                            .child(
+                                                div()
+                                                    .size(px(40.))
+                                                    .rounded(px(4.))
+                                                    .bg(rgb(0x2a2a2a))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .child(
+                                                        current_icon
+                                                            .as_ref()
+                                                            .map(|s| icon_from_string(s))
+                                                            .unwrap_or_else(|| {
+                                                                Icon::new(IconName::Folder)
+                                                            })
+                                                            .size(IconSize::Large)
+                                                            .color(rgb(0xd8d8d8)),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id("change-icon-btn")
+                                                    .px(px(12.))
+                                                    .py(px(6.))
+                                                    .rounded(px(4.))
+                                                    .bg(rgb(0x2a2a2a))
+                                                    .text_sm()
+                                                    .text_color(rgb(0xd8d8d8))
+                                                    .cursor_pointer()
+                                                    .hover(|s| s.bg(rgb(0x3a3a3a)))
+                                                    .child("Change..."),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(8.))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(rgb(0xa0a0a0))
+                                            .child("Name"),
+                                    )
+                                    .when_some(name_input, |el, input| el.child(input)),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(8.))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(rgb(0xa0a0a0))
+                                            .child("Path"),
+                                    )
+                                    .when_some(path_input, |el, input| el.child(input)),
+                            )
+                            .when_some(error, |el, err| {
+                                el.child(
+                                    div().text_sm().text_color(rgb(0xff6b6b)).child(err),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .px(px(16.))
+                            .py(px(12.))
+                            .border_t_1()
+                            .border_color(rgb(0x3a3a3a))
+                            .flex()
+                            .justify_end()
+                            .gap(px(8.))
+                            .child(
+                                div()
+                                    .id("cancel-btn")
+                                    .px(px(16.))
+                                    .py(px(8.))
+                                    .rounded(px(6.))
+                                    .bg(rgb(0x2a2a2a))
+                                    .text_color(rgb(0xd8d8d8))
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(rgb(0x3a3a3a)))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_project_editor(cx);
+                                    }))
+                                    .child("Cancel"),
+                            )
+                            .child(
+                                div()
+                                    .id("save-btn")
+                                    .px(px(16.))
+                                    .py(px(8.))
+                                    .rounded(px(6.))
+                                    .bg(rgb(0x5eead4))
+                                    .text_color(rgb(0x000000))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .cursor_pointer()
+                                    .hover(|s| s.opacity(0.9))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.save_project_editor(window, cx);
+                                    }))
+                                    .child("Save"),
+                            ),
+                    ),
+            )
+    }
 }
 
 fn resolve_transport(def: &agentterm_mcp::MCPDef) -> String {
@@ -1911,7 +2126,9 @@ fn icon_button(label: &'static str) -> gpui::Div {
 }
 
 impl Render for AgentTermApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let project_editor_open = self.project_editor_open;
+
         div()
             .id("agentterm-gpui")
             .absolute()
@@ -1940,6 +2157,9 @@ impl Render for AgentTermApp {
             })
             .when(self.mcp_dialog_open, |el| {
                 el.child(self.render_mcp_dialog(cx))
+            })
+            .when(project_editor_open, |el| {
+                el.child(self.render_project_editor_dialog(window, cx))
             })
     }
 }

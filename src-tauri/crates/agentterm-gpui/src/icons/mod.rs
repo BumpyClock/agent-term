@@ -2,7 +2,7 @@
 //!
 //! Provides Icon component with support for:
 //! - Embedded Lucide SVG icons (via rust-embed assets)
-//! - Runtime-loaded tool icons from disk
+//! - Embedded tool icons (via rust-embed assets)
 
 mod lucide_icons;
 mod tool_icons;
@@ -10,8 +10,7 @@ mod tool_icons;
 pub use lucide_icons::*;
 pub use tool_icons::*;
 
-use gpui::{prelude::*, img, px, svg, Hsla, IntoElement, SharedString, Styled, Window, App};
-use std::path::PathBuf;
+use gpui::{prelude::*, px, svg, Hsla, IntoElement, SharedString, Styled, Window, App};
 
 /// Common UI icons with type safety (subset of Lucide).
 /// These are the most frequently used icons with compile-time safety.
@@ -152,12 +151,10 @@ impl IconSize {
     }
 }
 
-/// Icon source - embedded or external.
+/// Icon source - all icons are embedded.
 enum IconSource {
-    /// Lucide SVG from embedded assets
+    /// SVG from embedded assets (Lucide or tool icons)
     Embedded(SharedString),
-    /// Tool icon loaded from disk at runtime
-    External(PathBuf),
 }
 
 /// Icon component for rendering Lucide or tool icons.
@@ -188,13 +185,18 @@ impl Icon {
         }
     }
 
-    /// Create an icon from an external file path (runtime loaded).
-    /// Use this for tool icons that are loaded from disk.
-    pub fn from_file(path: impl Into<PathBuf>) -> Self {
-        Self {
-            source: IconSource::External(path.into()),
-            size: IconSize::default(),
-            color: None,
+    /// Create an icon from a tool icon ID (embedded).
+    /// Tool icons are embedded in assets/tool-icons/
+    pub fn tool(id: &str) -> Self {
+        if let Some(info) = find_tool_icon(id) {
+            Self {
+                source: IconSource::Embedded(format!("tool-icons/{}", info.filename).into()),
+                size: IconSize::default(),
+                color: None,
+            }
+        } else {
+            // Fallback to file icon
+            Self::new(IconName::File)
         }
     }
 
@@ -215,19 +217,13 @@ impl Icon {
 impl RenderOnce for Icon {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let size = self.size.px();
+        let IconSource::Embedded(path) = self.source;
 
-        match self.source {
-            IconSource::Embedded(path) => {
-                let mut el = svg().path(path).size(size).flex_none();
-                if let Some(color) = self.color {
-                    el = el.text_color(color);
-                }
-                el.into_any_element()
-            }
-            IconSource::External(path) => {
-                img(path).size(size).flex_none().into_any_element()
-            }
+        let mut el = svg().path(path).size(size).flex_none();
+        if let Some(color) = self.color {
+            el = el.text_color(color);
         }
+        el
     }
 }
 
@@ -259,13 +255,7 @@ impl IconDescriptor {
     pub fn to_icon(&self) -> Icon {
         match self {
             Self::Lucide { id } => Icon::lucide(id),
-            Self::Tool { id } => {
-                if let Some(info) = find_tool_icon(id) {
-                    Icon::from_file(tool_icon_path(info.filename))
-                } else {
-                    Icon::new(IconName::File)
-                }
-            }
+            Self::Tool { id } => Icon::tool(id),
         }
     }
 }
@@ -273,20 +263,38 @@ impl IconDescriptor {
 /// Parse an icon string into an Icon element.
 ///
 /// Supports formats:
-/// - "lucide:terminal" -> Lucide icon
+/// - "lucide:terminal" -> Lucide icon by name
+/// - "/tool-icons/claude.svg" -> Tool icon by path (legacy format)
 /// - "claude" -> Tool icon by ID
-/// - Any other string -> Try as tool icon, fallback to File icon
+/// - Any other string -> Fallback to File icon
 pub fn icon_from_string(icon_str: &str) -> Icon {
+    // Handle lucide: prefix
     if icon_str.starts_with("lucide:") {
-        Icon::lucide(&icon_str[7..])
-    } else if let Some(info) = find_tool_icon(icon_str) {
-        Icon::from_file(tool_icon_path(info.filename))
-    } else {
-        let path = tool_icon_path(icon_str);
-        if path.exists() {
-            Icon::from_file(path)
-        } else {
-            Icon::new(IconName::File)
+        return Icon::lucide(&icon_str[7..]);
+    }
+
+    // Handle path format: /tool-icons/filename.svg or tool-icons/filename.svg
+    if icon_str.contains("tool-icons/") {
+        if let Some(filename) = icon_str.split('/').last() {
+            // Find tool icon by filename
+            if let Some(info) = TOOL_ICONS.iter().find(|t| t.filename == filename) {
+                return Icon::tool(info.id);
+            }
+            // Not in our predefined list - try to load as embedded asset
+            let path = format!("tool-icons/{}", filename);
+            return Icon {
+                source: IconSource::Embedded(path.into()),
+                size: IconSize::default(),
+                color: None,
+            };
         }
     }
+
+    // Handle tool icon by ID (e.g., "claude")
+    if find_tool_icon(icon_str).is_some() {
+        return Icon::tool(icon_str);
+    }
+
+    // Fallback
+    Icon::new(IconName::File)
 }
