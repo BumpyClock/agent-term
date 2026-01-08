@@ -1,0 +1,55 @@
+/* ABOUTME: Styles for the cross-window drop zone overlay. */
+/* ABOUTME: Full-screen overlay with animated border and centered content. */
+
+.window-drop-zone {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-window-drop-zone, oklch(from var(--primary) l c h / 15%));
+  border: 2px dashed var(--primary);
+  border-radius: var(--radius-2xl, 16px);
+  pointer-events: none;
+  animation: dropzone-pulse 1.5s ease-in-out infinite;
+}
+
+.window-drop-zone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 32px;
+  background: var(--color-surface-sidebar);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: var(--shadow-sidebar);
+}
+
+.window-drop-zone-icon {
+  font-size: 32px;
+  font-weight: var(--font-weight-bold, 700);
+  color: var(--primary);
+  line-height: 1;
+}
+
+.window-drop-zone-text {
+  font-size: 16px;
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--foreground);
+}
+
+.window-drop-zone-hint {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+@keyframes dropzone-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}

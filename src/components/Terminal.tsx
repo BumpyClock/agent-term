@@ -11,6 +11,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "../store/terminalStore";
 import { useTerminalSettings } from "../store/terminalSettingsStore";
 import { getTerminalTheme, type TerminalColorSchemeId } from "@/lib/terminalThemes";
+import { getCurrentWindowLabel } from "@/lib/windowContext";
 import "@xterm/xterm/css/xterm.css";
 
 /**
@@ -189,6 +190,8 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         attributeFilter: ["class"],
       });
 
+      const windowLabel = getCurrentWindowLabel();
+
       const teardown = () => {
         if (disposed) return;
         disposed = true;
@@ -209,6 +212,11 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
           disposed,
           active: isActiveRef.current,
         });
+        // Unsubscribe from session before stopping
+        invoke("unsubscribe_from_session", { sessionId, windowLabel })
+          .catch((err) => {
+            console.debug(`${logPrefix} unsubscribe_from_session failed (expected if not running)`, err);
+          });
         invoke("stop_session", { id: sessionId })
           .then(() => {
             console.debug(`${logPrefix} stop_session sent`);
@@ -332,6 +340,31 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         if (cancelled) {
           teardown();
           return;
+        }
+
+        // Subscribe this window to receive targeted session events
+        try {
+          await invoke("subscribe_to_session", { sessionId, windowLabel });
+          console.debug(`${logPrefix} subscribed to session`);
+        } catch (err) {
+          console.error(`${logPrefix} Failed to subscribe to session:`, err);
+        }
+
+        // Replay scrollback for sessions that were already running
+        // This enables mirror mode where multiple windows see the same output
+        try {
+          const scrollback = await invoke<number[]>("get_scrollback", { sessionId });
+          if (scrollback && scrollback.length > 0) {
+            const bytes = new Uint8Array(scrollback);
+            const text = decoder.decode(bytes);
+            if (text.length > 0) {
+              xterm.write(text);
+              console.debug(`${logPrefix} replayed scrollback`, { bytes: scrollback.length });
+            }
+          }
+        } catch (err) {
+          // Session may not be running yet or scrollback unavailable - this is OK
+          console.debug(`${logPrefix} scrollback replay skipped:`, err);
         }
       };
 

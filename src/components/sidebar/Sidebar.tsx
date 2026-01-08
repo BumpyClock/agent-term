@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { Search, Settings } from 'lucide-react';
+import { Search, Settings, ExternalLink, Copy } from 'lucide-react';
 import { useTerminalStore, type Section, type Session, type SessionTool } from '../../store/terminalStore';
 import { DndContext, DragOverlay, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent, type DragCancelEvent } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -669,6 +669,36 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                   closeMenuPopover();
                 },
               },
+              {
+                label: 'Move to New Window',
+                icon: <ExternalLink size={14} />,
+                onSelect: async () => {
+                  closeMenuPopover();
+                  try {
+                    await invoke('open_new_window', {
+                      title: menuSession.title,
+                      sessionIds: [menuSession.id],
+                    });
+                  } catch (err) {
+                    console.error('Failed to move to new window:', err);
+                  }
+                },
+              },
+              {
+                label: 'Open in New Window',
+                icon: <Copy size={14} />,
+                onSelect: async () => {
+                  closeMenuPopover();
+                  try {
+                    await invoke('open_new_window', {
+                      title: menuSession.title,
+                      sessionIds: [menuSession.id],
+                    });
+                  } catch (err) {
+                    console.error('Failed to open in new window:', err);
+                  }
+                },
+              },
             ]}
           />,
           document.body
@@ -683,6 +713,22 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
               {
                 label: 'Edit',
                 onSelect: () => openSectionEditDialog(menuSection),
+              },
+              {
+                label: 'Open in New Window',
+                icon: <ExternalLink size={14} />,
+                onSelect: async () => {
+                  closeSectionMenuPopover();
+                  const sessionIds = getSessionsBySection(menuSection.id).map((s) => s.id);
+                  try {
+                    await invoke('open_new_window', {
+                      title: menuSection.name,
+                      sessionIds,
+                    });
+                  } catch (err) {
+                    console.error('Failed to open new window:', err);
+                  }
+                },
               },
               ...(!menuSection.isDefault
                 ? [
