@@ -16,8 +16,9 @@ mod ui;
 use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use settings::AppSettings;
 use settings_dialog::SettingsDialog;
-use ui::ContextMenuExt;
+use ui::{ActiveTheme, Button, ButtonVariants, ContextMenuExt, Divider, Sizable, Tab, TabBar, WindowExt, v_flex};
 use gpui_component::{
+    Size as ComponentSize,
     input::{Input as GpuiInput, InputState as GpuiInputState},
     theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
 };
@@ -26,7 +27,7 @@ use gpui::{
     Focusable, InteractiveElement, IntoElement, KeyBinding, Menu, MenuItem, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, WeakEntity, Window, WindowBackgroundAppearance,
-    WindowBounds, WindowOptions, actions, div, hsla, point, prelude::*, px, rgb, rgba, size,
+    WindowBounds, WindowOptions, actions, div, hsla, point, prelude::*, px, rgba, size,
 };
 use gpui_term::{Clear, Copy, Paste, SelectAll, Terminal, TerminalBuilder, TerminalView};
 
@@ -67,10 +68,6 @@ const SIDEBAR_GAP: f32 = 16.0;
 const SIDEBAR_MIN_WIDTH: f32 = 200.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 const SIDEBAR_HEADER_LEFT_PADDING: f32 = 68.0;
-
-const TEXT_PRIMARY: u32 = 0xd8d8d8;
-const TEXT_SUBTLE: u32 = 0xa6a6a6;
-const TEXT_FAINT: u32 = 0x5a5a5a;
 
 const SURFACE_ROOT: u32 = 0x000000;
 const SURFACE_SIDEBAR: u32 = 0x202020;
@@ -222,10 +219,385 @@ fn main() {
     });
 }
 
+use std::sync::Arc;
+
 #[derive(Clone)]
 struct SectionItem {
     section: SectionRecord,
     is_default: bool,
+}
+
+/// TabPickerDialog - A dialog for selecting shells and tools to create new tabs.
+/// This is rendered as an Entity inside the gpui-component Dialog system.
+struct TabPickerDialog {
+    view: Entity<AgentTermApp>,
+    tokio: Arc<tokio::runtime::Runtime>,
+    mcp_manager: McpManager,
+    loading: bool,
+    error: Option<SharedString>,
+    tools: Vec<ToolInfo>,
+    shells: Vec<ShellInfo>,
+    pinned_shell_ids: Vec<String>,
+}
+
+impl TabPickerDialog {
+    fn new(
+        view: Entity<AgentTermApp>,
+        tokio: Arc<tokio::runtime::Runtime>,
+        mcp_manager: McpManager,
+    ) -> Self {
+        Self {
+            view,
+            tokio,
+            mcp_manager,
+            loading: true,
+            error: None,
+            tools: Vec::new(),
+            shells: Vec::new(),
+            pinned_shell_ids: Vec::new(),
+        }
+    }
+
+    fn load_data(&mut self) {
+        self.loading = true;
+        self.error = None;
+
+        let tools = match self.tokio.block_on(agentterm_tools::tools_list(&self.mcp_manager)) {
+            Ok(list) => list.into_iter().filter(|t| t.enabled).collect(),
+            Err(e) => {
+                self.error = Some(e.to_string().into());
+                Vec::new()
+            }
+        };
+
+        let pinned = match self.tokio.block_on(agentterm_tools::get_pinned_shells(&self.mcp_manager)) {
+            Ok(list) => list,
+            Err(e) => {
+                self.error = Some(e.to_string().into());
+                Vec::new()
+            }
+        };
+
+        self.tools = tools;
+        self.shells = agentterm_tools::available_shells();
+        self.pinned_shell_ids = pinned;
+        self.loading = false;
+    }
+
+    fn toggle_pin(&mut self, shell_id: String, cx: &mut Context<Self>) {
+        match self
+            .tokio
+            .block_on(agentterm_tools::toggle_pin_shell(&self.mcp_manager, shell_id))
+        {
+            Ok(pinned) => self.pinned_shell_ids = pinned,
+            Err(e) => self.error = Some(e.to_string().into()),
+        }
+        cx.notify();
+    }
+
+    fn select_tool(&self, tool: ToolInfo, window: &mut Window, cx: &mut Context<Self>) {
+        let session_tool = if tool.is_builtin {
+            match tool.id.as_str() {
+                "claude" => SessionTool::Claude,
+                "gemini" => SessionTool::Gemini,
+                "codex" => SessionTool::Codex,
+                "openCode" => SessionTool::OpenCode,
+                _ => SessionTool::Custom(tool.id.clone()),
+            }
+        } else {
+            SessionTool::Custom(tool.id.clone())
+        };
+
+        let icon = if tool.icon.is_empty() {
+            None
+        } else {
+            Some(tool.icon.clone())
+        };
+
+        window.close_dialog(cx);
+
+        self.view.update(cx, |app, cx| {
+            app.create_session_from_tool(
+                session_tool,
+                tool.name.clone(),
+                tool.command.clone(),
+                tool.args.clone(),
+                icon,
+                window,
+                cx,
+            );
+        });
+    }
+
+    fn select_shell(&self, shell: ShellInfo, window: &mut Window, cx: &mut Context<Self>) {
+        let icon = if shell.icon.is_empty() {
+            None
+        } else {
+            Some(shell.icon.clone())
+        };
+
+        window.close_dialog(cx);
+
+        self.view.update(cx, |app, cx| {
+            app.create_session_from_tool(
+                SessionTool::Shell,
+                shell.name.clone(),
+                shell.command.clone(),
+                shell.args.clone(),
+                icon,
+                window,
+                cx,
+            );
+        });
+    }
+
+    fn render_tool_row(&self, tool: ToolInfo, cx: &mut Context<Self>) -> impl IntoElement {
+        let label = tool.name.clone();
+        let icon_letter = label.chars().next().unwrap_or('T').to_string();
+        let hover_bg = cx.theme().list_hover;
+        let icon_bg = cx.theme().list_hover;
+
+        div()
+            .id(format!("tab-picker-tool-{}", tool.id))
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .rounded(px(8.0))
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover_bg))
+            .on_click(cx.listener({
+                let tool = tool.clone();
+                move |this, _: &ClickEvent, window, cx| {
+                    this.select_tool(tool.clone(), window, cx);
+                }
+            }))
+            .child(
+                div()
+                    .w(px(22.0))
+                    .h(px(22.0))
+                    .rounded(px(6.0))
+                    .bg(icon_bg)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(cx.theme().foreground)
+                    .text_sm()
+                    .child(icon_letter),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().foreground)
+                    .truncate()
+                    .child(label),
+            )
+    }
+
+    fn render_shell_row(
+        &self,
+        shell: ShellInfo,
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let label = shell.name.clone();
+        let icon_letter = label.chars().next().unwrap_or('S').to_string();
+        let shell_id = shell.id.clone();
+        let hover_bg = cx.theme().list_hover;
+        let icon_bg = cx.theme().list_hover;
+        let pin_hover_bg = cx.theme().list_hover;
+        let pin_hover_fg = cx.theme().foreground;
+
+        div()
+            .id(format!("tab-picker-shell-{}", shell.id))
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .rounded(px(8.0))
+            .hover(move |s| s.bg(hover_bg))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .flex_1()
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, cx.listener({
+                        let shell = shell.clone();
+                        move |this, _: &MouseDownEvent, window, cx| {
+                            this.select_shell(shell.clone(), window, cx);
+                        }
+                    }))
+                    .child(
+                        div()
+                            .w(px(22.0))
+                            .h(px(22.0))
+                            .rounded(px(6.0))
+                            .bg(icon_bg)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(cx.theme().foreground)
+                            .text_sm()
+                            .child(icon_letter),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .truncate()
+                            .child(label),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(22.0))
+                    .h(px(22.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(6.0))
+                    .cursor_pointer()
+                    .text_color(cx.theme().muted_foreground)
+                    .hover(move |s| s.text_color(pin_hover_fg).bg(pin_hover_bg))
+                    .child(if pinned { "★" } else { "☆" })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &MouseDownEvent, _w, cx| {
+                            this.toggle_pin(shell_id.clone(), cx);
+                        }),
+                    ),
+            )
+    }
+}
+
+impl Render for TabPickerDialog {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let pinned_set: std::collections::HashSet<&str> = self
+            .pinned_shell_ids
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        let mut pinned_shells: Vec<ShellInfo> = self
+            .shells
+            .iter()
+            .cloned()
+            .filter(|s| pinned_set.contains(s.id.as_str()))
+            .collect();
+        pinned_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut native_shells: Vec<ShellInfo> = self
+            .shells
+            .iter()
+            .cloned()
+            .filter(|s| s.shell_type == ShellType::Native && !pinned_set.contains(s.id.as_str()))
+            .collect();
+        native_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut wsl_shells: Vec<ShellInfo> = self
+            .shells
+            .iter()
+            .cloned()
+            .filter(|s| s.shell_type == ShellType::Wsl && !pinned_set.contains(s.id.as_str()))
+            .collect();
+        wsl_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let builtin_tools: Vec<ToolInfo> = self
+            .tools
+            .iter()
+            .cloned()
+            .filter(|t| t.is_builtin)
+            .collect();
+
+        let custom_tools: Vec<ToolInfo> = self
+            .tools
+            .iter()
+            .cloned()
+            .filter(|t| !t.is_builtin)
+            .collect();
+
+        let mut body = v_flex().gap(px(6.0));
+
+        if self.loading {
+            body = body.child(
+                div()
+                    .py(px(10.0))
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Loading..."),
+            );
+        } else {
+            if !pinned_shells.is_empty() {
+                body = body.child(
+                    div()
+                        .pt(px(8.0))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Pinned shells"),
+                );
+                for shell in pinned_shells {
+                    body = body.child(self.render_shell_row(shell, true, cx));
+                }
+                body = body.child(Divider::horizontal().pt(px(2.0)));
+            }
+
+            body = body.child(
+                div()
+                    .pt(px(8.0))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Shells"),
+            );
+            for shell in native_shells {
+                body = body.child(self.render_shell_row(shell, false, cx));
+            }
+            for shell in wsl_shells {
+                body = body.child(self.render_shell_row(shell, false, cx));
+            }
+
+            body = body.child(Divider::horizontal().pt(px(2.0)));
+
+            body = body.child(
+                div()
+                    .pt(px(8.0))
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Tools"),
+            );
+
+            for tool in builtin_tools {
+                body = body.child(self.render_tool_row(tool, cx));
+            }
+
+            if !custom_tools.is_empty() {
+                body = body.child(Divider::horizontal().pt(px(2.0)));
+                body = body.child(
+                    div()
+                        .pt(px(8.0))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Custom tools"),
+                );
+                for tool in custom_tools {
+                    body = body.child(self.render_tool_row(tool, cx));
+                }
+            }
+        }
+
+        body.when_some(self.error.as_ref(), |el, err| {
+            el.child(
+                div()
+                    .pt(px(10.0))
+                    .text_sm()
+                    .text_color(cx.theme().danger)
+                    .child(err.clone()),
+            )
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -236,12 +608,339 @@ struct McpItem {
     is_orphan: bool,
 }
 
+/// McpManagerDialog - A dialog for managing MCP (Model Context Protocol) servers.
+/// Allows attaching/detaching MCPs at Global or Local (project) scope.
+struct McpManagerDialog {
+    tokio: Arc<tokio::runtime::Runtime>,
+    mcp_manager: McpManager,
+    scope: McpScope,
+    attached: Vec<SharedString>,
+    available: Vec<McpItem>,
+    error: Option<SharedString>,
+    session_title: String,
+    project_path: Option<String>,
+    has_project: bool,
+}
+
+impl McpManagerDialog {
+    fn new(
+        tokio: Arc<tokio::runtime::Runtime>,
+        mcp_manager: McpManager,
+        session_title: String,
+        project_path: Option<String>,
+    ) -> Self {
+        let has_project = project_path.is_some();
+        Self {
+            tokio,
+            mcp_manager,
+            scope: McpScope::Global,
+            attached: Vec::new(),
+            available: Vec::new(),
+            error: None,
+            session_title,
+            project_path,
+            has_project,
+        }
+    }
+
+    fn load_data(&mut self) {
+        if self.scope == McpScope::Local && self.project_path.is_none() {
+            self.error = Some("Project path is required for local MCPs".into());
+            self.attached.clear();
+            self.available.clear();
+            return;
+        }
+
+        let attached = self
+            .tokio
+            .block_on(
+                self.mcp_manager
+                    .get_attached_mcps(self.scope, self.project_path.as_deref()),
+            )
+            .unwrap_or_default();
+
+        let available = self
+            .tokio
+            .block_on(self.mcp_manager.get_available_mcps())
+            .unwrap_or_default();
+
+        let mut items: Vec<McpItem> = available
+            .iter()
+            .map(|(name, def)| McpItem {
+                name: name.clone().into(),
+                description: def.description.clone().into(),
+                transport: resolve_transport(def).into(),
+                is_orphan: false,
+            })
+            .collect();
+        items.sort_by(|a, b| a.name.cmp(&b.name));
+
+        self.attached = attached.into_iter().map(SharedString::from).collect();
+        self.available = items;
+        self.error = None;
+    }
+
+    fn set_scope(&mut self, scope: McpScope, cx: &mut Context<Self>) {
+        self.scope = scope;
+        self.load_data();
+        cx.notify();
+    }
+
+    fn attach(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        if self.scope == McpScope::Local && self.project_path.is_none() {
+            self.error = Some("Project path is required for local MCPs".into());
+            cx.notify();
+            return;
+        }
+        let res = self.tokio.block_on(self.mcp_manager.attach_mcp(
+            self.scope,
+            self.project_path.as_deref(),
+            &name,
+        ));
+        if let Err(e) = res {
+            self.error = Some(e.to_string().into());
+        }
+        self.load_data();
+        cx.notify();
+    }
+
+    fn detach(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        if self.scope == McpScope::Local && self.project_path.is_none() {
+            self.error = Some("Project path is required for local MCPs".into());
+            cx.notify();
+            return;
+        }
+        let res = self.tokio.block_on(self.mcp_manager.detach_mcp(
+            self.scope,
+            self.project_path.as_deref(),
+            &name,
+        ));
+        if let Err(e) = res {
+            self.error = Some(e.to_string().into());
+        }
+        self.load_data();
+        cx.notify();
+    }
+
+    fn render_mcp_column(
+        &self,
+        cx: &mut Context<Self>,
+        title: &'static str,
+        items: Vec<McpItem>,
+        attached: bool,
+    ) -> impl IntoElement {
+        let mut col = div()
+            .flex_1()
+            .border_1()
+            .border_color(rgba(rgba_u32(BORDER_SOFT, 0.35)))
+            .rounded(px(10.0))
+            .overflow_hidden()
+            .child(
+                div()
+                    .px(px(12.0))
+                    .py(px(10.0))
+                    .bg(cx.theme().muted)
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().foreground)
+                    .child(title),
+            );
+
+        if items.is_empty() {
+            return col.child(
+                div()
+                    .px(px(12.0))
+                    .py(px(12.0))
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if attached {
+                        "No MCPs attached"
+                    } else {
+                        "No MCPs available"
+                    }),
+            );
+        }
+
+        for item in items {
+            let name = item.name.clone();
+            let transport = item.transport.clone();
+            let desc = if item.description.is_empty() {
+                "No description".into()
+            } else {
+                item.description.clone()
+            };
+
+            col = col.child(
+                div()
+                    .px(px(12.0))
+                    .py(px(10.0))
+                    .border_t_1()
+                    .border_color(rgba(rgba_u32(BORDER_SOFT, 0.25)))
+                    .flex()
+                    .justify_between()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().foreground)
+                                    .child(name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .pt(px(2.0))
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(desc),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .px(px(8.0))
+                                    .py(px(4.0))
+                                    .rounded(px(999.0))
+                                    .bg(cx.theme().list_hover)
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(transport),
+                            )
+                            .child(
+                                div()
+                                    .px(px(10.0))
+                                    .py(px(6.0))
+                                    .rounded(px(8.0))
+                                    .cursor_pointer()
+                                    .bg(if attached {
+                                        cx.theme().danger.opacity(0.063)
+                                    } else {
+                                        cx.theme().success.opacity(0.063)
+                                    })
+                                    .hover(|s| {
+                                        s.bg(if attached {
+                                            cx.theme().danger.opacity(0.094)
+                                        } else {
+                                            cx.theme().success.opacity(0.094)
+                                        })
+                                    })
+                                    .text_sm()
+                                    .text_color(cx.theme().foreground)
+                                    .child(if attached { "Detach" } else { "Attach" })
+                                    .id(format!(
+                                        "mcp-{}-{}",
+                                        if attached { "detach" } else { "attach" },
+                                        name
+                                    ))
+                                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
+                                        if attached {
+                                            this.detach(name.clone(), cx);
+                                        } else {
+                                            this.attach(name.clone(), cx);
+                                        }
+                                    })),
+                            ),
+                    ),
+            );
+        }
+
+        col
+    }
+}
+
+impl Render for McpManagerDialog {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let attached_set: std::collections::HashSet<&str> =
+            self.attached.iter().map(|s| s.as_ref()).collect();
+
+        let mut attached: Vec<McpItem> = self
+            .attached
+            .iter()
+            .map(|name| {
+                self.available
+                    .iter()
+                    .find(|m| m.name == *name)
+                    .cloned()
+                    .unwrap_or(McpItem {
+                        name: name.clone(),
+                        description: "Not in config.toml".into(),
+                        transport: "STDIO".into(),
+                        is_orphan: true,
+                    })
+            })
+            .collect();
+        attached.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut available: Vec<McpItem> = self
+            .available
+            .iter()
+            .filter(|m| !attached_set.contains(m.name.as_ref()))
+            .cloned()
+            .collect();
+        available.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let selected_index = if self.scope == McpScope::Global { 0 } else { 1 };
+
+        v_flex()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.session_title.clone()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(8.0))
+                    .items_center()
+                    .child(
+                        TabBar::new("mcp-scope-tabs")
+                            .pill()
+                            .with_size(ComponentSize::Small)
+                            .child(Tab::new().label("Shared"))
+                            .child(Tab::new().label("Project").disabled(!self.has_project))
+                            .selected_index(selected_index)
+                            .on_click(cx.listener(|this, ix: &usize, _w, cx| {
+                                let scope = if *ix == 0 {
+                                    McpScope::Global
+                                } else {
+                                    McpScope::Local
+                                };
+                                this.set_scope(scope, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(12.0))
+                    .child(self.render_mcp_column(cx, "Attached", attached, true))
+                    .child(self.render_mcp_column(cx, "Available", available, false)),
+            )
+            .when_some(self.error.as_ref(), |el, err| {
+                el.child(
+                    div()
+                        .pt(px(10.0))
+                        .text_sm()
+                        .text_color(cx.theme().danger)
+                        .child(err.clone()),
+                )
+            })
+    }
+}
+
 struct AgentTermApp {
     focus_handle: FocusHandle,
 
     session_store: SessionStore,
     mcp_manager: McpManager,
-    tokio: tokio::runtime::Runtime,
+    tokio: Arc<tokio::runtime::Runtime>,
 
     sidebar_visible: bool,
     sidebar_width: f32,
@@ -256,20 +955,6 @@ struct AgentTermApp {
     terminals: HashMap<String, Entity<Terminal>>,
     terminal_views: HashMap<String, Entity<TerminalView>>,
 
-    tab_picker_open: bool,
-    tab_picker_loading: bool,
-    tab_picker_error: Option<SharedString>,
-    tab_picker_tools: Vec<ToolInfo>,
-    tab_picker_shells: Vec<ShellInfo>,
-    tab_picker_pinned_shell_ids: Vec<String>,
-
-    project_editor_open: bool,
-    project_editor_section_id: Option<String>,
-    project_editor_name_input: Option<Entity<GpuiInputState>>,
-    project_editor_path_input: Option<Entity<GpuiInputState>>,
-    project_editor_icon: Option<String>,
-    project_editor_error: Option<SharedString>,
-
     session_menu_open: bool,
     session_menu_session_id: Option<String>,
 
@@ -277,12 +962,6 @@ struct AgentTermApp {
     session_rename_session_id: Option<String>,
     session_rename_input: Option<Entity<GpuiInputState>>,
     session_rename_error: Option<SharedString>,
-
-    mcp_dialog_open: bool,
-    mcp_scope: McpScope,
-    mcp_attached: Vec<SharedString>,
-    mcp_available: Vec<McpItem>,
-    mcp_error: Option<SharedString>,
 
     settings: AppSettings,
 }
@@ -292,10 +971,12 @@ impl AgentTermApp {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
-        let tokio = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime");
+        let tokio = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime"),
+        );
 
         let session_store = SessionStore::open_default_profile().expect("session store");
         let mcp_manager = tokio
@@ -317,29 +998,12 @@ impl AgentTermApp {
             active_session_id: None,
             terminals: HashMap::new(),
             terminal_views: HashMap::new(),
-            tab_picker_open: false,
-            tab_picker_loading: false,
-            tab_picker_error: None,
-            tab_picker_tools: Vec::new(),
-            tab_picker_shells: Vec::new(),
-            tab_picker_pinned_shell_ids: Vec::new(),
-            project_editor_open: false,
-            project_editor_section_id: None,
-            project_editor_name_input: None,
-            project_editor_path_input: None,
-            project_editor_icon: None,
-            project_editor_error: None,
             session_menu_open: false,
             session_menu_session_id: None,
             session_rename_open: false,
             session_rename_session_id: None,
             session_rename_input: None,
             session_rename_error: None,
-            mcp_dialog_open: false,
-            mcp_scope: McpScope::Global,
-            mcp_attached: Vec::new(),
-            mcp_available: Vec::new(),
-            mcp_error: None,
             settings: AppSettings::load(),
         };
 
@@ -435,124 +1099,99 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        eprintln!("[DEBUG] open_project_editor called with section_id: {}", section_id);
         let Some(section) = self
             .sections
             .iter()
             .find(|s| s.section.id == section_id)
             .map(|s| s.section.clone())
         else {
+            eprintln!("[DEBUG] Section not found!");
             return;
         };
+        eprintln!("[DEBUG] Found section: {}", section.name);
 
-        self.project_editor_open = true;
-        self.project_editor_section_id = Some(section_id);
-        self.project_editor_icon = section.icon.clone();
-        self.project_editor_error = None;
-        self.session_menu_open = false;
-        self.session_rename_open = false;
+        let view = cx.entity().clone();
+        let section_id_clone = section_id.clone();
+        let current_icon = section.icon.clone();
 
+        // Create inputs
         let name_input = cx.new(|cx| {
             GpuiInputState::new(window, cx)
                 .placeholder("Project name")
-                .default_value(section.name)
+                .default_value(section.name.clone())
         });
         let path_input = cx.new(|cx| {
             GpuiInputState::new(window, cx)
                 .placeholder("Project path")
-                .default_value(section.path)
-        });
-        self.project_editor_name_input = Some(name_input.clone());
-        self.project_editor_path_input = Some(path_input);
-
-        let focus_handle = { name_input.read(cx).focus_handle(cx) };
-        focus_handle.focus(window, cx);
-        cx.notify();
-    }
-
-    fn close_project_editor(&mut self, cx: &mut Context<Self>) {
-        self.project_editor_open = false;
-        self.project_editor_section_id = None;
-        self.project_editor_name_input = None;
-        self.project_editor_path_input = None;
-        self.project_editor_icon = None;
-        self.project_editor_error = None;
-        cx.notify();
-    }
-
-    fn save_project_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(section_id) = self.project_editor_section_id.clone() else {
-            return;
-        };
-        let Some(name_input) = self.project_editor_name_input.as_ref() else {
-            return;
-        };
-        let Some(path_input) = self.project_editor_path_input.as_ref() else {
-            return;
-        };
-
-        let name = name_input.read(cx).value().to_string().trim().to_string();
-        if name.is_empty() {
-            self.project_editor_error = Some("Project name is required".into());
-            cx.notify();
-            return;
-        }
-
-        let path = path_input.read(cx).value().to_string().trim().to_string();
-
-        if let Err(e) = self.session_store.rename_section(&section_id, name) {
-            self.project_editor_error = Some(e.into());
-            cx.notify();
-            return;
-        }
-
-        if let Err(e) = self.session_store.set_section_path(&section_id, path) {
-            self.project_editor_error = Some(e.into());
-            cx.notify();
-            return;
-        }
-
-        self.close_project_editor(cx);
-        self.reload_from_store(cx);
-        self.ensure_active_terminal(window, cx);
-    }
-
-    fn choose_project_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.project_editor_path_input.is_none() {
-            return;
-        };
-
-        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
-            prompt: Some("Select Project Folder".into()),
-            directories: true,
-            files: false,
-            multiple: false,
+                .default_value(section.path.clone())
         });
 
-        let window_handle = window.window_handle();
-        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let mut cx = cx.clone();
-            async move {
-                let Ok(result) = rx.await else {
-                    return;
-                };
-                let Ok(Some(paths)) = result else {
-                    return;
-                };
-                let Some(path) = paths.first() else {
-                    return;
-                };
-                let path_str = path.to_string_lossy().to_string();
-                let _ = cx.update_window(window_handle, |_, window, cx| {
-                    let _ = this.update(cx, |app, cx| {
-                        if let Some(input) = app.project_editor_path_input.as_ref() {
-                            input.update(cx, |ti, cx| ti.set_value(path_str.clone(), window, cx));
-                        }
-                        cx.notify();
-                    });
-                });
-            }
-        })
-        .detach();
+        let name_focus = name_input.read(cx).focus_handle(cx);
+
+        eprintln!("[DEBUG] About to call window.open_dialog");
+        eprintln!("[DEBUG] Has active dialog before: {}", window.has_active_dialog(cx));
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            eprintln!("[DEBUG] Inside dialog builder callback");
+            let name_input_for_content = name_input.clone();
+            let path_input_for_content = path_input.clone();
+
+            dialog
+                .title("Edit Project")
+                .w(px(400.))
+                .child(
+                    render_project_editor_content(
+                        &name_input_for_content,
+                        &path_input_for_content,
+                        current_icon.clone(),
+                        cx,
+                    )
+                )
+                .footer({
+                    let view = view.clone();
+                    let name_input = name_input.clone();
+                    let path_input = path_input.clone();
+                    let section_id = section_id_clone.clone();
+                    move |_ok, cancel, window, cx| {
+                        vec![
+                            cancel(window, cx),
+                            Button::new("save")
+                                .primary()
+                                .label("Save")
+                                .on_click({
+                                    let view = view.clone();
+                                    let name_input = name_input.clone();
+                                    let path_input = path_input.clone();
+                                    let section_id = section_id.clone();
+                                    move |_, window, cx| {
+                                        let name = name_input.read(cx).value().to_string().trim().to_string();
+                                        let path = path_input.read(cx).value().to_string().trim().to_string();
+
+                                        if name.is_empty() {
+                                            // TODO: Show error - for now just return
+                                            return;
+                                        }
+
+                                        window.close_dialog(cx);
+
+                                        view.update(cx, |app, cx| {
+                                            // Save changes via session_store
+                                            let _ = app.session_store.rename_section(&section_id, name);
+                                            let _ = app.session_store.set_section_path(&section_id, path);
+                                            app.reload_from_store(cx);
+                                            app.ensure_active_terminal(window, cx);
+                                        });
+                                    }
+                                })
+                                .into_any_element(),
+                        ]
+                    }
+                })
+        });
+
+        eprintln!("[DEBUG] Has active dialog after: {}", window.has_active_dialog(cx));
+        name_focus.focus(window, cx);
+        eprintln!("[DEBUG] open_project_editor completed");
     }
 
     fn toggle_section_collapsed(&mut self, section_id: String, cx: &mut Context<Self>) {
@@ -570,10 +1209,7 @@ impl AgentTermApp {
         let next = !section.collapsed;
         let _ = self
             .session_store
-            .set_section_collapsed(&section_id, next)
-            .map_err(|e| {
-                self.project_editor_error = Some(e.into());
-            });
+            .set_section_collapsed(&section_id, next);
         self.reload_from_store(cx);
     }
 
@@ -602,9 +1238,6 @@ impl AgentTermApp {
     fn open_session_menu(&mut self, session_id: String, cx: &mut Context<Self>) {
         self.session_menu_open = true;
         self.session_menu_session_id = Some(session_id);
-        self.tab_picker_open = false;
-        self.mcp_dialog_open = false;
-        self.project_editor_open = false;
         self.session_rename_open = false;
         cx.notify();
     }
@@ -764,74 +1397,70 @@ impl AgentTermApp {
     fn open_mcp_manager(
         &mut self,
         _: &ToggleMcpManager,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.tab_picker_open = false;
-        self.project_editor_open = false;
         self.session_menu_open = false;
         self.session_rename_open = false;
-        self.mcp_dialog_open = !self.mcp_dialog_open;
-        self.mcp_error = None;
-        if self.mcp_dialog_open {
-            self.refresh_mcp_data();
-        }
+
+        let tokio = self.tokio.clone();
+        let mcp_manager = self.mcp_manager.clone();
+
+        let session_title = self
+            .active_session()
+            .map(|s| s.title.clone())
+            .unwrap_or_default();
+        let project_path = self.active_session().and_then(|s| {
+            if s.project_path.is_empty() {
+                None
+            } else {
+                Some(s.project_path.clone())
+            }
+        });
+
+        let dialog_entity = cx.new(|_cx| {
+            let mut dialog =
+                McpManagerDialog::new(tokio, mcp_manager, session_title, project_path);
+            dialog.load_data();
+            dialog
+        });
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title("MCP Manager")
+                .w(px(720.))
+                .close_button(true)
+                .child(dialog_entity.clone())
+        });
+
         cx.notify();
     }
 
     fn new_shell_tab(&mut self, _: &NewShellTab, window: &mut Window, cx: &mut Context<Self>) {
-        self.tab_picker_open = !self.tab_picker_open;
-        self.tab_picker_error = None;
-        if self.tab_picker_open {
-            self.mcp_dialog_open = false;
-            self.project_editor_open = false;
-            self.session_menu_open = false;
-            self.session_rename_open = false;
-            self.refresh_tab_picker_data();
-        } else {
-            self.tab_picker_loading = false;
-        }
+        self.session_menu_open = false;
+        self.session_rename_open = false;
+
+        let view = cx.entity().clone();
+        let tokio = self.tokio.clone();
+        let mcp_manager = self.mcp_manager.clone();
+
+        // Create dialog entity with its own state
+        let dialog_entity = cx.new(|_cx| {
+            let mut dialog = TabPickerDialog::new(view, tokio, mcp_manager);
+            dialog.load_data();
+            dialog
+        });
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title("Create tab")
+                .w(px(280.))
+                .max_h(px(540.))
+                .close_button(true)
+                .child(dialog_entity.clone())
+        });
+
         self.ensure_active_terminal(window, cx);
-        cx.notify();
-    }
-
-    fn refresh_tab_picker_data(&mut self) {
-        self.tab_picker_loading = true;
-        self.tab_picker_tools.clear();
-        self.tab_picker_shells.clear();
-        self.tab_picker_pinned_shell_ids.clear();
-
-        let tools = match self.tokio.block_on(agentterm_tools::tools_list(&self.mcp_manager)) {
-            Ok(list) => list.into_iter().filter(|t| t.enabled).collect(),
-            Err(e) => {
-                self.tab_picker_error = Some(e.to_string().into());
-                Vec::new()
-            }
-        };
-
-        let pinned =
-            match self.tokio.block_on(agentterm_tools::get_pinned_shells(&self.mcp_manager)) {
-                Ok(list) => list,
-                Err(e) => {
-                    self.tab_picker_error = Some(e.to_string().into());
-                    Vec::new()
-                }
-            };
-
-        self.tab_picker_tools = tools;
-        self.tab_picker_shells = agentterm_tools::available_shells();
-        self.tab_picker_pinned_shell_ids = pinned;
-        self.tab_picker_loading = false;
-    }
-
-    fn toggle_pin_shell(&mut self, shell_id: String, cx: &mut Context<Self>) {
-        match self
-            .tokio
-            .block_on(agentterm_tools::toggle_pin_shell(&self.mcp_manager, shell_id))
-        {
-            Ok(pinned) => self.tab_picker_pinned_shell_ids = pinned,
-            Err(e) => self.tab_picker_error = Some(e.to_string().into()),
-        }
         cx.notify();
     }
 
@@ -863,12 +1492,12 @@ impl AgentTermApp {
         match self.session_store.create_session(input) {
             Ok(record) => {
                 let _ = self.session_store.set_active_session(Some(record.id.clone()));
-                self.tab_picker_open = false;
                 self.reload_from_store(cx);
                 self.ensure_active_terminal(window, cx);
             }
             Err(e) => {
-                self.tab_picker_error = Some(e.to_string().into());
+                // Log error - dialog handles its own error display
+                eprintln!("Failed to create session: {}", e);
             }
         }
         cx.notify();
@@ -893,9 +1522,6 @@ impl AgentTermApp {
         }
         let _ = self.session_store.set_active_session(Some(id.clone()));
         self.active_session_id = Some(id);
-        if self.mcp_dialog_open {
-            self.refresh_mcp_data();
-        }
         self.ensure_active_terminal(window, cx);
         cx.notify();
     }
@@ -908,9 +1534,6 @@ impl AgentTermApp {
 
         let _ = self.session_store.delete_session(&id);
         self.reload_from_store(cx);
-        if self.mcp_dialog_open {
-            self.refresh_mcp_data();
-        }
         if self.active_session_id.is_none() {
             self.ensure_active_terminal(window, cx);
         }
@@ -941,6 +1564,7 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        eprintln!("[DEBUG] handle_edit_section called with section_id: {}", action.0);
         self.open_project_editor(action.0.clone(), window, cx);
     }
 
@@ -1020,110 +1644,6 @@ impl AgentTermApp {
         .detach();
     }
 
-    fn refresh_mcp_data(&mut self) {
-        let Some(session) = self.active_session() else {
-            self.mcp_error = Some("Select a tab to manage MCPs".into());
-            self.mcp_attached.clear();
-            self.mcp_available.clear();
-            return;
-        };
-
-        let project_path = if session.project_path.is_empty() {
-            None
-        } else {
-            Some(session.project_path.as_str())
-        };
-
-        if self.mcp_scope == McpScope::Local && project_path.is_none() {
-            self.mcp_error = Some("Project path is required for local MCPs".into());
-            self.mcp_attached.clear();
-            self.mcp_available.clear();
-            return;
-        }
-
-        let attached = self
-            .tokio
-            .block_on(
-                self.mcp_manager
-                    .get_attached_mcps(self.mcp_scope, project_path),
-            )
-            .unwrap_or_default();
-
-        let available = self
-            .tokio
-            .block_on(self.mcp_manager.get_available_mcps())
-            .unwrap_or_default();
-
-        let available_map: HashMap<String, agentterm_mcp::MCPDef> = available;
-
-        let mut items: Vec<McpItem> = available_map
-            .iter()
-            .map(|(name, def)| McpItem {
-                name: name.clone().into(),
-                description: def.description.clone().into(),
-                transport: resolve_transport(def).into(),
-                is_orphan: false,
-            })
-            .collect();
-        items.sort_by(|a, b| a.name.cmp(&b.name));
-
-        self.mcp_attached = attached.into_iter().map(SharedString::from).collect();
-        self.mcp_available = items;
-        self.mcp_error = None;
-    }
-
-    fn mcp_attach(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        let Some(session) = self.active_session() else {
-            return;
-        };
-        let project_path = if session.project_path.is_empty() {
-            None
-        } else {
-            Some(session.project_path.as_str())
-        };
-        if self.mcp_scope == McpScope::Local && project_path.is_none() {
-            self.mcp_error = Some("Project path is required for local MCPs".into());
-            cx.notify();
-            return;
-        }
-        let res = self.tokio.block_on(self.mcp_manager.attach_mcp(
-            self.mcp_scope,
-            project_path,
-            &name,
-        ));
-        if let Err(e) = res {
-            self.mcp_error = Some(e.to_string().into());
-        }
-        self.refresh_mcp_data();
-        cx.notify();
-    }
-
-    fn mcp_detach(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        let Some(session) = self.active_session() else {
-            return;
-        };
-        let project_path = if session.project_path.is_empty() {
-            None
-        } else {
-            Some(session.project_path.as_str())
-        };
-        if self.mcp_scope == McpScope::Local && project_path.is_none() {
-            self.mcp_error = Some("Project path is required for local MCPs".into());
-            cx.notify();
-            return;
-        }
-        let res = self.tokio.block_on(self.mcp_manager.detach_mcp(
-            self.mcp_scope,
-            project_path,
-            &name,
-        ));
-        if let Err(e) = res {
-            self.mcp_error = Some(e.to_string().into());
-        }
-        self.refresh_mcp_data();
-        cx.notify();
-    }
-
     fn sidebar_shadow() -> Vec<BoxShadow> {
         vec![
             BoxShadow {
@@ -1142,6 +1662,7 @@ impl AgentTermApp {
     }
 
     fn render_sidebar_shell(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
         div()
             .id("sidebar-shell")
             .absolute()
@@ -1173,7 +1694,7 @@ impl AgentTermApp {
                     .rounded(px(999.0))
                     .bg(gpui::transparent_black())
                     .cursor_col_resize()
-                    .hover(|s| s.bg(rgba(rgba_u32(TEXT_PRIMARY, 0.20))))
+                    .hover(move |s| s.bg(resizer_hover_bg))
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::start_sidebar_resize))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize)),
             )
@@ -1204,23 +1725,31 @@ impl AgentTermApp {
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .child("AGENT TERM"),
             )
             .child(
                 div()
                     .flex()
                     .gap(px(10.0))
-                    .child(icon_button("T").id("sidebar-new-tab").on_click(cx.listener(
-                        |this, _: &ClickEvent, window, cx| {
-                            this.new_shell_tab(&NewShellTab, window, cx);
-                        },
-                    )))
-                    .child(icon_button("M").id("sidebar-mcp").on_click(cx.listener(
-                        |this, _: &ClickEvent, window, cx| {
-                            this.open_mcp_manager(&ToggleMcpManager, window, cx);
-                        },
-                    ))),
+                    .child(
+                        Button::new("sidebar-new-tab")
+                            .label("T")
+                            .ghost()
+                            .compact()
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.new_shell_tab(&NewShellTab, window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("sidebar-mcp")
+                            .label("M")
+                            .ghost()
+                            .compact()
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.open_mcp_manager(&ToggleMcpManager, window, cx);
+                            })),
+                    ),
             )
     }
 
@@ -1229,9 +1758,9 @@ impl AgentTermApp {
             div()
                 .id("sidebar-add-project")
                 .text_sm()
-                .text_color(rgb(TEXT_SUBTLE))
+                .text_color(cx.theme().muted_foreground)
                 .cursor_pointer()
-                .hover(|s| s.text_color(rgb(TEXT_PRIMARY)))
+                .hover(|s| s.text_color(cx.theme().foreground))
                 .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
                     let name = "New Project".to_string();
                     let path = String::new();
@@ -1265,6 +1794,7 @@ impl AgentTermApp {
         let is_collapsed = section.section.collapsed;
         let section_icon = section.section.icon.clone();
 
+        let hover_bg = cx.theme().list_hover;
         let section_header = div()
             .id(format!("section-header-{}", section.section.id))
             .px(px(8.0))
@@ -1274,7 +1804,7 @@ impl AgentTermApp {
             .gap(px(6.0))
             .rounded(px(6.0))
             .cursor_pointer()
-            .hover(|s| s.bg(rgba(0xffffff10)))
+            .hover(move |s| s.bg(hover_bg))
             .on_click(cx.listener({
                 let section_id = section.section.id.clone();
                 move |this, _, _, cx| {
@@ -1289,7 +1819,7 @@ impl AgentTermApp {
                     IconName::ChevronDown
                 })
                 .size(IconSize::Small)
-                .color(rgb(TEXT_SUBTLE)),
+                .color(cx.theme().muted_foreground),
             )
             .child(
                 section_icon
@@ -1297,13 +1827,13 @@ impl AgentTermApp {
                     .map(|s| icon_from_string(s))
                     .unwrap_or_else(|| Icon::new(IconName::Folder))
                     .size(IconSize::Medium)
-                    .color(rgb(TEXT_PRIMARY)),
+                    .color(cx.theme().foreground),
             )
             .child(
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .flex_1()
                     .child(section.section.name.clone()),
             )
@@ -1328,7 +1858,7 @@ impl AgentTermApp {
                     .px(px(12.0))
                     .py(px(4.0))
                     .text_sm()
-                    .text_color(rgb(TEXT_FAINT))
+                    .text_color(cx.theme().muted_foreground)
                     .child("No terminals"),
             );
             return container;
@@ -1357,6 +1887,8 @@ impl AgentTermApp {
         };
         let session_id = session.id.clone();
         let session_icon = session.icon.clone();
+        let active_bg = cx.theme().list_hover;
+        let hover_bg = cx.theme().list_active;
 
         div()
             .id(format!("session-row-{}", session.id))
@@ -1367,34 +1899,34 @@ impl AgentTermApp {
             .gap(px(6.0))
             .rounded(px(6.0))
             .cursor_pointer()
-            .when(is_active, |s| s.bg(rgba(0xffffff10)))
-            .hover(|s| s.bg(rgba(0xffffff15)))
+            .when(is_active, move |s| s.bg(active_bg))
+            .hover(move |s| s.bg(hover_bg))
             .child(
                 session_icon
                     .as_ref()
                     .map(|s| icon_from_string(s))
                     .unwrap_or_else(|| Icon::new(IconName::Terminal))
                     .size(IconSize::Small)
-                    .color(rgb(TEXT_SUBTLE)),
+                    .color(cx.theme().muted_foreground),
             )
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .truncate()
                     .flex_1()
                     .child(title.clone()),
             )
-            .child(
-                icon_button("×")
-                    .id(format!("session-close-{}", session.id))
-                    .on_click(cx.listener({
-                        let id = session.id.clone();
-                        move |this, _: &ClickEvent, window, cx| {
-                            this.close_session(id.clone(), window, cx);
-                        }
-                    })),
-            )
+            .child({
+                let id = session.id.clone();
+                Button::new(format!("session-close-{}", session.id))
+                    .label("×")
+                    .ghost()
+                    .compact()
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.close_session(id.clone(), window, cx);
+                    }))
+            })
             .on_click(cx.listener({
                 let id = session_id.clone();
                 move |this, _: &ClickEvent, window, cx| {
@@ -1411,7 +1943,7 @@ impl AgentTermApp {
             })
     }
 
-    fn render_terminal_container(&self) -> impl IntoElement {
+    fn render_terminal_container(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let content_left = if self.sidebar_visible {
             self.sidebar_width + SIDEBAR_INSET + SIDEBAR_GAP
         } else {
@@ -1446,795 +1978,94 @@ impl AgentTermApp {
             .when(active_view.is_none(), |el| {
                 el.flex().items_center().justify_center().child(
                     div()
-                        .text_color(rgb(TEXT_FAINT))
+                        .text_color(cx.theme().muted_foreground)
                         .child("No terminal selected"),
                 )
             })
     }
+}
 
-    fn render_tab_picker_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let pinned_set: std::collections::HashSet<&str> = self
-            .tab_picker_pinned_shell_ids
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
-
-        let mut pinned_shells: Vec<ShellInfo> = self
-            .tab_picker_shells
-            .iter()
-            .cloned()
-            .filter(|s| pinned_set.contains(s.id.as_str()))
-            .collect();
-        pinned_shells.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let mut native_shells: Vec<ShellInfo> = self
-            .tab_picker_shells
-            .iter()
-            .cloned()
-            .filter(|s| s.shell_type == ShellType::Native && !pinned_set.contains(s.id.as_str()))
-            .collect();
-        native_shells.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let mut wsl_shells: Vec<ShellInfo> = self
-            .tab_picker_shells
-            .iter()
-            .cloned()
-            .filter(|s| s.shell_type == ShellType::Wsl && !pinned_set.contains(s.id.as_str()))
-            .collect();
-        wsl_shells.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let builtin_tools: Vec<ToolInfo> = self
-            .tab_picker_tools
-            .iter()
-            .cloned()
-            .filter(|t| t.is_builtin)
-            .collect();
-
-        let custom_tools: Vec<ToolInfo> = self
-            .tab_picker_tools
-            .iter()
-            .cloned()
-            .filter(|t| !t.is_builtin)
-            .collect();
-
-        let mut body = div().flex().flex_col().gap(px(6.0));
-
-        if self.tab_picker_loading {
-            body = body.child(
-                div()
-                    .py(px(10.0))
-                    .text_sm()
-                    .text_color(rgb(TEXT_SUBTLE))
-                    .child("Loading..."),
-            );
-        } else {
-            if !pinned_shells.is_empty() {
-                body = body.child(
+fn render_project_editor_content(
+    name_input: &Entity<GpuiInputState>,
+    path_input: &Entity<GpuiInputState>,
+    current_icon: Option<String>,
+    cx: &App,
+) -> impl IntoElement {
+    v_flex()
+        .gap(px(16.))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(
                     div()
-                        .pt(px(8.0))
-                        .text_xs()
-                        .text_color(rgb(TEXT_SUBTLE))
-                        .child("Pinned shells"),
-                );
-                for shell in pinned_shells {
-                    body = body.child(self.render_shell_picker_row(shell, true, cx));
-                }
-                body = body.child(div().pt(px(2.0)).border_b_1().border_color(rgba(0xffffff10)));
-            }
-
-            body = body.child(
-                div()
-                    .pt(px(8.0))
-                    .text_xs()
-                    .text_color(rgb(TEXT_SUBTLE))
-                    .child("Shells"),
-            );
-            for shell in native_shells {
-                body = body.child(self.render_shell_picker_row(shell, false, cx));
-            }
-            for shell in wsl_shells {
-                body = body.child(self.render_shell_picker_row(shell, false, cx));
-            }
-
-            body = body.child(div().pt(px(2.0)).border_b_1().border_color(rgba(0xffffff10)));
-
-            body = body.child(
-                div()
-                    .pt(px(8.0))
-                    .text_xs()
-                    .text_color(rgb(TEXT_SUBTLE))
-                    .child("Tools"),
-            );
-
-            for tool in builtin_tools {
-                body = body.child(self.render_tool_picker_row(tool, cx));
-            }
-
-            if !custom_tools.is_empty() {
-                body = body.child(div().pt(px(2.0)).border_b_1().border_color(rgba(0xffffff10)));
-                body = body.child(
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Icon"),
+                )
+                .child(
                     div()
-                        .pt(px(8.0))
-                        .text_xs()
-                        .text_color(rgb(TEXT_SUBTLE))
-                        .child("Custom tools"),
-                );
-                for tool in custom_tools {
-                    body = body.child(self.render_tool_picker_row(tool, cx));
-                }
-            }
-        }
-
-        div()
-            .id("tab-picker-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .bg(rgba(rgba_u32(0x000000, 0.25)))
-            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                this.tab_picker_open = false;
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("tab-picker")
-                    .absolute()
-                    .top(px(SIDEBAR_INSET + 54.0))
-                    .left(px(SIDEBAR_INSET + 12.0))
-                    .w(px(280.0))
-                    .max_h(px(540.0))
-                    .rounded(px(12.0))
-                    .border_1()
-                    .border_color(rgba(rgba_u32(BORDER_SOFT, BORDER_SOFT_ALPHA)))
-                    .bg(rgba(rgba_u32(SURFACE_SIDEBAR, 0.92)))
-                    .shadow(Self::sidebar_shadow())
-                    .px(px(14.0))
-                    .py(px(12.0))
-                    .overflow_y_scroll()
-                    .on_click(|_: &ClickEvent, _, _| {})
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(TEXT_PRIMARY))
-                                    .child("Create tab"),
-                            )
-                            .child(icon_button("×").id("tab-picker-close").on_click(cx.listener(
-                                |this, _: &ClickEvent, _w, cx| {
-                                    this.tab_picker_open = false;
-                                    cx.notify();
-                                },
-                            ))),
-                    )
-                    .child(body)
-                    .when_some(self.tab_picker_error.as_ref(), |el, err| {
-                        el.child(
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
                             div()
-                                .pt(px(10.0))
-                                .text_sm()
-                                .text_color(rgb(0xffaaaa))
-                                .child(err.clone()),
+                                .size(px(40.))
+                                .rounded(px(4.))
+                                .bg(cx.theme().popover)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    current_icon
+                                        .as_ref()
+                                        .map(|s| icon_from_string(s))
+                                        .unwrap_or_else(|| Icon::new(IconName::Folder))
+                                        .size(IconSize::Large)
+                                        .color(cx.theme().foreground),
+                                ),
                         )
-                    }),
-            )
-    }
-
-    fn render_tool_picker_row(&self, tool: ToolInfo, cx: &mut Context<Self>) -> impl IntoElement {
-        let label = tool.name.clone();
-        let icon_letter = label.chars().next().unwrap_or('T').to_string();
-        div()
-            .id(format!("tab-picker-tool-{}", tool.id))
-            .px(px(10.0))
-            .py(px(8.0))
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .rounded(px(8.0))
-            .cursor_pointer()
-            .hover(|s| s.bg(rgba(0xffffff10)))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                let session_tool = if tool.is_builtin {
-                    match tool.id.as_str() {
-                        "claude" => SessionTool::Claude,
-                        "gemini" => SessionTool::Gemini,
-                        "codex" => SessionTool::Codex,
-                        "openCode" => SessionTool::OpenCode,
-                        _ => SessionTool::Custom(tool.id.clone()),
-                    }
-                } else {
-                    SessionTool::Custom(tool.id.clone())
-                };
-
-                let icon = if tool.icon.is_empty() {
-                    None
-                } else {
-                    Some(tool.icon.clone())
-                };
-
-                this.create_session_from_tool(
-                    session_tool,
-                    tool.name.clone(),
-                    tool.command.clone(),
-                    tool.args.clone(),
-                    icon,
-                    window,
-                    cx,
-                );
-            }))
-            .child(
-                div()
-                    .w(px(22.0))
-                    .h(px(22.0))
-                    .rounded(px(6.0))
-                    .bg(rgba(0xffffff10))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(rgb(TEXT_PRIMARY))
-                    .text_sm()
-                    .child(icon_letter),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(rgb(TEXT_PRIMARY))
-                    .truncate()
-                    .child(label),
-            )
-    }
-
-    fn render_shell_picker_row(
-        &self,
-        shell: ShellInfo,
-        pinned: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let label = shell.name.clone();
-        let icon_letter = label.chars().next().unwrap_or('S').to_string();
-        let shell_id = shell.id.clone();
-
-        div()
-            .id(format!("tab-picker-shell-{}", shell.id))
-            .px(px(10.0))
-            .py(px(8.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .rounded(px(8.0))
-            .hover(|s| s.bg(rgba(0xffffff10)))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .flex_1()
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                        let icon = if shell.icon.is_empty() {
-                            None
-                        } else {
-                            Some(shell.icon.clone())
-                        };
-
-                        this.create_session_from_tool(
-                            SessionTool::Shell,
-                            shell.name.clone(),
-                            shell.command.clone(),
-                            shell.args.clone(),
-                            icon,
-                            window,
-                            cx,
-                        );
-                    }))
-                    .child(
-                        div()
-                            .w(px(22.0))
-                            .h(px(22.0))
-                            .rounded(px(6.0))
-                            .bg(rgba(0xffffff10))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(rgb(TEXT_PRIMARY))
-                            .text_sm()
-                            .child(icon_letter),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(rgb(TEXT_PRIMARY))
-                            .truncate()
-                            .child(label),
-                    ),
-            )
-            .child(
-                div()
-                    .w(px(22.0))
-                    .h(px(22.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(6.0))
-                    .cursor_pointer()
-                    .text_color(rgb(TEXT_SUBTLE))
-                    .hover(|s| s.text_color(rgb(TEXT_PRIMARY)).bg(rgba(0xffffff10)))
-                    .child(if pinned { "★" } else { "☆" })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _: &MouseDownEvent, _w, cx| {
-                            this.toggle_pin_shell(shell_id.clone(), cx);
-                        }),
-                    ),
-            )
-    }
-
-    fn render_mcp_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let attached_set: std::collections::HashSet<&str> =
-            self.mcp_attached.iter().map(|s| s.as_ref()).collect();
-
-        let mut attached: Vec<McpItem> = self
-            .mcp_attached
-            .iter()
-            .map(|name| {
-                self.mcp_available
-                    .iter()
-                    .find(|m| m.name == *name)
-                    .cloned()
-                    .unwrap_or(McpItem {
-                        name: name.clone(),
-                        description: "Not in config.toml".into(),
-                        transport: "STDIO".into(),
-                        is_orphan: true,
-                    })
-            })
-            .collect();
-        attached.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let mut available: Vec<McpItem> = self
-            .mcp_available
-            .iter()
-            .filter(|m| !attached_set.contains(m.name.as_ref()))
-            .cloned()
-            .collect();
-        available.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let active_session_title = self
-            .active_session()
-            .map(|s| s.title.clone())
-            .unwrap_or_default();
-
-        div()
-            .id("mcp-overlay")
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .bg(rgba(rgba_u32(0x000000, 0.35)))
-            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                this.mcp_dialog_open = false;
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("mcp-dialog")
-                    .absolute()
-                    .top(px(90.0))
-                    .left(px(90.0))
-                    .w(px(720.0))
-                    .rounded(px(12.0))
-                    .border_1()
-                    .border_color(rgba(rgba_u32(BORDER_SOFT, BORDER_SOFT_ALPHA)))
-                    .bg(rgba(rgba_u32(SURFACE_SIDEBAR, 0.92)))
-                    .shadow(Self::sidebar_shadow())
-                    .px(px(16.0))
-                    .py(px(14.0))
-                    .on_click(|_: &ClickEvent, _, _| {})
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(TEXT_PRIMARY))
-                            .child("MCP Manager"),
-                    )
-                    .child(
-                        div()
-                            .pt(px(2.0))
-                            .pb(px(10.0))
-                            .text_sm()
-                            .text_color(rgb(TEXT_SUBTLE))
-                            .child(active_session_title),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(8.0))
-                            .pb(px(10.0))
-                            .items_center()
-                            .child(self.render_mcp_scope_tab(cx, McpScope::Global, "Shared"))
-                            .child(self.render_mcp_scope_tab(cx, McpScope::Local, "Project"))
-                            .child(div().flex_1())
-                            .child(icon_button("×").id("mcp-close").on_click(cx.listener(
-                                |this, _: &ClickEvent, _w, cx| {
-                                    this.mcp_dialog_open = false;
-                                    cx.notify();
-                                },
-                            ))),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(12.0))
-                            .child(self.render_mcp_column(cx, "Attached", attached, true))
-                            .child(self.render_mcp_column(cx, "Available", available, false)),
-                    )
-                    .when_some(self.mcp_error.as_ref(), |el, err| {
-                        el.child(
+                        .child(
                             div()
-                                .pt(px(10.0))
+                                .id("change-icon-btn")
+                                .px(px(12.))
+                                .py(px(6.))
+                                .rounded(px(4.))
+                                .bg(cx.theme().popover)
                                 .text_sm()
-                                .text_color(rgb(0xffaaaa))
-                                .child(err.clone()),
-                        )
-                    }),
-            )
-    }
-
-    fn render_mcp_scope_tab(
-        &self,
-        cx: &mut Context<Self>,
-        scope: McpScope,
-        label: &'static str,
-    ) -> impl IntoElement {
-        let has_project_path = self
-            .active_session()
-            .is_some_and(|s| !s.project_path.is_empty());
-        let disabled = scope == McpScope::Local && !has_project_path;
-        let is_active = self.mcp_scope == scope;
-        div()
-            .id(format!("mcp-scope-{}", label))
-            .px(px(10.0))
-            .py(px(6.0))
-            .rounded(px(8.0))
-            .bg(if is_active {
-                rgba(0xffffff12)
-            } else {
-                rgba(0xffffff05)
-            })
-            .hover(|s| s.bg(rgba(0xffffff14)))
-            .text_sm()
-            .text_color(rgb(if is_active { TEXT_PRIMARY } else { TEXT_SUBTLE }))
-            .child(label)
-            .when(disabled, |s| s.opacity(0.5).cursor_default())
-            .when(!disabled, |s| {
-                s.cursor_pointer()
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
-                        this.mcp_scope = scope;
-                        this.refresh_mcp_data();
-                        cx.notify();
-                    }))
-            })
-    }
-
-    fn render_mcp_column(
-        &self,
-        cx: &mut Context<Self>,
-        title: &'static str,
-        items: Vec<McpItem>,
-        attached: bool,
-    ) -> impl IntoElement {
-        let mut col = div()
-            .flex_1()
-            .border_1()
-            .border_color(rgba(rgba_u32(BORDER_SOFT, 0.35)))
-            .rounded(px(10.0))
-            .overflow_hidden()
-            .child(
-                div()
-                    .px(px(12.0))
-                    .py(px(10.0))
-                    .bg(rgba(0xffffff07))
-                    .text_sm()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
-                    .child(title),
-            );
-
-        if items.is_empty() {
-            return col.child(
-                div()
-                    .px(px(12.0))
-                    .py(px(12.0))
-                    .text_sm()
-                    .text_color(rgb(TEXT_FAINT))
-                    .child(if attached {
-                        "No MCPs attached"
-                    } else {
-                        "No MCPs available"
-                    }),
-            );
-        }
-
-        for item in items {
-            let name = item.name.clone();
-            let transport = item.transport.clone();
-            let desc = if item.description.is_empty() {
-                "No description".into()
-            } else {
-                item.description.clone()
-            };
-
-            col = col.child(
-                div()
-                    .px(px(12.0))
-                    .py(px(10.0))
-                    .border_t_1()
-                    .border_color(rgba(rgba_u32(BORDER_SOFT, 0.25)))
-                    .flex()
-                    .justify_between()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(rgb(TEXT_PRIMARY))
-                                    .child(name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .pt(px(2.0))
-                                    .text_xs()
-                                    .text_color(rgb(TEXT_SUBTLE))
-                                    .child(desc),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .px(px(8.0))
-                                    .py(px(4.0))
-                                    .rounded(px(999.0))
-                                    .bg(rgba(0xffffff10))
-                                    .text_xs()
-                                    .text_color(rgb(TEXT_SUBTLE))
-                                    .child(transport),
-                            )
-                            .child(
-                                div()
-                                    .px(px(10.0))
-                                    .py(px(6.0))
-                                    .rounded(px(8.0))
-                                    .cursor_pointer()
-                                    .bg(if attached {
-                                        rgba(0xff444410)
-                                    } else {
-                                        rgba(0x5eead410)
-                                    })
-                                    .hover(|s| {
-                                        s.bg(if attached {
-                                            rgba(0xff444418)
-                                        } else {
-                                            rgba(0x5eead418)
-                                        })
-                                    })
-                                    .text_sm()
-                                    .text_color(rgb(TEXT_PRIMARY))
-                                    .child(if attached { "Detach" } else { "Attach" })
-                                    .id(format!(
-                                        "mcp-{}-{}",
-                                        if attached { "detach" } else { "attach" },
-                                        name
-                                    ))
-                                    .on_click(cx.listener(move |this, _: &ClickEvent, _w, cx| {
-                                        if attached {
-                                            this.mcp_detach(name.clone(), cx);
-                                        } else {
-                                            this.mcp_attach(name.clone(), cx);
-                                        }
-                                    })),
-                            ),
-                    ),
-            );
-        }
-
-        col
-    }
-
-    fn render_project_editor_dialog(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let name_field = self
-            .project_editor_name_input
-            .as_ref()
-            .map(|input| agentterm_input_field(input));
-        let path_field = self
-            .project_editor_path_input
-            .as_ref()
-            .map(|input| agentterm_input_field(input));
-        let current_icon = self.project_editor_icon.clone();
-        let error = self.project_editor_error.clone();
-
-        div()
-            .id("project-editor-overlay")
-            .absolute()
-            .inset_0()
-            .bg(rgba(0x00000080))
-            .flex()
-            .items_center()
-            .justify_center()
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                this.close_project_editor(cx);
-            }))
-            .child(
-                div()
-                    .id("project-editor-dialog")
-                    .w(px(400.))
-                    .bg(rgb(0x1a1a1a))
-                    .border_1()
-                    .border_color(rgb(0x3a3a3a))
-                    .rounded(px(8.))
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        div()
-                            .px(px(16.))
-                            .py(px(12.))
-                            .border_b_1()
-                            .border_color(rgb(0x3a3a3a))
-                            .text_lg()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(0xd8d8d8))
-                            .child("Edit Project"),
-                    )
-                    .child(
-                        div()
-                            .px(px(16.))
-                            .py(px(16.))
-                            .flex()
-                            .flex_col()
-                            .gap(px(16.))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(8.))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(rgb(0xa0a0a0))
-                                            .child("Icon"),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.))
-                                            .child(
-                                                div()
-                                                    .size(px(40.))
-                                                    .rounded(px(4.))
-                                                    .bg(rgb(0x2a2a2a))
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .child(
-                                                        current_icon
-                                                            .as_ref()
-                                                            .map(|s| icon_from_string(s))
-                                                            .unwrap_or_else(|| {
-                                                                Icon::new(IconName::Folder)
-                                                            })
-                                                            .size(IconSize::Large)
-                                                            .color(rgb(0xd8d8d8)),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .id("change-icon-btn")
-                                                    .px(px(12.))
-                                                    .py(px(6.))
-                                                    .rounded(px(4.))
-                                                    .bg(rgb(0x2a2a2a))
-                                                    .text_sm()
-                                                    .text_color(rgb(0xd8d8d8))
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.bg(rgb(0x3a3a3a)))
-                                                    .child("Change..."),
-                                            ),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(8.))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(rgb(0xa0a0a0))
-                                            .child("Name"),
-                                    )
-                                    .when_some(name_field, |el, input| el.child(input)),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(8.))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(rgb(0xa0a0a0))
-                                            .child("Path"),
-                                    )
-                                    .when_some(path_field, |el, input| el.child(input)),
-                            )
-                            .when_some(error, |el, err| {
-                                el.child(
-                                    div().text_sm().text_color(rgb(0xff6b6b)).child(err),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .px(px(16.))
-                            .py(px(12.))
-                            .border_t_1()
-                            .border_color(rgb(0x3a3a3a))
-                            .flex()
-                            .justify_end()
-                            .gap(px(8.))
-                            .child(
-                                div()
-                                    .id("cancel-btn")
-                                    .px(px(16.))
-                                    .py(px(8.))
-                                    .rounded(px(6.))
-                                    .bg(rgb(0x2a2a2a))
-                                    .text_color(rgb(0xd8d8d8))
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(rgb(0x3a3a3a)))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_project_editor(cx);
-                                    }))
-                                    .child("Cancel"),
-                            )
-                            .child(
-                                div()
-                                    .id("save-btn")
-                                    .px(px(16.))
-                                    .py(px(8.))
-                                    .rounded(px(6.))
-                                    .bg(rgb(0x5eead4))
-                                    .text_color(rgb(0x000000))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .cursor_pointer()
-                                    .hover(|s| s.opacity(0.9))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.save_project_editor(window, cx);
-                                    }))
-                                    .child("Save"),
-                            ),
-                    ),
-            )
-    }
+                                .text_color(cx.theme().foreground)
+                                .cursor_pointer()
+                                .child("Change..."),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Name"),
+                )
+                .child(agentterm_input_field(name_input)),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Path"),
+                )
+                .child(agentterm_input_field(path_input)),
+        )
 }
 
 fn resolve_transport(def: &agentterm_mcp::MCPDef) -> String {
@@ -2251,24 +2082,8 @@ fn agentterm_input_field(input: &Entity<GpuiInputState>) -> GpuiInput {
     GpuiInput::new(input)
 }
 
-fn icon_button(label: &'static str) -> gpui::Div {
-    div()
-        .w(px(22.0))
-        .h(px(22.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.0))
-        .cursor_pointer()
-        .text_color(rgb(TEXT_SUBTLE))
-        .hover(|s| s.text_color(rgb(TEXT_PRIMARY)).bg(rgba(0xffffff10)))
-        .child(label)
-}
-
 impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let project_editor_open = self.project_editor_open;
-
         div()
             .id("agentterm-gpui")
             .absolute()
@@ -2290,19 +2105,13 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::zoom_window))
             .on_mouse_move(cx.listener(Self::update_sidebar_resize))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
-            .child(self.render_terminal_container())
+            .child(self.render_terminal_container(cx))
             .when(self.sidebar_visible, |el| {
                 el.child(self.render_sidebar_shell(cx))
             })
-            .when(self.tab_picker_open, |el| {
-                el.child(self.render_tab_picker_dialog(cx))
-            })
-            .when(self.mcp_dialog_open, |el| {
-                el.child(self.render_mcp_dialog(cx))
-            })
-            .when(project_editor_open, |el| {
-                el.child(self.render_project_editor_dialog(window, cx))
-            })
+            // Dialog and sheet layers for gpui-component
+            .children(gpui_component::Root::render_dialog_layer(window, cx))
+            .children(gpui_component::Root::render_sheet_layer(window, cx))
     }
 }
 
