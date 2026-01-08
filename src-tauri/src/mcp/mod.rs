@@ -219,7 +219,9 @@ pub async fn mcp_detach(
 
 /// Get the current status of all pooled MCP servers
 #[tauri::command(rename_all = "camelCase")]
-pub async fn mcp_pool_status() -> Result<PoolStatusResponse, String> {
+pub async fn mcp_pool_status(state: State<'_, McpManager>) -> Result<PoolStatusResponse, String> {
+    let config = state.load_config().await.map_err(|e| e.to_string())?;
+    pool_manager::ensure_global_pool(&config).map_err(|e| e.to_string())?;
     Ok(pool_manager::get_pool_status())
 }
 

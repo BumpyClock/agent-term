@@ -1201,6 +1201,63 @@
 }
 
 /* Update Notification / Version Footer */
+.sidebar-status-bar {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-status-wrapper {
+  overflow: hidden;
+}
+
+.sidebar-status-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 16px;
+  background-color: var(--color-surface-sidebar);
+  border-top: 1px solid var(--color-border-soft);
+  font-size: var(--font-size-xs);
+  color: var(--muted-foreground);
+  gap: 8px;
+}
+
+.sidebar-status-row.clickable {
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-status-row.clickable:hover {
+  background-color: var(--muted);
+  color: var(--foreground);
+}
+
+.sidebar-status-row.clickable:active {
+  background-color: var(--accent);
+}
+
+.sidebar-status-row.error {
+  color: var(--destructive);
+}
+
+.sidebar-status-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-status-meta {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.sidebar-status-spinner {
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
 .update-notification {
   position: relative;
   display: flex;

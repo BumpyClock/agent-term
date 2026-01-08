@@ -19,7 +19,7 @@ import { ProjectSection } from './ProjectSection';
 import { SettingsDialog } from './SettingsDialog';
 import { TabPicker } from './TabPicker';
 import { TabsList } from './TabsList';
-import { UpdateNotification } from './UpdateNotification';
+import { SidebarStatusBar } from './SidebarStatusBar';
 import type { PopoverPosition, SearchResult } from './types';
 import './Sidebar.css';
 
@@ -81,16 +81,6 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<DragItemType | null>(null);
   const [collapsedBeforeDrag, setCollapsedBeforeDrag] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    invoke('search_reindex')
-      .then(() => {
-        console.info('Search index rebuilt');
-      })
-      .catch((err) => {
-        console.error('Failed to reindex search:', err);
-      });
-  }, []);
 
   useEffect(() => {
     const handleToggleCommandBar = () => setIsCommandBarOpen((prev) => !prev);
@@ -609,7 +599,7 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
         )}
       </div>
 
-        <UpdateNotification />
+        <SidebarStatusBar />
 
         <DragOverlay>
           {activeId && activeType && (
