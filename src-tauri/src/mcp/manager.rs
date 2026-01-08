@@ -667,6 +667,8 @@ mod tests {
 
     fn test_manager() -> (TempDir, McpManager) {
         let temp = TempDir::new().unwrap();
+        // Set env var so config is read from temp dir instead of real ~/.agent-term
+        std::env::set_var("AGENT_TERM_HOME", temp.path());
         let manager = McpManager::new();
         (temp, manager)
     }

@@ -35,14 +35,15 @@ body,
     height: 100%;
     width: 100%;
     overflow: hidden;
+    background-color: var(--color-surface-root);
 }
 
 .app {
     display: flex;
     height: 100%;
     width: 100%;
-    background-color: var(--color-surface-root);
     color: var(--foreground);
+
     font-family: var(--font-sans);
     position: relative;
     -webkit-backdrop-filter: blur(60px);
@@ -220,10 +221,10 @@ body,
     --secondary: oklch(0.95 0.005 270);
     --secondary-foreground: oklch(0.25 0.01 270);
     --muted: oklch(0.93 0.005 270);
-    --muted-foreground: oklch(0.50 0.01 270);
+    --muted-foreground: oklch(0.5 0.01 270);
     --accent: oklch(0.95 0.005 270);
     --accent-foreground: oklch(0.25 0.01 270);
-    --destructive: oklch(0.55 0.20 25);
+    --destructive: oklch(0.55 0.2 25);
     --border: oklch(0.88 0.01 270);
     --input: oklch(0.88 0.01 270);
     --ring: oklch(0.68 0.12 270);
@@ -250,7 +251,9 @@ body,
     --card-foreground: oklch(0.847 0 0); /* #d4d4d4 - text-primary */
     --popover: oklch(0.176 0 0); /* #1f1f1f - surface-1 */
     --popover-foreground: oklch(0.847 0 0); /* #d4d4d4 - text-primary */
-    --primary: oklch(0.68 0.12 270); /* pastel periwinkle - matches light theme */
+    --primary: oklch(
+        0.68 0.12 270
+    ); /* pastel periwinkle - matches light theme */
     --primary-foreground: oklch(0.15 0 0); /* dark text on pastel */
     --secondary: oklch(0.296 0 0); /* #3c3c3c - surface-5 */
     --secondary-foreground: oklch(0.847 0 0);
