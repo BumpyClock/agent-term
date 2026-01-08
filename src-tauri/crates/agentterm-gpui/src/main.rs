@@ -18,13 +18,12 @@ use settings::AppSettings;
 use settings_dialog::SettingsDialog;
 use ui::ContextMenuExt;
 use gpui_component::{
-    input::InputState as GpuiInputState,
+    input::{Input as GpuiInput, InputState as GpuiInputState},
     theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
 };
 use gpui::{
-    App, Application, AsyncApp, Bounds, BoxShadow, ClickEvent, Context, CursorStyle, Entity,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding, Menu, MenuItem,
-    MouseButton,
+    App, Application, AsyncApp, Bounds, BoxShadow, ClickEvent, Context, Entity, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, KeyBinding, Menu, MenuItem, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, WeakEntity, Window, WindowBackgroundAppearance,
     WindowBounds, WindowOptions, actions, div, hsla, point, prelude::*, px, rgb, rgba, size,
@@ -2057,14 +2056,14 @@ impl AgentTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let name_field = self.project_editor_name_input.clone().map(|input| {
-            let focus_handle = input.read(cx).focus_handle(cx);
-            agentterm_input_field(input, focus_handle)
-        });
-        let path_field = self.project_editor_path_input.clone().map(|input| {
-            let focus_handle = input.read(cx).focus_handle(cx);
-            agentterm_input_field(input, focus_handle)
-        });
+        let name_field = self
+            .project_editor_name_input
+            .as_ref()
+            .map(|input| agentterm_input_field(input));
+        let path_field = self
+            .project_editor_path_input
+            .as_ref()
+            .map(|input| agentterm_input_field(input));
         let current_icon = self.project_editor_icon.clone();
         let error = self.project_editor_error.clone();
 
@@ -2248,20 +2247,8 @@ fn resolve_transport(def: &agentterm_mcp::MCPDef) -> String {
     "STDIO".to_string()
 }
 
-fn agentterm_input_field(input: Entity<GpuiInputState>, focus_handle: FocusHandle) -> gpui::Div {
-    div()
-        .flex()
-        .key_context("Input")
-        .track_focus(&focus_handle)
-        .cursor(CursorStyle::IBeam)
-        .h(px(34.))
-        .w_full()
-        .p(px(6.))
-        .rounded(px(8.))
-        .bg(rgba(0xffffff10))
-        .border_1()
-        .border_color(rgba(0xffffff18))
-        .child(input)
+fn agentterm_input_field(input: &Entity<GpuiInputState>) -> GpuiInput {
+    GpuiInput::new(input)
 }
 
 fn icon_button(label: &'static str) -> gpui::Div {

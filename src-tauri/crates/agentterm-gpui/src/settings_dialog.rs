@@ -3,22 +3,15 @@
 //! Opens in its own window with 3 tabs: General, Appearance, and Tools.
 
 use gpui::{
-    div, prelude::*, px, rgb, AnyElement, App, Context, Entity, FocusHandle, Focusable,
+    div, prelude::*, px, AnyElement, App, Context, Entity, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Window,
 };
 
 use crate::settings::{AppSettings, Theme};
-use crate::ui::{Slider, SliderEvent, SliderState, Switch, Tab, TabBar};
-
-/// Colors for the settings dialog.
-const DIALOG_BG: u32 = 0x1a1a1a;
-const DIALOG_BORDER: u32 = 0x3a3a3a;
-const TEXT_PRIMARY: u32 = 0xd8d8d8;
-const TEXT_MUTED: u32 = 0xa6a6a6;
-const ACCENT: u32 = 0x5eead4;
-const BUTTON_BG: u32 = 0x2a2a2a;
-const BUTTON_HOVER: u32 = 0x3a3a3a;
+use crate::ui::{
+    ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
+};
 
 /// Settings dialog state.
 pub struct SettingsDialog {
@@ -123,7 +116,7 @@ impl SettingsDialog {
         }
     }
 
-    fn render_general_tab(&self, _window: &mut Window, _cx: &mut App) -> AnyElement {
+    fn render_general_tab(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
         div()
             .flex()
             .flex_col()
@@ -132,7 +125,7 @@ impl SettingsDialog {
                 div()
                     .text_lg()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .child("Updates"),
             )
             .child(self.render_setting_row(
@@ -141,6 +134,7 @@ impl SettingsDialog {
                 Switch::new("check-updates")
                     .checked(self.settings.check_for_updates)
                     .into_any_element(),
+                cx,
             ))
             .child(self.render_setting_row(
                 "Auto update",
@@ -148,19 +142,20 @@ impl SettingsDialog {
                 Switch::new("auto-update")
                     .checked(self.settings.auto_update)
                     .into_any_element(),
+                cx,
             ))
             .child(
                 div()
                     .mt(px(16.))
                     .text_lg()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .child("About"),
             )
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(TEXT_MUTED))
+                    .text_color(cx.theme().muted_foreground)
                     .child("AgentTerm v0.1.0"),
             )
             .into_any_element()
@@ -179,7 +174,7 @@ impl SettingsDialog {
                 div()
                     .text_lg()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .child("Theme"),
             )
             .child(self.render_theme_selector())
@@ -188,28 +183,31 @@ impl SettingsDialog {
                     .mt(px(16.))
                     .text_lg()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .child("Typography"),
             )
             .child(self.render_slider_row(
                 "Font Size",
                 format!("{:.0}px", font_size),
                 Slider::new(&self.font_size_slider).into_any_element(),
+                cx,
             ))
             .child(self.render_slider_row(
                 "Line Height",
                 format!("{:.1}", line_height),
                 Slider::new(&self.line_height_slider).into_any_element(),
+                cx,
             ))
             .child(self.render_slider_row(
                 "Letter Spacing",
                 format!("{:.1}px", letter_spacing),
                 Slider::new(&self.letter_spacing_slider).into_any_element(),
+                cx,
             ))
             .into_any_element()
     }
 
-    fn render_tools_tab(&self, _window: &mut Window, _cx: &mut App) -> AnyElement {
+    fn render_tools_tab(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
         div()
             .flex()
             .flex_col()
@@ -218,13 +216,13 @@ impl SettingsDialog {
                 div()
                     .text_lg()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .child("Default Shell"),
             )
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(TEXT_MUTED))
+                    .text_color(cx.theme().muted_foreground)
                     .child(
                         self.settings
                             .default_shell_id
@@ -237,13 +235,13 @@ impl SettingsDialog {
                     .mt(px(16.))
                     .text_lg()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(cx.theme().foreground)
                     .child("Custom Tools"),
             )
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(TEXT_MUTED))
+                    .text_color(cx.theme().muted_foreground)
                     .child(format!("{} custom tools configured", self.settings.custom_tools.len())),
             )
             .into_any_element()
@@ -251,42 +249,43 @@ impl SettingsDialog {
 
     fn render_theme_selector(&self) -> AnyElement {
         let current_theme = &self.settings.theme;
-        let themes = [
-            (Theme::Light, "Light"),
-            (Theme::Dark, "Dark"),
-            (Theme::System, "System"),
-        ];
 
         div()
             .flex()
             .gap(px(8.))
-            .children(themes.into_iter().map(|(theme, label)| {
-                let is_selected = *current_theme == theme;
-                div()
-                    .id(SharedString::from(format!("theme-{:?}", theme)))
-                    .px(px(16.))
-                    .py(px(8.))
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .bg(if is_selected {
-                        rgb(ACCENT)
-                    } else {
-                        rgb(BUTTON_BG)
-                    })
-                    .text_color(if is_selected {
-                        rgb(0x000000)
-                    } else {
-                        rgb(TEXT_PRIMARY)
-                    })
-                    .hover(|s| {
-                        if !is_selected {
-                            s.bg(rgb(BUTTON_HOVER))
+            .child(
+                Button::new("theme-light")
+                    .label("Light")
+                    .map(|b| {
+                        if *current_theme == Theme::Light {
+                            b.primary()
                         } else {
-                            s
+                            b.ghost()
                         }
-                    })
-                    .child(label)
-            }))
+                    }),
+            )
+            .child(
+                Button::new("theme-dark")
+                    .label("Dark")
+                    .map(|b| {
+                        if *current_theme == Theme::Dark {
+                            b.primary()
+                        } else {
+                            b.ghost()
+                        }
+                    }),
+            )
+            .child(
+                Button::new("theme-system")
+                    .label("System")
+                    .map(|b| {
+                        if *current_theme == Theme::System {
+                            b.primary()
+                        } else {
+                            b.ghost()
+                        }
+                    }),
+            )
             .into_any_element()
     }
 
@@ -295,6 +294,7 @@ impl SettingsDialog {
         label: impl Into<SharedString>,
         description: impl Into<SharedString>,
         control: AnyElement,
+        cx: &App,
     ) -> AnyElement {
         let label: SharedString = label.into();
         let description: SharedString = description.into();
@@ -307,11 +307,11 @@ impl SettingsDialog {
                     .flex()
                     .flex_col()
                     .gap(px(2.))
-                    .child(div().text_sm().text_color(rgb(TEXT_PRIMARY)).child(label))
+                    .child(div().text_sm().text_color(cx.theme().foreground).child(label))
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(TEXT_MUTED))
+                            .text_color(cx.theme().muted_foreground)
                             .child(description),
                     ),
             )
@@ -324,6 +324,7 @@ impl SettingsDialog {
         label: impl Into<SharedString>,
         value: impl Into<SharedString>,
         control: AnyElement,
+        cx: &App,
     ) -> AnyElement {
         let label: SharedString = label.into();
         let value: SharedString = value.into();
@@ -335,8 +336,8 @@ impl SettingsDialog {
                 div()
                     .flex()
                     .justify_between()
-                    .child(div().text_sm().text_color(rgb(TEXT_PRIMARY)).child(label))
-                    .child(div().text_sm().text_color(rgb(ACCENT)).child(value)),
+                    .child(div().text_sm().text_color(cx.theme().foreground).child(label))
+                    .child(div().text_sm().text_color(cx.theme().accent).child(value)),
             )
             .child(control)
             .into_any_element()
@@ -365,7 +366,7 @@ impl Render for SettingsDialog {
             .id("settings-dialog")
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(rgb(DIALOG_BG))
+            .bg(cx.theme().background)
             .flex()
             .flex_col()
             // Tab bar
@@ -374,7 +375,7 @@ impl Render for SettingsDialog {
                     .px(px(24.))
                     .py(px(12.))
                     .border_b_1()
-                    .border_color(rgb(DIALOG_BORDER))
+                    .border_color(cx.theme().border)
                     .child(
                         TabBar::new("settings-tabs")
                             .child(Tab::new().label("General"))
@@ -407,37 +408,22 @@ impl Render for SettingsDialog {
                     .px(px(24.))
                     .py(px(16.))
                     .border_t_1()
-                    .border_color(rgb(DIALOG_BORDER))
+                    .border_color(cx.theme().border)
                     .child(
-                        div()
-                            .id("cancel-btn")
-                            .px(px(16.))
-                            .py(px(8.))
-                            .rounded(px(6.))
-                            .cursor_pointer()
-                            .bg(rgb(BUTTON_BG))
-                            .text_color(rgb(TEXT_PRIMARY))
-                            .hover(|s| s.bg(rgb(BUTTON_HOVER)))
+                        Button::new("cancel-btn")
+                            .label("Cancel")
+                            .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.handle_close(window, cx);
-                            }))
-                            .child("Cancel"),
+                            })),
                     )
                     .child(
-                        div()
-                            .id("save-btn")
-                            .px(px(16.))
-                            .py(px(8.))
-                            .rounded(px(6.))
-                            .cursor_pointer()
-                            .bg(rgb(ACCENT))
-                            .text_color(rgb(0x000000))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .hover(|s| s.opacity(0.9))
+                        Button::new("save-btn")
+                            .label("Save")
+                            .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.handle_save(window, cx);
-                            }))
-                            .child("Save"),
+                            })),
                     ),
             )
     }
