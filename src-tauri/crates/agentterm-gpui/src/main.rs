@@ -59,6 +59,9 @@ pub struct RenameSession(pub String);
 pub struct CloseSessionAction(pub String);
 
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct RestartSessionAction(pub String);
+
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 pub struct EditSection(pub String);
 
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
@@ -1773,6 +1776,28 @@ impl AgentTermApp {
         self.close_session(action.0.clone(), window, cx);
     }
 
+    fn handle_restart_session(
+        &mut self,
+        action: &RestartSessionAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.restart_session(action.0.clone(), window, cx);
+    }
+
+    fn restart_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        // Shutdown the existing terminal if it exists
+        if let Some(terminal) = self.terminals.remove(&id) {
+            terminal.update(cx, |terminal, _| terminal.shutdown());
+        }
+        self.terminal_views.remove(&id);
+
+        // Set this session as active and recreate the terminal
+        self.active_session_id = Some(id);
+        self.ensure_active_terminal(window, cx);
+        cx.notify();
+    }
+
     fn handle_edit_section(
         &mut self,
         action: &EditSection,
@@ -2285,6 +2310,7 @@ impl AgentTermApp {
                 let session_id = session_id.clone();
                 move |menu, _window, _cx| {
                     menu.menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
+                        .menu("Restart", Box::new(RestartSessionAction(session_id.clone())))
                         .separator()
                         .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
                 }
@@ -2364,6 +2390,7 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::open_settings))
             .on_action(cx.listener(Self::handle_rename_session))
             .on_action(cx.listener(Self::handle_close_session))
+            .on_action(cx.listener(Self::handle_restart_session))
             .on_action(cx.listener(Self::handle_edit_section))
             .on_action(cx.listener(Self::handle_remove_section))
             .on_action(cx.listener(Self::minimize_window))
