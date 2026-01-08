@@ -13,7 +13,8 @@ mod settings;
 mod settings_dialog;
 mod text_input;
 mod ui;
-use crate::icons::{Icon, IconName, IconSize, icon_from_string};
+use crate::icons::{Icon, IconDescriptor, IconName, IconSize, icon_from_string};
+use crate::ui::IconPicker;
 use settings::AppSettings;
 use settings_dialog::SettingsDialog;
 use ui::{ActiveTheme, Button, ButtonVariants, ContextMenuExt, Divider, Sizable, Tab, TabBar, WindowExt, v_flex};
@@ -935,6 +936,254 @@ impl Render for McpManagerDialog {
     }
 }
 
+/// ProjectEditorDialog - A dialog for editing project name, path, and icon.
+struct ProjectEditorDialog {
+    view: Entity<AgentTermApp>,
+    section_id: String,
+    name_input: Entity<GpuiInputState>,
+    path_input: Entity<GpuiInputState>,
+    current_icon: Option<String>,
+}
+
+impl ProjectEditorDialog {
+    fn new(
+        view: Entity<AgentTermApp>,
+        section_id: String,
+        name_input: Entity<GpuiInputState>,
+        path_input: Entity<GpuiInputState>,
+        current_icon: Option<String>,
+    ) -> Self {
+        Self {
+            view,
+            section_id,
+            name_input,
+            path_input,
+            current_icon,
+        }
+    }
+
+    fn set_icon(&mut self, icon: Option<IconDescriptor>, cx: &mut Context<Self>) {
+        self.current_icon = icon.map(|d| icon_descriptor_to_string(&d));
+        cx.notify();
+    }
+
+    fn save(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.name_input.read(cx).value().to_string().trim().to_string();
+        let path = self.path_input.read(cx).value().to_string().trim().to_string();
+
+        if name.is_empty() {
+            return;
+        }
+
+        window.close_dialog(cx);
+
+        let view = self.view.clone();
+        let section_id = self.section_id.clone();
+        let icon = self.current_icon.clone();
+        view.update(cx, |app, cx| {
+            let _ = app.session_store.rename_section(&section_id, name);
+            let _ = app.session_store.set_section_path(&section_id, path);
+            let _ = app.session_store.set_section_icon(&section_id, icon);
+            app.reload_from_store(cx);
+            app.ensure_active_terminal(window, cx);
+        });
+    }
+}
+
+impl Render for ProjectEditorDialog {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let current_icon = self.current_icon.clone();
+        let entity = cx.entity().clone();
+
+        v_flex()
+            .gap(px(16.))
+            // Icon section with inline IconPicker
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Icon"),
+                    )
+                    .child(
+                        IconPicker::new("project-icon-picker")
+                            .value(current_icon.as_ref().map(|s| icon_descriptor_from_string(s)))
+                            .on_change(move |icon, _window, cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.set_icon(icon, cx);
+                                });
+                            })
+                    )
+            )
+            // Name input
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Name"),
+                    )
+                    .child(agentterm_input_field(&self.name_input)),
+            )
+            // Path input
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Path"),
+                    )
+                    .child(agentterm_input_field(&self.path_input)),
+            )
+    }
+}
+
+/// Convert IconDescriptor to a string format for storage
+fn icon_descriptor_to_string(icon: &IconDescriptor) -> String {
+    match icon {
+        IconDescriptor::Lucide { id } => format!("lucide:{}", id),
+        IconDescriptor::Tool { id } => id.clone(),
+    }
+}
+
+/// Convert a string to IconDescriptor
+fn icon_descriptor_from_string(s: &str) -> IconDescriptor {
+    if s.starts_with("lucide:") {
+        IconDescriptor::lucide(&s[7..])
+    } else {
+        IconDescriptor::tool(s)
+    }
+}
+
+/// Dialog for editing session properties: icon, name, command
+struct SessionEditorDialog {
+    view: Entity<AgentTermApp>,
+    session_id: String,
+    name_input: Entity<GpuiInputState>,
+    command_input: Entity<GpuiInputState>,
+    current_icon: Option<String>,
+}
+
+impl SessionEditorDialog {
+    fn new(
+        view: Entity<AgentTermApp>,
+        session_id: String,
+        name_input: Entity<GpuiInputState>,
+        command_input: Entity<GpuiInputState>,
+        current_icon: Option<String>,
+    ) -> Self {
+        Self {
+            view,
+            session_id,
+            name_input,
+            command_input,
+            current_icon,
+        }
+    }
+
+    fn set_icon(&mut self, icon: Option<IconDescriptor>, cx: &mut Context<Self>) {
+        self.current_icon = icon.map(|d| icon_descriptor_to_string(&d));
+        cx.notify();
+    }
+
+    fn save(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.name_input.read(cx).value().to_string().trim().to_string();
+        let command = self.command_input.read(cx).value().to_string().trim().to_string();
+
+        if name.is_empty() {
+            return;
+        }
+
+        window.close_dialog(cx);
+
+        let view = self.view.clone();
+        let session_id = self.session_id.clone();
+        let icon = self.current_icon.clone();
+
+        view.update(cx, |app, cx| {
+            let _ = app.session_store.rename_session(&session_id, name, true);
+            if !command.is_empty() {
+                let _ = app.session_store.set_session_command(&session_id, command);
+            }
+            let _ = app.session_store.set_session_icon(&session_id, icon);
+            app.reload_from_store(cx);
+            app.ensure_active_terminal(window, cx);
+        });
+    }
+}
+
+impl Render for SessionEditorDialog {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let current_icon = self.current_icon.clone();
+        let entity = cx.entity().clone();
+
+        v_flex()
+            .gap(px(16.))
+            // Icon section
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Icon"),
+                    )
+                    .child(
+                        IconPicker::new("session-icon-picker")
+                            .value(current_icon.as_ref().map(|s| icon_descriptor_from_string(s)))
+                            .on_change(move |icon, _window, cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.set_icon(icon, cx);
+                                });
+                            }),
+                    ),
+            )
+            // Name section
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Name"),
+                    )
+                    .child(agentterm_input_field(&self.name_input)),
+            )
+            // Command section
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Command"),
+                    )
+                    .child(agentterm_input_field(&self.command_input)),
+            )
+    }
+}
+
 struct AgentTermApp {
     focus_handle: FocusHandle,
 
@@ -957,11 +1206,6 @@ struct AgentTermApp {
 
     session_menu_open: bool,
     session_menu_session_id: Option<String>,
-
-    session_rename_open: bool,
-    session_rename_session_id: Option<String>,
-    session_rename_input: Option<Entity<GpuiInputState>>,
-    session_rename_error: Option<SharedString>,
 
     settings: AppSettings,
 }
@@ -1000,10 +1244,6 @@ impl AgentTermApp {
             terminal_views: HashMap::new(),
             session_menu_open: false,
             session_menu_session_id: None,
-            session_rename_open: false,
-            session_rename_session_id: None,
-            session_rename_input: None,
-            session_rename_error: None,
             settings: AppSettings::load(),
         };
 
@@ -1099,21 +1339,16 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        eprintln!("[DEBUG] open_project_editor called with section_id: {}", section_id);
         let Some(section) = self
             .sections
             .iter()
             .find(|s| s.section.id == section_id)
             .map(|s| s.section.clone())
         else {
-            eprintln!("[DEBUG] Section not found!");
             return;
         };
-        eprintln!("[DEBUG] Found section: {}", section.name);
 
         let view = cx.entity().clone();
-        let section_id_clone = section_id.clone();
-        let current_icon = section.icon.clone();
 
         // Create inputs
         let name_input = cx.new(|cx| {
@@ -1129,29 +1364,24 @@ impl AgentTermApp {
 
         let name_focus = name_input.read(cx).focus_handle(cx);
 
-        eprintln!("[DEBUG] About to call window.open_dialog");
-        eprintln!("[DEBUG] Has active dialog before: {}", window.has_active_dialog(cx));
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            eprintln!("[DEBUG] Inside dialog builder callback");
-            let name_input_for_content = name_input.clone();
-            let path_input_for_content = path_input.clone();
+        // Create the dialog entity
+        let dialog_entity = cx.new(|_cx| {
+            ProjectEditorDialog::new(
+                view.clone(),
+                section_id.clone(),
+                name_input.clone(),
+                path_input.clone(),
+                section.icon.clone(),
+            )
+        });
 
+        window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
                 .title("Edit Project")
                 .w(px(400.))
-                .child(
-                    render_project_editor_content(
-                        &name_input_for_content,
-                        &path_input_for_content,
-                        current_icon.clone(),
-                        cx,
-                    )
-                )
+                .child(dialog_entity.clone())
                 .footer({
-                    let view = view.clone();
-                    let name_input = name_input.clone();
-                    let path_input = path_input.clone();
-                    let section_id = section_id_clone.clone();
+                    let dialog_entity = dialog_entity.clone();
                     move |_ok, cancel, window, cx| {
                         vec![
                             cancel(window, cx),
@@ -1159,27 +1389,10 @@ impl AgentTermApp {
                                 .primary()
                                 .label("Save")
                                 .on_click({
-                                    let view = view.clone();
-                                    let name_input = name_input.clone();
-                                    let path_input = path_input.clone();
-                                    let section_id = section_id.clone();
+                                    let dialog_entity = dialog_entity.clone();
                                     move |_, window, cx| {
-                                        let name = name_input.read(cx).value().to_string().trim().to_string();
-                                        let path = path_input.read(cx).value().to_string().trim().to_string();
-
-                                        if name.is_empty() {
-                                            // TODO: Show error - for now just return
-                                            return;
-                                        }
-
-                                        window.close_dialog(cx);
-
-                                        view.update(cx, |app, cx| {
-                                            // Save changes via session_store
-                                            let _ = app.session_store.rename_section(&section_id, name);
-                                            let _ = app.session_store.set_section_path(&section_id, path);
-                                            app.reload_from_store(cx);
-                                            app.ensure_active_terminal(window, cx);
+                                        dialog_entity.update(cx, |dialog, cx| {
+                                            dialog.save(window, cx);
                                         });
                                     }
                                 })
@@ -1189,9 +1402,7 @@ impl AgentTermApp {
                 })
         });
 
-        eprintln!("[DEBUG] Has active dialog after: {}", window.has_active_dialog(cx));
         name_focus.focus(window, cx);
-        eprintln!("[DEBUG] open_project_editor completed");
     }
 
     fn toggle_section_collapsed(&mut self, section_id: String, cx: &mut Context<Self>) {
@@ -1238,7 +1449,6 @@ impl AgentTermApp {
     fn open_session_menu(&mut self, session_id: String, cx: &mut Context<Self>) {
         self.session_menu_open = true;
         self.session_menu_session_id = Some(session_id);
-        self.session_rename_open = false;
         cx.notify();
     }
 
@@ -1252,53 +1462,62 @@ impl AgentTermApp {
         let Some(session) = self.sessions.iter().find(|s| s.id == session_id).cloned() else {
             return;
         };
-        self.session_rename_open = true;
-        self.session_rename_session_id = Some(session_id);
-        self.session_rename_error = None;
         self.session_menu_open = false;
 
-        let input = cx.new(|cx| {
+        let view = cx.entity().clone();
+
+        // Create inputs with current values
+        let name_input = cx.new(|cx| {
             GpuiInputState::new(window, cx)
-                .placeholder("Tab title")
-                .default_value(session.title)
+                .placeholder("Tab name")
+                .default_value(session.title.clone())
         });
-        self.session_rename_input = Some(input.clone());
-        let focus_handle = { input.read(cx).focus_handle(cx) };
-        focus_handle.focus(window, cx);
+        let command_input = cx.new(|cx| {
+            GpuiInputState::new(window, cx)
+                .placeholder("Command (e.g., /bin/zsh)")
+                .default_value(session.command.clone())
+        });
+        let name_focus = name_input.read(cx).focus_handle(cx);
+
+        let dialog_entity = cx.new(|_cx| {
+            SessionEditorDialog::new(
+                view.clone(),
+                session_id.clone(),
+                name_input.clone(),
+                command_input.clone(),
+                session.icon.clone(),
+            )
+        });
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title("Edit Tab")
+                .w(px(400.))
+                .child(dialog_entity.clone())
+                .footer({
+                    let dialog_entity = dialog_entity.clone();
+                    move |_ok, cancel, window, cx| {
+                        vec![
+                            cancel(window, cx),
+                            Button::new("save")
+                                .primary()
+                                .label("Save")
+                                .on_click({
+                                    let dialog_entity = dialog_entity.clone();
+                                    move |_, window, cx| {
+                                        dialog_entity.update(cx, |dialog, cx| {
+                                            dialog.save(window, cx);
+                                        });
+                                    }
+                                })
+                                .into_any_element(),
+                        ]
+                    }
+                })
+        });
+
+        name_focus.focus(window, cx);
         cx.notify();
-    }
-
-    fn close_session_rename(&mut self, cx: &mut Context<Self>) {
-        self.session_rename_open = false;
-        self.session_rename_session_id = None;
-        self.session_rename_input = None;
-        self.session_rename_error = None;
-        cx.notify();
-    }
-
-    fn save_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session_id) = self.session_rename_session_id.clone() else {
-            return;
-        };
-        let Some(input) = self.session_rename_input.as_ref() else {
-            return;
-        };
-        let title = input.read(cx).value().to_string().trim().to_string();
-        if title.is_empty() {
-            self.session_rename_error = Some("Title is required".into());
-            cx.notify();
-            return;
-        }
-
-        if let Err(e) = self.session_store.rename_session(&session_id, title, true) {
-            self.session_rename_error = Some(e.into());
-            cx.notify();
-            return;
-        }
-
-        self.close_session_rename(cx);
-        self.reload_from_store(cx);
-        self.ensure_active_terminal(window, cx);
     }
 
     fn move_session_to_section(
@@ -1308,9 +1527,7 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Err(e) = self.session_store.move_session(&session_id, section_id) {
-            self.session_rename_error = Some(e.into());
-        }
+        let _ = self.session_store.move_session(&session_id, section_id);
         self.close_session_menu(cx);
         self.reload_from_store(cx);
         self.ensure_active_terminal(window, cx);
@@ -1401,7 +1618,6 @@ impl AgentTermApp {
         cx: &mut Context<Self>,
     ) {
         self.session_menu_open = false;
-        self.session_rename_open = false;
 
         let tokio = self.tokio.clone();
         let mcp_manager = self.mcp_manager.clone();
@@ -1438,7 +1654,6 @@ impl AgentTermApp {
 
     fn new_shell_tab(&mut self, _: &NewShellTab, window: &mut Window, cx: &mut Context<Self>) {
         self.session_menu_open = false;
-        self.session_rename_open = false;
 
         let view = cx.entity().clone();
         let tokio = self.tokio.clone();
@@ -1564,17 +1779,150 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        eprintln!("[DEBUG] handle_edit_section called with section_id: {}", action.0);
         self.open_project_editor(action.0.clone(), window, cx);
     }
 
     fn handle_remove_section(
         &mut self,
-        _action: &RemoveSection,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        action: &RemoveSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
-        // TODO: Implement section removal
+        let section_id = action.0.clone();
+
+        // Prevent removing the default section
+        if section_id == DEFAULT_SECTION_ID {
+            return;
+        }
+
+        // Find the section
+        let Some(section) = self
+            .sections
+            .iter()
+            .find(|s| s.section.id == section_id)
+            .map(|s| s.section.clone())
+        else {
+            return;
+        };
+
+        // Count sessions in this section
+        let session_count = self
+            .sessions
+            .iter()
+            .filter(|s| s.section_id == section_id)
+            .count();
+
+        // Get session titles for display (max 5)
+        let session_titles: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|s| s.section_id == section_id)
+            .take(5)
+            .map(|s| s.title.clone())
+            .collect();
+
+        let view = cx.entity().clone();
+        let section_id_for_delete = section_id.clone();
+        let section_name = section.name.clone();
+
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let mut content = v_flex().gap(px(12.));
+
+            // Confirmation message
+            content = content.child(
+                div()
+                    .text_sm()
+                    .child(format!("Are you sure you want to remove \"{}\"?", section_name)),
+            );
+
+            // Session info warning
+            if session_count > 0 {
+                let tabs_text = if session_count == 1 {
+                    "1 tab".to_string()
+                } else {
+                    format!("{} tabs", session_count)
+                };
+
+                content = content.child(
+                    div()
+                        .mt(px(8.))
+                        .p(px(12.))
+                        .rounded(px(6.))
+                        .bg(cx.theme().warning.opacity(0.1))
+                        .border_1()
+                        .border_color(cx.theme().warning.opacity(0.3))
+                        .child(
+                            v_flex()
+                                .gap(px(4.))
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(cx.theme().warning)
+                                        .child(format!("This project has {}", tabs_text)),
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("These tabs will be moved to the Default section."),
+                                ),
+                        ),
+                );
+
+                // List session titles (max 5)
+                if !session_titles.is_empty() {
+                    let mut list = v_flex().gap(px(2.)).mt(px(8.));
+                    for title in &session_titles {
+                        list = list.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("• {}", title)),
+                        );
+                    }
+                    if session_count > 5 {
+                        list = list.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("...and {} more", session_count - 5)),
+                        );
+                    }
+                    content = content.child(list);
+                }
+            }
+
+            dialog
+                .title("Remove Project")
+                .w(px(400.))
+                .child(content)
+                .footer({
+                    let view = view.clone();
+                    let section_id = section_id_for_delete.clone();
+                    move |_ok, cancel, window, cx| {
+                        vec![
+                            cancel(window, cx),
+                            Button::new("remove")
+                                .danger()
+                                .label("Remove")
+                                .on_click({
+                                    let view = view.clone();
+                                    let section_id = section_id.clone();
+                                    move |_, window, cx| {
+                                        window.close_dialog(cx);
+                                        view.update(cx, |app, cx| {
+                                            let _ = app.session_store.delete_section(&section_id);
+                                            app.reload_from_store(cx);
+                                            app.ensure_active_terminal(window, cx);
+                                        });
+                                    }
+                                })
+                                .into_any_element(),
+                        ]
+                    }
+                })
+        });
     }
 
     fn ensure_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1936,7 +2284,7 @@ impl AgentTermApp {
             .context_menu({
                 let session_id = session_id.clone();
                 move |menu, _window, _cx| {
-                    menu.menu("Rename", Box::new(RenameSession(session_id.clone())))
+                    menu.menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
                         .separator()
                         .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
                 }
@@ -1983,89 +2331,6 @@ impl AgentTermApp {
                 )
             })
     }
-}
-
-fn render_project_editor_content(
-    name_input: &Entity<GpuiInputState>,
-    path_input: &Entity<GpuiInputState>,
-    current_icon: Option<String>,
-    cx: &App,
-) -> impl IntoElement {
-    v_flex()
-        .gap(px(16.))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Icon"),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(
-                            div()
-                                .size(px(40.))
-                                .rounded(px(4.))
-                                .bg(cx.theme().popover)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    current_icon
-                                        .as_ref()
-                                        .map(|s| icon_from_string(s))
-                                        .unwrap_or_else(|| Icon::new(IconName::Folder))
-                                        .size(IconSize::Large)
-                                        .color(cx.theme().foreground),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .id("change-icon-btn")
-                                .px(px(12.))
-                                .py(px(6.))
-                                .rounded(px(4.))
-                                .bg(cx.theme().popover)
-                                .text_sm()
-                                .text_color(cx.theme().foreground)
-                                .cursor_pointer()
-                                .child("Change..."),
-                        ),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Name"),
-                )
-                .child(agentterm_input_field(name_input)),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Path"),
-                )
-                .child(agentterm_input_field(path_input)),
-        )
 }
 
 fn resolve_transport(def: &agentterm_mcp::MCPDef) -> String {
