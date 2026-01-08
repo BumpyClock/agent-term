@@ -16,6 +16,7 @@ agentterm_tools = { path = "../agentterm_tools" }
 anyhow.workspace = true
 gpui.workspace = true
 gpui_term = { path = "../gpui_term" }
+gpui-component.workspace = true
 parking_lot.workspace = true
 tokio.workspace = true
 unicode-segmentation = "1.12.0"

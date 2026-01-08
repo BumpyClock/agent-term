@@ -17,19 +17,37 @@ use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use settings::AppSettings;
 use settings_dialog::SettingsDialog;
 use ui::ContextMenuExt;
+use gpui_component::{
+    input::InputState as GpuiInputState,
+    theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
+};
 use gpui::{
-    App, Application, AsyncApp, Bounds, BoxShadow, ClickEvent, Context, Entity, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, SharedString,
+    App, Application, AsyncApp, Bounds, BoxShadow, ClickEvent, Context, CursorStyle, Entity,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding, Menu, MenuItem,
+    MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, WeakEntity, Window, WindowBackgroundAppearance,
     WindowBounds, WindowOptions, actions, div, hsla, point, prelude::*, px, rgb, rgba, size,
 };
 use gpui_term::{Clear, Copy, Paste, SelectAll, Terminal, TerminalBuilder, TerminalView};
-use text_input::TextInput;
 
 actions!(
     agentterm_gpui,
-    [Quit, ToggleSidebar, ToggleMcpManager, NewShellTab, OpenSettings]
+    [
+        Quit,
+        ToggleSidebar,
+        ToggleMcpManager,
+        NewShellTab,
+        OpenSettings,
+        // Window actions (cross-platform)
+        Minimize,
+        Zoom,
+        // macOS-only actions (defined here, but only registered on macOS)
+        About,
+        Hide,
+        HideOthers,
+        ShowAll,
+    ]
 );
 
 // Actions with data for context menu items
@@ -65,13 +83,85 @@ const BORDER_SOFT_ALPHA: f32 = 0.50;
 
 const ENABLE_BLUR: bool = true;
 
+/// Create the application menu bar.
+/// Uses conditional compilation for platform-specific items.
+fn app_menus() -> Vec<Menu> {
+    vec![
+        Menu {
+            name: "Agent Term".into(),
+            items: vec![
+                MenuItem::action("About Agent Term", About),
+                MenuItem::separator(),
+                MenuItem::action("Settings...", OpenSettings),
+                MenuItem::separator(),
+                #[cfg(target_os = "macos")]
+                MenuItem::action("Hide Agent Term", Hide),
+                #[cfg(target_os = "macos")]
+                MenuItem::action("Hide Others", HideOthers),
+                #[cfg(target_os = "macos")]
+                MenuItem::action("Show All", ShowAll),
+                #[cfg(target_os = "macos")]
+                MenuItem::separator(),
+                MenuItem::action("Quit Agent Term", Quit),
+            ],
+        },
+        Menu {
+            name: "Edit".into(),
+            items: vec![
+                MenuItem::action("Copy", Copy),
+                MenuItem::action("Paste", Paste),
+                MenuItem::action("Select All", SelectAll),
+            ],
+        },
+        Menu {
+            name: "View".into(),
+            items: vec![
+                MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                MenuItem::action("MCP Manager", ToggleMcpManager),
+            ],
+        },
+        Menu {
+            name: "Terminal".into(),
+            items: vec![
+                MenuItem::action("New Tab", NewShellTab),
+                MenuItem::action("Clear", Clear),
+            ],
+        },
+        Menu {
+            name: "Window".into(),
+            items: vec![
+                MenuItem::action("Minimize", Minimize),
+                MenuItem::action("Zoom", Zoom),
+            ],
+        },
+    ]
+}
+
 fn rgba_u32(rgb: u32, alpha: f32) -> u32 {
     let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
     (rgb << 8) | a
 }
 
 fn main() {
-    Application::new().with_assets(assets::Assets).run(|cx: &mut App| {
+    let app = Application::new().with_assets(assets::Assets);
+
+    // Handle dock icon click when app has no visible windows (macOS)
+    // Also handles similar scenarios on other platforms
+    app.on_reopen(|cx| {
+        // Find existing windows and activate them
+        if let Some(window) = cx.windows().first() {
+            let _ = cx.update_window(*window, |_root, window, _cx| {
+                window.activate_window();
+            });
+        }
+    });
+
+    app.run(|cx: &mut App| {
+        // Initialize gpui-component (theme, input bindings, dialogs, menus, etc.)
+        gpui_component::init(cx);
+        GpuiTheme::global_mut(cx).mode = GpuiThemeMode::Dark;
+
+        // Set up key bindings
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-b", ToggleSidebar, None),
@@ -85,7 +175,24 @@ fn main() {
         ]);
         text_input::bind_keys(cx);
 
+        // Set up application menu bar
+        cx.set_menus(app_menus());
+
+        // Register action handlers
         cx.on_action(|_: &Quit, cx| cx.quit());
+
+        // macOS-specific action handlers
+        #[cfg(target_os = "macos")]
+        {
+            cx.on_action(|_: &Hide, cx| cx.hide());
+            cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+            cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+        }
+
+        // About action (TODO: show about dialog)
+        cx.on_action(|_: &About, _cx| {
+            // For now, just a no-op. Could show an about dialog later.
+        });
 
         let background_appearance = if ENABLE_BLUR {
             WindowBackgroundAppearance::Blurred
@@ -109,6 +216,9 @@ fn main() {
             cx.new(|cx| AgentTermApp::new(window, cx))
         })
         .unwrap();
+
+        // Activate the app (bring to front)
+        cx.activate(true);
     });
 }
 
@@ -155,8 +265,8 @@ struct AgentTermApp {
 
     project_editor_open: bool,
     project_editor_section_id: Option<String>,
-    project_editor_name_input: Option<Entity<TextInput>>,
-    project_editor_path_input: Option<Entity<TextInput>>,
+    project_editor_name_input: Option<Entity<GpuiInputState>>,
+    project_editor_path_input: Option<Entity<GpuiInputState>>,
     project_editor_icon: Option<String>,
     project_editor_error: Option<SharedString>,
 
@@ -165,7 +275,7 @@ struct AgentTermApp {
 
     session_rename_open: bool,
     session_rename_session_id: Option<String>,
-    session_rename_input: Option<Entity<TextInput>>,
+    session_rename_input: Option<Entity<GpuiInputState>>,
     session_rename_error: Option<SharedString>,
 
     mcp_dialog_open: bool,
@@ -282,6 +392,14 @@ impl AgentTermApp {
         cx.notify();
     }
 
+    fn minimize_window(&mut self, _: &Minimize, window: &mut Window, _cx: &mut Context<Self>) {
+        window.minimize_window();
+    }
+
+    fn zoom_window(&mut self, _: &Zoom, window: &mut Window, _cx: &mut Context<Self>) {
+        window.zoom_window();
+    }
+
     fn open_settings(&mut self, _: &OpenSettings, _window: &mut Window, cx: &mut Context<Self>) {
         let settings = self.settings.clone();
 
@@ -333,13 +451,21 @@ impl AgentTermApp {
         self.session_menu_open = false;
         self.session_rename_open = false;
 
-        let name_input = cx.new(|cx| TextInput::new("Project name", section.name, cx));
-        let path_input = cx.new(|cx| TextInput::new("Project path", section.path, cx));
+        let name_input = cx.new(|cx| {
+            GpuiInputState::new(window, cx)
+                .placeholder("Project name")
+                .default_value(section.name)
+        });
+        let path_input = cx.new(|cx| {
+            GpuiInputState::new(window, cx)
+                .placeholder("Project path")
+                .default_value(section.path)
+        });
         self.project_editor_name_input = Some(name_input.clone());
         self.project_editor_path_input = Some(path_input);
 
-        let focus_handle = { name_input.read(cx).focus_handle_clone() };
-        window.focus(&focus_handle, cx);
+        let focus_handle = { name_input.read(cx).focus_handle(cx) };
+        focus_handle.focus(window, cx);
         cx.notify();
     }
 
@@ -364,14 +490,14 @@ impl AgentTermApp {
             return;
         };
 
-        let name = name_input.read(cx).text().trim().to_string();
+        let name = name_input.read(cx).value().to_string().trim().to_string();
         if name.is_empty() {
             self.project_editor_error = Some("Project name is required".into());
             cx.notify();
             return;
         }
 
-        let path = path_input.read(cx).text().trim().to_string();
+        let path = path_input.read(cx).value().to_string().trim().to_string();
 
         if let Err(e) = self.session_store.rename_section(&section_id, name) {
             self.project_editor_error = Some(e.into());
@@ -416,10 +542,10 @@ impl AgentTermApp {
                     return;
                 };
                 let path_str = path.to_string_lossy().to_string();
-                let _ = cx.update_window(window_handle, |_, _window, cx| {
+                let _ = cx.update_window(window_handle, |_, window, cx| {
                     let _ = this.update(cx, |app, cx| {
                         if let Some(input) = app.project_editor_path_input.as_ref() {
-                            input.update(cx, |ti, cx| ti.set_text(path_str.clone(), cx));
+                            input.update(cx, |ti, cx| ti.set_value(path_str.clone(), window, cx));
                         }
                         cx.notify();
                     });
@@ -498,10 +624,14 @@ impl AgentTermApp {
         self.session_rename_error = None;
         self.session_menu_open = false;
 
-        let input = cx.new(|cx| TextInput::new("Tab title", session.title, cx));
+        let input = cx.new(|cx| {
+            GpuiInputState::new(window, cx)
+                .placeholder("Tab title")
+                .default_value(session.title)
+        });
         self.session_rename_input = Some(input.clone());
-        let focus_handle = { input.read(cx).focus_handle_clone() };
-        window.focus(&focus_handle, cx);
+        let focus_handle = { input.read(cx).focus_handle(cx) };
+        focus_handle.focus(window, cx);
         cx.notify();
     }
 
@@ -520,7 +650,7 @@ impl AgentTermApp {
         let Some(input) = self.session_rename_input.as_ref() else {
             return;
         };
-        let title = input.read(cx).text().trim().to_string();
+        let title = input.read(cx).value().to_string().trim().to_string();
         if title.is_empty() {
             self.session_rename_error = Some("Title is required".into());
             cx.notify();
@@ -1926,8 +2056,14 @@ impl AgentTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let name_input = self.project_editor_name_input.clone();
-        let path_input = self.project_editor_path_input.clone();
+        let name_field = self.project_editor_name_input.clone().map(|input| {
+            let focus_handle = input.read(cx).focus_handle(cx);
+            agentterm_input_field(input, focus_handle)
+        });
+        let path_field = self.project_editor_path_input.clone().map(|input| {
+            let focus_handle = input.read(cx).focus_handle(cx);
+            agentterm_input_field(input, focus_handle)
+        });
         let current_icon = self.project_editor_icon.clone();
         let error = self.project_editor_error.clone();
 
@@ -2035,7 +2171,7 @@ impl AgentTermApp {
                                             .text_color(rgb(0xa0a0a0))
                                             .child("Name"),
                                     )
-                                    .when_some(name_input, |el, input| el.child(input)),
+                                    .when_some(name_field, |el, input| el.child(input)),
                             )
                             .child(
                                 div()
@@ -2048,7 +2184,7 @@ impl AgentTermApp {
                                             .text_color(rgb(0xa0a0a0))
                                             .child("Path"),
                                     )
-                                    .when_some(path_input, |el, input| el.child(input)),
+                                    .when_some(path_field, |el, input| el.child(input)),
                             )
                             .when_some(error, |el, err| {
                                 el.child(
@@ -2111,6 +2247,22 @@ fn resolve_transport(def: &agentterm_mcp::MCPDef) -> String {
     "STDIO".to_string()
 }
 
+fn agentterm_input_field(input: Entity<GpuiInputState>, focus_handle: FocusHandle) -> gpui::Div {
+    div()
+        .flex()
+        .key_context("Input")
+        .track_focus(&focus_handle)
+        .cursor(CursorStyle::IBeam)
+        .h(px(34.))
+        .w_full()
+        .p(px(6.))
+        .rounded(px(8.))
+        .bg(rgba(0xffffff10))
+        .border_1()
+        .border_color(rgba(0xffffff18))
+        .child(input)
+}
+
 fn icon_button(label: &'static str) -> gpui::Div {
     div()
         .w(px(22.0))
@@ -2146,6 +2298,8 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::handle_close_session))
             .on_action(cx.listener(Self::handle_edit_section))
             .on_action(cx.listener(Self::handle_remove_section))
+            .on_action(cx.listener(Self::minimize_window))
+            .on_action(cx.listener(Self::zoom_window))
             .on_mouse_move(cx.listener(Self::update_sidebar_resize))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
             .child(self.render_terminal_container())
