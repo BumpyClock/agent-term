@@ -106,6 +106,27 @@ impl SessionStore {
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
+    pub fn set_section_collapsed(&self, id: &str, collapsed: bool) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        let section = snapshot
+            .sections
+            .iter_mut()
+            .find(|section| section.id == id)
+            .ok_or_else(|| "Section not found".to_string())?;
+        section.collapsed = collapsed;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    pub fn reorder_sections(&self, ordered_section_ids: &[String]) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        for (index, id) in ordered_section_ids.iter().enumerate() {
+            if let Some(section) = snapshot.sections.iter_mut().find(|s| &s.id == id) {
+                section.order = (index as u32).saturating_add(1);
+            }
+        }
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
     pub fn delete_section(&self, id: &str) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
         snapshot.sections.retain(|section| section.id != id);
@@ -158,6 +179,10 @@ impl SessionStore {
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
+    pub fn rename_session(&self, id: &str, title: String, is_custom: bool) -> Result<(), String> {
+        self.set_session_custom_title(id, title, is_custom)
+    }
+
     pub fn move_session(&self, id: &str, section_id: String) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
         let session = snapshot
@@ -166,6 +191,26 @@ impl SessionStore {
             .find(|session| session.id == id)
             .ok_or_else(|| "Session not found".to_string())?;
         session.section_id = section_id;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    pub fn reorder_sessions_in_section(
+        &self,
+        section_id: &str,
+        ordered_session_ids: &[String],
+    ) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+
+        for (index, id) in ordered_session_ids.iter().enumerate() {
+            if let Some(session) = snapshot
+                .sessions
+                .iter_mut()
+                .find(|s| s.section_id == section_id && &s.id == id)
+            {
+                session.tab_order = Some(index as u32);
+            }
+        }
+
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
