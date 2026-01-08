@@ -54,10 +54,17 @@ dependencies = [
  "agentterm_session",
  "agentterm_tools",
  "anyhow",
+ "dirs 5.0.1",
  "gpui",
  "gpui_term",
+ "once_cell",
  "parking_lot",
+ "rust-embed",
+ "schemars 1.2.0",
+ "serde",
+ "smallvec",
  "tokio",
+ "toml 0.8.23",
  "unicode-segmentation",
 ]
 
