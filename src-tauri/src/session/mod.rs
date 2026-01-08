@@ -144,6 +144,8 @@ impl SessionManager {
             loaded_mcp_names: Vec::new(),
             is_open: true,
             tab_order: Some(self.next_tab_order()),
+            is_custom_title: false,
+            dynamic_title: None,
         };
         diagnostics::log(format!(
             "create_session id={} title={} tool={:?} command={} project_path={} section_id={}",
@@ -168,6 +170,39 @@ impl SessionManager {
             .find(|session| session.id == id)
             .ok_or_else(|| "Session not found".to_string())?;
         session.title = title;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    /// Set a custom (user-provided) title and lock it from dynamic updates
+    pub fn set_session_custom_title(
+        &self,
+        id: &str,
+        title: String,
+        is_custom: bool,
+    ) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        let session = snapshot
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        session.title = title;
+        session.is_custom_title = is_custom;
+        self.storage.save(&snapshot).map_err(|e| e.to_string())
+    }
+
+    /// Set a dynamic title from OSC escape sequences (only if not custom-locked)
+    pub fn set_session_dynamic_title(&self, id: &str, title: String) -> Result<(), String> {
+        let mut snapshot = self.snapshot.lock();
+        let session = snapshot
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        session.dynamic_title = Some(title.clone());
+        if !session.is_custom_title {
+            session.title = title;
+        }
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
@@ -822,6 +857,25 @@ pub fn rename_session(
     title: String,
 ) -> Result<(), String> {
     state.rename_session(&id, title)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_session_custom_title(
+    state: State<'_, SessionManager>,
+    id: String,
+    title: String,
+    is_custom: bool,
+) -> Result<(), String> {
+    state.set_session_custom_title(&id, title, is_custom)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_session_dynamic_title(
+    state: State<'_, SessionManager>,
+    id: String,
+    title: String,
+) -> Result<(), String> {
+    state.set_session_dynamic_title(&id, title)
 }
 
 #[tauri::command(rename_all = "camelCase")]

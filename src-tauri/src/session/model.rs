@@ -43,6 +43,12 @@ pub struct SessionRecord {
     pub loaded_mcp_names: Vec<String>,
     pub is_open: bool,
     pub tab_order: Option<u32>,
+    /// Whether the user manually set a custom title (locked from dynamic updates)
+    #[serde(default)]
+    pub is_custom_title: bool,
+    /// Title set by terminal OSC escape sequences (dynamic title)
+    #[serde(default)]
+    pub dynamic_title: Option<String>,
 }
 
 /// Section metadata for organizing sessions.
