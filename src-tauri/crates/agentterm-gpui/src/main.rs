@@ -213,7 +213,8 @@ fn main() {
 
         cx.open_window(window_options, |window, cx| {
             window.set_background_appearance(background_appearance);
-            cx.new(|cx| AgentTermApp::new(window, cx))
+            let app = cx.new(|cx| AgentTermApp::new(window, cx));
+            cx.new(|cx| gpui_component::Root::new(app, window, cx))
         })
         .unwrap();
 

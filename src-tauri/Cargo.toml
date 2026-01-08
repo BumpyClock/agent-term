@@ -7,9 +7,6 @@ members = [
     "crates/agentterm_session",
     "crates/agentterm_tools",
     "crates/agentterm-gpui",
-    "crates/gpui-component",
-    "crates/gpui-component-assets",
-    "crates/gpui-component-macros",
     "crates/gpui_term",
     ".",
 ]
@@ -17,11 +14,8 @@ members = [
 [workspace.dependencies]
 dirs = "6.0.0"
 time = { version = "0.3.44", features = ["formatting"] }
-gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "7e39e1589200d3425a31e7961a407b2c9983d536" }
 gpui-macros = "0.2.2"
-gpui-component = { path = "crates/gpui-component" }
-gpui-component-macros = { path = "crates/gpui-component-macros" }
-gpui-component-assets = { path = "crates/gpui-component-assets" }
 alacritty_terminal = "0.25"
 portable-pty = "0.9"
 futures = "0.3"
@@ -49,6 +43,7 @@ uuid = { version = "1.19.0", features = ["v4"] }
 [workspace.dependencies.windows]
 version = "0.58.0"
 features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]
+
 
 [workspace.package]
 edition = "2024"
