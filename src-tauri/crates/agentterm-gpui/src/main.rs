@@ -7,6 +7,7 @@ use agentterm_session::{
     DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
 };
 use agentterm_tools::{ShellInfo, ShellType, ToolInfo};
+mod text_input;
 use gpui::{
     App, Application, AsyncApp, BoxShadow, ClickEvent, Context, Entity, FocusHandle, Focusable,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -15,6 +16,7 @@ use gpui::{
     prelude::*, px, rgb, rgba,
 };
 use gpui_term::{Clear, Copy, Paste, SelectAll, Terminal, TerminalBuilder, TerminalView};
+use text_input::TextInput;
 
 actions!(
     agentterm_gpui,
@@ -58,6 +60,7 @@ fn main() {
             KeyBinding::new("cmd-a", SelectAll, Some("Terminal")),
             KeyBinding::new("cmd-k", Clear, Some("Terminal")),
         ]);
+        text_input::bind_keys(cx);
 
         cx.on_action(|_: &Quit, cx| cx.quit());
 
@@ -127,6 +130,20 @@ struct AgentTermApp {
     tab_picker_shells: Vec<ShellInfo>,
     tab_picker_pinned_shell_ids: Vec<String>,
 
+    project_editor_open: bool,
+    project_editor_section_id: Option<String>,
+    project_editor_name_input: Option<Entity<TextInput>>,
+    project_editor_path_input: Option<Entity<TextInput>>,
+    project_editor_error: Option<SharedString>,
+
+    session_menu_open: bool,
+    session_menu_session_id: Option<String>,
+
+    session_rename_open: bool,
+    session_rename_session_id: Option<String>,
+    session_rename_input: Option<Entity<TextInput>>,
+    session_rename_error: Option<SharedString>,
+
     mcp_dialog_open: bool,
     mcp_scope: McpScope,
     mcp_attached: Vec<SharedString>,
@@ -170,6 +187,17 @@ impl AgentTermApp {
             tab_picker_tools: Vec::new(),
             tab_picker_shells: Vec::new(),
             tab_picker_pinned_shell_ids: Vec::new(),
+            project_editor_open: false,
+            project_editor_section_id: None,
+            project_editor_name_input: None,
+            project_editor_path_input: None,
+            project_editor_error: None,
+            session_menu_open: false,
+            session_menu_session_id: None,
+            session_rename_open: false,
+            session_rename_session_id: None,
+            session_rename_input: None,
+            session_rename_error: None,
             mcp_dialog_open: false,
             mcp_scope: McpScope::Global,
             mcp_attached: Vec::new(),
@@ -226,6 +254,281 @@ impl AgentTermApp {
         cx.notify();
     }
 
+    fn open_project_editor(
+        &mut self,
+        section_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(section) = self
+            .sections
+            .iter()
+            .find(|s| s.section.id == section_id)
+            .map(|s| s.section.clone())
+        else {
+            return;
+        };
+
+        self.project_editor_open = true;
+        self.project_editor_section_id = Some(section_id);
+        self.project_editor_error = None;
+        self.session_menu_open = false;
+        self.session_rename_open = false;
+
+        let name_input = cx.new(|cx| TextInput::new("Project name", section.name, cx));
+        let path_input = cx.new(|cx| TextInput::new("Project path", section.path, cx));
+        self.project_editor_name_input = Some(name_input.clone());
+        self.project_editor_path_input = Some(path_input);
+
+        let focus_handle = { name_input.read(cx).focus_handle_clone() };
+        window.focus(&focus_handle, cx);
+        cx.notify();
+    }
+
+    fn close_project_editor(&mut self, cx: &mut Context<Self>) {
+        self.project_editor_open = false;
+        self.project_editor_section_id = None;
+        self.project_editor_name_input = None;
+        self.project_editor_path_input = None;
+        self.project_editor_error = None;
+        cx.notify();
+    }
+
+    fn save_project_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(section_id) = self.project_editor_section_id.clone() else {
+            return;
+        };
+        let Some(name_input) = self.project_editor_name_input.as_ref() else {
+            return;
+        };
+        let Some(path_input) = self.project_editor_path_input.as_ref() else {
+            return;
+        };
+
+        let name = name_input.read(cx).text().trim().to_string();
+        if name.is_empty() {
+            self.project_editor_error = Some("Project name is required".into());
+            cx.notify();
+            return;
+        }
+
+        let path = path_input.read(cx).text().trim().to_string();
+
+        if let Err(e) = self.session_store.rename_section(&section_id, name) {
+            self.project_editor_error = Some(e.into());
+            cx.notify();
+            return;
+        }
+
+        if let Err(e) = self.session_store.set_section_path(&section_id, path) {
+            self.project_editor_error = Some(e.into());
+            cx.notify();
+            return;
+        }
+
+        self.close_project_editor(cx);
+        self.reload_from_store(cx);
+        self.ensure_active_terminal(window, cx);
+    }
+
+    fn choose_project_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.project_editor_path_input.is_none() {
+            return;
+        };
+
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
+            prompt: Some("Select Project Folder".into()),
+            directories: true,
+            files: false,
+            multiple: false,
+        });
+
+        let window_handle = window.window_handle();
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                let Ok(result) = rx.await else {
+                    return;
+                };
+                let Ok(Some(paths)) = result else {
+                    return;
+                };
+                let Some(path) = paths.first() else {
+                    return;
+                };
+                let path_str = path.to_string_lossy().to_string();
+                let _ = cx.update_window(window_handle, |_, _window, cx| {
+                    let _ = this.update(cx, |app, cx| {
+                        if let Some(input) = app.project_editor_path_input.as_ref() {
+                            input.update(cx, |ti, cx| ti.set_text(path_str.clone(), cx));
+                        }
+                        cx.notify();
+                    });
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn toggle_section_collapsed(&mut self, section_id: String, cx: &mut Context<Self>) {
+        if section_id == DEFAULT_SECTION_ID {
+            return;
+        }
+        let Some(section) = self
+            .sections
+            .iter()
+            .find(|s| s.section.id == section_id)
+            .map(|s| s.section.clone())
+        else {
+            return;
+        };
+        let next = !section.collapsed;
+        let _ = self
+            .session_store
+            .set_section_collapsed(&section_id, next)
+            .map_err(|e| {
+                self.project_editor_error = Some(e.into());
+            });
+        self.reload_from_store(cx);
+    }
+
+    fn move_section(&mut self, section_id: String, delta: isize, cx: &mut Context<Self>) {
+        let mut ordered: Vec<SectionRecord> = self
+            .sections
+            .iter()
+            .filter(|s| s.section.id != DEFAULT_SECTION_ID)
+            .map(|s| s.section.clone())
+            .collect();
+        ordered.sort_by_key(|s| s.order);
+
+        let idx = ordered.iter().position(|s| s.id == section_id);
+        let Some(idx) = idx else { return };
+        let new_idx = (idx as isize + delta).clamp(0, ordered.len().saturating_sub(1) as isize);
+        if new_idx as usize == idx {
+            return;
+        }
+        let item = ordered.remove(idx);
+        ordered.insert(new_idx as usize, item);
+        let ids: Vec<String> = ordered.into_iter().map(|s| s.id).collect();
+        let _ = self.session_store.reorder_sections(&ids);
+        self.reload_from_store(cx);
+    }
+
+    fn open_session_menu(&mut self, session_id: String, cx: &mut Context<Self>) {
+        self.session_menu_open = true;
+        self.session_menu_session_id = Some(session_id);
+        self.tab_picker_open = false;
+        self.mcp_dialog_open = false;
+        self.project_editor_open = false;
+        self.session_rename_open = false;
+        cx.notify();
+    }
+
+    fn close_session_menu(&mut self, cx: &mut Context<Self>) {
+        self.session_menu_open = false;
+        self.session_menu_session_id = None;
+        cx.notify();
+    }
+
+    fn open_session_rename(&mut self, session_id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.sessions.iter().find(|s| s.id == session_id).cloned() else {
+            return;
+        };
+        self.session_rename_open = true;
+        self.session_rename_session_id = Some(session_id);
+        self.session_rename_error = None;
+        self.session_menu_open = false;
+
+        let input = cx.new(|cx| TextInput::new("Tab title", session.title, cx));
+        self.session_rename_input = Some(input.clone());
+        let focus_handle = { input.read(cx).focus_handle_clone() };
+        window.focus(&focus_handle, cx);
+        cx.notify();
+    }
+
+    fn close_session_rename(&mut self, cx: &mut Context<Self>) {
+        self.session_rename_open = false;
+        self.session_rename_session_id = None;
+        self.session_rename_input = None;
+        self.session_rename_error = None;
+        cx.notify();
+    }
+
+    fn save_session_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session_id) = self.session_rename_session_id.clone() else {
+            return;
+        };
+        let Some(input) = self.session_rename_input.as_ref() else {
+            return;
+        };
+        let title = input.read(cx).text().trim().to_string();
+        if title.is_empty() {
+            self.session_rename_error = Some("Title is required".into());
+            cx.notify();
+            return;
+        }
+
+        if let Err(e) = self.session_store.rename_session(&session_id, title, true) {
+            self.session_rename_error = Some(e.into());
+            cx.notify();
+            return;
+        }
+
+        self.close_session_rename(cx);
+        self.reload_from_store(cx);
+        self.ensure_active_terminal(window, cx);
+    }
+
+    fn move_session_to_section(
+        &mut self,
+        session_id: String,
+        section_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(e) = self.session_store.move_session(&session_id, section_id) {
+            self.session_rename_error = Some(e.into());
+        }
+        self.close_session_menu(cx);
+        self.reload_from_store(cx);
+        self.ensure_active_terminal(window, cx);
+    }
+
+    fn move_session_order(&mut self, session_id: String, delta: isize, cx: &mut Context<Self>) {
+        let Some(session) = self.sessions.iter().find(|s| s.id == session_id).cloned() else {
+            return;
+        };
+        let section_id = session.section_id.clone();
+
+        let mut ordered: Vec<SessionRecord> = self
+            .sessions
+            .iter()
+            .filter(|s| s.section_id == section_id)
+            .cloned()
+            .collect();
+        ordered.sort_by(|a, b| {
+            a.tab_order
+                .unwrap_or(u32::MAX)
+                .cmp(&b.tab_order.unwrap_or(u32::MAX))
+                .then_with(|| a.created_at.cmp(&b.created_at))
+        });
+
+        let idx = ordered.iter().position(|s| s.id == session_id);
+        let Some(idx) = idx else { return };
+        let new_idx = (idx as isize + delta).clamp(0, ordered.len().saturating_sub(1) as isize);
+        if new_idx as usize == idx {
+            return;
+        }
+
+        let item = ordered.remove(idx);
+        ordered.insert(new_idx as usize, item);
+        let ids: Vec<String> = ordered.into_iter().map(|s| s.id).collect();
+        let _ = self
+            .session_store
+            .reorder_sessions_in_section(&section_id, &ids);
+        self.reload_from_store(cx);
+    }
+
     fn start_sidebar_resize(
         &mut self,
         event: &MouseDownEvent,
@@ -276,6 +579,9 @@ impl AgentTermApp {
         cx: &mut Context<Self>,
     ) {
         self.tab_picker_open = false;
+        self.project_editor_open = false;
+        self.session_menu_open = false;
+        self.session_rename_open = false;
         self.mcp_dialog_open = !self.mcp_dialog_open;
         self.mcp_error = None;
         if self.mcp_dialog_open {
@@ -289,6 +595,9 @@ impl AgentTermApp {
         self.tab_picker_error = None;
         if self.tab_picker_open {
             self.mcp_dialog_open = false;
+            self.project_editor_open = false;
+            self.session_menu_open = false;
+            self.session_rename_open = false;
             self.refresh_tab_picker_data();
         } else {
             self.tab_picker_loading = false;
