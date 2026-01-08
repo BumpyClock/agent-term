@@ -4,6 +4,7 @@ import type { PopoverPosition } from './types';
 
 interface MenuItem {
   label: string;
+  icon?: React.ReactNode;
   onSelect: () => void;
 }
 
@@ -32,6 +33,7 @@ export function MenuPopover({ position, items, onClose }: MenuPopoverProps) {
             onClose();
           }}
         >
+          {item.icon && <span className="tab-menu-item-icon">{item.icon}</span>}
           {item.label}
         </button>
       ))}

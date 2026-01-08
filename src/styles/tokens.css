@@ -49,6 +49,11 @@
     --z-titlebar: 80;
     --z-popover: 120;
     --z-dialog: 140;
+
+    /* Multi-window specific tokens */
+    --color-mirror-indicator: oklch(0.75 0.12 200);
+    --color-window-drop-zone: oklch(from var(--primary) l c h / 15%);
+    --shadow-window-preview: 0 4px 12px oklch(0 0 0 / 20%);
 }
 
 /* Dark theme custom tokens */
