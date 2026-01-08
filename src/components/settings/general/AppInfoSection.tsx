@@ -15,14 +15,14 @@ export function AppInfoSection() {
     <div className="pt-4 pb-2 border-t">
       <div className="flex items-start gap-4">
         {/* App Icon */}
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center shrink-0">
+        <div className="w-12 h-12 rounded-xl bg-linear-to-br from-primary/20 to-primary/5 flex items-center justify-center shrink-0">
           <Terminal className="w-6 h-6 text-primary" />
         </div>
 
         {/* App Info */}
         <div className="flex-1 space-y-1 min-w-0">
           <div>
-            <h2 className="text-base font-semibold">Agent Term</h2>
+            <h2 className="text-base font-bold">Agenty Term</h2>
             <p className="text-xs text-muted-foreground">
               Version {currentVersion || '0.0.0'}
             </p>

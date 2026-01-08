@@ -10,7 +10,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "../store/terminalStore";
 import { useTerminalSettings } from "../store/terminalSettingsStore";
+import { getTerminalTheme, type TerminalColorSchemeId } from "@/lib/terminalThemes";
 import "@xterm/xterm/css/xterm.css";
+
+/**
+ * Get the resolved app theme (light or dark) from the document class.
+ */
+function getResolvedAppTheme(): "light" | "dark" {
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+}
 
 const RESIZE_DEBOUNCE_MS = 150;
 
@@ -31,6 +39,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
   const isActiveRef = useRef(isActive);
   const resizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevUseWebGLRef = useRef(useTerminalSettings.getState().useWebGL);
+  const prevTerminalColorSchemeRef = useRef(useTerminalSettings.getState().terminalColorScheme);
   const setLastKnownSize = useTerminalStore((state) => state.setLastKnownSize);
   const logPrefix = `[terminal ${sessionId}]`;
 
@@ -65,6 +74,9 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
       const decoder = new TextDecoder("utf-8");
 
       const termSettings = useTerminalSettings.getState();
+      const appTheme = getResolvedAppTheme();
+      const initialTerminalTheme = getTerminalTheme(termSettings.terminalColorScheme, appTheme);
+
       const xterm = new XTerm({
         cursorBlink: true,
         fontSize: termSettings.fontSize,
@@ -72,29 +84,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         lineHeight: termSettings.lineHeight,
         letterSpacing: termSettings.letterSpacing,
         allowTransparency: true,
-        theme: {
-          background: "#00000000",
-          foreground: "#d4d4d4",
-          cursor: "#d4d4d4",
-          cursorAccent: "#1e1e1e",
-          selectionBackground: "#264f78",
-          black: "#000000",
-          red: "#cd3131",
-          green: "#0dbc79",
-          yellow: "#e5e510",
-          blue: "#2472c8",
-          magenta: "#bc3fbc",
-          cyan: "#11a8cd",
-          white: "#e5e5e5",
-          brightBlack: "#666666",
-          brightRed: "#f14c4c",
-          brightGreen: "#23d18b",
-          brightYellow: "#f5f543",
-          brightBlue: "#3b8eea",
-          brightMagenta: "#d670d6",
-          brightCyan: "#29b8db",
-          brightWhite: "#e5e5e5",
-        },
+        theme: initialTerminalTheme,
       });
 
       const fitAddon = new FitAddon();
@@ -142,11 +132,19 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
 
       let inputDisposable: IDisposable | null = null;
       let resizeObserver: ResizeObserver | null = null;
+      let themeObserver: MutationObserver | null = null;
       let unlistenOutput: (() => void) | null = null;
       let unlistenExit: (() => void) | null = null;
       let unsubscribeSettings: (() => void) | null = null;
       let cancelled = false;
       let disposed = false;
+
+      // Helper to update terminal theme
+      const updateTerminalTheme = (schemeId: TerminalColorSchemeId) => {
+        const currentAppTheme = getResolvedAppTheme();
+        const newTheme = getTerminalTheme(schemeId, currentAppTheme);
+        xterm.options.theme = newTheme;
+      };
 
       // Subscribe to terminal settings changes
       unsubscribeSettings = useTerminalSettings.subscribe((state) => {
@@ -165,6 +163,29 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
           }
           prevUseWebGLRef.current = state.useWebGL;
         }
+
+        // Handle terminal color scheme change
+        if (state.terminalColorScheme !== prevTerminalColorSchemeRef.current) {
+          updateTerminalTheme(state.terminalColorScheme);
+          prevTerminalColorSchemeRef.current = state.terminalColorScheme;
+        }
+      });
+
+      // Watch for app theme changes (light/dark class on document)
+      themeObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          if (mutation.attributeName === "class") {
+            // App theme changed, update terminal theme
+            const currentScheme = useTerminalSettings.getState().terminalColorScheme;
+            updateTerminalTheme(currentScheme);
+            break;
+          }
+        }
+      });
+
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
       });
 
       const teardown = () => {
@@ -173,6 +194,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         unlistenOutput?.();
         unlistenExit?.();
         unsubscribeSettings?.();
+        themeObserver?.disconnect();
         resizeObserver?.disconnect();
         inputDisposable?.dispose();
         unloadWebGL();

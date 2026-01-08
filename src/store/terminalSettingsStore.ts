@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { AccentColorId } from '@/lib/accentColors';
+import type { TerminalColorSchemeId } from '@/lib/terminalThemes';
 
 export interface TerminalSettings {
   fontFamily: string;
@@ -7,6 +9,8 @@ export interface TerminalSettings {
   lineHeight: number;
   letterSpacing: number;
   useWebGL: boolean;
+  accentColor: AccentColorId;
+  terminalColorScheme: TerminalColorSchemeId;
 }
 
 interface TerminalSettingsState extends TerminalSettings {
@@ -15,6 +19,8 @@ interface TerminalSettingsState extends TerminalSettings {
   setLineHeight: (lineHeight: number) => void;
   setLetterSpacing: (letterSpacing: number) => void;
   setUseWebGL: (useWebGL: boolean) => void;
+  setAccentColor: (accentColor: AccentColorId) => void;
+  setTerminalColorScheme: (terminalColorScheme: TerminalColorSchemeId) => void;
   resetToDefaults: () => void;
 }
 
@@ -24,6 +30,8 @@ export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   lineHeight: 1.2,
   letterSpacing: 0,
   useWebGL: true,
+  accentColor: 'periwinkle',
+  terminalColorScheme: 'one',
 };
 
 export const FONT_OPTIONS = [
@@ -47,6 +55,8 @@ export const useTerminalSettings = create<TerminalSettingsState>()(
       setLineHeight: (lineHeight) => set({ lineHeight: Math.min(2.0, Math.max(1.0, lineHeight)) }),
       setLetterSpacing: (letterSpacing) => set({ letterSpacing: Math.min(5, Math.max(-2, letterSpacing)) }),
       setUseWebGL: (useWebGL) => set({ useWebGL }),
+      setAccentColor: (accentColor) => set({ accentColor }),
+      setTerminalColorScheme: (terminalColorScheme) => set({ terminalColorScheme }),
       resetToDefaults: () => set(DEFAULT_TERMINAL_SETTINGS),
     }),
     {
