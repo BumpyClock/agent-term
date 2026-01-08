@@ -5,6 +5,7 @@ members = [
     "crates/agentterm-mcp-proxy",
     "crates/agentterm_mcp",
     "crates/agentterm_session",
+    "crates/agentterm_tools",
     "crates/agentterm-gpui",
     "crates/gpui_term",
     ".",
