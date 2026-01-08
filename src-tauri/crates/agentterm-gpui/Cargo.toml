@@ -18,3 +18,4 @@ gpui.workspace = true
 gpui_term = { path = "../gpui_term" }
 parking_lot.workspace = true
 tokio.workspace = true
+unicode-segmentation = "1.12.0"

@@ -58,6 +58,7 @@ dependencies = [
  "gpui_term",
  "parking_lot",
  "tokio",
+ "unicode-segmentation",
 ]
 
 [[package]]
