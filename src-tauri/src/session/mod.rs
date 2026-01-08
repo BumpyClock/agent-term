@@ -1055,6 +1055,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            args: None,
             icon: None,
         };
 
@@ -1077,6 +1078,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            args: None,
             icon: None,
         };
 
@@ -1097,6 +1099,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            args: None,
             icon: None,
         };
 
@@ -1133,6 +1136,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
+            args: None,
             icon: None,
         };
 
@@ -1155,6 +1159,7 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Claude,
             command: "claude".to_string(),
+            args: None,
             icon: None,
         };
 
@@ -1178,6 +1183,7 @@ mod tests {
                 section_id: "default".to_string(),
                 tool: model::SessionTool::Shell,
                 command: "/bin/bash".to_string(),
+                args: None,
                 icon: None,
             };
             manager.create_session(input).unwrap();
@@ -1202,6 +1208,7 @@ mod tests {
                 section_id: "default".to_string(),
                 tool: model::SessionTool::Claude,
                 command: "claude".to_string(),
+                args: None,
                 icon: None,
             })
             .unwrap();
@@ -1213,6 +1220,7 @@ mod tests {
                 section_id: "default".to_string(),
                 tool: model::SessionTool::Gemini,
                 command: "gemini".to_string(),
+                args: None,
                 icon: None,
             })
             .unwrap();
