@@ -395,6 +395,9 @@ impl AgentTermApp {
         }
         let _ = self.session_store.set_active_session(Some(id.clone()));
         self.active_session_id = Some(id);
+        if self.mcp_dialog_open {
+            self.refresh_mcp_data();
+        }
         self.ensure_active_terminal(window, cx);
         cx.notify();
     }
@@ -407,6 +410,9 @@ impl AgentTermApp {
 
         let _ = self.session_store.delete_session(&id);
         self.reload_from_store(cx);
+        if self.mcp_dialog_open {
+            self.refresh_mcp_data();
+        }
         if self.active_session_id.is_none() {
             self.ensure_active_terminal(window, cx);
         }
