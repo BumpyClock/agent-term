@@ -58,28 +58,25 @@ impl SettingsDialog {
         });
 
         cx.subscribe(&font_size_slider, |this, _, event: &SliderEvent, cx| {
-            if let SliderEvent::Change(value) = event {
-                this.settings.font_size = *value;
-                cx.notify();
-            }
+            let SliderEvent::Change(slider_value) = event;
+            this.settings.font_size = slider_value.start();
+            cx.notify();
         })
         .detach();
 
         cx.subscribe(&line_height_slider, |this, _, event: &SliderEvent, cx| {
-            if let SliderEvent::Change(value) = event {
-                this.settings.line_height = *value;
-                cx.notify();
-            }
+            let SliderEvent::Change(slider_value) = event;
+            this.settings.line_height = slider_value.start();
+            cx.notify();
         })
         .detach();
 
         cx.subscribe(
             &letter_spacing_slider,
             |this, _, event: &SliderEvent, cx| {
-                if let SliderEvent::Change(value) = event {
-                    this.settings.letter_spacing = *value;
-                    cx.notify();
-                }
+                let SliderEvent::Change(slider_value) = event;
+                this.settings.letter_spacing = slider_value.start();
+                cx.notify();
             },
         )
         .detach();
@@ -170,9 +167,9 @@ impl SettingsDialog {
     }
 
     fn render_appearance_tab(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
-        let font_size = self.font_size_slider.read(cx).value();
-        let line_height = self.line_height_slider.read(cx).value();
-        let letter_spacing = self.letter_spacing_slider.read(cx).value();
+        let font_size = self.font_size_slider.read(cx).value().start();
+        let line_height = self.line_height_slider.read(cx).value().start();
+        let letter_spacing = self.letter_spacing_slider.read(cx).value().start();
 
         div()
             .flex()
@@ -380,9 +377,9 @@ impl Render for SettingsDialog {
                     .border_color(rgb(DIALOG_BORDER))
                     .child(
                         TabBar::new("settings-tabs")
-                            .child(Tab::new(0).label("General"))
-                            .child(Tab::new(1).label("Appearance"))
-                            .child(Tab::new(2).label("Tools"))
+                            .child(Tab::new().label("General"))
+                            .child(Tab::new().label("Appearance"))
+                            .child(Tab::new().label("Tools"))
                             .selected_index(tab_index)
                             .on_click(cx.listener(|this, ix: &usize, _, cx| {
                                 this.tab_index = *ix;

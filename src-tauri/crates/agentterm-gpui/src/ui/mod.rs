@@ -1,23 +1,22 @@
 //! UI components for agentterm-gpui
 //!
-//! Simplified UI components adapted from gpui-component.
-//! All components use hardcoded colors and avoid complex theming
-//! or animation systems.
+//! Re-exports gpui-component UI primitives and provides
+//! app-specific components (IconPicker, LucideSearchModal).
 
-mod context_menu;
 mod icon_picker;
 mod lucide_search;
-mod popup_menu;
-mod slider;
-mod switch;
-mod tab;
-mod tab_bar;
 
-pub use context_menu::*;
+// App-specific components
 pub use icon_picker::*;
 pub use lucide_search::*;
-pub use popup_menu::*;
-pub use slider::*;
-pub use switch::*;
-pub use tab::*;
-pub use tab_bar::*;
+
+// Re-export gpui-component UI primitives
+pub use gpui_component::{
+    // Form controls
+    slider::{Slider, SliderEvent, SliderState},
+    switch::Switch,
+    // Tab components
+    tab::{Tab, TabBar},
+    // Menu components
+    menu::ContextMenuExt,
+};
