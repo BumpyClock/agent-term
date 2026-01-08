@@ -295,7 +295,7 @@
 }
 
 .delete-btn:hover {
-    background-color: oklch(0.25 0.08 25);
+    background-color: oklch(from var(--destructive) l c h / 20%);
     color: var(--destructive);
 }
 
@@ -440,7 +440,7 @@
 }
 
 .tab-close:hover {
-    background-color: oklch(0.25 0.08 25);
+    background-color: oklch(from var(--destructive) l c h / 20%);
     color: var(--destructive);
 }
 

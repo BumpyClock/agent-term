@@ -15,26 +15,26 @@
     --font-weight-medium: 500;
     --font-weight-semibold: 600;
 
-    /* Custom text colors not in shadcn */
-    --color-text-subtle: oklch(0.698 0 0); /* #a6a6a6 */
-    --color-text-faint: oklch(0.418 0 0); /* #5a5a5a */
+    /* Light theme custom text colors */
+    --color-text-subtle: oklch(0.45 0.01 270);
+    --color-text-faint: oklch(0.60 0.01 270);
 
-    /* Custom surface colors with alpha (not in shadcn) */
-    --color-surface-sidebar: oklch(0.213 0 0 / 32%);
-    --color-surface-panel: oklch(0.255 0 0 / 82%);
-    --color-surface-panel-strong: oklch(0.255 0 0 / 88%);
+    /* Light theme custom surface colors with alpha */
+    --color-surface-root: oklch(0.98 0.002 270 / 10%);
+    --color-surface-sidebar: oklch(0.97 0.005 270 / 85%);
+    --color-surface-panel: oklch(0.95 0.005 270 / 90%);
+    --color-surface-panel-strong: oklch(0.93 0.005 270 / 95%);
 
-    /* Custom border with alpha */
-    --color-border-soft: oklch(0.296 0 0 / 50%);
+    /* Light theme custom border with alpha */
+    --color-border-soft: oklch(0.88 0.01 270 / 60%);
 
     /* Semantic colors */
-    --color-warning: oklch(0.788 0.108 85); /* #d7ba7d */
+    --color-warning: oklch(0.65 0.12 70);
 
-    /* Shadows */
-    --shadow-sidebar:
-        0 18px 45px oklch(0 0 0 / 25%), 0 6px 18px oklch(0 0 0 / 15%);
-    --shadow-popover: 0 12px 28px oklch(0 0 0 / 40%);
-    --shadow-dialog: 0 18px 40px oklch(0 0 0 / 45%);
+    /* Light theme shadows - subtle */
+    --shadow-sidebar: 0 8px 24px oklch(0 0 0 / 8%), 0 2px 8px oklch(0 0 0 / 4%);
+    --shadow-popover: 0 8px 20px oklch(0 0 0 / 12%);
+    --shadow-dialog: 0 12px 32px oklch(0 0 0 / 15%);
 
     /* Layout */
     --titlebar-height: 40px;
@@ -47,4 +47,29 @@
     --z-titlebar: 80;
     --z-popover: 120;
     --z-dialog: 140;
+}
+
+/* Dark theme custom tokens */
+.dark {
+    /* Dark theme custom text colors */
+    --color-text-subtle: oklch(0.698 0 0); /* #a6a6a6 */
+    --color-text-faint: oklch(0.418 0 0); /* #5a5a5a */
+
+    /* Dark theme custom surface colors with alpha */
+    --color-surface-root: oklch(0.1 0 0 / 10%);
+    --color-surface-sidebar: oklch(0.213 0 0 / 32%);
+    --color-surface-panel: oklch(0.255 0 0 / 82%);
+    --color-surface-panel-strong: oklch(0.255 0 0 / 88%);
+
+    /* Dark theme custom border with alpha */
+    --color-border-soft: oklch(0.296 0 0 / 50%);
+
+    /* Semantic colors */
+    --color-warning: oklch(0.788 0.108 85); /* #d7ba7d */
+
+    /* Dark theme shadows - deeper */
+    --shadow-sidebar:
+        0 18px 45px oklch(0 0 0 / 25%), 0 6px 18px oklch(0 0 0 / 15%);
+    --shadow-popover: 0 12px 28px oklch(0 0 0 / 40%);
+    --shadow-dialog: 0 18px 40px oklch(0 0 0 / 45%);
 }

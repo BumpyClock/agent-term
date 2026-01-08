@@ -6,7 +6,9 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { TitleBar } from './components/titlebar/TitleBar';
 import { Terminal } from './components/Terminal';
 import { useTerminalStore, type SessionStatus, type SessionTool } from './store/terminalStore';
+import { useTerminalSettings } from './store/terminalSettingsStore';
 import { useUpdateStore, shouldCheckForUpdates } from './store/updateStore';
+import { applyAccentColor } from '@/lib/accentColors';
 import './App.css';
 import "overlayscrollbars/overlayscrollbars.css";
 
@@ -40,6 +42,12 @@ function App() {
   const sidebarInset = 8;
   const sidebarGap = 16;
   const initializedRef = useRef(false);
+
+  // Apply accent color on mount and when it changes
+  const accentColor = useTerminalSettings((state) => state.accentColor);
+  useEffect(() => {
+    applyAccentColor(accentColor);
+  }, [accentColor]);
 
   useEffect(() => {
     if (!hasHydrated || initializedRef.current) return;
