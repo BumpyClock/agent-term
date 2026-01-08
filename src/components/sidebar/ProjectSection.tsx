@@ -22,7 +22,6 @@ interface ProjectSectionProps {
   onToggleCollapse: () => void;
   onOpenSectionMenu: (event: MouseEvent<HTMLButtonElement>) => void;
   onOpenTabPicker: (event: MouseEvent<HTMLButtonElement>) => void;
-  onDeleteSection: (event: MouseEvent<HTMLButtonElement>) => void;
   onSectionContextMenu: (event: MouseEvent<HTMLSpanElement>) => void;
   onSelectSession: (session: Session) => void;
   onSessionContextMenu: (session: Session, event: MouseEvent<HTMLDivElement>) => void;
@@ -51,7 +50,6 @@ export function ProjectSection({
   onToggleCollapse,
   onOpenSectionMenu,
   onOpenTabPicker,
-  onDeleteSection,
   onSectionContextMenu,
   onSelectSession,
   onSessionContextMenu,
@@ -79,7 +77,6 @@ export function ProjectSection({
         onContextMenu={onSectionContextMenu}
         onMenuClick={onOpenSectionMenu}
         onAddTab={onOpenTabPicker}
-        onDelete={onDeleteSection}
       />
       <AnimatePresence initial={false}>
         {!isCollapsed && (

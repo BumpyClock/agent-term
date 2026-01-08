@@ -500,14 +500,6 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                   setTabPickerPosition({ x: Math.round(rect.left), y: Math.round(rect.bottom + 6) });
                   setTabPickerSectionId((prev) => (prev === section.id ? null : section.id));
                 }}
-                onDeleteSection={async (event) => {
-                  event.stopPropagation();
-                  if (
-                    confirm(`Delete project "${section.name}"? Terminals will be moved to Default.`)
-                  ) {
-                    await removeSection(section.id);
-                  }
-                }}
                 onSectionContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -679,6 +671,17 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
                 label: 'Edit',
                 onSelect: () => openSectionEditDialog(menuSection),
               },
+              ...(!menuSection.isDefault
+                ? [
+                    {
+                      label: 'Remove project',
+                      onSelect: async () => {
+                        closeSectionMenuPopover();
+                        await removeSection(menuSection.id);
+                      },
+                    },
+                  ]
+                : []),
             ]}
           />,
           document.body

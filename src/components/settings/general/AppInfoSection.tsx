@@ -22,7 +22,7 @@ export function AppInfoSection() {
         {/* App Info */}
         <div className="flex-1 space-y-1 min-w-0">
           <div>
-            <h2 className="text-base font-bold">Agenty Term</h2>
+            <h2 className="text-base font-bold">Agent Term</h2>
             <p className="text-xs text-muted-foreground">
               Version {currentVersion || '0.0.0'}
             </p>

@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import type { Section } from '../../store/terminalStore';
 import type { IconDescriptor } from './types';
 import { LucideIcon } from './LucideIcon';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, ChevronRight, MoreHorizontal, Plus } from 'lucide-react';
 
 interface SectionHeaderProps {
   section: Section;
@@ -22,7 +22,6 @@ interface SectionHeaderProps {
   onContextMenu: (event: MouseEvent<HTMLSpanElement>) => void;
   onMenuClick: (event: MouseEvent<HTMLButtonElement>) => void;
   onAddTab: (event: MouseEvent<HTMLButtonElement>) => void;
-  onDelete?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
 
 export function SectionHeader({
@@ -40,7 +39,6 @@ export function SectionHeader({
   onContextMenu,
   onMenuClick,
   onAddTab,
-  onDelete,
 }: SectionHeaderProps) {
   return (
     <div className="section-header" onClick={onToggleCollapse}>
@@ -54,7 +52,7 @@ export function SectionHeader({
         animate={{ rotate: isCollapsed ? 0 : 90 }}
         transition={{ duration: 0.2 }}
       >
-        ▶
+        <ChevronRight size={12} />
       </motion.span>
       {icon?.kind === 'lucide' ? (
         <LucideIcon
@@ -98,16 +96,11 @@ export function SectionHeader({
       )}
       <div className="section-actions">
         <button className="action-btn" onClick={onMenuClick} title="Project menu">
-          ⋯
+          <MoreHorizontal size={14} />
         </button>
         <button className="action-btn" onClick={onAddTab} title="New Terminal">
-          +
+          <Plus size={14} />
         </button>
-        {onDelete && (
-          <button className="action-btn delete-btn" onClick={onDelete} title="Delete Project">
-            ×
-          </button>
-        )}
       </div>
     </div>
   );

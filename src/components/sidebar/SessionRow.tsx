@@ -5,6 +5,7 @@ import type { MouseEvent } from 'react';
 import type { Session } from '../../store/terminalStore';
 import { getStatusTitle, getToolTitle, needsAttention, resolveSessionIcon } from './utils';
 import { LucideIcon } from './LucideIcon';
+import { MoreHorizontal, X } from 'lucide-react';
 
 interface SessionRowProps {
   session: Session;
@@ -93,7 +94,7 @@ export function SessionRow({
           title="Tab menu"
           aria-label="Tab menu"
         >
-          ⋯
+          <MoreHorizontal size={14} />
         </button>
         <button
           className="tab-close"
@@ -101,7 +102,7 @@ export function SessionRow({
           title="Close Terminal"
           aria-label="Close Terminal"
         >
-          ×
+          <X size={14} />
         </button>
       </div>
     </div>
