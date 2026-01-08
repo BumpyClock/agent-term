@@ -6,6 +6,7 @@ use agentterm_mcp::{McpManager, McpScope};
 use agentterm_session::{
     DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
 };
+use agentterm_tools::{ShellInfo, ShellType, ToolInfo};
 use gpui::{
     App, Application, AsyncApp, BoxShadow, ClickEvent, Context, Entity, FocusHandle, Focusable,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -119,6 +120,13 @@ struct AgentTermApp {
     terminals: HashMap<String, Entity<Terminal>>,
     terminal_views: HashMap<String, Entity<TerminalView>>,
 
+    tab_picker_open: bool,
+    tab_picker_loading: bool,
+    tab_picker_error: Option<SharedString>,
+    tab_picker_tools: Vec<ToolInfo>,
+    tab_picker_shells: Vec<ShellInfo>,
+    tab_picker_pinned_shell_ids: Vec<String>,
+
     mcp_dialog_open: bool,
     mcp_scope: McpScope,
     mcp_attached: Vec<SharedString>,
@@ -156,6 +164,12 @@ impl AgentTermApp {
             active_session_id: None,
             terminals: HashMap::new(),
             terminal_views: HashMap::new(),
+            tab_picker_open: false,
+            tab_picker_loading: false,
+            tab_picker_error: None,
+            tab_picker_tools: Vec::new(),
+            tab_picker_shells: Vec::new(),
+            tab_picker_pinned_shell_ids: Vec::new(),
             mcp_dialog_open: false,
             mcp_scope: McpScope::Global,
             mcp_attached: Vec::new(),
@@ -261,6 +275,7 @@ impl AgentTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.tab_picker_open = false;
         self.mcp_dialog_open = !self.mcp_dialog_open;
         self.mcp_error = None;
         if self.mcp_dialog_open {
@@ -270,30 +285,95 @@ impl AgentTermApp {
     }
 
     fn new_shell_tab(&mut self, _: &NewShellTab, window: &mut Window, cx: &mut Context<Self>) {
+        self.tab_picker_open = !self.tab_picker_open;
+        self.tab_picker_error = None;
+        if self.tab_picker_open {
+            self.mcp_dialog_open = false;
+            self.refresh_tab_picker_data();
+        } else {
+            self.tab_picker_loading = false;
+        }
+        self.ensure_active_terminal(window, cx);
+        cx.notify();
+    }
+
+    fn refresh_tab_picker_data(&mut self) {
+        self.tab_picker_loading = true;
+        self.tab_picker_tools.clear();
+        self.tab_picker_shells.clear();
+        self.tab_picker_pinned_shell_ids.clear();
+
+        let tools = match self.tokio.block_on(agentterm_tools::tools_list(&self.mcp_manager)) {
+            Ok(list) => list.into_iter().filter(|t| t.enabled).collect(),
+            Err(e) => {
+                self.tab_picker_error = Some(e.to_string().into());
+                Vec::new()
+            }
+        };
+
+        let pinned =
+            match self.tokio.block_on(agentterm_tools::get_pinned_shells(&self.mcp_manager)) {
+                Ok(list) => list,
+                Err(e) => {
+                    self.tab_picker_error = Some(e.to_string().into());
+                    Vec::new()
+                }
+            };
+
+        self.tab_picker_tools = tools;
+        self.tab_picker_shells = agentterm_tools::available_shells();
+        self.tab_picker_pinned_shell_ids = pinned;
+        self.tab_picker_loading = false;
+    }
+
+    fn toggle_pin_shell(&mut self, shell_id: String, cx: &mut Context<Self>) {
+        match self
+            .tokio
+            .block_on(agentterm_tools::toggle_pin_shell(&self.mcp_manager, shell_id))
+        {
+            Ok(pinned) => self.tab_picker_pinned_shell_ids = pinned,
+            Err(e) => self.tab_picker_error = Some(e.to_string().into()),
+        }
+        cx.notify();
+    }
+
+    fn create_session_from_tool(
+        &mut self,
+        tool: SessionTool,
+        title: String,
+        command: String,
+        args: Vec<String>,
+        icon: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let (section_id, project_path) = self
             .active_section()
             .map(|s| (s.id.clone(), s.path.clone()))
             .unwrap_or_else(|| (DEFAULT_SECTION_ID.to_string(), String::new()));
 
-        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        let title = "Terminal".to_string();
         let input = NewSessionInput {
             title,
             project_path,
             section_id,
-            tool: SessionTool::Shell,
-            command: shell,
-            args: None,
-            icon: None,
+            tool,
+            command,
+            args: if args.is_empty() { None } else { Some(args) },
+            icon,
         };
 
-        if let Ok(record) = self.session_store.create_session(input) {
-            let _ = self
-                .session_store
-                .set_active_session(Some(record.id.clone()));
-            self.reload_from_store(cx);
-            self.ensure_active_terminal(window, cx);
+        match self.session_store.create_session(input) {
+            Ok(record) => {
+                let _ = self.session_store.set_active_session(Some(record.id.clone()));
+                self.tab_picker_open = false;
+                self.reload_from_store(cx);
+                self.ensure_active_terminal(window, cx);
+            }
+            Err(e) => {
+                self.tab_picker_error = Some(e.to_string().into());
+            }
         }
+        cx.notify();
     }
 
     fn active_session(&self) -> Option<&SessionRecord> {
@@ -769,6 +849,328 @@ impl AgentTermApp {
             })
     }
 
+    fn render_tab_picker_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let pinned_set: std::collections::HashSet<&str> = self
+            .tab_picker_pinned_shell_ids
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        let mut pinned_shells: Vec<ShellInfo> = self
+            .tab_picker_shells
+            .iter()
+            .cloned()
+            .filter(|s| pinned_set.contains(s.id.as_str()))
+            .collect();
+        pinned_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut native_shells: Vec<ShellInfo> = self
+            .tab_picker_shells
+            .iter()
+            .cloned()
+            .filter(|s| s.shell_type == ShellType::Native && !pinned_set.contains(s.id.as_str()))
+            .collect();
+        native_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut wsl_shells: Vec<ShellInfo> = self
+            .tab_picker_shells
+            .iter()
+            .cloned()
+            .filter(|s| s.shell_type == ShellType::Wsl && !pinned_set.contains(s.id.as_str()))
+            .collect();
+        wsl_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let builtin_tools: Vec<ToolInfo> = self
+            .tab_picker_tools
+            .iter()
+            .cloned()
+            .filter(|t| t.is_builtin)
+            .collect();
+
+        let custom_tools: Vec<ToolInfo> = self
+            .tab_picker_tools
+            .iter()
+            .cloned()
+            .filter(|t| !t.is_builtin)
+            .collect();
+
+        let mut body = div().flex().flex_col().gap(px(6.0));
+
+        if self.tab_picker_loading {
+            body = body.child(
+                div()
+                    .py(px(10.0))
+                    .text_sm()
+                    .text_color(rgb(TEXT_SUBTLE))
+                    .child("Loading..."),
+            );
+        } else {
+            if !pinned_shells.is_empty() {
+                body = body.child(
+                    div()
+                        .pt(px(8.0))
+                        .text_xs()
+                        .text_color(rgb(TEXT_SUBTLE))
+                        .child("Pinned shells"),
+                );
+                for shell in pinned_shells {
+                    body = body.child(self.render_shell_picker_row(shell, true, cx));
+                }
+                body = body.child(div().pt(px(2.0)).border_b_1().border_color(rgba(0xffffff10)));
+            }
+
+            body = body.child(
+                div()
+                    .pt(px(8.0))
+                    .text_xs()
+                    .text_color(rgb(TEXT_SUBTLE))
+                    .child("Shells"),
+            );
+            for shell in native_shells {
+                body = body.child(self.render_shell_picker_row(shell, false, cx));
+            }
+            for shell in wsl_shells {
+                body = body.child(self.render_shell_picker_row(shell, false, cx));
+            }
+
+            body = body.child(div().pt(px(2.0)).border_b_1().border_color(rgba(0xffffff10)));
+
+            body = body.child(
+                div()
+                    .pt(px(8.0))
+                    .text_xs()
+                    .text_color(rgb(TEXT_SUBTLE))
+                    .child("Tools"),
+            );
+
+            for tool in builtin_tools {
+                body = body.child(self.render_tool_picker_row(tool, cx));
+            }
+
+            if !custom_tools.is_empty() {
+                body = body.child(div().pt(px(2.0)).border_b_1().border_color(rgba(0xffffff10)));
+                body = body.child(
+                    div()
+                        .pt(px(8.0))
+                        .text_xs()
+                        .text_color(rgb(TEXT_SUBTLE))
+                        .child("Custom tools"),
+                );
+                for tool in custom_tools {
+                    body = body.child(self.render_tool_picker_row(tool, cx));
+                }
+            }
+        }
+
+        div()
+            .id("tab-picker-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .bg(rgba(rgba_u32(0x000000, 0.25)))
+            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
+                this.tab_picker_open = false;
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id("tab-picker")
+                    .absolute()
+                    .top(px(SIDEBAR_INSET + 54.0))
+                    .left(px(SIDEBAR_INSET + 12.0))
+                    .w(px(280.0))
+                    .max_h(px(540.0))
+                    .rounded(px(12.0))
+                    .border_1()
+                    .border_color(rgba(rgba_u32(BORDER_SOFT, BORDER_SOFT_ALPHA)))
+                    .bg(rgba(rgba_u32(SURFACE_SIDEBAR, 0.92)))
+                    .shadow(Self::sidebar_shadow())
+                    .px(px(14.0))
+                    .py(px(12.0))
+                    .overflow_y_scroll()
+                    .on_click(|_: &ClickEvent, _, _| {})
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(TEXT_PRIMARY))
+                                    .child("Create tab"),
+                            )
+                            .child(icon_button("×").id("tab-picker-close").on_click(cx.listener(
+                                |this, _: &ClickEvent, _w, cx| {
+                                    this.tab_picker_open = false;
+                                    cx.notify();
+                                },
+                            ))),
+                    )
+                    .child(body)
+                    .when_some(self.tab_picker_error.as_ref(), |el, err| {
+                        el.child(
+                            div()
+                                .pt(px(10.0))
+                                .text_sm()
+                                .text_color(rgb(0xffaaaa))
+                                .child(err.clone()),
+                        )
+                    }),
+            )
+    }
+
+    fn render_tool_picker_row(&self, tool: ToolInfo, cx: &mut Context<Self>) -> impl IntoElement {
+        let label = tool.name.clone();
+        let icon_letter = label.chars().next().unwrap_or('T').to_string();
+        div()
+            .id(format!("tab-picker-tool-{}", tool.id))
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .rounded(px(8.0))
+            .cursor_pointer()
+            .hover(|s| s.bg(rgba(0xffffff10)))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                let session_tool = if tool.is_builtin {
+                    match tool.id.as_str() {
+                        "claude" => SessionTool::Claude,
+                        "gemini" => SessionTool::Gemini,
+                        "codex" => SessionTool::Codex,
+                        "openCode" => SessionTool::OpenCode,
+                        _ => SessionTool::Custom(tool.id.clone()),
+                    }
+                } else {
+                    SessionTool::Custom(tool.id.clone())
+                };
+
+                let icon = if tool.icon.is_empty() {
+                    None
+                } else {
+                    Some(tool.icon.clone())
+                };
+
+                this.create_session_from_tool(
+                    session_tool,
+                    tool.name.clone(),
+                    tool.command.clone(),
+                    tool.args.clone(),
+                    icon,
+                    window,
+                    cx,
+                );
+            }))
+            .child(
+                div()
+                    .w(px(22.0))
+                    .h(px(22.0))
+                    .rounded(px(6.0))
+                    .bg(rgba(0xffffff10))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_sm()
+                    .child(icon_letter),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(TEXT_PRIMARY))
+                    .truncate()
+                    .child(label),
+            )
+    }
+
+    fn render_shell_picker_row(
+        &self,
+        shell: ShellInfo,
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let label = shell.name.clone();
+        let icon_letter = label.chars().next().unwrap_or('S').to_string();
+        let shell_id = shell.id.clone();
+
+        div()
+            .id(format!("tab-picker-shell-{}", shell.id))
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .rounded(px(8.0))
+            .hover(|s| s.bg(rgba(0xffffff10)))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .flex_1()
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                        let icon = if shell.icon.is_empty() {
+                            None
+                        } else {
+                            Some(shell.icon.clone())
+                        };
+
+                        this.create_session_from_tool(
+                            SessionTool::Shell,
+                            shell.name.clone(),
+                            shell.command.clone(),
+                            shell.args.clone(),
+                            icon,
+                            window,
+                            cx,
+                        );
+                    }))
+                    .child(
+                        div()
+                            .w(px(22.0))
+                            .h(px(22.0))
+                            .rounded(px(6.0))
+                            .bg(rgba(0xffffff10))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(rgb(TEXT_PRIMARY))
+                            .text_sm()
+                            .child(icon_letter),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(TEXT_PRIMARY))
+                            .truncate()
+                            .child(label),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(22.0))
+                    .h(px(22.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(6.0))
+                    .cursor_pointer()
+                    .text_color(rgb(TEXT_SUBTLE))
+                    .hover(|s| s.text_color(rgb(TEXT_PRIMARY)).bg(rgba(0xffffff10)))
+                    .child(if pinned { "★" } else { "☆" })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &MouseDownEvent, _w, cx| {
+                            this.toggle_pin_shell(shell_id.clone(), cx);
+                        }),
+                    ),
+            )
+    }
+
     fn render_mcp_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let attached_set: std::collections::HashSet<&str> =
             self.mcp_attached.iter().map(|s| s.as_ref()).collect();
@@ -1090,6 +1492,9 @@ impl Render for AgentTermApp {
             .child(self.render_terminal_container())
             .when(self.sidebar_visible, |el| {
                 el.child(self.render_sidebar_shell(cx))
+            })
+            .when(self.tab_picker_open, |el| {
+                el.child(self.render_tab_picker_dialog(cx))
             })
             .when(self.mcp_dialog_open, |el| {
                 el.child(self.render_mcp_dialog(cx))
