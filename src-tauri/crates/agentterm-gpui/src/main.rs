@@ -344,6 +344,11 @@ impl AgentTermApp {
         }
 
         let shell = Some(session.command.clone());
+        let shell_args = if session.args.is_empty() {
+            None
+        } else {
+            Some(session.args.clone())
+        };
         let working_directory = if session.project_path.is_empty() {
             env::current_dir().ok()
         } else {
@@ -355,8 +360,15 @@ impl AgentTermApp {
         env_vars.insert("COLORTERM".to_string(), "truecolor".to_string());
 
         let window_id = window.window_handle().window_id().as_u64();
-        let terminal_task =
-            TerminalBuilder::new(working_directory, shell, env_vars, None, window_id, cx);
+        let terminal_task = TerminalBuilder::new(
+            working_directory,
+            shell,
+            shell_args,
+            env_vars,
+            None,
+            window_id,
+            cx,
+        );
 
         let session_id = session.id.clone();
         let window_handle = window.window_handle();

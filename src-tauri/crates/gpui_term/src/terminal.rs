@@ -269,6 +269,7 @@ impl TerminalBuilder {
     ///
     /// * `working_directory` - Initial working directory for the shell
     /// * `shell` - Shell program to run (None uses system default)
+    /// * `shell_args` - Optional args for the shell/tool command
     /// * `env` - Additional environment variables
     /// * `max_scroll_history_lines` - Maximum scrollback history
     /// * `window_id` - GPUI window identifier
@@ -276,6 +277,7 @@ impl TerminalBuilder {
     pub fn new(
         working_directory: Option<PathBuf>,
         shell: Option<String>,
+        shell_args: Option<Vec<String>>,
         env: std::collections::HashMap<String, String>,
         max_scroll_history_lines: Option<usize>,
         window_id: u64,
@@ -283,14 +285,14 @@ impl TerminalBuilder {
     ) -> Task<Result<TerminalBuilder>> {
         cx.spawn(async move |_| {
             let mut shell_cmd = shell.clone();
-            let shell_args: Option<Vec<String>> = None;
+            let shell_args: Vec<String> = shell_args.unwrap_or_default();
 
             if shell_cmd.is_none() {
                 shell_cmd = std::env::var("SHELL").ok();
             }
 
             let alac_shell =
-                shell_cmd.map(|program| tty::Shell::new(program, shell_args.unwrap_or_default()));
+                shell_cmd.map(|program| tty::Shell::new(program, shell_args));
 
             let pty_options = tty::Options {
                 shell: alac_shell,
