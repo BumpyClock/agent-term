@@ -12,6 +12,8 @@ pub use lucide_search::*;
 
 // Re-export gpui-component UI primitives
 pub use gpui_component::{
+    // Button components
+    button::{Button, ButtonVariants},
     // Form controls
     slider::{Slider, SliderEvent, SliderState},
     switch::Switch,
@@ -19,4 +21,6 @@ pub use gpui_component::{
     tab::{Tab, TabBar},
     // Menu components
     menu::ContextMenuExt,
+    // Theme
+    ActiveTheme,
 };
