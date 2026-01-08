@@ -7,14 +7,18 @@ use agentterm_session::{
     DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
 };
 use gpui::{
-    actions, div, hsla, point, prelude::*, px, rgb, rgba, App, Application, BoxShadow, ClickEvent,
-    AsyncApp, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
-    WindowBackgroundAppearance, WindowOptions,
+    App, Application, AsyncApp, BoxShadow, ClickEvent, Context, Entity, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
+    WeakEntity, Window, WindowBackgroundAppearance, WindowOptions, actions, div, hsla, point,
+    prelude::*, px, rgb, rgba,
 };
 use gpui_term::{Clear, Copy, Paste, SelectAll, Terminal, TerminalBuilder, TerminalView};
 
-actions!(agentterm_gpui, [Quit, ToggleSidebar, ToggleMcpManager, NewShellTab]);
+actions!(
+    agentterm_gpui,
+    [Quit, ToggleSidebar, ToggleMcpManager, NewShellTab]
+);
 
 const SIDEBAR_INSET: f32 = 8.0;
 const SIDEBAR_GAP: f32 = 16.0;
@@ -104,6 +108,9 @@ struct AgentTermApp {
 
     sidebar_visible: bool,
     sidebar_width: f32,
+    resizing_sidebar: bool,
+    resize_start_x: Pixels,
+    resize_start_width: f32,
 
     sections: Vec<SectionItem>,
     sessions: Vec<SessionRecord>,
@@ -141,6 +148,9 @@ impl AgentTermApp {
             tokio,
             sidebar_visible: true,
             sidebar_width: 250.0,
+            resizing_sidebar: false,
+            resize_start_x: Pixels::ZERO,
+            resize_start_width: 250.0,
             sections: Vec::new(),
             sessions: Vec::new(),
             active_session_id: None,
@@ -202,6 +212,49 @@ impl AgentTermApp {
         cx.notify();
     }
 
+    fn start_sidebar_resize(
+        &mut self,
+        event: &MouseDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.resizing_sidebar = true;
+        self.resize_start_x = event.position.x;
+        self.resize_start_width = self.sidebar_width;
+        cx.notify();
+    }
+
+    fn stop_sidebar_resize(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.resizing_sidebar {
+            self.resizing_sidebar = false;
+            cx.notify();
+        }
+    }
+
+    fn update_sidebar_resize(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.resizing_sidebar || !event.dragging() {
+            return;
+        }
+
+        let delta = event.position.x - self.resize_start_x;
+        let next_width =
+            (self.resize_start_width + delta / px(1.0)).clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+        if (next_width - self.sidebar_width).abs() > 0.1 {
+            self.sidebar_width = next_width;
+            cx.notify();
+        }
+    }
+
     fn open_mcp_manager(
         &mut self,
         _: &ToggleMcpManager,
@@ -235,7 +288,9 @@ impl AgentTermApp {
         };
 
         if let Ok(record) = self.session_store.create_session(input) {
-            let _ = self.session_store.set_active_session(Some(record.id.clone()));
+            let _ = self
+                .session_store
+                .set_active_session(Some(record.id.clone()));
             self.reload_from_store(cx);
             self.ensure_active_terminal(window, cx);
         }
@@ -262,6 +317,19 @@ impl AgentTermApp {
         self.active_session_id = Some(id);
         self.ensure_active_terminal(window, cx);
         cx.notify();
+    }
+
+    fn close_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(terminal) = self.terminals.remove(&id) {
+            terminal.update(cx, |terminal, _| terminal.shutdown());
+        }
+        self.terminal_views.remove(&id);
+
+        let _ = self.session_store.delete_session(&id);
+        self.reload_from_store(cx);
+        if self.active_session_id.is_none() {
+            self.ensure_active_terminal(window, cx);
+        }
     }
 
     fn ensure_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -342,7 +410,10 @@ impl AgentTermApp {
 
         let attached = self
             .tokio
-            .block_on(self.mcp_manager.get_attached_mcps(self.mcp_scope, project_path))
+            .block_on(
+                self.mcp_manager
+                    .get_attached_mcps(self.mcp_scope, project_path),
+            )
             .unwrap_or_default();
 
         let available = self
@@ -382,9 +453,11 @@ impl AgentTermApp {
             cx.notify();
             return;
         }
-        let res = self
-            .tokio
-            .block_on(self.mcp_manager.attach_mcp(self.mcp_scope, project_path, &name));
+        let res = self.tokio.block_on(self.mcp_manager.attach_mcp(
+            self.mcp_scope,
+            project_path,
+            &name,
+        ));
         if let Err(e) = res {
             self.mcp_error = Some(e.to_string().into());
         }
@@ -406,9 +479,11 @@ impl AgentTermApp {
             cx.notify();
             return;
         }
-        let res = self
-            .tokio
-            .block_on(self.mcp_manager.detach_mcp(self.mcp_scope, project_path, &name));
+        let res = self.tokio.block_on(self.mcp_manager.detach_mcp(
+            self.mcp_scope,
+            project_path,
+            &name,
+        ));
         if let Err(e) = res {
             self.mcp_error = Some(e.to_string().into());
         }
@@ -454,6 +529,21 @@ impl AgentTermApp {
                     .shadow(Self::sidebar_shadow())
                     .child(self.render_sidebar_content(cx)),
             )
+            .child(
+                div()
+                    .id("sidebar-resizer")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(self.sidebar_width - 3.0))
+                    .w(px(6.0))
+                    .rounded(px(999.0))
+                    .bg(gpui::transparent_black())
+                    .cursor_col_resize()
+                    .hover(|s| s.bg(rgba(rgba_u32(TEXT_PRIMARY, 0.20))))
+                    .on_mouse_down(MouseButton::Left, cx.listener(Self::start_sidebar_resize))
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize)),
+            )
     }
 
     fn render_sidebar_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -488,42 +578,35 @@ impl AgentTermApp {
                 div()
                     .flex()
                     .gap(px(10.0))
-                    .child(
-                        icon_button("T").id("sidebar-new-tab").on_click(cx.listener(
-                            |this, _: &ClickEvent, window, cx| {
-                                this.new_shell_tab(&NewShellTab, window, cx);
-                            },
-                        )),
-                    )
-                    .child(
-                        icon_button("M").id("sidebar-mcp").on_click(cx.listener(
-                            |this, _: &ClickEvent, window, cx| {
-                                this.open_mcp_manager(&ToggleMcpManager, window, cx);
-                            },
-                        )),
-                    ),
+                    .child(icon_button("T").id("sidebar-new-tab").on_click(cx.listener(
+                        |this, _: &ClickEvent, window, cx| {
+                            this.new_shell_tab(&NewShellTab, window, cx);
+                        },
+                    )))
+                    .child(icon_button("M").id("sidebar-mcp").on_click(cx.listener(
+                        |this, _: &ClickEvent, window, cx| {
+                            this.open_mcp_manager(&ToggleMcpManager, window, cx);
+                        },
+                    ))),
             )
     }
 
     fn render_add_project(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px(px(16.0))
-            .py(px(12.0))
-            .child(
-                div()
-                    .id("sidebar-add-project")
-                    .text_sm()
-                    .text_color(rgb(TEXT_SUBTLE))
-                    .cursor_pointer()
-                    .hover(|s| s.text_color(rgb(TEXT_PRIMARY)))
-                    .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                        let name = "New Project".to_string();
-                        let path = String::new();
-                        let _ = this.session_store.create_section(name, path);
-                        this.reload_from_store(cx);
-                    }))
-                    .child("+ Add Project"),
-            )
+        div().px(px(16.0)).py(px(12.0)).child(
+            div()
+                .id("sidebar-add-project")
+                .text_sm()
+                .text_color(rgb(TEXT_SUBTLE))
+                .cursor_pointer()
+                .hover(|s| s.text_color(rgb(TEXT_PRIMARY)))
+                .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
+                    let name = "New Project".to_string();
+                    let path = String::new();
+                    let _ = this.session_store.create_section(name, path);
+                    this.reload_from_store(cx);
+                }))
+                .child("+ Add Project"),
+        )
     }
 
     fn render_sections_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -582,7 +665,11 @@ impl AgentTermApp {
         container
     }
 
-    fn render_session_row(&self, session: &SessionRecord, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_session_row(
+        &self,
+        session: &SessionRecord,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let is_active = self
             .active_session_id
             .as_deref()
@@ -610,6 +697,16 @@ impl AgentTermApp {
                     .text_color(rgb(TEXT_PRIMARY))
                     .truncate()
                     .child(title.to_string()),
+            )
+            .child(
+                icon_button("×")
+                    .id(format!("session-close-{}", session.id))
+                    .on_click(cx.listener({
+                        let id = session.id.clone();
+                        move |this, _: &ClickEvent, window, cx| {
+                            this.close_session(id.clone(), window, cx);
+                        }
+                    })),
             )
             .on_click(cx.listener({
                 let id = session.id.clone();
@@ -661,11 +758,8 @@ impl AgentTermApp {
     }
 
     fn render_mcp_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let attached_set: std::collections::HashSet<&str> = self
-            .mcp_attached
-            .iter()
-            .map(|s| s.as_ref())
-            .collect();
+        let attached_set: std::collections::HashSet<&str> =
+            self.mcp_attached.iter().map(|s| s.as_ref()).collect();
 
         let mut attached: Vec<McpItem> = self
             .mcp_attached
@@ -748,14 +842,12 @@ impl AgentTermApp {
                             .child(self.render_mcp_scope_tab(cx, McpScope::Global, "Shared"))
                             .child(self.render_mcp_scope_tab(cx, McpScope::Local, "Project"))
                             .child(div().flex_1())
-                            .child(
-                                icon_button("×")
-                                    .id("mcp-close")
-                                    .on_click(cx.listener(|this, _: &ClickEvent, _w, cx| {
+                            .child(icon_button("×").id("mcp-close").on_click(cx.listener(
+                                |this, _: &ClickEvent, _w, cx| {
                                     this.mcp_dialog_open = false;
                                     cx.notify();
-                                })),
-                            ),
+                                },
+                            ))),
                     )
                     .child(
                         div()
@@ -792,7 +884,11 @@ impl AgentTermApp {
             .px(px(10.0))
             .py(px(6.0))
             .rounded(px(8.0))
-            .bg(if is_active { rgba(0xffffff12) } else { rgba(0xffffff05) })
+            .bg(if is_active {
+                rgba(0xffffff12)
+            } else {
+                rgba(0xffffff05)
+            })
             .hover(|s| s.bg(rgba(0xffffff14)))
             .text_sm()
             .text_color(rgb(if is_active { TEXT_PRIMARY } else { TEXT_SUBTLE }))
@@ -903,8 +999,18 @@ impl AgentTermApp {
                                     .py(px(6.0))
                                     .rounded(px(8.0))
                                     .cursor_pointer()
-                                    .bg(if attached { rgba(0xff444410) } else { rgba(0x5eead410) })
-                                    .hover(|s| s.bg(if attached { rgba(0xff444418) } else { rgba(0x5eead418) }))
+                                    .bg(if attached {
+                                        rgba(0xff444410)
+                                    } else {
+                                        rgba(0x5eead410)
+                                    })
+                                    .hover(|s| {
+                                        s.bg(if attached {
+                                            rgba(0xff444418)
+                                        } else {
+                                            rgba(0x5eead418)
+                                        })
+                                    })
                                     .text_sm()
                                     .text_color(rgb(TEXT_PRIMARY))
                                     .child(if attached { "Detach" } else { "Attach" })
@@ -967,9 +1073,15 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::open_mcp_manager))
             .on_action(cx.listener(Self::new_shell_tab))
+            .on_mouse_move(cx.listener(Self::update_sidebar_resize))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
             .child(self.render_terminal_container())
-            .when(self.sidebar_visible, |el| el.child(self.render_sidebar_shell(cx)))
-            .when(self.mcp_dialog_open, |el| el.child(self.render_mcp_dialog(cx)))
+            .when(self.sidebar_visible, |el| {
+                el.child(self.render_sidebar_shell(cx))
+            })
+            .when(self.mcp_dialog_open, |el| {
+                el.child(self.render_mcp_dialog(cx))
+            })
     }
 }
 
