@@ -15,7 +15,6 @@ mod session;
 mod shells;
 mod tools;
 pub mod update;
-mod window;
 
 #[tauri::command(rename_all = "camelCase")]
 fn get_home_dir() -> Option<String> {
@@ -130,9 +129,6 @@ pub fn run() {
 
     let update_manager = update::build_update_manager();
 
-    let window_manager = window::build_window_manager()
-        .expect("failed to build window manager");
-
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -140,7 +136,6 @@ pub fn run() {
         .manage(mcp_manager)
         .manage(search_manager)
         .manage(update_manager)
-        .manage(window_manager)
         .invoke_handler(tauri::generate_handler![
             get_home_dir,
             get_default_shell,
@@ -168,10 +163,6 @@ pub fn run() {
             session::resize_session,
             session::acknowledge_session,
             session::set_tool_session_id,
-            session::get_scrollback,
-            session::subscribe_to_session,
-            session::unsubscribe_from_session,
-            session::get_session_subscriber_count,
             mcp::mcp_list,
             mcp::mcp_get_settings,
             mcp::mcp_set_settings,
@@ -198,16 +189,6 @@ pub fn run() {
             update::update_get_status,
             update::update_get_settings,
             update::update_set_settings,
-            window::list_windows,
-            window::get_window,
-            window::create_window_record,
-            window::update_window_geometry,
-            window::delete_window_record,
-            window::open_new_window,
-            window::move_session_to_window,
-            window::relay_window_ipc,
-            window::merge_windows,
-            window::merge_all_windows,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("failed to get main window");
@@ -260,12 +241,6 @@ pub fn run() {
                         }
                     }
                 }
-            });
-
-            let app_handle_for_windows = app.handle().clone();
-            let secondary_windows = app.state::<window::WindowManager>().get_secondary_windows();
-            tauri::async_runtime::spawn(async move {
-                window::restore_secondary_windows_from_records(&app_handle_for_windows, secondary_windows).await;
             });
 
             Ok(())

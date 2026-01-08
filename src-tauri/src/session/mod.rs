@@ -1,7 +1,7 @@
 // ABOUTME: Coordinates session metadata, runtime management, and Tauri commands for terminals.
 // ABOUTME: Starts, stops, and persists sessions while emitting events to the frontend.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::mpsc;
 use std::thread;
@@ -9,7 +9,7 @@ use std::thread;
 use parking_lot::Mutex;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::diagnostics;
@@ -453,14 +453,6 @@ impl SessionManager {
         let tool_for_extract = record.tool.clone();
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
-        let scrollback = std::sync::Arc::new(parking_lot::Mutex::new(
-            runtime::ScrollbackBuffer::new(10 * 1024 * 1024),
-        ));
-        let scrollback_for_reader = scrollback.clone();
-
-        let subscribers = std::sync::Arc::new(parking_lot::Mutex::new(HashSet::<String>::new()));
-        let subscribers_for_reader = subscribers.clone();
-
         let reader_thread = thread::spawn(move || {
             diagnostics::log(format!(
                 "session_reader_started id={} tool={:?}",
@@ -477,25 +469,12 @@ impl SessionManager {
             let mut tool_session_id_extracted = false;
             let mut output_events: u64 = 0;
 
-            let emit_output = |data: &[u8],
-                               app: &AppHandle,
-                               sid: &str,
-                               subs: &parking_lot::Mutex<HashSet<String>>| {
+            let emit_output = |data: &[u8], app: &AppHandle, sid: &str| {
                 let payload = SessionOutput {
                     session_id: sid.to_string(),
                     data: data.to_vec(),
                 };
-                let subscriber_labels: Vec<String> = subs.lock().iter().cloned().collect();
-                // If no subscribers, emit globally for backward compatibility
-                if subscriber_labels.is_empty() {
-                    let _ = app.emit("session-output", payload);
-                } else {
-                    for window_label in subscriber_labels {
-                        if let Some(window) = app.get_webview_window(&window_label) {
-                            let _ = window.emit("session-output", payload.clone());
-                        }
-                    }
-                }
+                let _ = app.emit("session-output", payload);
             };
 
             let check_status = |buffer: &str,
@@ -525,7 +504,7 @@ impl SessionManager {
                 match reader.read(&mut buf) {
                     Ok(0) => {
                         if !pending.is_empty() {
-                            emit_output(&pending, &app_clone, &session_id, &subscribers_for_reader);
+                            emit_output(&pending, &app_clone, &session_id);
                             pending.clear();
                         }
                         diagnostics::log(format!(
@@ -541,7 +520,6 @@ impl SessionManager {
                         break;
                     }
                     Ok(n) => {
-                        scrollback_for_reader.lock().append(&buf[..n]);
                         pending.extend_from_slice(&buf[..n]);
                         output_events += 1;
                         if output_events <= 3 {
@@ -586,7 +564,7 @@ impl SessionManager {
                         }
                         let should_emit = pending.len() >= emit_threshold || n < buf.len();
                         if should_emit {
-                            emit_output(&pending, &app_clone, &session_id, &subscribers_for_reader);
+                            emit_output(&pending, &app_clone, &session_id);
                             pending.clear();
                         }
                         check_status(
@@ -600,7 +578,7 @@ impl SessionManager {
                     }
                     Err(_) => {
                         if !pending.is_empty() {
-                            emit_output(&pending, &app_clone, &session_id, &subscribers_for_reader);
+                            emit_output(&pending, &app_clone, &session_id);
                             pending.clear();
                         }
                         diagnostics::log(format!(
@@ -620,8 +598,6 @@ impl SessionManager {
             reader_thread,
             shutdown_tx,
             id.to_string(),
-            scrollback,
-            subscribers,
         );
 
         self.runtimes.lock().insert(id.to_string(), runtime);
@@ -1045,62 +1021,6 @@ pub fn set_tool_session_id(
     state.set_tool_session_id(&id, &tool, tool_session_id)
 }
 
-#[tauri::command(rename_all = "camelCase")]
-pub fn get_scrollback(
-    state: State<'_, SessionManager>,
-    session_id: String,
-) -> Result<Vec<u8>, String> {
-    let runtimes = state.runtimes.lock();
-    let runtime = runtimes
-        .get(&session_id)
-        .ok_or_else(|| "session not running".to_string())?;
-    Ok(runtime.get_scrollback())
-}
-
-/// Subscribe a window to receive output events from a session.
-/// This enables mirror mode where multiple windows can view the same session.
-#[tauri::command(rename_all = "camelCase")]
-pub fn subscribe_to_session(
-    state: State<'_, SessionManager>,
-    session_id: String,
-    window_label: String,
-) -> Result<(), String> {
-    let runtimes = state.runtimes.lock();
-    let runtime = runtimes
-        .get(&session_id)
-        .ok_or_else(|| "session not running".to_string())?;
-    runtime.add_subscriber(window_label);
-    Ok(())
-}
-
-/// Unsubscribe a window from receiving output events from a session.
-#[tauri::command(rename_all = "camelCase")]
-pub fn unsubscribe_from_session(
-    state: State<'_, SessionManager>,
-    session_id: String,
-    window_label: String,
-) -> Result<(), String> {
-    let runtimes = state.runtimes.lock();
-    if let Some(runtime) = runtimes.get(&session_id) {
-        runtime.remove_subscriber(window_label);
-    }
-    Ok(())
-}
-
-/// Get the number of windows currently subscribed to a session.
-/// Used by the UI to show mirror badges when count > 1.
-#[tauri::command(rename_all = "camelCase")]
-pub fn get_session_subscriber_count(
-    state: State<'_, SessionManager>,
-    session_id: String,
-) -> Result<usize, String> {
-    let runtimes = state.runtimes.lock();
-    let runtime = runtimes
-        .get(&session_id)
-        .ok_or_else(|| "session not running".to_string())?;
-    Ok(runtime.subscriber_count())
-}
-
 fn chrono_now() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -1135,7 +1055,6 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
-            args: None,
             icon: None,
         };
 
@@ -1158,7 +1077,6 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
-            args: None,
             icon: None,
         };
 
@@ -1179,7 +1097,6 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
-            args: None,
             icon: None,
         };
 
@@ -1216,7 +1133,6 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Shell,
             command: "/bin/bash".to_string(),
-            args: None,
             icon: None,
         };
 
@@ -1239,7 +1155,6 @@ mod tests {
             section_id: "default".to_string(),
             tool: model::SessionTool::Claude,
             command: "claude".to_string(),
-            args: None,
             icon: None,
         };
 
@@ -1263,7 +1178,6 @@ mod tests {
                 section_id: "default".to_string(),
                 tool: model::SessionTool::Shell,
                 command: "/bin/bash".to_string(),
-                args: None,
                 icon: None,
             };
             manager.create_session(input).unwrap();
@@ -1288,7 +1202,6 @@ mod tests {
                 section_id: "default".to_string(),
                 tool: model::SessionTool::Claude,
                 command: "claude".to_string(),
-                args: None,
                 icon: None,
             })
             .unwrap();
@@ -1300,7 +1213,6 @@ mod tests {
                 section_id: "default".to_string(),
                 tool: model::SessionTool::Gemini,
                 command: "gemini".to_string(),
-                args: None,
                 icon: None,
             })
             .unwrap();
