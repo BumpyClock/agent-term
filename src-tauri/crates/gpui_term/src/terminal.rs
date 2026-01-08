@@ -441,6 +441,12 @@ pub struct Terminal {
 }
 
 impl Terminal {
+    pub fn shutdown(&self) {
+        if let Some(pty_tx) = &self.pty_tx {
+            let _ = pty_tx.0.send(Msg::Shutdown);
+        }
+    }
+
     /// Writes bytes to the PTY.
     fn write_to_pty(&self, input: impl Into<Cow<'static, [u8]>>) {
         if let Some(pty_tx) = &self.pty_tx {
@@ -961,6 +967,12 @@ impl Terminal {
                 }
             }
         }
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
