@@ -5,7 +5,6 @@ import type { MouseEvent } from 'react';
 import type { Session } from '../../store/terminalStore';
 import { getStatusTitle, getToolTitle, needsAttention, resolveSessionIcon } from './utils';
 import { LucideIcon } from './LucideIcon';
-import { MirrorBadge } from './MirrorBadge';
 import { MoreHorizontal, X } from 'lucide-react';
 
 interface SessionRowProps {
@@ -86,7 +85,6 @@ export function SessionRow({
               title={getStatusTitle(session.status)}
             />
           )}
-          <MirrorBadge sessionId={session.id} />
         </span>
       )}
       <div className="tab-actions">

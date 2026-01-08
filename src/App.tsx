@@ -5,12 +5,10 @@ import { getVersion } from '@tauri-apps/api/app';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { TitleBar } from './components/titlebar/TitleBar';
 import { Terminal } from './components/Terminal';
-import { WindowDropZone } from './components/WindowDropZone';
 import { useTerminalStore, type SessionStatus, type SessionTool } from './store/terminalStore';
 import { useTerminalSettings } from './store/terminalSettingsStore';
 import { useUpdateStore, shouldCheckForUpdates } from './store/updateStore';
 import { applyAccentColor } from '@/lib/accentColors';
-import { getCurrentWindowId, isMainWindow, initializeWindow, type WindowRecord } from '@/lib/windowContext';
 import './App.css';
 import "overlayscrollbars/overlayscrollbars.css";
 
@@ -45,58 +43,11 @@ function App() {
   const sidebarGap = 16;
   const initializedRef = useRef(false);
 
-  const [windowId] = useState(() => getCurrentWindowId());
-  const [windowRecord, setWindowRecord] = useState<WindowRecord | null>(null);
-  const isMain = isMainWindow();
-
   // Apply accent color on mount and when it changes
   const accentColor = useTerminalSettings((state) => state.accentColor);
   useEffect(() => {
     applyAccentColor(accentColor);
   }, [accentColor]);
-
-  useEffect(() => {
-    if (isMain) return;
-
-    initializeWindow()
-      .then((record) => {
-        if (record) {
-          setWindowRecord(record);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to initialize window:', err);
-      });
-  }, [isMain]);
-
-  // Handle window close for secondary windows: merge sessions back to main
-  useEffect(() => {
-    if (isMain) return;
-
-    let unlisten: (() => void) | null = null;
-
-    listen('tauri://close-requested', async () => {
-      try {
-        // Merge this window's sessions to main before closing
-        await invoke('merge_windows', {
-          sourceWindowId: windowId,
-          targetWindowId: 'main',
-        });
-      } catch (err) {
-        console.error('Failed to merge window on close:', err);
-      }
-    })
-      .then((unsub) => {
-        unlisten = unsub;
-      })
-      .catch((err) => {
-        console.error('Failed to listen for close-requested event:', err);
-      });
-
-    return () => {
-      unlisten?.();
-    };
-  }, [isMain, windowId]);
 
   useEffect(() => {
     if (!hasHydrated || initializedRef.current) return;
@@ -274,39 +225,13 @@ function App() {
         window.dispatchEvent(new CustomEvent('toggle-command-bar'));
         return;
       }
-
-      if (event.key === 'n' && !event.shiftKey) {
-        event.preventDefault();
-        invoke('open_new_window', { title: 'New Window', sessionIds: [] })
-          .catch((err) => {
-            console.error('Failed to open new window:', err);
-          });
-        return;
-      }
-
-      if (event.key === 'N' && event.shiftKey) {
-        event.preventDefault();
-        if (activeSessionId) {
-          const session = sessions[activeSessionId];
-          if (session) {
-            invoke('open_new_window', {
-              title: session.title,
-              sessionIds: [activeSessionId],
-            })
-              .catch((err) => {
-                console.error('Failed to move tab to new window:', err);
-              });
-          }
-        }
-        return;
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [sessionOrder, activeSessionId, sessions, setActiveSession, getDefaultSection, addSession, removeSession]);
+  }, [sessionOrder, activeSessionId, setActiveSession, getDefaultSection, addSession, removeSession]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -357,9 +282,8 @@ function App() {
   const terminalPaddingLeft = sidebarWidth + sidebarInset + sidebarGap;
 
   return (
-    <div className="app" data-window-id={windowId} data-is-main={isMain}>
+    <div className="app">
       <TitleBar />
-      <WindowDropZone />
       <div className="sidebar-shell" style={{ width: sidebarWidth }}>
         <div className="sidebar-wrapper">
           <Sidebar onCreateTerminal={handleCreateTerminal} />
