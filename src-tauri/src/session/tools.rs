@@ -62,11 +62,12 @@ pub fn build_command(record: &SessionRecord) -> Result<CommandSpec, String> {
 fn wrap_in_shell(program: &str, args: &[String], env: Vec<(String, String)>) -> CommandSpec {
     let shell = crate::detect_default_shell();
 
-    // Build the full command string
+    // Build the full command string with properly quoted arguments
     let full_cmd = if args.is_empty() {
-        program.to_string()
+        shell_words::quote(program).into_owned()
     } else {
-        format!("{} {}", program, args.join(" "))
+        let quoted_args: Vec<String> = args.iter().map(|a| shell_words::quote(a).into_owned()).collect();
+        format!("{} {}", shell_words::quote(program), quoted_args.join(" "))
     };
 
     #[cfg(not(target_os = "windows"))]
