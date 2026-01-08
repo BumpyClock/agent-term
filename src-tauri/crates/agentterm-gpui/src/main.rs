@@ -7,21 +7,43 @@ use agentterm_session::{
     DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
 };
 use agentterm_tools::{ShellInfo, ShellType, ToolInfo};
+mod assets;
+mod icons;
+mod settings;
+mod settings_dialog;
 mod text_input;
+mod ui;
+use crate::icons::{Icon, IconName, IconSize, icon_from_string};
+use settings::AppSettings;
+use settings_dialog::SettingsDialog;
+use ui::ContextMenuExt;
 use gpui::{
-    App, Application, AsyncApp, BoxShadow, ClickEvent, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, WindowBackgroundAppearance, WindowOptions, actions, div, hsla, point,
-    prelude::*, px, rgb, rgba,
+    App, Application, AsyncApp, Bounds, BoxShadow, ClickEvent, Context, Entity, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowOptions, actions, div, hsla, point, prelude::*, px, rgb, rgba, size,
 };
 use gpui_term::{Clear, Copy, Paste, SelectAll, Terminal, TerminalBuilder, TerminalView};
 use text_input::TextInput;
 
 actions!(
     agentterm_gpui,
-    [Quit, ToggleSidebar, ToggleMcpManager, NewShellTab]
+    [Quit, ToggleSidebar, ToggleMcpManager, NewShellTab, OpenSettings]
 );
+
+// Actions with data for context menu items
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct RenameSession(pub String);
+
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct CloseSessionAction(pub String);
+
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct EditSection(pub String);
+
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct RemoveSection(pub String);
 
 const SIDEBAR_INSET: f32 = 8.0;
 const SIDEBAR_GAP: f32 = 16.0;
@@ -49,12 +71,13 @@ fn rgba_u32(rgb: u32, alpha: f32) -> u32 {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    Application::new().with_assets(assets::Assets).run(|cx: &mut App| {
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-b", ToggleSidebar, None),
             KeyBinding::new("cmd-m", ToggleMcpManager, None),
             KeyBinding::new("cmd-t", NewShellTab, None),
+            KeyBinding::new("cmd-,", OpenSettings, None),
             KeyBinding::new("cmd-c", Copy, Some("Terminal")),
             KeyBinding::new("cmd-v", Paste, Some("Terminal")),
             KeyBinding::new("cmd-a", SelectAll, Some("Terminal")),
@@ -149,6 +172,8 @@ struct AgentTermApp {
     mcp_attached: Vec<SharedString>,
     mcp_available: Vec<McpItem>,
     mcp_error: Option<SharedString>,
+
+    settings: AppSettings,
 }
 
 impl AgentTermApp {
@@ -203,6 +228,7 @@ impl AgentTermApp {
             mcp_attached: Vec::new(),
             mcp_available: Vec::new(),
             mcp_error: None,
+            settings: AppSettings::load(),
         };
 
         this.reload_from_store(cx);
@@ -252,6 +278,35 @@ impl AgentTermApp {
     fn toggle_sidebar(&mut self, _: &ToggleSidebar, _window: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_visible = !self.sidebar_visible;
         cx.notify();
+    }
+
+    fn open_settings(&mut self, _: &OpenSettings, _window: &mut Window, cx: &mut Context<Self>) {
+        let settings = self.settings.clone();
+
+        // Compute bounds before opening window to avoid borrow conflict
+        let window_bounds = WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(600.0), px(700.0)),
+            cx,
+        ));
+
+        let _ = cx.open_window(
+            WindowOptions {
+                titlebar: Some(gpui::TitlebarOptions {
+                    title: Some("Settings".into()),
+                    appears_transparent: false,
+                    ..Default::default()
+                }),
+                window_bounds: Some(window_bounds),
+                kind: gpui::WindowKind::Normal,
+                is_resizable: true,
+                is_movable: true,
+                focus: true,
+                show: true,
+                ..Default::default()
+            },
+            |settings_window, cx| cx.new(|cx| SettingsDialog::new(settings, settings_window, cx)),
+        );
     }
 
     fn open_project_editor(
@@ -727,6 +782,43 @@ impl AgentTermApp {
         }
     }
 
+    // Action handlers for context menu items
+    fn handle_rename_session(
+        &mut self,
+        action: &RenameSession,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_session_rename(action.0.clone(), window, cx);
+    }
+
+    fn handle_close_session(
+        &mut self,
+        action: &CloseSessionAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_session(action.0.clone(), window, cx);
+    }
+
+    fn handle_edit_section(
+        &mut self,
+        _action: &EditSection,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        // TODO: Implement section editing
+    }
+
+    fn handle_remove_section(
+        &mut self,
+        _action: &RemoveSection,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        // TODO: Implement section removal
+    }
+
     fn ensure_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.active_session().cloned() else {
             return;
@@ -1035,23 +1127,34 @@ impl AgentTermApp {
             .filter(|s| s.section_id == section.section.id)
             .collect();
 
-        let mut container = div().py(px(4.0)).child(
-            div()
-                .px(px(8.0))
-                .py(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .rounded(px(6.0))
-                .hover(|s| s.bg(rgba(0xffffff10)))
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(TEXT_PRIMARY))
-                        .child(section.section.name.clone()),
-                ),
-        );
+        let section_id = section.section.id.clone();
+
+        let section_header = div()
+            .id(format!("section-header-{}", section.section.id))
+            .px(px(8.0))
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .rounded(px(6.0))
+            .hover(|s| s.bg(rgba(0xffffff10)))
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(TEXT_PRIMARY))
+                    .child(section.section.name.clone()),
+            )
+            .context_menu({
+                let section_id = section_id.clone();
+                move |menu, _window, _cx| {
+                    menu.menu("Edit Project...", Box::new(EditSection(section_id.clone())))
+                        .separator()
+                        .menu("Remove Project", Box::new(RemoveSection(section_id.clone())))
+                }
+            });
+
+        let mut container = div().py(px(4.0)).child(section_header);
 
         if sessions.is_empty() {
             container = container.child(
@@ -1082,10 +1185,12 @@ impl AgentTermApp {
             .as_deref()
             .is_some_and(|id| id == session.id);
         let title = if session.title.is_empty() {
-            "Terminal"
+            "Terminal".to_string()
         } else {
-            session.title.as_str()
+            session.title.clone()
         };
+        let session_id = session.id.clone();
+        let session_icon = session.icon.clone();
 
         div()
             .id(format!("session-row-{}", session.id))
@@ -1093,17 +1198,26 @@ impl AgentTermApp {
             .py(px(4.0))
             .flex()
             .items_center()
-            .justify_between()
+            .gap(px(6.0))
             .rounded(px(6.0))
             .cursor_pointer()
             .when(is_active, |s| s.bg(rgba(0xffffff10)))
             .hover(|s| s.bg(rgba(0xffffff15)))
             .child(
+                session_icon
+                    .as_ref()
+                    .map(|s| icon_from_string(s))
+                    .unwrap_or_else(|| Icon::new(IconName::Terminal))
+                    .size(IconSize::Small)
+                    .color(rgb(TEXT_SUBTLE)),
+            )
+            .child(
                 div()
                     .text_sm()
                     .text_color(rgb(TEXT_PRIMARY))
                     .truncate()
-                    .child(title.to_string()),
+                    .flex_1()
+                    .child(title.clone()),
             )
             .child(
                 icon_button("×")
@@ -1116,11 +1230,19 @@ impl AgentTermApp {
                     })),
             )
             .on_click(cx.listener({
-                let id = session.id.clone();
+                let id = session_id.clone();
                 move |this, _: &ClickEvent, window, cx| {
                     this.set_active_session_id(id.clone(), window, cx);
                 }
             }))
+            .context_menu({
+                let session_id = session_id.clone();
+                move |menu, _window, _cx| {
+                    menu.menu("Rename", Box::new(RenameSession(session_id.clone())))
+                        .separator()
+                        .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
+                }
+            })
     }
 
     fn render_terminal_container(&self) -> impl IntoElement {
@@ -1802,6 +1924,11 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::open_mcp_manager))
             .on_action(cx.listener(Self::new_shell_tab))
+            .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::handle_rename_session))
+            .on_action(cx.listener(Self::handle_close_session))
+            .on_action(cx.listener(Self::handle_edit_section))
+            .on_action(cx.listener(Self::handle_remove_section))
             .on_mouse_move(cx.listener(Self::update_sidebar_resize))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
             .child(self.render_terminal_container())
