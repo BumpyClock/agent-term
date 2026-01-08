@@ -144,6 +144,8 @@ pub fn run() {
             session::get_session,
             session::create_session,
             session::rename_session,
+            session::set_session_custom_title,
+            session::set_session_dynamic_title,
             session::set_session_command,
             session::set_session_icon,
             session::delete_session,

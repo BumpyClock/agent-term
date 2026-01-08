@@ -41,6 +41,8 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
     updateSessionTitle,
     updateSessionCommand,
     updateSessionIcon,
+    setCustomTitle,
+    clearCustomTitle,
     getSessionsBySection,
     reorderSessionsInSection,
     reorderSections,
@@ -655,6 +657,17 @@ export function Sidebar({ onCreateTerminal }: SidebarProps) {
               {
                 label: 'Edit',
                 onSelect: () => openEditDialog(menuSession),
+              },
+              {
+                label: menuSession.isCustomTitle ? 'Use dynamic title' : 'Lock title',
+                onSelect: async () => {
+                  if (menuSession.isCustomTitle) {
+                    await clearCustomTitle(menuSession.id);
+                  } else {
+                    await setCustomTitle(menuSession.id, menuSession.title, true);
+                  }
+                  closeMenuPopover();
+                },
               },
             ]}
           />,

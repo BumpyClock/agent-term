@@ -131,6 +131,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         initialDims && initialDims.cols > 0 ? initialDims.cols : lastKnownCols;
 
       let inputDisposable: IDisposable | null = null;
+      let titleDisposable: IDisposable | null = null;
       let resizeObserver: ResizeObserver | null = null;
       let themeObserver: MutationObserver | null = null;
       let unlistenOutput: (() => void) | null = null;
@@ -197,6 +198,7 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
         themeObserver?.disconnect();
         resizeObserver?.disconnect();
         inputDisposable?.dispose();
+        titleDisposable?.dispose();
         unloadWebGL();
         if (resizeDebounceRef.current) {
           clearTimeout(resizeDebounceRef.current);
@@ -228,6 +230,13 @@ export function Terminal({ sessionId, cwd, isActive }: TerminalProps) {
             id: sessionId,
             data,
           }).catch((err) => console.error(`${logPrefix} write_session_input error:`, err));
+        });
+
+        // Listen for OSC title changes (e.g., when apps set terminal title via escape sequences)
+        titleDisposable = xterm.onTitleChange((newTitle: string) => {
+          if (cancelled || !newTitle.trim()) return;
+          // Update dynamic title in store (respects isCustomTitle lock)
+          useTerminalStore.getState().updateDynamicTitle(sessionId, newTitle);
         });
 
         if (cancelled) { teardown(); return; }

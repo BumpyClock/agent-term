@@ -29,6 +29,10 @@ export interface Session {
   loadedMcpNames: string[];
   isOpen: boolean;
   tabOrder: number | null;
+  /** Whether the user manually set a custom title (locked from dynamic updates) */
+  isCustomTitle: boolean;
+  /** Title set by terminal OSC escape sequences (dynamic title) */
+  dynamicTitle: string | null;
 }
 
 export interface Section {
@@ -64,6 +68,9 @@ interface TerminalState {
   removeSession: (id: string) => Promise<void>;
   setActiveSession: (id: string) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
+  updateDynamicTitle: (id: string, title: string) => void;
+  setCustomTitle: (id: string, title: string, isCustom: boolean) => Promise<void>;
+  clearCustomTitle: (id: string) => Promise<void>;
   updateSessionCommand: (id: string, command: string) => Promise<void>;
   updateSessionIcon: (id: string, icon: string | null) => Promise<void>;
   moveSessionToSection: (sessionId: string, sectionId: string) => Promise<void>;
@@ -142,6 +149,29 @@ function getToolTitle(tool: SessionTool): string {
     }
   }
   return tool.custom;
+}
+
+/**
+ * Gets a friendly display name for a shell command.
+ * Used for dynamic tab naming when idle.
+ */
+function getShellDisplayName(command: string): string {
+  const lowerCmd = command.toLowerCase();
+  const baseName = command.split(/[/\\]/).pop() || command;
+
+  // Map common shell executables to friendly names
+  if (lowerCmd.includes('pwsh')) return 'PowerShell 7';
+  if (lowerCmd.includes('powershell')) return 'PowerShell';
+  if (lowerCmd.includes('cmd.exe') || lowerCmd === 'cmd') return 'Command Prompt';
+  if (lowerCmd.includes('bash')) return 'Bash';
+  if (lowerCmd.includes('zsh')) return 'Zsh';
+  if (lowerCmd.includes('fish')) return 'Fish';
+  if (lowerCmd.includes('wsl')) return 'WSL';
+  if (lowerCmd.includes('nu') || lowerCmd.includes('nushell')) return 'Nushell';
+
+  // Default: capitalize basename without extension
+  const nameWithoutExt = baseName.replace(/\.exe$/i, '');
+  return nameWithoutExt.charAt(0).toUpperCase() + nameWithoutExt.slice(1);
 }
 
 export const useTerminalStore = create<TerminalState>()(
@@ -244,15 +274,16 @@ export const useTerminalStore = create<TerminalState>()(
             ? s.tool === tool
             : false
         ).length;
+        // Get the command early so we can use it for shell display name
+        const command = options?.command ?? await getCommandForTool(tool);
         const sessionTitle =
           options?.title ||
           (tool === 'shell'
-            ? `Terminal ${sectionSessions.length + 1}`
+            ? getShellDisplayName(command)
             : toolCount === 0
               ? toolTitle
               : `${toolTitle} ${toolCount + 1}`);
         const projectPath = section?.path || '';
-        const command = options?.command ?? await getCommandForTool(tool);
         const args = options?.args ?? null;
         const icon = options?.icon ?? null;
 
@@ -338,10 +369,51 @@ export const useTerminalStore = create<TerminalState>()(
       },
 
       updateSessionTitle: async (id: string, title: string) => {
-        await invoke('rename_session', { id, title });
+        // When user manually sets a title, mark it as custom (locked)
+        await invoke('set_session_custom_title', { id, title, isCustom: true });
         set((state) => {
           if (state.sessions[id]) {
             state.sessions[id].title = title;
+            state.sessions[id].isCustomTitle = true;
+          }
+        });
+      },
+
+      updateDynamicTitle: (id: string, title: string) => {
+        // Only update if session exists and isn't custom-locked
+        const session = get().sessions[id];
+        if (!session || session.isCustomTitle) return;
+
+        set((state) => {
+          if (state.sessions[id]) {
+            state.sessions[id].dynamicTitle = title;
+            state.sessions[id].title = title;
+          }
+        });
+        // Persist to backend (fire and forget)
+        invoke('set_session_dynamic_title', { id, title }).catch(console.error);
+      },
+
+      setCustomTitle: async (id: string, title: string, isCustom: boolean) => {
+        await invoke('set_session_custom_title', { id, title, isCustom });
+        set((state) => {
+          if (state.sessions[id]) {
+            state.sessions[id].title = title;
+            state.sessions[id].isCustomTitle = isCustom;
+          }
+        });
+      },
+
+      clearCustomTitle: async (id: string) => {
+        const session = get().sessions[id];
+        if (!session) return;
+        // Restore dynamic title if available, otherwise use shell name
+        const newTitle = session.dynamicTitle || getShellDisplayName(session.command);
+        await invoke('set_session_custom_title', { id, title: newTitle, isCustom: false });
+        set((state) => {
+          if (state.sessions[id]) {
+            state.sessions[id].isCustomTitle = false;
+            state.sessions[id].title = newTitle;
           }
         });
       },
@@ -548,7 +620,12 @@ export const useTerminalStore = create<TerminalState>()(
           const sessionOrder: string[] = [];
 
           sessionsArray.forEach((session) => {
-            sessionsMap[session.id] = session;
+            // Ensure backward compatibility with sessions that don't have new fields
+            sessionsMap[session.id] = {
+              ...session,
+              isCustomTitle: session.isCustomTitle ?? false,
+              dynamicTitle: session.dynamicTitle ?? null,
+            };
             sessionOrder.push(session.id);
             if (!sessionsBySection[session.sectionId]) {
               sessionsBySection[session.sectionId] = [];
