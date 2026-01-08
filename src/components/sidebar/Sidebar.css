@@ -59,10 +59,10 @@
 
 .sidebar-header-title {
     font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-black);
     color: var(--muted-foreground);
     text-transform: uppercase;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.25px;
 }
 
 .sidebar-header-btn {
@@ -181,9 +181,9 @@
 .section-header {
     display: flex;
     align-items: center;
-    padding: 8px 12px;
+    padding: 8px 12px 8px 4px;
     cursor: pointer;
-    background-color: var(--color-surface-panel);
+    background-color: transparent;
 }
 
 .section-header.default {
@@ -195,10 +195,18 @@
 }
 
 .collapse-icon {
-    font-size: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--muted-foreground);
     margin-right: 8px;
     width: 12px;
+    height: 12px;
+    transition: color 0.15s ease;
+}
+
+.section-header:hover .collapse-icon {
+    color: var(--foreground);
 }
 
 .collapse-icon.placeholder {
@@ -213,6 +221,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: -0.01em;
 }
 
 .section-icon {
@@ -282,11 +291,13 @@
     background: transparent;
     border: none;
     color: var(--muted-foreground);
-    font-size: 14px;
     cursor: pointer;
-    padding: 2px 6px;
+    padding: 4px;
     border-radius: var(--radius-xs);
-    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .action-btn:hover {
@@ -412,31 +423,23 @@
     gap: 4px;
 }
 
-.tab-menu {
+.tab-menu,
+.tab-close {
     background: transparent;
     border: none;
     color: var(--muted-foreground);
-    font-size: 16px;
     cursor: pointer;
-    padding: 2px 4px;
+    padding: 4px;
     border-radius: var(--radius-xs);
-    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .tab-menu:hover {
     background-color: var(--muted);
     color: var(--foreground);
-}
-
-.tab-close {
-    background: transparent;
-    border: none;
-    color: var(--muted-foreground);
-    font-size: 14px;
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: var(--radius-xs);
-    line-height: 1;
 }
 
 .tab-close:hover {
@@ -970,8 +973,8 @@
 .drag-handle {
     cursor: grab;
     color: var(--muted-foreground);
-    padding: 2px 4px;
-    margin-right: 2px;
+    padding: 2px 2px;
+    margin-right: 4px;
     opacity: 0;
     transition: opacity 0.15s ease;
     display: flex;
