@@ -1,0 +1,288 @@
+//! Core AgentTermApp state and lifecycle methods.
+
+use std::collections::HashMap;
+use std::env;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use agentterm_mcp::McpManager;
+use agentterm_session::{
+    DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
+};
+use gpui::{
+    App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity, Window, prelude::*,
+};
+use gpui_term::{Terminal, TerminalBuilder, TerminalView};
+
+use crate::settings::AppSettings;
+use crate::ui::SectionItem;
+
+/// The main application state for AgentTerm.
+pub struct AgentTermApp {
+    pub(crate) focus_handle: FocusHandle,
+
+    pub session_store: SessionStore,
+    pub(crate) mcp_manager: McpManager,
+    pub(crate) tokio: Arc<tokio::runtime::Runtime>,
+
+    pub(crate) sidebar_visible: bool,
+    pub(crate) sidebar_width: f32,
+    pub(crate) resizing_sidebar: bool,
+    pub(crate) resize_start_x: Pixels,
+    pub(crate) resize_start_width: f32,
+
+    pub(crate) sections: Vec<SectionItem>,
+    pub(crate) sessions: Vec<SessionRecord>,
+    pub(crate) active_session_id: Option<String>,
+
+    pub(crate) terminals: HashMap<String, Entity<Terminal>>,
+    pub(crate) terminal_views: HashMap<String, Entity<TerminalView>>,
+
+    pub(crate) session_menu_open: bool,
+    pub(crate) session_menu_session_id: Option<String>,
+
+    pub(crate) settings: AppSettings,
+}
+
+impl AgentTermApp {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window, cx);
+
+        let tokio = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime"),
+        );
+
+        let session_store = SessionStore::open_default_profile().expect("session store");
+        let mcp_manager = tokio
+            .block_on(agentterm_mcp::build_mcp_manager())
+            .expect("mcp manager");
+
+        let mut this = Self {
+            focus_handle,
+            session_store,
+            mcp_manager,
+            tokio,
+            sidebar_visible: true,
+            sidebar_width: 250.0,
+            resizing_sidebar: false,
+            resize_start_x: Pixels::ZERO,
+            resize_start_width: 250.0,
+            sections: Vec::new(),
+            sessions: Vec::new(),
+            active_session_id: None,
+            terminals: HashMap::new(),
+            terminal_views: HashMap::new(),
+            session_menu_open: false,
+            session_menu_session_id: None,
+            settings: AppSettings::load(),
+        };
+
+        this.reload_from_store(cx);
+        this.ensure_active_terminal(window, cx);
+        this
+    }
+
+    pub fn reload_from_store(&mut self, cx: &mut Context<Self>) {
+        let mut sections: Vec<SectionItem> = self
+            .session_store
+            .list_sections()
+            .into_iter()
+            .map(|section| SectionItem {
+                section,
+                is_default: false,
+            })
+            .collect();
+
+        sections.sort_by_key(|s| s.section.order);
+        sections.insert(
+            0,
+            SectionItem {
+                section: SectionRecord {
+                    id: DEFAULT_SECTION_ID.to_string(),
+                    name: "Default".to_string(),
+                    path: String::new(),
+                    icon: None,
+                    collapsed: false,
+                    order: 0,
+                },
+                is_default: true,
+            },
+        );
+
+        let sessions = self.session_store.list_sessions();
+        let active_session_id = self
+            .session_store
+            .active_session_id()
+            .or_else(|| sessions.first().map(|s| s.id.clone()));
+
+        self.sections = sections;
+        self.sessions = sessions;
+        self.active_session_id = active_session_id;
+        cx.notify();
+    }
+
+    pub fn active_session(&self) -> Option<&SessionRecord> {
+        let id = self.active_session_id.as_deref()?;
+        self.sessions.iter().find(|s| s.id == id)
+    }
+
+    pub fn active_section(&self) -> Option<&SectionRecord> {
+        let session = self.active_session()?;
+        self.sections
+            .iter()
+            .find(|s| s.section.id == session.section_id)
+            .map(|s| &s.section)
+    }
+
+    pub fn set_active_session_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_session_id.as_deref() == Some(&id) {
+            return;
+        }
+        let _ = self.session_store.set_active_session(Some(id.clone()));
+        self.active_session_id = Some(id);
+        self.ensure_active_terminal(window, cx);
+        cx.notify();
+    }
+
+    pub fn close_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(terminal) = self.terminals.remove(&id) {
+            terminal.update(cx, |terminal, _| terminal.shutdown());
+        }
+        self.terminal_views.remove(&id);
+
+        let _ = self.session_store.delete_session(&id);
+        self.reload_from_store(cx);
+        if self.active_session_id.is_none() {
+            self.ensure_active_terminal(window, cx);
+        }
+    }
+
+    pub fn restart_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        // Shutdown the existing terminal if it exists
+        if let Some(terminal) = self.terminals.remove(&id) {
+            terminal.update(cx, |terminal, _| terminal.shutdown());
+        }
+        self.terminal_views.remove(&id);
+
+        // Set this session as active and recreate the terminal
+        self.active_session_id = Some(id);
+        self.ensure_active_terminal(window, cx);
+        cx.notify();
+    }
+
+    pub fn create_session_from_tool(
+        &mut self,
+        tool: SessionTool,
+        title: String,
+        command: String,
+        args: Vec<String>,
+        icon: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (section_id, project_path) = self
+            .active_section()
+            .map(|s| (s.id.clone(), s.path.clone()))
+            .unwrap_or_else(|| (DEFAULT_SECTION_ID.to_string(), String::new()));
+
+        let input = NewSessionInput {
+            title,
+            project_path,
+            section_id,
+            tool,
+            command,
+            args: if args.is_empty() { None } else { Some(args) },
+            icon,
+        };
+
+        match self.session_store.create_session(input) {
+            Ok(record) => {
+                let _ = self.session_store.set_active_session(Some(record.id.clone()));
+                self.reload_from_store(cx);
+                self.ensure_active_terminal(window, cx);
+            }
+            Err(e) => {
+                // Log error - dialog handles its own error display
+                eprintln!("Failed to create session: {}", e);
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn ensure_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.active_session().cloned() else {
+            return;
+        };
+
+        if let Some(view) = self.terminal_views.get(&session.id) {
+            let focus_handle = view.read(cx).focus_handle(cx);
+            focus_handle.focus(window, cx);
+            return;
+        }
+
+        let shell = Some(session.command.clone());
+        let shell_args = if session.args.is_empty() {
+            None
+        } else {
+            Some(session.args.clone())
+        };
+        let working_directory = if session.project_path.is_empty() {
+            env::current_dir().ok()
+        } else {
+            Some(PathBuf::from(session.project_path.clone()))
+        };
+
+        let mut env_vars: HashMap<String, String> = env::vars().collect();
+        env_vars.insert("TERM".to_string(), "xterm-256color".to_string());
+        env_vars.insert("COLORTERM".to_string(), "truecolor".to_string());
+
+        let window_id = window.window_handle().window_id().as_u64();
+        let terminal_task = TerminalBuilder::new(
+            working_directory,
+            shell,
+            shell_args,
+            env_vars,
+            None,
+            window_id,
+            cx,
+        );
+
+        let session_id = session.id.clone();
+        let window_handle = window.window_handle();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                let builder = match terminal_task.await {
+                    Ok(b) => b,
+                    Err(_) => return,
+                };
+
+                let _ = cx.update_window(window_handle, |_, window, cx| {
+                    let _ = this.update(cx, |app, cx| {
+                        let terminal = cx.new(|cx| builder.subscribe(cx));
+                        let terminal_view =
+                            cx.new(|cx| TerminalView::new(terminal.clone(), window, cx));
+                        app.terminals.insert(session_id.clone(), terminal);
+                        app.terminal_views
+                            .insert(session_id.clone(), terminal_view.clone());
+
+                        let focus_handle = terminal_view.read(cx).focus_handle(cx);
+                        focus_handle.focus(window, cx);
+                        cx.notify();
+                    });
+                });
+            }
+        })
+        .detach();
+    }
+}
+
+impl Focusable for AgentTermApp {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
