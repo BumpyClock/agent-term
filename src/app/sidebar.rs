@@ -134,7 +134,12 @@ impl AgentTermApp {
                     )
                     .child(
                         Button::new("sidebar-mcp")
-                            .label("M")
+                            // Tool SVGs use `currentColor`; set a color explicitly so it isn't invisible on dark themes.
+                            .child(
+                                Icon::asset("tool-icons/mcp.svg")
+                                    .size(IconSize::Small)
+                                    .color(cx.theme().muted_foreground),
+                            )
                             .ghost()
                             .compact()
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
