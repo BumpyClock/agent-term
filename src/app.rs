@@ -2064,15 +2064,22 @@ impl AgentTermApp {
     fn sidebar_shadow() -> Vec<BoxShadow> {
         vec![
             BoxShadow {
-                color: hsla(0., 0., 0., 0.25),
-                offset: point(px(0.0), px(18.0)),
-                blur_radius: px(45.0),
+                // subtle near-edge shadow for elevation
+                color: hsla(0., 0., 0., 0.18),
+                offset: point(px(0.0), px(1.0)),
+                blur_radius: px(6.0),
                 spread_radius: px(0.0),
             },
             BoxShadow {
-                color: hsla(0., 0., 0., 0.15),
-                offset: point(px(0.0), px(6.0)),
-                blur_radius: px(18.0),
+                color: hsla(0., 0., 0., 0.22),
+                offset: point(px(0.0), px(8.0)),
+                blur_radius: px(22.0),
+                spread_radius: px(0.0),
+            },
+            BoxShadow {
+                color: hsla(0., 0., 0., 0.18),
+                offset: point(px(0.0), px(22.0)),
+                blur_radius: px(54.0),
                 spread_radius: px(0.0),
             },
         ]
