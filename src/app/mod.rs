@@ -100,6 +100,12 @@ pub fn run() {
                 ..Default::default()
             }),
             window_background: background_appearance,
+            // Enable client-side decorations on Windows/Linux for custom title bar
+            window_decorations: if cfg!(not(target_os = "macos")) {
+                Some(gpui::WindowDecorations::Client)
+            } else {
+                None
+            },
             ..Default::default()
         };
 
