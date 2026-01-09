@@ -186,9 +186,9 @@ impl Render for AgentTermApp {
                     .left_0()
                     .right_0()
                     .h(px(34.0))
-                    .bg(cx.theme().title_bar)
-                    .border_b_1()
-                    .border_color(cx.theme().title_bar_border),
+                    // Keep the visual strip but let the window/terminal background show through.
+                    .bg(cx.theme().transparent)
+                    ,
             )
             // Main content (full-window). Titlebar is drawn as an overlay above this so the sidebar
             // can visually extend to the top while Windows still hit-tests the titlebar controls.
