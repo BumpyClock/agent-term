@@ -12,24 +12,36 @@ pub struct FontOption {
 /// Returns a curated list of monospace fonts suitable for terminal use.
 ///
 /// The list includes:
-/// - Bundled fonts (to be added to assets/fonts)
+/// - Bundled Nerd Fonts (in assets/fonts)
 /// - Common system monospace fonts available on macOS, Windows, and Linux
 pub fn font_presets() -> Vec<FontOption> {
     vec![
-        // Popular programming/terminal fonts (often bundled or commonly installed)
+        // ===== Bundled Nerd Fonts (these match the TTF files in assets/fonts) =====
         FontOption {
-            name: "JetBrains Mono",
-            family: "JetBrains Mono",
-        },
-        FontOption {
-            name: "Fira Code",
-            family: "Fira Code",
+            name: "JetBrainsMono Nerd Font",
+            family: "JetBrainsMono Nerd Font",
         },
         FontOption {
             name: "FiraCode Nerd Font",
             family: "FiraCode Nerd Font",
         },
-        // macOS system fonts
+        FontOption {
+            name: "CaskaydiaCove Nerd Font",
+            family: "CaskaydiaCove Nerd Font",
+        },
+        FontOption {
+            name: "Hack Nerd Font",
+            family: "Hack Nerd Font",
+        },
+        FontOption {
+            name: "MesloLGS NF",
+            family: "MesloLGS NF",
+        },
+        FontOption {
+            name: "NotoSans Nerd Font",
+            family: "NotoSans Nerd Font",
+        },
+        // ===== macOS System Fonts =====
         FontOption {
             name: "SF Mono",
             family: "SF Mono",
@@ -42,7 +54,7 @@ pub fn font_presets() -> Vec<FontOption> {
             name: "Monaco",
             family: "Monaco",
         },
-        // Windows system fonts
+        // ===== Windows System Fonts =====
         FontOption {
             name: "Consolas",
             family: "Consolas",
@@ -51,11 +63,7 @@ pub fn font_presets() -> Vec<FontOption> {
             name: "Cascadia Code",
             family: "Cascadia Code",
         },
-        FontOption {
-            name: "Cascadia Mono",
-            family: "Cascadia Mono",
-        },
-        // Cross-platform fonts
+        // ===== Cross-platform / Commonly Installed =====
         FontOption {
             name: "Source Code Pro",
             family: "Source Code Pro",
@@ -64,23 +72,7 @@ pub fn font_presets() -> Vec<FontOption> {
             name: "Ubuntu Mono",
             family: "Ubuntu Mono",
         },
-        FontOption {
-            name: "IBM Plex Mono",
-            family: "IBM Plex Mono",
-        },
-        FontOption {
-            name: "Hack",
-            family: "Hack",
-        },
-        FontOption {
-            name: "Iosevka",
-            family: "Iosevka",
-        },
-        FontOption {
-            name: "Inconsolata",
-            family: "Inconsolata",
-        },
-        // Fallback system fonts
+        // ===== Fallback =====
         FontOption {
             name: "Courier New",
             family: "Courier New",

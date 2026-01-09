@@ -60,14 +60,27 @@ impl AgentTermApp {
                 // Create the SettingsDialog entity
                 let dialog = cx.new(|cx| {
                     SettingsDialog::new(settings.clone(), settings_window, cx)
+                        .on_change({
+                            let app_entity = app_entity.clone();
+                            move |new_settings, _window, cx| {
+                                // Live preview: update settings in the main app
+                                let _ = cx.update_window(main_window_handle, |_, window, cx| {
+                                    if let Some(app) = app_entity.upgrade() {
+                                        app.update(cx, |app, cx| {
+                                            app.update_settings(new_settings.clone(), window, cx);
+                                        });
+                                    }
+                                });
+                            }
+                        })
                         .on_save({
                             let app_entity = app_entity.clone();
                             move |new_settings, _window, cx| {
-                                // Update settings in the main app
-                                let _ = cx.update_window(main_window_handle, |_, _window, cx| {
+                                // Final save: update settings in the main app
+                                let _ = cx.update_window(main_window_handle, |_, window, cx| {
                                     if let Some(app) = app_entity.upgrade() {
                                         app.update(cx, |app, cx| {
-                                            app.update_settings(new_settings.clone(), cx);
+                                            app.update_settings(new_settings.clone(), window, cx);
                                         });
                                     }
                                 });

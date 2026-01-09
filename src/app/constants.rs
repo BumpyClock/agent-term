@@ -8,7 +8,9 @@ pub const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 pub const SIDEBAR_HEADER_LEFT_PADDING: f32 = 68.0;
 
 // Sidebar glass effect constants
-pub const SIDEBAR_GLASS_BASE_ALPHA: f32 = 0.18;
+// SIDEBAR_GLASS_BASE_ALPHA: Base opacity for sidebar's glass panel
+// This is layered on top of the root surface
+pub const SIDEBAR_GLASS_BASE_ALPHA: f32 = 0.65;
 pub const SIDEBAR_GLASS_BORDER_ALPHA: f32 = 0.14;
 
 // Color palette (RGB hex values)
@@ -17,7 +19,11 @@ pub const SURFACE_SIDEBAR: u32 = 0x202020;
 pub const BORDER_SOFT: u32 = 0x3a3a3a;
 
 // Alpha values for glass effect
-pub const SURFACE_ROOT_ALPHA: f32 = 0.05;
+// SURFACE_ROOT_ALPHA: Base opacity when transparency slider is at 0%
+// Higher value = more solid/opaque window at min transparency
+// At transparency=0%: window has this much dark tint
+// At transparency=100%: window is fully transparent (blur shows through)
+pub const SURFACE_ROOT_ALPHA: f32 = 0.85;
 pub const SURFACE_SIDEBAR_ALPHA: f32 = 0.32;
 pub const BORDER_SOFT_ALPHA: f32 = 0.50;
 
