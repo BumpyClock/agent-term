@@ -119,6 +119,39 @@ impl McpManager {
         Ok(())
     }
 
+    /// Initialize MCP pool on startup if auto_start is enabled
+    /// This should be called early in the app lifecycle to start pooled MCPs
+    pub async fn initialize_pool(&self) -> McpResult<()> {
+        let config = self.load_config().await?;
+
+        if !config.mcp_pool.enabled {
+            diagnostics::log("pool_init_skipped reason=disabled");
+            return Ok(());
+        }
+
+        if !config.mcp_pool.auto_start {
+            diagnostics::log("pool_init_skipped reason=auto_start_disabled");
+            return Ok(());
+        }
+
+        diagnostics::log("pool_init_starting");
+
+        match pool_manager::initialize_global_pool(&config) {
+            Ok(Some(_)) => {
+                diagnostics::log("pool_init_success");
+            }
+            Ok(None) => {
+                diagnostics::log("pool_init_returned_none");
+            }
+            Err(e) => {
+                diagnostics::log(format!("pool_init_failed error={}", e));
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get all available MCP definitions from config
     pub async fn get_available_mcps(&self) -> McpResult<HashMap<String, super::config::MCPDef>> {
         let config = self.load_config().await?;

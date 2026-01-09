@@ -8,6 +8,10 @@ use super::error::{McpError, McpResult};
 /// User configuration loaded from ~/.agent-term/config.toml
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UserConfig {
+    /// Enable debug/diagnostic logging
+    #[serde(default)]
+    pub debug: bool,
+
     /// Default tool for new sessions
     #[serde(default)]
     pub default_tool: String,
@@ -48,6 +52,7 @@ pub struct UserConfig {
 impl Default for UserConfig {
     fn default() -> Self {
         Self {
+            debug: false,
             default_tool: String::new(),
             tools: HashMap::new(),
             shell: ShellSettings::default(),

@@ -1,4 +1,4 @@
-mod diagnostics;
+pub mod diagnostics;
 
 pub mod config;
 mod error;
