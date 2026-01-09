@@ -61,6 +61,11 @@ impl AgentTermApp {
             .block_on(agentterm_mcp::build_mcp_manager())
             .expect("mcp manager");
 
+        // Initialize MCP pool on startup if auto_start is enabled
+        if let Err(e) = tokio.block_on(mcp_manager.initialize_pool()) {
+            agentterm_mcp::diagnostics::log(format!("pool_startup_init_failed error={}", e));
+        }
+
         let mut this = Self {
             focus_handle,
             session_store,

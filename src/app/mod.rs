@@ -27,6 +27,26 @@ use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
 pub fn run() {
+    // Enable diagnostics early, before any other initialization
+    // First check config file for debug flag
+    if let Ok(config_path) = agentterm_mcp::config::get_config_path() {
+        if let Ok(contents) = std::fs::read_to_string(&config_path) {
+            if let Ok(config) = toml::from_str::<agentterm_mcp::config::UserConfig>(&contents) {
+                if config.debug {
+                    agentterm_mcp::diagnostics::set_enabled(true);
+                    agentterm_mcp::diagnostics::log("debug_mode_enabled via config");
+                }
+            }
+        }
+    }
+    // Also check env var as fallback
+    if std::env::var("AGENT_TERM_DIAG")
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+    {
+        agentterm_mcp::diagnostics::set_enabled(true);
+    }
+
     let app = Application::new().with_assets(crate::assets::Assets);
 
     // Handle dock icon click when app has no visible windows (macOS)
