@@ -2374,11 +2374,7 @@ impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("agentterm-gpui")
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
+            .size_full()
             .relative()
             .bg(rgba(rgba_u32(SURFACE_ROOT, SURFACE_ROOT_ALPHA)))
             .track_focus(&self.focus_handle)
