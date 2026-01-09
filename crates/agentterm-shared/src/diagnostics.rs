@@ -8,11 +8,20 @@ use time::OffsetDateTime;
 
 const DIAG_ENV: &str = "AGENT_TERM_DIAG";
 
+static DIAG_ENABLED: OnceLock<bool> = OnceLock::new();
+
+/// Explicitly set diagnostics enabled state. Call early in main().
+/// If not called, falls back to checking AGENT_TERM_DIAG env var.
+pub fn set_enabled(enabled: bool) {
+    let _ = DIAG_ENABLED.set(enabled);
+}
+
 fn diagnostics_enabled() -> bool {
-    match std::env::var(DIAG_ENV) {
-        Ok(value) => matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on"),
-        Err(_) => false,
-    }
+    *DIAG_ENABLED.get_or_init(|| {
+        std::env::var(DIAG_ENV)
+            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false)
+    })
 }
 
 fn diagnostics_path() -> Option<PathBuf> {
