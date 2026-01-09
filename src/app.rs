@@ -16,6 +16,7 @@ use crate::ui::{
     v_flex,
 };
 use gpui_component::{
+    ElementExt as _,
     Size as ComponentSize,
     input::{Input as GpuiInput, InputState as GpuiInputState},
     theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
@@ -1204,6 +1205,8 @@ struct AgentTermApp {
     resizing_sidebar: bool,
     resize_start_x: Pixels,
     resize_start_width: f32,
+    sidebar_glass_bounds: Option<Bounds<Pixels>>,
+    active_session_row_bounds: Option<Bounds<Pixels>>,
 
     sections: Vec<SectionItem>,
     sessions: Vec<SessionRecord>,
@@ -1245,6 +1248,8 @@ impl AgentTermApp {
             resizing_sidebar: false,
             resize_start_x: Pixels::ZERO,
             resize_start_width: 250.0,
+            sidebar_glass_bounds: None,
+            active_session_row_bounds: None,
             sections: Vec::new(),
             sessions: Vec::new(),
             active_session_id: None,
@@ -1745,6 +1750,8 @@ impl AgentTermApp {
         }
         let _ = self.session_store.set_active_session(Some(id.clone()));
         self.active_session_id = Some(id);
+        // Prevent the sidebar "shine" from momentarily showing at the previous active row position.
+        self.active_session_row_bounds = None;
         self.ensure_active_terminal(window, cx);
         cx.notify();
     }
@@ -2055,6 +2062,25 @@ impl AgentTermApp {
             gpui::linear_color_stop(gpui::transparent_black(), 0.75),
         );
 
+        let view = cx.entity().clone();
+        let active_shine_center_y = self
+            .active_session_row_bounds
+            .clone()
+            .zip(self.sidebar_glass_bounds.clone())
+            .map(|(row, sidebar)| (row.origin.y - sidebar.origin.y) + row.size.height / 2.0);
+
+        let accent = cx.theme().accent;
+        let shine_top = gpui::linear_gradient(
+            180.0,
+            gpui::linear_color_stop(gpui::transparent_black(), 0.0),
+            gpui::linear_color_stop(accent.opacity(0.16), 1.0),
+        );
+        let shine_bottom = gpui::linear_gradient(
+            180.0,
+            gpui::linear_color_stop(accent.opacity(0.12), 0.0),
+            gpui::linear_color_stop(gpui::transparent_black(), 1.0),
+        );
+
         div()
             .id("sidebar-shell")
             .absolute()
@@ -2077,6 +2103,12 @@ impl AgentTermApp {
                             .id("sidebar-glass")
                             .size_full()
                             .relative()
+                            .on_prepaint(move |bounds, _window, cx| {
+                                view.update(cx, |app, cx| {
+                                    app.sidebar_glass_bounds = Some(bounds);
+                                    cx.notify();
+                                });
+                            })
                             .child(
                                 div()
                                     .absolute()
@@ -2095,6 +2127,46 @@ impl AgentTermApp {
                                     .bottom_0()
                                     .bg(bottom_shade),
                             )
+                            .when_some(active_shine_center_y, move |el, center_y| {
+                                let shine_h = px(200.0);
+                                let half = shine_h / 2.0;
+                                el.child(
+                                    div()
+                                        .id("sidebar-active-shine")
+                                        .absolute()
+                                        .left_0()
+                                        .right_0()
+                                        .top(center_y - half)
+                                        .h(shine_h)
+                                        .child(
+                                            div()
+                                                .absolute()
+                                                .top_0()
+                                                .left_0()
+                                                .right_0()
+                                                .h(half)
+                                                .bg(shine_top),
+                                        )
+                                        .child(
+                                            div()
+                                                .absolute()
+                                                .bottom_0()
+                                                .left_0()
+                                                .right_0()
+                                                .h(half)
+                                                .bg(shine_bottom),
+                                        )
+                                        .child(
+                                            div()
+                                                .absolute()
+                                                .left(px(12.0))
+                                                .right(px(12.0))
+                                                .top(half - px(0.5))
+                                                .h(px(1.0))
+                                                .bg(accent.opacity(0.18)),
+                                        ),
+                                )
+                            })
                             .child(
                                 div()
                                     .absolute()
@@ -2323,6 +2395,8 @@ impl AgentTermApp {
         let active_bg = cx.theme().list_hover;
         let hover_bg = cx.theme().list_active;
 
+        let view = cx.entity().clone();
+
         div()
             .id(format!("session-row-{}", session.id))
             .px(px(8.0))
@@ -2334,6 +2408,20 @@ impl AgentTermApp {
             .cursor_pointer()
             .when(is_active, move |s| s.bg(active_bg))
             .hover(move |s| s.bg(hover_bg))
+            .when(is_active, {
+                let view = view.clone();
+                let id = session.id.clone();
+                move |s| {
+                    s.on_prepaint(move |bounds, _window, cx| {
+                        view.update(cx, |app, cx| {
+                            if app.active_session_id.as_deref() == Some(id.as_str()) {
+                                app.active_session_row_bounds = Some(bounds);
+                                cx.notify();
+                            }
+                        });
+                    })
+                }
+            })
             .child(
                 session_icon
                     .as_ref()
