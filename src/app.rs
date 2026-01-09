@@ -17,6 +17,7 @@ use crate::ui::{
 };
 use gpui_component::{
     Size as ComponentSize,
+    TitleBar,
     input::{Input as GpuiInput, InputState as GpuiInputState},
     theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
 };
@@ -2450,6 +2451,12 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::zoom_window))
             .on_mouse_move(cx.listener(Self::update_sidebar_resize))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
+            // TitleBar for window controls and dragging (Windows/Linux)
+            .child(
+                TitleBar::new()
+                    .bg(gpui::transparent_black())
+                    .border_b_0()
+            )
             .child(self.render_terminal_container(cx))
             .when(self.sidebar_visible, |el| {
                 el.child(self.render_sidebar_shell(cx))

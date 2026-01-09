@@ -64,6 +64,11 @@ pub enum IconName {
     ArrowRight,
     ArrowUp,
     ArrowDown,
+    // Window controls
+    WindowMinimize,
+    WindowMaximize,
+    WindowRestore,
+    WindowClose,
 }
 
 impl IconName {
@@ -118,6 +123,11 @@ impl IconName {
             Self::ArrowRight => "icons/arrow-right.svg",
             Self::ArrowUp => "icons/arrow-up.svg",
             Self::ArrowDown => "icons/arrow-down.svg",
+            // Window controls
+            Self::WindowMinimize => "icons/window-minimize.svg",
+            Self::WindowMaximize => "icons/window-maximize.svg",
+            Self::WindowRestore => "icons/window-restore.svg",
+            Self::WindowClose => "icons/window-close.svg",
         }
     }
 }
