@@ -142,6 +142,42 @@ fn rgba_u32(rgb: u32, alpha: f32) -> u32 {
     (rgb << 8) | a
 }
 
+#[cfg(target_os = "macos")]
+fn configure_macos_titlebar(window: &mut Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use objc::{msg_send, sel, sel_impl};
+
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+
+    // raw-window-handle gives us an NSView*. From that, ask for the NSWindow and
+    // remove the titlebar separator line (otherwise it shows up behind our floating sidebar).
+    unsafe {
+        let ns_view = handle.ns_view.as_ptr() as *mut objc::runtime::Object;
+        if ns_view.is_null() {
+            return;
+        }
+        let ns_window: *mut objc::runtime::Object = msg_send![ns_view, window];
+        if ns_window.is_null() {
+            return;
+        }
+
+        let responds: bool = msg_send![
+            ns_window,
+            respondsToSelector: sel!(setTitlebarSeparatorStyle:)
+        ];
+        if responds {
+            // NSTitlebarSeparatorStyleNone = 1
+            let _: () = msg_send![ns_window, setTitlebarSeparatorStyle: 1isize];
+        }
+    }
+}
+
 pub fn run() {
     let app = Application::new().with_assets(crate::assets::Assets);
 
@@ -219,6 +255,8 @@ pub fn run() {
 
         cx.open_window(window_options, |window, cx| {
             window.set_background_appearance(background_appearance);
+            #[cfg(target_os = "macos")]
+            configure_macos_titlebar(window);
             let app = cx.new(|cx| AgentTermApp::new(window, cx));
             cx.new(|cx| gpui_component::Root::new(app, window, cx))
         })
