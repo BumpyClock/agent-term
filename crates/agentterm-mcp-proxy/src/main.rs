@@ -18,7 +18,7 @@ async fn main() {
 
     let args = parse_args();
     if args.debug {
-        env::set_var("AGENT_TERM_DIAG", "1");
+        diagnostics::set_enabled(true);
     }
     let endpoint = args
         .endpoint
