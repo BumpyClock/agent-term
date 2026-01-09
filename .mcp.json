@@ -2,7 +2,7 @@
   "mcpServers": {
     "Exa": {
       "type": "stdio",
-      "command": "/Users/adityasharma/Projects/friday_v2/terminal-app/src-tauri/target/debug/agentterm-mcp-proxy",
+      "command": "/Users/adityasharma/Projects/friday_v2/terminal-app/target/debug/agentterm-mcp-proxy",
       "args": [
         "--name",
         "Exa"

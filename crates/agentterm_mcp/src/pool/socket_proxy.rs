@@ -41,6 +41,7 @@ pub struct SocketProxy {
     request_map: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     shutdown: Arc<AtomicBool>,
     shutdown_notify: Arc<Notify>,
+    ready_notify: Arc<Notify>,
     started_at: Mutex<Option<Instant>>,
     total_connections: Arc<AtomicU32>,
     cleanup_counter: Arc<AtomicU32>,
@@ -72,6 +73,7 @@ impl SocketProxy {
             request_map: Arc::new(Mutex::new(HashMap::new())),
             shutdown: Arc::new(AtomicBool::new(false)),
             shutdown_notify: Arc::new(Notify::new()),
+            ready_notify: Arc::new(Notify::new()),
             started_at: Mutex::new(None),
             total_connections: Arc::new(AtomicU32::new(0)),
             cleanup_counter: Arc::new(AtomicU32::new(0)),
@@ -110,12 +112,18 @@ impl SocketProxy {
         self.exit_complete_rx.lock().take()
     }
 
+    /// Returns a clone of the ready notifier for async waiting on socket readiness.
+    pub fn ready_notifier(&self) -> Arc<Notify> {
+        self.ready_notify.clone()
+    }
+
     pub fn start(&self) -> io::Result<()> {
         if self.status() == ServerStatus::Running {
             return Ok(());
         }
         if !self.owned {
             *self.status.lock() = ServerStatus::Running;
+            self.ready_notify.notify_waiters();
             return Ok(());
         }
 
@@ -219,6 +227,7 @@ impl SocketProxy {
         self.spawn_accept_loop(listener);
 
         *self.status.lock() = ServerStatus::Running;
+        self.ready_notify.notify_waiters();
         *self.started_at.lock() = Some(Instant::now());
         diagnostics::log(format!(
             "pool_proxy_started name={} socket={}",
