@@ -156,7 +156,12 @@ pub fn run() {
     app.run(|cx: &mut App| {
         // Initialize gpui-component (theme, input bindings, dialogs, menus, etc.)
         gpui_component::init(cx);
-        GpuiTheme::global_mut(cx).mode = GpuiThemeMode::Dark;
+        {
+            let theme = GpuiTheme::global_mut(cx);
+            theme.mode = GpuiThemeMode::Dark;
+            // Allow the platform blur/vibrancy to show through.
+            theme.colors.background = theme.colors.background.alpha(0.01);
+        }
 
         // Set up key bindings
         cx.bind_keys([
@@ -2375,7 +2380,7 @@ impl Render for AgentTermApp {
             .id("agentterm-gpui")
             .size_full()
             .relative()
-            .bg(rgba(rgba_u32(SURFACE_ROOT, SURFACE_ROOT_ALPHA)))
+            .bg(gpui::transparent_black())
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::open_mcp_manager))
