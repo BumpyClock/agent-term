@@ -2040,7 +2040,6 @@ impl AgentTermApp {
             .top(px(SIDEBAR_INSET))
             .bottom(px(SIDEBAR_INSET))
             .w(px(self.sidebar_width))
-            .relative()
             .child(
                 div()
                     .id("sidebar-wrapper")
