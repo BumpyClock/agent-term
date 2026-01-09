@@ -2081,7 +2081,6 @@ impl AgentTermApp {
     fn render_sidebar_shell(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
         let base = rgba(rgba_u32(SURFACE_SIDEBAR, SIDEBAR_GLASS_BASE_ALPHA));
-        let border = cx.theme().foreground.alpha(SIDEBAR_GLASS_BORDER_ALPHA);
 
         div()
             .id("sidebar-shell")
@@ -2097,32 +2096,12 @@ impl AgentTermApp {
                     .rounded(px(16.0))
                     .overflow_hidden()
                     .bg(base)
-                    .border_1()
-                    .border_color(border)
                     .shadow(Self::sidebar_shadow())
                     .child(
                         div()
                             .id("sidebar-glass")
                             .size_full()
                             .relative()
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .left_0()
-                                    .right_0()
-                                    .h(px(1.0))
-                                    .bg(cx.theme().foreground.alpha(0.08)),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .left_0()
-                                    .bottom_0()
-                                    .w(px(1.0))
-                                    .bg(cx.theme().foreground.alpha(0.06)),
-                            )
                             .child(self.render_sidebar_content(cx)),
                     ),
             )
