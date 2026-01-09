@@ -18,7 +18,7 @@ license = "MIT"
 [workspace.dependencies]
 dirs = "6.0.0"
 time = { version = "0.3.44", features = ["formatting"] }
-gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "ddf70bc3217eb2f55f1bdf1d44d1f3d8719502e6" }
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "442c2364025401f81a8a2d45dea4a8f8c123f1e7" }
 gpui-macros = "0.2.2"
 gpui-component-macros = { path = "vendor/gpui-component/crates/macros" }
 alacritty_terminal = "0.25"
