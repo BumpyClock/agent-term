@@ -243,6 +243,14 @@ pub fn run() {
             WindowBackgroundAppearance::Opaque
         };
 
+        // On Windows/Linux we use a custom title bar (`gpui_component::TitleBar`), which requires
+        // client-side window decorations so GPUI can hit-test drag + caption buttons.
+        let window_decorations = if cfg!(target_os = "macos") {
+            None
+        } else {
+            Some(gpui::WindowDecorations::Client)
+        };
+
         let window_options = WindowOptions {
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Agent Term".into()),
@@ -251,6 +259,7 @@ pub fn run() {
                 ..Default::default()
             }),
             window_background: background_appearance,
+            window_decorations,
             ..Default::default()
         };
 
@@ -2089,12 +2098,17 @@ impl AgentTermApp {
     fn render_sidebar_shell(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
         let base = rgba(rgba_u32(SURFACE_SIDEBAR, SIDEBAR_GLASS_BASE_ALPHA));
+        let top_inset = if cfg!(target_os = "macos") {
+            px(SIDEBAR_INSET)
+        } else {
+            gpui_component::TITLE_BAR_HEIGHT + px(SIDEBAR_INSET)
+        };
 
         div()
             .id("sidebar-shell")
             .absolute()
             .left(px(SIDEBAR_INSET))
-            .top(px(SIDEBAR_INSET))
+            .top(top_inset)
             .bottom(px(SIDEBAR_INSET))
             .w(px(self.sidebar_width))
             .child(
@@ -2381,6 +2395,12 @@ impl AgentTermApp {
             0.0
         };
 
+        let content_top = if cfg!(target_os = "macos") {
+            px(0.0)
+        } else {
+            gpui_component::TITLE_BAR_HEIGHT
+        };
+
         let active_view = self
             .active_session_id
             .as_ref()
@@ -2390,7 +2410,7 @@ impl AgentTermApp {
         div()
             .id("terminal-container")
             .absolute()
-            .top_0()
+            .top(content_top)
             .right_0()
             .bottom_0()
             .left(px(content_left))
@@ -2432,6 +2452,8 @@ fn agentterm_input_field(input: &Entity<GpuiInputState>) -> GpuiInput {
 
 impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let show_custom_titlebar = !cfg!(target_os = "macos");
+
         div()
             .id("agentterm-gpui")
             .size_full()
@@ -2451,12 +2473,10 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::zoom_window))
             .on_mouse_move(cx.listener(Self::update_sidebar_resize))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
-            // TitleBar for window controls and dragging (Windows/Linux)
-            .child(
-                TitleBar::new()
-                    .bg(gpui::transparent_black())
-                    .border_b_0()
-            )
+            // TitleBar for window controls and dragging (Windows/Linux). macOS uses native titlebar.
+            .when(show_custom_titlebar, |el| {
+                el.child(TitleBar::new().bg(gpui::transparent_black()).border_b_0())
+            })
             .child(self.render_terminal_container(cx))
             .when(self.sidebar_visible, |el| {
                 el.child(self.render_sidebar_shell(cx))
