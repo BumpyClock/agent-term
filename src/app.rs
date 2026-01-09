@@ -1380,10 +1380,9 @@ impl AgentTermApp {
             )
         });
 
-        window.open_dialog(cx, move |dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
                 .title("Edit Project")
-                .bg(cx.theme().popover)
                 .w(px(400.))
                 .child(dialog_entity.clone())
                 .footer({
@@ -1495,10 +1494,9 @@ impl AgentTermApp {
             )
         });
 
-        window.open_dialog(cx, move |dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
                 .title("Edit Tab")
-                .bg(cx.theme().popover)
                 .w(px(400.))
                 .child(dialog_entity.clone())
                 .footer({
@@ -1648,10 +1646,9 @@ impl AgentTermApp {
             dialog
         });
 
-        window.open_dialog(cx, move |dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
                 .title("MCP Manager")
-                .bg(cx.theme().popover)
                 .w(px(720.))
                 .close_button(true)
                 .child(dialog_entity.clone())
@@ -1674,10 +1671,9 @@ impl AgentTermApp {
             dialog
         });
 
-        window.open_dialog(cx, move |dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
                 .title("Create tab")
-                .bg(cx.theme().popover)
                 .w(px(280.))
                 .max_h(px(540.))
                 .close_button(true)
@@ -1926,7 +1922,6 @@ impl AgentTermApp {
 
             dialog
                 .title("Remove Project")
-                .bg(cx.theme().popover)
                 .w(px(400.))
                 .child(content)
                 .footer({
