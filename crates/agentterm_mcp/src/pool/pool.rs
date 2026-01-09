@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use parking_lot::RwLock;
 
@@ -98,7 +98,12 @@ impl Pool {
             HashMap::new(),
             false,
         ));
-        let _ = proxy.start();
+        if let Err(e) = proxy.start() {
+            diagnostics::log(format!(
+                "pool_external_socket_start_failed name={} error={}",
+                name, e
+            ));
+        }
         self.proxies.write().insert(name.to_string(), proxy);
     }
 
@@ -138,15 +143,26 @@ impl Pool {
         proxies.clear();
     }
 
-    pub fn wait_for_socket(&self, name: &str, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if self.is_running(name) {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+    pub async fn wait_for_socket(&self, name: &str, timeout: Duration) -> bool {
+        // Check if already running
+        if self.is_running(name) {
+            return true;
         }
-        false
+
+        // Get the ready notifier for this proxy
+        let notify = {
+            let proxies = self.proxies.read();
+            match proxies.get(name) {
+                Some(proxy) => proxy.ready_notifier(),
+                None => return false,
+            }
+        };
+
+        // Wait with timeout for the socket to become ready
+        match tokio::time::timeout(timeout, notify.notified()).await {
+            Ok(_) => self.is_running(name),
+            Err(_) => false,
+        }
     }
 
     /// Get status of all servers in the pool

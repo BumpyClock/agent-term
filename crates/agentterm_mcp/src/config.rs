@@ -505,6 +505,57 @@ pub fn get_user_project_mcp_path(project_path: &str) -> PathBuf {
     PathBuf::from(project_path).join(".mcp.json")
 }
 
+/// Get the AgentTerm-managed MCP config path for a project
+/// Stores in ~/.agent-term/project-configs/{project-identifier}/.mcp.json
+/// This keeps AgentTerm's MCP configs separate from the user's project .mcp.json
+pub fn get_managed_project_mcp_path(project_path: &str) -> McpResult<PathBuf> {
+    let identifier = project_path_to_identifier(project_path);
+    let dir = get_agent_term_dir()?.join("project-configs").join(&identifier);
+    Ok(dir.join(".mcp.json"))
+}
+
+/// Generate a unique, readable identifier for a project path
+/// Format: {sanitized_name}-{hash_suffix}
+/// Example: /Users/john/projects/my-app -> my-app-a1b2c3d4
+fn project_path_to_identifier(project_path: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let path = std::path::Path::new(project_path);
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("project");
+
+    let mut hasher = DefaultHasher::new();
+    project_path.hash(&mut hasher);
+    let hash = hasher.finish();
+    let hash_suffix = format!("{:x}", hash).chars().take(8).collect::<String>();
+
+    let sanitized = sanitize_project_name(name);
+    format!("{}-{}", sanitized, hash_suffix)
+}
+
+fn sanitize_project_name(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else if c == ' ' {
+                '-'
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "project".to_string()
+    } else {
+        sanitized.to_lowercase()
+    }
+}
+
 /// Get the path to the agent-term config.toml file
 pub fn get_config_path() -> McpResult<PathBuf> {
     let dir = get_agent_term_dir()?;

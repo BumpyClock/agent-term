@@ -189,13 +189,16 @@ impl AgentTermApp {
             .map(|s| (s.id.clone(), s.path.clone()))
             .unwrap_or_else(|| (DEFAULT_SECTION_ID.to_string(), String::new()));
 
+        // Inject --mcp-config for Claude if project has managed MCP config
+        let final_args = self.maybe_inject_mcp_config(&tool, args, &project_path);
+
         let input = NewSessionInput {
             title,
             project_path,
             section_id,
             tool,
             command,
-            args: if args.is_empty() { None } else { Some(args) },
+            args: if final_args.is_empty() { None } else { Some(final_args) },
             icon,
         };
 
@@ -211,6 +214,17 @@ impl AgentTermApp {
             }
         }
         cx.notify();
+    }
+
+    /// Inject --mcp-config argument for supported tools if a managed MCP config exists
+    fn maybe_inject_mcp_config(&self, tool: &SessionTool, mut args: Vec<String>, project_path: &str) -> Vec<String> {
+        if matches!(tool, SessionTool::Claude) {
+            if let Some(config_path) = self.mcp_manager.get_project_mcp_config_path(project_path) {
+                args.push("--mcp-config".to_string());
+                args.push(config_path.to_string_lossy().to_string());
+            }
+        }
+        args
     }
 
     pub fn ensure_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {

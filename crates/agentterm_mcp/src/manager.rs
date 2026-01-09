@@ -1,7 +1,7 @@
 use super::config::{
     get_config_path,
     get_managed_global_mcp_path,
-    get_user_project_mcp_path,
+    get_managed_project_mcp_path,
     MCPServerConfig,
     McpJsonConfig,
     UserConfig,
@@ -135,6 +135,20 @@ impl McpManager {
             .ok_or_else(|| McpError::MCPNotFound(name.to_string()))
     }
 
+    /// Get the MCP config file path for launching tools (if it exists)
+    /// Returns the path to the AgentTerm-managed project config if it exists
+    pub fn get_project_mcp_config_path(&self, project_path: &str) -> Option<PathBuf> {
+        if project_path.is_empty() {
+            return None;
+        }
+        let path = get_managed_project_mcp_path(project_path).ok()?;
+        if path.exists() {
+            Some(path)
+        } else {
+            None
+        }
+    }
+
     /// Get attached MCPs for a given scope
     ///
     /// # Arguments
@@ -193,26 +207,26 @@ impl McpManager {
         Ok(names)
     }
 
-    /// Get local MCPs (project .mcp.json)
+    /// Get local MCPs (AgentTerm-managed project config)
     async fn get_local_mcps(&self, project_path: &str) -> McpResult<Vec<String>> {
-        let user_path = get_user_project_mcp_path(project_path);
-        if user_path.exists() {
-            let contents = fs::read_to_string(&user_path).await.map_err(|e| {
+        let managed_path = get_managed_project_mcp_path(project_path)?;
+        if managed_path.exists() {
+            let contents = fs::read_to_string(&managed_path).await.map_err(|e| {
                 diagnostics::log(format!(
-                    "mcp_user_read_failed path={} error={}",
-                    user_path.display(),
+                    "mcp_managed_read_failed path={} error={}",
+                    managed_path.display(),
                     e
                 ));
-                McpError::IoError(format!("{}: {}", user_path.display(), e))
+                McpError::IoError(format!("{}: {}", managed_path.display(), e))
             })?;
 
             let config: McpJsonConfig = serde_json::from_str(&contents).map_err(|e| {
                 diagnostics::log(format!(
-                    "mcp_user_parse_failed path={} error={}",
-                    user_path.display(),
+                    "mcp_managed_parse_failed path={} error={}",
+                    managed_path.display(),
                     e
                 ));
-                McpError::ConfigParseError(format!("{}: {}", user_path.display(), e))
+                McpError::ConfigParseError(format!("{}: {}", managed_path.display(), e))
             })?;
 
             let mut names: Vec<String> = config.mcp_servers.keys().cloned().collect();
@@ -276,16 +290,16 @@ impl McpManager {
         self.write_mcp_json(&config_path, &config).await
     }
 
-    /// Attach MCP to local scope (project .mcp.json)
+    /// Attach MCP to local scope (AgentTerm-managed project config)
     async fn attach_mcp_local(
         &self,
         project_path: &str,
         mcp_name: &str,
         mcp_def: &super::config::MCPDef,
     ) -> McpResult<()> {
-        let mcp_json_path = get_user_project_mcp_path(project_path);
+        let mcp_json_path = get_managed_project_mcp_path(project_path)?;
 
-        // Read existing project MCP config or create new
+        // Read existing managed config or create new
         let mut config = if mcp_json_path.exists() {
             let contents = fs::read_to_string(&mcp_json_path)
                 .await
@@ -353,9 +367,9 @@ impl McpManager {
         self.write_mcp_json(&config_path, &config).await
     }
 
-    /// Detach MCP from local scope (project .mcp.json)
+    /// Detach MCP from local scope (AgentTerm-managed project config)
     async fn detach_mcp_local(&self, project_path: &str, mcp_name: &str) -> McpResult<()> {
-        let mcp_json_path = get_user_project_mcp_path(project_path);
+        let mcp_json_path = get_managed_project_mcp_path(project_path)?;
 
         if !mcp_json_path.exists() {
             return Ok(()); // Nothing to detach
@@ -406,7 +420,8 @@ impl McpManager {
                             pool,
                             mcp_name,
                             Duration::from_secs(3),
-                        );
+                        )
+                        .await;
                     }
 
                     if pool.is_running(mcp_name) {
@@ -547,13 +562,13 @@ impl McpManager {
         self.write_mcp_json(&config_path, &config).await
     }
 
-    /// Set local MCPs
+    /// Set local MCPs (AgentTerm-managed project config)
     async fn set_mcps_local(
         &self,
         project_path: &str,
         mcp_defs: &HashMap<String, super::config::MCPDef>,
     ) -> McpResult<()> {
-        let mcp_json_path = get_user_project_mcp_path(project_path);
+        let mcp_json_path = get_managed_project_mcp_path(project_path)?;
 
         // Create new config
         let mut config = McpJsonConfig::default();

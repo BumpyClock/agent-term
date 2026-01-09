@@ -64,8 +64,8 @@ pub fn shutdown_global_pool() -> McpResult<()> {
     Ok(())
 }
 
-pub fn wait_for_socket_ready(pool: &Pool, name: &str, timeout: Duration) -> bool {
-    pool.wait_for_socket(name, timeout)
+pub async fn wait_for_socket_ready(pool: &Pool, name: &str, timeout: Duration) -> bool {
+    pool.wait_for_socket(name, timeout).await
 }
 
 pub fn get_external_socket_path(name: &str) -> Option<PathBuf> {
