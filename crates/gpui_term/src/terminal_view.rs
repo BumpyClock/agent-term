@@ -53,6 +53,8 @@ pub struct TerminalView {
     terminal: Entity<Terminal>,
     focus_handle: FocusHandle,
     has_bell: bool,
+    font_family: String,
+    font_size: f32,
 }
 
 impl TerminalView {
@@ -60,6 +62,23 @@ impl TerminalView {
     ///
     /// Sets up event subscriptions and focus handling for the terminal.
     pub fn new(terminal: Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_settings(terminal, window, cx, "JetBrains Mono", 14.0)
+    }
+
+    /// Creates a new TerminalView with custom font settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `terminal` - The Terminal entity to wrap
+    /// * `font_family` - The font family name for terminal rendering
+    /// * `font_size` - The font size in pixels
+    pub fn with_settings(
+        terminal: Entity<Terminal>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        font_family: impl Into<String>,
+        font_size: f32,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
 
         cx.subscribe(&terminal, |this, _, event: &Event, cx| {
@@ -89,7 +108,15 @@ impl TerminalView {
             terminal,
             focus_handle,
             has_bell: false,
+            font_family: font_family.into(),
+            font_size,
         }
+    }
+
+    /// Updates the font settings for the terminal.
+    pub fn set_font_settings(&mut self, font_family: impl Into<String>, font_size: f32) {
+        self.font_family = font_family.into();
+        self.font_size = font_size;
     }
 
     /// Returns a reference to the underlying Terminal entity.
@@ -318,11 +345,13 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::scroll_line_down))
             .on_action(cx.listener(Self::scroll_page_up))
             .on_action(cx.listener(Self::scroll_page_down))
-            .child(TerminalElement::new(
+            .child(TerminalElement::with_settings(
                 terminal,
                 focus_handle.clone(),
                 is_focused,
                 true,
+                &self.font_family,
+                self.font_size,
             ))
     }
 }

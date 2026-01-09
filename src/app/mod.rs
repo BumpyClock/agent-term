@@ -142,11 +142,19 @@ impl Render for AgentTermApp {
                     .bg(gpui::transparent_black())
                     .border_b_0()
             )
-            .child(self.render_terminal_container(cx))
-            .when(self.sidebar_visible, |el| {
-                el.child(self.render_sidebar_shell(cx))
-            })
-            // Dialog and sheet layers for gpui-component
+            // Main content (opacity controlled via surface background alpha)
+            .child(
+                div()
+                    .size_full()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .child(self.render_terminal_container(cx))
+                    .when(self.sidebar_visible, |el| {
+                        el.child(self.render_sidebar_shell(cx))
+                    })
+            )
+            // Dialog and sheet layers at full opacity
             .children(gpui_component::Root::render_dialog_layer(window, cx))
             .children(gpui_component::Root::render_sheet_layer(window, cx))
     }

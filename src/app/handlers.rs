@@ -29,8 +29,10 @@ impl AgentTermApp {
     }
 
     // Settings dialog
-    pub fn open_settings(&mut self, _: &OpenSettings, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
         let settings = self.settings.clone();
+        let app_entity = cx.entity().downgrade();
+        let main_window_handle = window.window_handle();
 
         // Compute bounds before opening window to avoid borrow conflict
         let window_bounds = WindowBounds::Windowed(Bounds::centered(
@@ -54,7 +56,32 @@ impl AgentTermApp {
                 show: true,
                 ..Default::default()
             },
-            |settings_window, cx| cx.new(|cx| SettingsDialog::new(settings, settings_window, cx)),
+            move |settings_window, cx| {
+                // Create the SettingsDialog entity
+                let dialog = cx.new(|cx| {
+                    SettingsDialog::new(settings.clone(), settings_window, cx)
+                        .on_save({
+                            let app_entity = app_entity.clone();
+                            move |new_settings, _window, cx| {
+                                // Update settings in the main app
+                                let _ = cx.update_window(main_window_handle, |_, _window, cx| {
+                                    if let Some(app) = app_entity.upgrade() {
+                                        app.update(cx, |app, cx| {
+                                            app.update_settings(new_settings.clone(), cx);
+                                        });
+                                    }
+                                });
+                            }
+                        })
+                        .on_close({
+                            move |window, _cx| {
+                                window.remove_window();
+                            }
+                        })
+                });
+                // Wrap in Root to provide theme context for gpui-component elements
+                cx.new(|cx| gpui_component::Root::new(dialog, settings_window, cx))
+            },
         );
     }
 

@@ -363,10 +363,12 @@ pub struct TerminalElement {
     focus: FocusHandle,
     focused: bool,
     cursor_visible: bool,
+    font_family: String,
+    font_size: f32,
 }
 
 impl TerminalElement {
-    /// Creates a new terminal element.
+    /// Creates a new terminal element with default font settings.
     ///
     /// # Arguments
     ///
@@ -380,11 +382,34 @@ impl TerminalElement {
         focused: bool,
         cursor_visible: bool,
     ) -> Self {
+        Self::with_settings(terminal, focus, focused, cursor_visible, "JetBrains Mono", 14.0)
+    }
+
+    /// Creates a new terminal element with custom font settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `terminal` - The terminal entity to render
+    /// * `focus` - Focus handle for keyboard input
+    /// * `focused` - Whether the terminal currently has focus
+    /// * `cursor_visible` - Whether the cursor should be visible (for blinking)
+    /// * `font_family` - The font family name to use for rendering
+    /// * `font_size` - The font size in pixels
+    pub fn with_settings(
+        terminal: Entity<Terminal>,
+        focus: FocusHandle,
+        focused: bool,
+        cursor_visible: bool,
+        font_family: impl Into<String>,
+        font_size: f32,
+    ) -> Self {
         TerminalElement {
             terminal,
             focus,
             focused,
             cursor_visible,
+            font_family: font_family.into(),
+            font_size,
         }
     }
 
@@ -623,6 +648,35 @@ impl Default for TextStyle {
     }
 }
 
+impl TextStyle {
+    /// Creates a TextStyle with custom font settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `font_family` - The font family name
+    /// * `font_size` - The font size in pixels
+    pub fn with_font(font_family: &str, font_size: f32) -> Self {
+        TextStyle {
+            font: Font {
+                family: font_family.to_string().into(),
+                features: gpui::FontFeatures::default(),
+                fallbacks: None,
+                weight: FontWeight::NORMAL,
+                style: FontStyle::Normal,
+            },
+            font_size: AbsoluteLength::Pixels(px(font_size)),
+            font_weight: FontWeight::NORMAL,
+            foreground: Hsla::white(),
+            background: Hsla {
+                h: 0.0,
+                s: 0.0,
+                l: 0.0,
+                a: 0.0,
+            },
+        }
+    }
+}
+
 impl Element for TerminalElement {
     type RequestLayoutState = ();
     type PrepaintState = LayoutState;
@@ -662,7 +716,7 @@ impl Element for TerminalElement {
     ) -> Self::PrepaintState {
         let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
 
-        let text_style = TextStyle::default();
+        let text_style = TextStyle::with_font(&self.font_family, self.font_size);
         let background_color = text_style.background;
 
         let font_id = window.text_system().resolve_font(&text_style.font);

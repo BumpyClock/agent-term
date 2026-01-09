@@ -42,7 +42,9 @@ impl AgentTermApp {
 
     pub fn render_sidebar_shell(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
-        let base = rgba(rgba_u32(SURFACE_SIDEBAR, SIDEBAR_GLASS_BASE_ALPHA));
+        // Apply window_opacity to sidebar background alpha
+        let bg_alpha = SIDEBAR_GLASS_BASE_ALPHA * self.settings.window_opacity;
+        let base = rgba(rgba_u32(SURFACE_SIDEBAR, bg_alpha));
 
         div()
             .id("sidebar-shell")

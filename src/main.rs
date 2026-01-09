@@ -1,6 +1,7 @@
 mod app;
 mod assets;
 mod dialogs;
+mod fonts;
 mod icons;
 mod settings;
 mod settings_dialog;
