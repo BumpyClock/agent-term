@@ -290,7 +290,7 @@ impl AgentTermApp {
     }
 
     /// Updates the application settings and propagates changes to terminal views.
-    pub fn update_settings(&mut self, settings: AppSettings, cx: &mut Context<Self>) {
+    pub fn update_settings(&mut self, settings: AppSettings, window: &mut Window, cx: &mut Context<Self>) {
         // Update font settings for all terminal views
         let font_family = settings.font_family.clone();
         let font_size = settings.font_size;
@@ -300,10 +300,20 @@ impl AgentTermApp {
             });
         }
 
+        // Update window background appearance if blur setting changed
+        if settings.blur_enabled != self.settings.blur_enabled {
+            let appearance = if settings.blur_enabled {
+                gpui::WindowBackgroundAppearance::Blurred
+            } else {
+                gpui::WindowBackgroundAppearance::Transparent
+            };
+            window.set_background_appearance(appearance);
+        }
+
         // Store the new settings
         self.settings = settings;
 
-        // Trigger re-render for opacity and other changes
+        // Trigger re-render for transparency and other changes
         cx.notify();
     }
 }

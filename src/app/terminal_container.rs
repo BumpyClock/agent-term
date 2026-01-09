@@ -30,6 +30,7 @@ impl AgentTermApp {
             .left(px(content_left))
             .flex()
             .flex_col()
+            .bg(gpui::transparent_black())
             .when_some(active_view.as_ref(), |el, tv| {
                 el.child(
                     div()

@@ -40,11 +40,20 @@ pub struct AppSettings {
     pub font_size: f32,
     pub line_height: f32,
     pub letter_spacing: f32,
-    pub window_opacity: f32,
+    /// Window transparency (0.0 = solid, 1.0 = fully transparent)
+    #[serde(default, alias = "window_opacity")]
+    pub window_transparency: f32,
+    /// Enable macOS vibrancy blur effect
+    #[serde(default = "default_blur_enabled")]
+    pub blur_enabled: bool,
 
     // Tools
     pub default_shell_id: Option<String>,
     pub custom_tools: Vec<CustomTool>,
+}
+
+fn default_blur_enabled() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -58,11 +67,12 @@ impl Default for AppSettings {
             theme: Theme::System,
             accent_color: "#5eead4".to_string(),
             terminal_color_scheme: "one".to_string(),
-            font_family: "JetBrains Mono".to_string(),
+            font_family: "JetBrainsMono Nerd Font".to_string(),
             font_size: 14.0,
             line_height: 1.4,
             letter_spacing: 0.0,
-            window_opacity: 1.0,
+            window_transparency: 0.0, // 0.0 = solid (no transparency)
+            blur_enabled: true,
 
             // Tools
             default_shell_id: None,

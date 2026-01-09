@@ -22,7 +22,7 @@ use gpui::{
 use gpui_component::{TitleBar, theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode}};
 use gpui_term::{Clear, Copy, Paste, SelectAll};
 
-use constants::{ENABLE_BLUR, rgba_u32, SURFACE_SIDEBAR, SIDEBAR_GLASS_BASE_ALPHA};
+use constants::{rgba_u32, SURFACE_ROOT, SURFACE_ROOT_ALPHA};
 use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
@@ -84,10 +84,12 @@ pub fn run() {
             // For now, just a no-op. Could show an about dialog later.
         });
 
-        let background_appearance = if ENABLE_BLUR {
+        // Load settings to determine initial window appearance
+        let settings = crate::settings::AppSettings::load();
+        let background_appearance = if settings.blur_enabled {
             WindowBackgroundAppearance::Blurred
         } else {
-            WindowBackgroundAppearance::Opaque
+            WindowBackgroundAppearance::Transparent
         };
 
         let window_options = WindowOptions {
@@ -117,11 +119,18 @@ pub fn run() {
 
 impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Calculate base surface alpha based on transparency setting
+        // Higher transparency = lower alpha (more blur shows through)
+        // At transparency=0: full tint (SURFACE_ROOT_ALPHA)
+        // At transparency=1: no tint (fully transparent, blur shows through)
+        let base_alpha = SURFACE_ROOT_ALPHA * (1.0 - self.settings.window_transparency);
+        let base_bg = rgba(rgba_u32(SURFACE_ROOT, base_alpha));
+
         div()
             .id("agentterm-gpui")
             .size_full()
             .relative()
-            .bg(gpui::transparent_black())
+            .bg(base_bg)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::open_mcp_manager))
@@ -142,7 +151,7 @@ impl Render for AgentTermApp {
                     .bg(gpui::transparent_black())
                     .border_b_0()
             )
-            // Main content (opacity controlled via surface background alpha)
+            // Main content
             .child(
                 div()
                     .size_full()

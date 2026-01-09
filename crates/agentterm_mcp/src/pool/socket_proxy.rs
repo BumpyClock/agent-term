@@ -4,16 +4,21 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
+use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::time::{sleep, Duration, Instant};
+
+// TODO: Consider making these configurable in future
+const REQUEST_TTL_SECS: u64 = 300;
+const CLEANUP_INTERVAL: u32 = 100;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use crate::diagnostics;
 use super::transport::{self, LocalListener, LocalStream};
@@ -33,10 +38,12 @@ pub struct SocketProxy {
     kill_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     listener: Mutex<Option<Arc<LocalListener>>>,
     clients: Arc<Mutex<HashMap<String, ClientSender>>>,
-    request_map: Arc<Mutex<HashMap<String, String>>>,
+    request_map: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     shutdown: Arc<AtomicBool>,
+    shutdown_notify: Arc<Notify>,
     started_at: Mutex<Option<Instant>>,
     total_connections: Arc<AtomicU32>,
+    cleanup_counter: Arc<AtomicU32>,
     exit_complete_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     exit_complete_rx: Mutex<Option<oneshot::Receiver<()>>>,
 }
@@ -64,15 +71,17 @@ impl SocketProxy {
             clients: Arc::new(Mutex::new(HashMap::new())),
             request_map: Arc::new(Mutex::new(HashMap::new())),
             shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown_notify: Arc::new(Notify::new()),
             started_at: Mutex::new(None),
             total_connections: Arc::new(AtomicU32::new(0)),
+            cleanup_counter: Arc::new(AtomicU32::new(0)),
             exit_complete_tx: Arc::new(Mutex::new(None)),
             exit_complete_rx: Mutex::new(None),
         }
     }
 
     pub fn status(&self) -> ServerStatus {
-        *self.status.lock().unwrap()
+        *self.status.lock()
     }
 
     pub fn socket_path(&self) -> PathBuf {
@@ -88,7 +97,7 @@ impl SocketProxy {
     }
 
     pub fn uptime_seconds(&self) -> Option<u64> {
-        self.started_at.lock().unwrap().map(|start| start.elapsed().as_secs())
+        self.started_at.lock().map(|start| start.elapsed().as_secs())
     }
 
     pub fn connection_count(&self) -> u32 {
@@ -98,7 +107,7 @@ impl SocketProxy {
     /// Takes the exit completion receiver, allowing the caller to await process exit.
     /// Returns None if start() hasn't been called or receiver was already taken.
     pub fn take_exit_receiver(&self) -> Option<oneshot::Receiver<()>> {
-        self.exit_complete_rx.lock().unwrap().take()
+        self.exit_complete_rx.lock().take()
     }
 
     pub fn start(&self) -> io::Result<()> {
@@ -106,11 +115,11 @@ impl SocketProxy {
             return Ok(());
         }
         if !self.owned {
-            *self.status.lock().unwrap() = ServerStatus::Running;
+            *self.status.lock() = ServerStatus::Running;
             return Ok(());
         }
 
-        *self.status.lock().unwrap() = ServerStatus::Starting;
+        *self.status.lock() = ServerStatus::Starting;
 
         diagnostics::log(format!(
             "pool_proxy_starting name={} command={} args={:?}",
@@ -148,15 +157,15 @@ impl SocketProxy {
         let stderr = child.stderr.take();
 
         let (request_tx, request_rx) = mpsc::channel::<String>(1024);
-        *self.request_tx.lock().unwrap() = Some(request_tx);
+        *self.request_tx.lock() = Some(request_tx);
 
         let (kill_tx, kill_rx) = oneshot::channel();
-        *self.kill_tx.lock().unwrap() = Some(kill_tx);
+        *self.kill_tx.lock() = Some(kill_tx);
 
         // Create exit completion channel for callers to await process exit
         let (exit_tx, exit_rx) = oneshot::channel::<()>();
-        *self.exit_complete_tx.lock().unwrap() = Some(exit_tx);
-        *self.exit_complete_rx.lock().unwrap() = Some(exit_rx);
+        *self.exit_complete_tx.lock() = Some(exit_tx);
+        *self.exit_complete_rx.lock() = Some(exit_rx);
 
         if let Some(stderr) = stderr {
             self.spawn_stderr_logger(stderr)?;
@@ -172,6 +181,7 @@ impl SocketProxy {
 
         let status = self.status.clone();
         let shutdown = self.shutdown.clone();
+        let shutdown_notify = self.shutdown_notify.clone();
         let name = self.name.clone();
         let exit_complete_tx = self.exit_complete_tx.clone();
 
@@ -186,11 +196,12 @@ impl SocketProxy {
                 }
             };
 
-            *status.lock().unwrap() = ServerStatus::Stopped;
+            *status.lock() = ServerStatus::Stopped;
             shutdown.store(true, Ordering::SeqCst);
+            shutdown_notify.notify_waiters();
 
             // Signal exit completion to any waiting callers
-            if let Some(tx) = exit_complete_tx.lock().unwrap().take() {
+            if let Some(tx) = exit_complete_tx.lock().take() {
                 let _ = tx.send(());
             }
 
@@ -203,12 +214,12 @@ impl SocketProxy {
         });
 
         let listener = Arc::new(transport::bind(&self.socket_path)?);
-        *self.listener.lock().unwrap() = Some(listener.clone());
+        *self.listener.lock() = Some(listener.clone());
 
         self.spawn_accept_loop(listener);
 
-        *self.status.lock().unwrap() = ServerStatus::Running;
-        *self.started_at.lock().unwrap() = Some(Instant::now());
+        *self.status.lock() = ServerStatus::Running;
+        *self.started_at.lock() = Some(Instant::now());
         diagnostics::log(format!(
             "pool_proxy_started name={} socket={}",
             self.name,
@@ -219,12 +230,13 @@ impl SocketProxy {
 
     pub fn stop(&self) -> io::Result<()> {
         self.shutdown.store(true, Ordering::SeqCst);
-        if let Some(listener) = self.listener.lock().unwrap().take() {
+        self.shutdown_notify.notify_waiters();
+        if let Some(listener) = self.listener.lock().take() {
             drop(listener);
         }
 
         if self.owned {
-            if let Some(kill_tx) = self.kill_tx.lock().unwrap().take() {
+            if let Some(kill_tx) = self.kill_tx.lock().take() {
                 let _ = kill_tx.send(());
             }
             #[cfg(unix)]
@@ -233,14 +245,14 @@ impl SocketProxy {
             }
         }
 
-        *self.request_tx.lock().unwrap() = None;
-        self.clients.lock().unwrap().clear();
-        self.request_map.lock().unwrap().clear();
-        *self.started_at.lock().unwrap() = None;
+        *self.request_tx.lock() = None;
+        self.clients.lock().clear();
+        self.request_map.lock().clear();
+        *self.started_at.lock() = None;
         // For non-owned servers, set status here since there's no background task.
         // For owned servers, the background task sets Stopped after process exits.
         if !self.owned {
-            *self.status.lock().unwrap() = ServerStatus::Stopped;
+            *self.status.lock() = ServerStatus::Stopped;
         }
         Ok(())
     }
@@ -281,8 +293,10 @@ impl SocketProxy {
         let request_map = self.request_map.clone();
         let request_tx = self.request_tx.clone();
         let shutdown = self.shutdown.clone();
+        let shutdown_notify = self.shutdown_notify.clone();
         let name = self.name.clone();
         let total_connections = self.total_connections.clone();
+        let cleanup_counter = self.cleanup_counter.clone();
 
         tokio::spawn(async move {
             let mut counter = 0;
@@ -296,7 +310,7 @@ impl SocketProxy {
                         counter += 1;
                         total_connections.fetch_add(1, Ordering::SeqCst);
                         let (tx, rx) = mpsc::channel::<String>(128);
-                        clients.lock().unwrap().insert(client_id.clone(), tx);
+                        clients.lock().insert(client_id.clone(), tx);
                         diagnostics::log(format!(
                             "pool_client_connected name={} client_id={}",
                             name, client_id
@@ -306,6 +320,8 @@ impl SocketProxy {
                         let request_map_for_drop = request_map.clone();
                         let request_tx_for_client = request_tx.clone();
                         let shutdown_for_client = shutdown.clone();
+                        let shutdown_notify_for_client = shutdown_notify.clone();
+                        let cleanup_counter_for_client = cleanup_counter.clone();
                         let client_id_clone = client_id.clone();
 
                         tokio::spawn(async move {
@@ -316,6 +332,8 @@ impl SocketProxy {
                                 request_map_for_drop,
                                 clients_for_drop,
                                 shutdown_for_client,
+                                shutdown_notify_for_client,
+                                cleanup_counter_for_client,
                                 rx,
                             )
                             .await;
@@ -338,6 +356,7 @@ impl SocketProxy {
         let request_map = self.request_map.clone();
         let shutdown = self.shutdown.clone();
         let name = self.name.clone();
+        let cleanup_counter = self.cleanup_counter.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             let mut buffer = String::new();
@@ -353,7 +372,7 @@ impl SocketProxy {
                         if line.is_empty() {
                             continue;
                         }
-                        route_response(&line, &clients, &request_map).await;
+                        route_response(&line, &clients, &request_map, &cleanup_counter).await;
                     }
                     Err(err) => {
                         diagnostics::log(format!(
@@ -370,6 +389,7 @@ impl SocketProxy {
 
     fn spawn_stdin_writer(&self, stdin: ChildStdin, mut rx: mpsc::Receiver<String>) {
         let shutdown = self.shutdown.clone();
+        let shutdown_notify = self.shutdown_notify.clone();
         let name = self.name.clone();
         tokio::spawn(async move {
             let mut stdin = stdin;
@@ -399,7 +419,7 @@ impl SocketProxy {
                             None => break,
                         }
                     }
-                    _ = sleep(Duration::from_millis(50)) => {}
+                    _ = shutdown_notify.notified() => break,
                 }
             }
         });
@@ -410,9 +430,11 @@ async fn handle_client(
     stream: LocalStream,
     client_id: String,
     request_tx: Arc<Mutex<Option<mpsc::Sender<String>>>>,
-    request_map: Arc<Mutex<HashMap<String, String>>>,
+    request_map: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     clients: Arc<Mutex<HashMap<String, ClientSender>>>,
     shutdown: Arc<AtomicBool>,
+    shutdown_notify: Arc<Notify>,
+    cleanup_counter: Arc<AtomicU32>,
     mut rx: mpsc::Receiver<String>,
 ) {
     diagnostics::log(format!(
@@ -447,7 +469,7 @@ async fn handle_client(
                         }
                         if let Ok(value) = serde_json::from_str::<Value>(&line) {
                             if let Some(id) = value.get("id").and_then(id_key) {
-                                request_map.lock().unwrap().insert(id, client_id.clone());
+                                request_map.lock().insert(id, (client_id.clone(), Instant::now()));
                             }
                         } else if parse_failures < 3 {
                             parse_failures += 1;
@@ -457,7 +479,7 @@ async fn handle_client(
                                 line.len()
                             ));
                         }
-                        let sender = request_tx.lock().unwrap().clone();
+                        let sender = request_tx.lock().clone();
                         if let Some(sender) = sender {
                             if sender.send(line.clone()).await.is_err() {
                                 diagnostics::log(format!(
@@ -511,23 +533,30 @@ async fn handle_client(
                     None => break,
                 }
             }
-            _ = sleep(Duration::from_millis(50)) => {}
+            _ = shutdown_notify.notified() => break,
         }
     }
 
-    clients.lock().unwrap().remove(&client_id);
+    // Clean up all pending requests for this client before removing from clients map
+    request_map.lock().retain(|_, (cid, _)| cid != &client_id);
+    clients.lock().remove(&client_id);
+    cleanup_stale_requests(&request_map, &cleanup_counter);
 }
 
 async fn route_response(
     line: &str,
     clients: &Arc<Mutex<HashMap<String, ClientSender>>>,
-    request_map: &Arc<Mutex<HashMap<String, String>>>,
+    request_map: &Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    cleanup_counter: &Arc<AtomicU32>,
 ) {
+    // Opportunistically clean up stale requests
+    cleanup_stale_requests(request_map, cleanup_counter);
+
     let mut target = None;
     let parsed = serde_json::from_str::<Value>(line);
     if let Ok(value) = parsed {
         if let Some(id) = value.get("id").and_then(id_key) {
-            target = request_map.lock().unwrap().remove(&id);
+            target = request_map.lock().remove(&id).map(|(cid, _)| cid);
         }
     } else {
         diagnostics::log(format!(
@@ -537,7 +566,7 @@ async fn route_response(
     }
 
     if let Some(client_id) = target {
-        let sender = clients.lock().unwrap().get(&client_id).cloned();
+        let sender = clients.lock().get(&client_id).cloned();
         if let Some(sender) = sender {
             if sender.send(line.to_string()).await.is_ok() {
                 diagnostics::log(format!(
@@ -559,8 +588,32 @@ async fn route_response(
     }
 }
 
+fn cleanup_stale_requests(
+    request_map: &Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    cleanup_counter: &Arc<AtomicU32>,
+) {
+    let count = cleanup_counter.fetch_add(1, Ordering::Relaxed);
+    if count % CLEANUP_INTERVAL != 0 {
+        return;
+    }
+
+    let now = Instant::now();
+    let before_count = request_map.lock().len();
+    request_map.lock().retain(|_, (_, inserted_at)| {
+        now.duration_since(*inserted_at).as_secs() <= REQUEST_TTL_SECS
+    });
+    let after_count = request_map.lock().len();
+    let removed = before_count - after_count;
+    if removed > 0 {
+        diagnostics::log(format!(
+            "pool_stale_requests_cleaned removed={} remaining={}",
+            removed, after_count
+        ));
+    }
+}
+
 async fn broadcast_to_all(line: &str, clients: &Arc<Mutex<HashMap<String, ClientSender>>>) {
-    let senders: Vec<ClientSender> = clients.lock().unwrap().values().cloned().collect();
+    let senders: Vec<ClientSender> = clients.lock().values().cloned().collect();
     for sender in &senders {
         let _ = sender.send(line.to_string()).await;
     }

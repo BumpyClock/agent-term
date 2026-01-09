@@ -8,61 +8,108 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window,
 };
 
-use crate::fonts::{find_font_index, font_presets};
+use crate::fonts::{find_font_index, font_presets, FontOption};
 use crate::settings::{AppSettings, Theme};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
 };
 use gpui_component::input::{InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction};
+use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
+use gpui_component::IndexPath;
+
+/// A font item for the Select dropdown that wraps FontOption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FontItem {
+    name: SharedString,
+    family: String,
+}
+
+impl FontItem {
+    fn from_font_option(opt: &FontOption) -> Self {
+        Self {
+            name: opt.name.into(),
+            family: opt.family.to_string(),
+        }
+    }
+}
+
+impl SelectItem for FontItem {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        self.name.clone()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.family
+    }
+}
 
 /// Settings dialog state.
 pub struct SettingsDialog {
     focus_handle: FocusHandle,
     tab_index: usize,
     settings: AppSettings,
+    original_settings: AppSettings,
     font_size_input: Entity<GpuiInputState>,
-    line_height_slider: Entity<SliderState>,
-    letter_spacing_slider: Entity<SliderState>,
-    opacity_slider: Entity<SliderState>,
-    font_dropdown_open: bool,
-    selected_font_index: usize,
+    line_height_input: Entity<GpuiInputState>,
+    letter_spacing_input: Entity<GpuiInputState>,
+    transparency_slider: Entity<SliderState>,
+    font_select: Entity<SelectState<Vec<FontItem>>>,
     on_close: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_save: Option<Box<dyn Fn(AppSettings, &mut Window, &mut App) + 'static>>,
+    on_change: Option<Box<dyn Fn(AppSettings, &mut Window, &mut App) + 'static>>,
 }
 
 impl SettingsDialog {
     /// Create a new settings dialog.
     pub fn new(settings: AppSettings, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let original_settings = settings.clone();
+
         let font_size_input = cx.new(|cx| {
             GpuiInputState::new(window, cx)
                 .default_value(settings.font_size.to_string())
         });
-        let line_height_slider = cx.new(|_| {
-            SliderState::new()
-                .min(1.0)
-                .max(2.0)
-                .step(0.1)
-                .default_value(settings.line_height)
+
+        let line_height_input = cx.new(|cx| {
+            GpuiInputState::new(window, cx)
+                .default_value(format!("{:.1}", settings.line_height))
         });
-        let letter_spacing_slider = cx.new(|_| {
-            SliderState::new()
-                .min(-2.0)
-                .max(5.0)
-                .step(0.5)
-                .default_value(settings.letter_spacing)
+
+        let letter_spacing_input = cx.new(|cx| {
+            GpuiInputState::new(window, cx)
+                .default_value(format!("{:.1}", settings.letter_spacing))
         });
-        let opacity_slider = cx.new(|_| {
+
+        let transparency_slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
                 .max(100.0)
                 .step(5.0)
-                .default_value(settings.window_opacity * 100.0)
+                .default_value(settings.window_transparency * 100.0)
         });
 
-        // Find initial font index
-        let selected_font_index = find_font_index(&settings.font_family).unwrap_or(0);
+        // Create font select with initial selection
+        let font_items: Vec<FontItem> = font_presets()
+            .iter()
+            .map(FontItem::from_font_option)
+            .collect();
+        let selected_font_index = find_font_index(&settings.font_family)
+            .map(|idx| IndexPath::default().row(idx));
+        let font_select = cx.new(|cx| {
+            SelectState::new(font_items, selected_font_index, window, cx)
+        });
 
-        // Subscribe to NumberInputEvent for +/- buttons
+        // Subscribe to font select events
+        cx.subscribe_in(&font_select, window, |this, _, event: &SelectEvent<Vec<FontItem>>, window, cx| {
+            if let SelectEvent::Confirm(Some(family)) = event {
+                this.settings.font_family = family.clone();
+                this.notify_change(window, cx);
+            }
+        })
+        .detach();
+
+        // Subscribe to font size NumberInput events
         cx.subscribe_in(&font_size_input, window, |this, input, event: &NumberInputEvent, window, cx| {
             if let NumberInputEvent::Step(action) = event {
                 input.update(cx, |input, cx| {
@@ -74,43 +121,82 @@ impl SettingsDialog {
                     this.settings.font_size = new_value;
                     input.set_value(new_value.to_string(), window, cx);
                 });
-                cx.notify();
+                this.notify_change(window, cx);
             }
         })
         .detach();
 
-        // Subscribe to InputEvent::Change for manual typing
-        cx.subscribe_in(&font_size_input, window, |this, input, event: &InputEvent, _window, cx| {
+        cx.subscribe_in(&font_size_input, window, |this, input, event: &InputEvent, window, cx| {
             if let InputEvent::Change = event {
                 if let Ok(value) = input.read(cx).value().parse::<f32>() {
                     this.settings.font_size = value.clamp(8.0, 32.0);
-                    cx.notify();
+                    this.notify_change(window, cx);
                 }
             }
         })
         .detach();
 
-        cx.subscribe(&line_height_slider, |this, _, event: &SliderEvent, cx| {
-            let SliderEvent::Change(slider_value) = event;
-            this.settings.line_height = slider_value.start();
-            cx.notify();
+        // Subscribe to line height NumberInput events
+        cx.subscribe_in(&line_height_input, window, |this, input, event: &NumberInputEvent, window, cx| {
+            if let NumberInputEvent::Step(action) = event {
+                input.update(cx, |input, cx| {
+                    let value = input.value().parse::<f32>().unwrap_or(1.4);
+                    let new_value = match action {
+                        StepAction::Increment => (value + 0.1).min(2.5),
+                        StepAction::Decrement => (value - 0.1).max(1.0),
+                    };
+                    this.settings.line_height = new_value;
+                    input.set_value(format!("{:.1}", new_value), window, cx);
+                });
+                this.notify_change(window, cx);
+            }
         })
         .detach();
 
-        cx.subscribe(
-            &letter_spacing_slider,
-            |this, _, event: &SliderEvent, cx| {
-                let SliderEvent::Change(slider_value) = event;
-                this.settings.letter_spacing = slider_value.start();
-                cx.notify();
-            },
-        )
+        cx.subscribe_in(&line_height_input, window, |this, input, event: &InputEvent, window, cx| {
+            if let InputEvent::Change = event {
+                if let Ok(value) = input.read(cx).value().parse::<f32>() {
+                    this.settings.line_height = value.clamp(1.0, 2.5);
+                    this.notify_change(window, cx);
+                }
+            }
+        })
         .detach();
 
-        cx.subscribe(&opacity_slider, |this, _, event: &SliderEvent, cx| {
+        // Subscribe to letter spacing NumberInput events
+        cx.subscribe_in(&letter_spacing_input, window, |this, input, event: &NumberInputEvent, window, cx| {
+            if let NumberInputEvent::Step(action) = event {
+                input.update(cx, |input, cx| {
+                    let value = input.value().parse::<f32>().unwrap_or(0.0);
+                    let new_value = match action {
+                        StepAction::Increment => (value + 0.5).min(10.0),
+                        StepAction::Decrement => (value - 0.5).max(-2.0),
+                    };
+                    this.settings.letter_spacing = new_value;
+                    input.set_value(format!("{:.1}", new_value), window, cx);
+                });
+                this.notify_change(window, cx);
+            }
+        })
+        .detach();
+
+        cx.subscribe_in(&letter_spacing_input, window, |this, input, event: &InputEvent, window, cx| {
+            if let InputEvent::Change = event {
+                if let Ok(value) = input.read(cx).value().parse::<f32>() {
+                    this.settings.letter_spacing = value.clamp(-2.0, 10.0);
+                    this.notify_change(window, cx);
+                }
+            }
+        })
+        .detach();
+
+        // Subscribe to transparency slider events
+        cx.subscribe(&transparency_slider, |this, _, event: &SliderEvent, cx| {
             let SliderEvent::Change(slider_value) = event;
-            this.settings.window_opacity = slider_value.start() / 100.0;
+            this.settings.window_transparency = slider_value.start() / 100.0;
             cx.notify();
+            // Note: Can't call notify_change here since we don't have window access
+            // The slider subscription doesn't provide window in older GPUI versions
         })
         .detach();
 
@@ -118,14 +204,15 @@ impl SettingsDialog {
             focus_handle: cx.focus_handle(),
             tab_index: 0,
             settings,
+            original_settings,
             font_size_input,
-            line_height_slider,
-            letter_spacing_slider,
-            opacity_slider,
-            font_dropdown_open: false,
-            selected_font_index,
+            line_height_input,
+            letter_spacing_input,
+            transparency_slider,
+            font_select,
             on_close: None,
             on_save: None,
+            on_change: None,
         }
     }
 
@@ -144,7 +231,27 @@ impl SettingsDialog {
         self
     }
 
+    /// Set the change callback for live preview.
+    pub fn on_change(
+        mut self,
+        callback: impl Fn(AppSettings, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_change = Some(Box::new(callback));
+        self
+    }
+
+    /// Notify that settings have changed (for live preview).
+    fn notify_change(&mut self, window: &mut Window, cx: &mut App) {
+        if let Some(on_change) = self.on_change.as_ref() {
+            on_change(self.settings.clone(), window, cx);
+        }
+    }
+
     fn handle_close(&mut self, window: &mut Window, cx: &mut App) {
+        // Revert to original settings
+        if let Some(on_change) = self.on_change.as_ref() {
+            on_change(self.original_settings.clone(), window, cx);
+        }
         if let Some(on_close) = self.on_close.take() {
             on_close(window, cx);
             self.on_close = Some(on_close);
@@ -156,6 +263,11 @@ impl SettingsDialog {
         if let Some(on_save) = self.on_save.take() {
             on_save(self.settings.clone(), window, cx);
             self.on_save = Some(on_save);
+        }
+        // Close the window after saving
+        if let Some(on_close) = self.on_close.take() {
+            on_close(window, cx);
+            self.on_close = Some(on_close);
         }
     }
 
@@ -205,9 +317,7 @@ impl SettingsDialog {
     }
 
     fn render_appearance_tab(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let line_height = self.line_height_slider.read(cx).value().start();
-        let letter_spacing = self.letter_spacing_slider.read(cx).value().start();
-        let opacity_percent = self.opacity_slider.read(cx).value().start();
+        let transparency_percent = self.transparency_slider.read(cx).value().start();
 
         div()
             .flex()
@@ -249,16 +359,19 @@ impl SettingsDialog {
                     .into_any_element(),
                 cx,
             ))
-            .child(self.render_slider_row(
+            .child(self.render_setting_row(
                 "Line Height",
-                format!("{:.1}", line_height),
-                Slider::new(&self.line_height_slider).into_any_element(),
+                "1.0-2.5",
+                NumberInput::new(&self.line_height_input)
+                    .into_any_element(),
                 cx,
             ))
-            .child(self.render_slider_row(
+            .child(self.render_setting_row(
                 "Letter Spacing",
-                format!("{:.1}px", letter_spacing),
-                Slider::new(&self.letter_spacing_slider).into_any_element(),
+                "-2 to 10 px",
+                NumberInput::new(&self.letter_spacing_input)
+                    .suffix(div().text_xs().text_color(cx.theme().muted_foreground).child("px"))
+                    .into_any_element(),
                 cx,
             ))
             // Window section
@@ -271,9 +384,21 @@ impl SettingsDialog {
                     .child("Window"),
             )
             .child(self.render_slider_row(
-                "Opacity",
-                format!("{:.0}%", opacity_percent),
-                Slider::new(&self.opacity_slider).into_any_element(),
+                "Transparency",
+                format!("{:.0}%", transparency_percent),
+                Slider::new(&self.transparency_slider).into_any_element(),
+                cx,
+            ))
+            .child(self.render_setting_row(
+                "Background Blur",
+                "Enable macOS vibrancy effect",
+                Switch::new("blur-enabled")
+                    .checked(self.settings.blur_enabled)
+                    .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                        this.settings.blur_enabled = *checked;
+                        this.notify_change(window, cx);
+                    }))
+                    .into_any_element(),
                 cx,
             ))
             .into_any_element()
@@ -335,9 +460,9 @@ impl SettingsDialog {
                             b.ghost()
                         }
                     })
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.settings.theme = Theme::Light;
-                        cx.notify();
+                        this.notify_change(window, cx);
                     })),
             )
             .child(
@@ -350,9 +475,9 @@ impl SettingsDialog {
                             b.ghost()
                         }
                     })
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.settings.theme = Theme::Dark;
-                        cx.notify();
+                        this.notify_change(window, cx);
                     })),
             )
             .child(
@@ -365,40 +490,18 @@ impl SettingsDialog {
                             b.ghost()
                         }
                     })
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.settings.theme = Theme::System;
-                        cx.notify();
+                        this.notify_change(window, cx);
                     })),
             )
             .into_any_element()
     }
 
-    fn render_font_selector(&self, cx: &mut Context<Self>) -> AnyElement {
-        let fonts = font_presets();
-        let current_font = &self.settings.font_family;
-
-        div()
-            .flex()
-            .flex_wrap()
-            .gap(px(6.))
-            .children(fonts.iter().enumerate().map(|(idx, font)| {
-                let is_selected = font.family == current_font;
-                let family = font.family.to_string();
-                Button::new(format!("font-{}", idx))
-                    .label(font.name)
-                    .map(|b| {
-                        if is_selected {
-                            b.primary()
-                        } else {
-                            b.ghost()
-                        }
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.font_family = family.clone();
-                        this.selected_font_index = idx;
-                        cx.notify();
-                    }))
-            }))
+    fn render_font_selector(&self, _cx: &mut Context<Self>) -> AnyElement {
+        Select::new(&self.font_select)
+            .placeholder("Select a font...")
+            .w(px(280.))
             .into_any_element()
     }
 
