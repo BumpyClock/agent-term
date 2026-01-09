@@ -64,7 +64,7 @@ pub struct EditSection(pub String);
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 pub struct RemoveSection(pub String);
 
-const SIDEBAR_INSET: f32 = 8.0;
+const SIDEBAR_INSET: f32 = 4.0;
 const SIDEBAR_GAP: f32 = 16.0;
 const SIDEBAR_MIN_WIDTH: f32 = 200.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
