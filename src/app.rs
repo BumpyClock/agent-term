@@ -70,6 +70,9 @@ const SIDEBAR_MIN_WIDTH: f32 = 200.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 const SIDEBAR_HEADER_LEFT_PADDING: f32 = 68.0;
 
+const SIDEBAR_GLASS_BASE_ALPHA: f32 = 0.18;
+const SIDEBAR_GLASS_BORDER_ALPHA: f32 = 0.14;
+
 const SURFACE_ROOT: u32 = 0x000000;
 const SURFACE_SIDEBAR: u32 = 0x202020;
 const BORDER_SOFT: u32 = 0x3a3a3a;
@@ -2038,6 +2041,20 @@ impl AgentTermApp {
 
     fn render_sidebar_shell(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
+        let base = rgba(rgba_u32(SURFACE_SIDEBAR, SIDEBAR_GLASS_BASE_ALPHA));
+        let border = cx.theme().foreground.alpha(SIDEBAR_GLASS_BORDER_ALPHA);
+
+        let top_shine = gpui::linear_gradient(
+            180.0,
+            gpui::linear_color_stop(rgba(0xffffff1f), 0.0),
+            gpui::linear_color_stop(gpui::transparent_black(), 0.65),
+        );
+        let bottom_shade = gpui::linear_gradient(
+            0.0,
+            gpui::linear_color_stop(rgba(0x00000033), 0.0),
+            gpui::linear_color_stop(gpui::transparent_black(), 0.75),
+        );
+
         div()
             .id("sidebar-shell")
             .absolute()
@@ -2051,11 +2068,53 @@ impl AgentTermApp {
                     .size_full()
                     .rounded(px(16.0))
                     .overflow_hidden()
-                    .bg(rgba(rgba_u32(SURFACE_SIDEBAR, SURFACE_SIDEBAR_ALPHA)))
+                    .bg(base)
                     .border_1()
-                    .border_color(rgba(rgba_u32(BORDER_SOFT, BORDER_SOFT_ALPHA)))
+                    .border_color(border)
                     .shadow(Self::sidebar_shadow())
-                    .child(self.render_sidebar_content(cx)),
+                    .child(
+                        div()
+                            .id("sidebar-glass")
+                            .size_full()
+                            .relative()
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .bg(top_shine),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .bg(bottom_shade),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .right_0()
+                                    .h(px(1.0))
+                                    .bg(cx.theme().foreground.alpha(0.08)),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .bottom_0()
+                                    .w(px(1.0))
+                                    .bg(cx.theme().foreground.alpha(0.06)),
+                            )
+                            .child(self.render_sidebar_content(cx)),
+                    ),
             )
             .child(
                 div()
