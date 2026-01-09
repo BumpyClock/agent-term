@@ -53,8 +53,8 @@ impl AlacMouseButton {
     fn from_button(e: MouseButton) -> Self {
         match e {
             gpui::MouseButton::Left => AlacMouseButton::LeftButton,
-            gpui::MouseButton::Right => AlacMouseButton::MiddleButton,
-            gpui::MouseButton::Middle => AlacMouseButton::RightButton,
+            gpui::MouseButton::Right => AlacMouseButton::RightButton,
+            gpui::MouseButton::Middle => AlacMouseButton::MiddleButton,
             gpui::MouseButton::Navigate(_) => AlacMouseButton::Other,
         }
     }
@@ -91,7 +91,7 @@ pub fn scroll_report(
             e.modifiers,
             MouseFormat::from_mode(mode),
         )
-        .map(|report| repeat(report).take(max(scroll_lines, 1) as usize))
+        .map(|report| repeat(report).take(max(scroll_lines.abs(), 1) as usize))
     } else {
         None
     }
@@ -162,9 +162,10 @@ pub fn grid_point_and_side(
     cur_size: TerminalBounds,
     display_offset: usize,
 ) -> (AlacPoint, Side) {
-    let col_f32: f32 = pos.x / cur_size.cell_width;
+    let x = pos.x.max(px(0.));
+    let col_f32: f32 = x / cur_size.cell_width;
     let mut col = GridCol(col_f32 as usize);
-    let cell_x = cmp::max(px(0.), pos.x) % cur_size.cell_width;
+    let cell_x = x % cur_size.cell_width;
     let half_cell_width = cur_size.cell_width / 2.0;
     let mut side = if cell_x > half_cell_width {
         Side::Right
@@ -176,7 +177,6 @@ pub fn grid_point_and_side(
         col = cur_size.last_column();
         side = Side::Right;
     }
-    let col = min(col, cur_size.last_column());
     let line_f32: f32 = pos.y / cur_size.line_height;
     let mut line = line_f32 as i32;
     if line > cur_size.bottommost_line() {
@@ -263,13 +263,11 @@ fn normal_mouse_report(point: AlacPoint, button: u8, utf8: bool) -> Option<Vec<u
 fn sgr_mouse_report(point: AlacPoint, button: u8, pressed: bool) -> String {
     let c = if pressed { 'M' } else { 'm' };
 
-    let msg = format!(
+    format!(
         "\x1b[<{};{};{}{}",
         button,
         point.column + 1,
         point.line + 1,
         c
-    );
-
-    msg
+    )
 }

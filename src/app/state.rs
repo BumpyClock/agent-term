@@ -264,8 +264,17 @@ impl AgentTermApp {
                 let _ = cx.update_window(window_handle, |_, window, cx| {
                     let _ = this.update(cx, |app, cx| {
                         let terminal = cx.new(|cx| builder.subscribe(cx));
-                        let terminal_view =
-                            cx.new(|cx| TerminalView::new(terminal.clone(), window, cx));
+                        let font_family = app.settings.font_family.clone();
+                        let font_size = app.settings.font_size;
+                        let terminal_view = cx.new(|cx| {
+                            TerminalView::with_settings(
+                                terminal.clone(),
+                                window,
+                                cx,
+                                font_family,
+                                font_size,
+                            )
+                        });
                         app.terminals.insert(session_id.clone(), terminal);
                         app.terminal_views
                             .insert(session_id.clone(), terminal_view.clone());
@@ -278,6 +287,24 @@ impl AgentTermApp {
             }
         })
         .detach();
+    }
+
+    /// Updates the application settings and propagates changes to terminal views.
+    pub fn update_settings(&mut self, settings: AppSettings, cx: &mut Context<Self>) {
+        // Update font settings for all terminal views
+        let font_family = settings.font_family.clone();
+        let font_size = settings.font_size;
+        for terminal_view in self.terminal_views.values() {
+            terminal_view.update(cx, |view, _| {
+                view.set_font_settings(font_family.clone(), font_size);
+            });
+        }
+
+        // Store the new settings
+        self.settings = settings;
+
+        // Trigger re-render for opacity and other changes
+        cx.notify();
     }
 }
 

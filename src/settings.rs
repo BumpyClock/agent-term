@@ -40,6 +40,7 @@ pub struct AppSettings {
     pub font_size: f32,
     pub line_height: f32,
     pub letter_spacing: f32,
+    pub window_opacity: f32,
 
     // Tools
     pub default_shell_id: Option<String>,
@@ -61,6 +62,7 @@ impl Default for AppSettings {
             font_size: 14.0,
             line_height: 1.4,
             letter_spacing: 0.0,
+            window_opacity: 1.0,
 
             // Tools
             default_shell_id: None,
