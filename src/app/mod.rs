@@ -24,6 +24,7 @@ use gpui_term::{Clear, Copy, Paste, SelectAll};
 
 use constants::{rgba_u32, SIDEBAR_GAP, SIDEBAR_INSET, SURFACE_ROOT, SURFACE_ROOT_ALPHA};
 use menus::{app_menus, configure_macos_titlebar};
+use crate::ui::ActiveTheme as _;
 
 /// Main entry point for the application.
 pub fn run() {
@@ -176,6 +177,19 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::zoom_window))
             .on_mouse_move(cx.listener(Self::update_sidebar_resize))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
+            // Visual titlebar background across the whole window (no hit-testing).
+            .child(
+                div()
+                    .id("agentterm-titlebar-bg")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(34.0))
+                    .bg(cx.theme().title_bar)
+                    .border_b_1()
+                    .border_color(cx.theme().title_bar_border),
+            )
             // Main content (full-window). Titlebar is drawn as an overlay above this so the sidebar
             // can visually extend to the top while Windows still hit-tests the titlebar controls.
             .child(
