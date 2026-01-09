@@ -136,6 +136,8 @@ impl Render for AgentTermApp {
             .id("agentterm-gpui")
             .size_full()
             .relative()
+            .flex()
+            .flex_col()
             .bg(base_bg)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
@@ -151,23 +153,17 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::zoom_window))
             .on_mouse_move(cx.listener(Self::update_sidebar_resize))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
-            // TitleBar for window controls and dragging (Windows/Linux)
-            .child(
-                TitleBar::new()
-                    .bg(gpui::transparent_black())
-                    .border_b_0()
-            )
-            // Main content
+            // TitleBar for window controls and dragging.
+            .child(TitleBar::new().bg(gpui::transparent_black()).border_b_0())
+            // Main content (kept below title bar so it can't intercept title bar hit-testing on Windows).
             .child(
                 div()
-                    .size_full()
-                    .absolute()
-                    .top_0()
-                    .left_0()
+                    .id("agentterm-content")
+                    .flex_1()
+                    .relative()
+                    .w_full()
                     .child(self.render_terminal_container(cx))
-                    .when(self.sidebar_visible, |el| {
-                        el.child(self.render_sidebar_shell(cx))
-                    })
+                    .when(self.sidebar_visible, |el| el.child(self.render_sidebar_shell(cx))),
             )
             // Dialog and sheet layers at full opacity
             .children(gpui_component::Root::render_dialog_layer(window, cx))
