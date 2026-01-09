@@ -210,6 +210,17 @@ impl Icon {
         }
     }
 
+    /// Create an icon from a raw embedded asset path (relative to `assets/`).
+    ///
+    /// Example: `"tool-icons/mcp.svg"` corresponds to `assets/tool-icons/mcp.svg` on disk.
+    pub fn asset(path: impl Into<SharedString>) -> Self {
+        Self {
+            source: IconSource::Embedded(path.into()),
+            size: IconSize::default(),
+            color: None,
+        }
+    }
+
     /// Set the icon size.
     pub fn size(mut self, size: IconSize) -> Self {
         self.size = size;
