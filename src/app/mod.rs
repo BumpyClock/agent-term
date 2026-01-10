@@ -152,11 +152,6 @@ impl Render for AgentTermApp {
         // At transparency=1: no tint (fully transparent, blur shows through)
         let base_alpha = SURFACE_ROOT_ALPHA * (1.0 - self.settings.window_transparency);
         let base_bg = rgba(rgba_u32(SURFACE_ROOT, base_alpha));
-        let titlebar_left = if self.sidebar_visible {
-            self.sidebar_width + SIDEBAR_INSET + SIDEBAR_GAP
-        } else {
-            0.0
-        };
 
         div()
             .id("agentterm-gpui")
@@ -210,7 +205,7 @@ impl Render for AgentTermApp {
                     .border_b_0()
                     .absolute()
                     .top_0()
-                    .left(px(titlebar_left))
+                    .left_0()
                     .right_0(),
             )
             // Dialog and sheet layers at full opacity
