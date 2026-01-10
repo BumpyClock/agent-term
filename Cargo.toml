@@ -46,8 +46,8 @@ toml = "0.9.10"
 uuid = { version = "1.19.0", features = ["v4"] }
 
 [workspace.dependencies.windows]
-version = "0.58.0"
-features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]
+version = "0.62.2"
+features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"]
 
 [workspace.lints.clippy]
 almost_complete_range = "allow"
