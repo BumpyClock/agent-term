@@ -5,6 +5,7 @@ use gpui::{
     BoxShadow, ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Styled, Window, div, hsla, point, prelude::*, px, rgba,
 };
+use gpui_component::TITLE_BAR_HEIGHT;
 
 use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
@@ -92,11 +93,15 @@ impl AgentTermApp {
     }
 
     pub fn render_sidebar_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let top_offset_for_title_bar = TITLE_BAR_HEIGHT - px(SIDEBAR_INSET);
         div()
             .id("sidebar-content")
             .size_full()
             .flex()
             .flex_col()
+            .when(cfg!(not(target_os = "macos")), |el| {
+                el.child(div().h(top_offset_for_title_bar).flex_shrink_0())
+            })
             .child(self.render_sidebar_header(cx))
             .child(self.render_add_project(cx))
             .child(self.render_sections_list(cx))

@@ -1,6 +1,7 @@
 //! Terminal container rendering.
 
 use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui_component::TITLE_BAR_HEIGHT;
 
 use crate::ui::ActiveTheme;
 
@@ -13,6 +14,12 @@ impl AgentTermApp {
             self.sidebar_width + SIDEBAR_INSET + SIDEBAR_GAP
         } else {
             0.0
+        };
+
+        let content_padding_top = if cfg!(not(target_os = "macos")) {
+            TITLE_BAR_HEIGHT
+        } else {
+            px(16.0)
         };
 
         let active_view = self
@@ -36,7 +43,8 @@ impl AgentTermApp {
                     div()
                         .flex_1()
                         .overflow_hidden()
-                        .py(px(16.0))
+                        .pt(content_padding_top)
+                        .pb(px(16.0))
                         .px(px(8.0))
                         .child(tv.clone()),
                 )
