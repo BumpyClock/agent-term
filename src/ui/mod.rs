@@ -30,7 +30,7 @@ pub use gpui_component::{
     // List components
     list::ListItem,
     // Menu components
-    menu::ContextMenuExt,
+    menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     // Form controls
     slider::{Slider, SliderEvent, SliderState},
     switch::Switch,
