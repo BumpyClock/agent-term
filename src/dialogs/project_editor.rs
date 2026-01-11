@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 
 use gpui::{ClickEvent, Context, Entity, IntoElement, Render, Styled, Window, div, prelude::*, px};
 use gpui_component::input::{InputEvent, InputState as GpuiInputState};
+use gpui_component::theme::ThemeMode;
 use rfd::FileDialog;
 
 use crate::icons::IconDescriptor;
+use crate::theme::surface_background;
 use crate::ui::{
     ActiveTheme, Button, IconPicker, WindowExt,
     helpers::{agentterm_input_field, icon_descriptor_from_string, icon_descriptor_to_string},
@@ -193,6 +195,12 @@ impl Render for ProjectEditorDialog {
         let current_icon = self.current_icon.clone();
         let entity = cx.entity().clone();
         let icon_entity = entity.clone();
+        let mode = if cx.theme().is_dark() {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        };
+        let surface = surface_background(mode);
 
         v_flex()
             .gap(px(16.))
@@ -270,7 +278,7 @@ impl Render for ProjectEditorDialog {
                                 .rounded(px(6.))
                                 .border_1()
                                 .border_color(cx.theme().border)
-                                .bg(cx.theme().background)
+                                .bg(surface)
                                 .px(px(4.))
                                 .py(px(4.))
                                 .flex()
@@ -456,6 +464,12 @@ impl Render for AddProjectDialog {
         let current_icon = self.current_icon.clone();
         let entity = cx.entity().clone();
         let icon_entity = entity.clone();
+        let mode = if cx.theme().is_dark() {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        };
+        let surface = surface_background(mode);
 
         v_flex()
             .gap(px(16.))
@@ -531,7 +545,7 @@ impl Render for AddProjectDialog {
                                 .rounded(px(6.))
                                 .border_1()
                                 .border_color(cx.theme().border)
-                                .bg(cx.theme().background)
+                                .bg(surface)
                                 .px(px(4.))
                                 .py(px(4.))
                                 .flex()

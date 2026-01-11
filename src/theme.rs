@@ -80,19 +80,37 @@ pub fn resolve_accent_color(id: &str) -> AccentColor {
 
 pub fn apply_theme_from_settings(
     settings: &AppSettings,
-    mut window: Option<&mut Window>,
+    window: Option<&mut Window>,
     cx: &mut App,
 ) -> ThemeMode {
     let accent = resolve_accent_color(&settings.accent_color);
     let light_config = build_theme_config(ThemeMode::Light, accent);
     let dark_config = build_theme_config(ThemeMode::Dark, accent);
-    let mode = resolve_theme_mode(settings, window.as_deref(), cx);
 
-    let theme = GpuiTheme::global_mut(cx);
-    theme.light_theme = Rc::new(light_config);
-    theme.dark_theme = Rc::new(dark_config);
+    // Resolve theme mode based on settings and window appearance
+    let mode = match settings.theme {
+        Theme::Light => ThemeMode::Light,
+        Theme::Dark => ThemeMode::Dark,
+        Theme::System => {
+            let appearance = window
+                .as_ref()
+                .map(|w| w.appearance())
+                .unwrap_or_else(|| cx.window_appearance());
+            match appearance {
+                WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
+                WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
+            }
+        }
+    };
 
-    GpuiTheme::change(mode, window.as_deref_mut(), cx);
+    {
+        let theme = GpuiTheme::global_mut(cx);
+        theme.light_theme = Rc::new(light_config);
+        theme.dark_theme = Rc::new(dark_config);
+    }
+
+    GpuiTheme::change(mode, window, cx);
+    GpuiTheme::global_mut(cx).colors.background = gpui::transparent_black();
     mode
 }
 
@@ -247,4 +265,18 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             chart_5: "#ff2058",
         },
     }
+}
+
+pub fn surface_background(mode: ThemeMode) -> gpui::Hsla {
+    parse_hex_color(palette_for_mode(mode).background)
+}
+
+fn parse_hex_color(color: &str) -> gpui::Hsla {
+    let rgba = gpui::Rgba::try_from(color).unwrap_or(gpui::Rgba {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    });
+    rgba.into()
 }

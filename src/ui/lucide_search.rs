@@ -9,9 +9,11 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::*, px,
 };
+use gpui_component::theme::ThemeMode;
 
 use crate::icons::{Icon, IconDescriptor, IconName, IconSize, search_lucide_icons};
 use crate::text_input::TextInput;
+use crate::theme::surface_background;
 use crate::ui::ActiveTheme;
 
 /// Number of icons to show per page
@@ -32,9 +34,14 @@ struct LucideSearchPalette {
 }
 
 fn lucide_search_palette(cx: &App) -> LucideSearchPalette {
+    let mode = if cx.theme().is_dark() {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    };
     LucideSearchPalette {
         overlay: cx.theme().overlay,
-        modal_bg: cx.theme().background,
+        modal_bg: surface_background(mode),
         modal_border: cx.theme().border,
         header_bg: cx.theme().secondary,
         icon_button_bg: cx.theme().muted,
