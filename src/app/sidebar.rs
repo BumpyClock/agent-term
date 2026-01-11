@@ -48,8 +48,8 @@ impl AgentTermApp {
         // Apply window_transparency to sidebar background alpha with exponential curve
         // Higher transparency = lower alpha (more see-through), accelerating at higher values
         let exp_factor = (1.0 - self.settings.window_transparency).powf(2.0);
-        // Clamp to minimum 15% opacity so sidebar is never fully transparent
-        let bg_alpha = (SIDEBAR_GLASS_BASE_ALPHA * exp_factor).max(0.15);
+        // Clamp to minimum 50% opacity so sidebar is never fully transparent
+        let bg_alpha = (SIDEBAR_GLASS_BASE_ALPHA * exp_factor).max(0.50);
         let sidebar_base = cx.theme().sidebar;
         let sidebar_alpha = (sidebar_base.a * bg_alpha).clamp(0.0, 1.0);
         let base = gpui::Hsla {
