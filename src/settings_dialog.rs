@@ -11,7 +11,7 @@ use gpui::{
 use crate::fonts::{FontOption, find_font_index, font_presets};
 use crate::settings::{AppSettings, Theme};
 use crate::terminal_schemes;
-use crate::theme::{accent_colors, resolve_accent_color};
+use crate::theme::{accent_colors, resolve_accent_color, surface_background};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
 };
@@ -723,7 +723,7 @@ impl SettingsDialog {
                     .rounded(px(6.))
                     .border_1()
                     .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
+                    .bg(surface_background(mode))
                     .child(
                         div().flex().items_center().gap(px(4.)).children(
                             preview_colors.into_iter().map(|color| {
@@ -845,7 +845,11 @@ impl Render for SettingsDialog {
             .id("settings-dialog")
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(cx.theme().background)
+            .bg(surface_background(if cx.theme().is_dark() {
+                ThemeMode::Dark
+            } else {
+                ThemeMode::Light
+            }))
             .flex()
             .flex_col()
             // Tab bar

@@ -151,7 +151,12 @@ impl Render for AgentTermApp {
         // At transparency=0: full tint (SURFACE_ROOT_ALPHA)
         // At transparency=1: no tint (fully transparent, blur shows through)
         let base_alpha = SURFACE_ROOT_ALPHA * (1.0 - self.settings.window_transparency);
-        let base_bg = cx.theme().background.alpha(base_alpha);
+        let mode = if cx.theme().is_dark() {
+            gpui_component::theme::ThemeMode::Dark
+        } else {
+            gpui_component::theme::ThemeMode::Light
+        };
+        let base_bg = theme::surface_background(mode).alpha(base_alpha);
 
         div()
             .id("agentterm-gpui")
