@@ -65,7 +65,7 @@ impl Default for AppSettings {
 
             // Appearance
             theme: Theme::System,
-            accent_color: "#5eead4".to_string(),
+            accent_color: "periwinkle".to_string(),
             terminal_color_scheme: "one".to_string(),
             font_family: "JetBrainsMono Nerd Font".to_string(),
             font_size: 14.0,

@@ -17,16 +17,14 @@ pub use state::AgentTermApp;
 use gpui::{
     App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowOptions, div,
-    prelude::*, px, rgba,
+    prelude::*, px,
 };
-use gpui_component::{
-    TITLE_BAR_HEIGHT, TitleBar,
-    theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
-};
+use gpui_component::{TITLE_BAR_HEIGHT, TitleBar};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
+use crate::theme;
 use crate::ui::ActiveTheme as _;
-use constants::{SIDEBAR_GAP, SIDEBAR_INSET, SURFACE_ROOT, SURFACE_ROOT_ALPHA, rgba_u32};
+use constants::SURFACE_ROOT_ALPHA;
 use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
@@ -67,13 +65,6 @@ pub fn run() {
     app.run(|cx: &mut App| {
         // Initialize gpui-component (theme, input bindings, dialogs, menus, etc.)
         gpui_component::init(cx);
-        {
-            let theme = GpuiTheme::global_mut(cx);
-            theme.mode = GpuiThemeMode::Dark;
-            // Fully transparent Root background so blur/vibrancy shows through and
-            // translucent surfaces keep clean rounded corners.
-            theme.colors.background = gpui::transparent_black();
-        }
 
         // Set up key bindings
         cx.bind_keys([
@@ -114,6 +105,8 @@ pub fn run() {
 
         // Load settings to determine initial window appearance
         let settings = crate::settings::AppSettings::load();
+        let resolved_mode = theme::apply_theme_from_settings(&settings, None, cx);
+        theme::apply_terminal_scheme(&settings, resolved_mode);
         let background_appearance = if settings.blur_enabled {
             WindowBackgroundAppearance::Blurred
         } else {
@@ -158,7 +151,7 @@ impl Render for AgentTermApp {
         // At transparency=0: full tint (SURFACE_ROOT_ALPHA)
         // At transparency=1: no tint (fully transparent, blur shows through)
         let base_alpha = SURFACE_ROOT_ALPHA * (1.0 - self.settings.window_transparency);
-        let base_bg = rgba(rgba_u32(SURFACE_ROOT, base_alpha));
+        let base_bg = cx.theme().background.alpha(base_alpha);
 
         div()
             .id("agentterm-gpui")

@@ -5,11 +5,10 @@ use std::sync::Arc;
 use agentterm_mcp::{McpManager, McpScope};
 use gpui::{
     ClickEvent, Context, IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
-    prelude::*, px, rgba,
+    prelude::*, px,
 };
 use gpui_component::Size as ComponentSize;
 
-use crate::app::constants::{BORDER_SOFT, rgba_u32};
 use crate::ui::{ActiveTheme, Sizable, Tab, TabBar, v_flex};
 
 #[derive(Clone)]
@@ -141,10 +140,12 @@ impl McpManagerDialog {
         items: Vec<McpItem>,
         attached: bool,
     ) -> impl IntoElement {
+        let border = cx.theme().border.alpha(0.35);
+        let row_border = cx.theme().border.alpha(0.25);
         let mut col = div()
             .flex_1()
             .border_1()
-            .border_color(rgba(rgba_u32(BORDER_SOFT, 0.35)))
+            .border_color(border)
             .rounded(px(10.0))
             .overflow_hidden()
             .child(
@@ -187,7 +188,7 @@ impl McpManagerDialog {
                     .px(px(12.0))
                     .py(px(10.0))
                     .border_t_1()
-                    .border_color(rgba(rgba_u32(BORDER_SOFT, 0.25)))
+                    .border_color(row_border)
                     .flex()
                     .justify_between()
                     .gap(px(10.0))

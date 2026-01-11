@@ -7,24 +7,44 @@ use std::rc::Rc;
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::*, px, rgb, rgba,
+    prelude::*, px,
 };
 
 use crate::icons::{Icon, IconDescriptor, IconName, IconSize, search_lucide_icons};
 use crate::text_input::TextInput;
-
-/// Colors for the search modal
-const MODAL_BG: u32 = 0x1a1a1a;
-const MODAL_BORDER: u32 = 0x3a3a3a;
-const HEADER_BG: u32 = 0x222222;
-const ICON_BUTTON_BG: u32 = 0x2a2a2a;
-const ICON_BUTTON_HOVER: u32 = 0x3a3a3a;
-const ICON_BUTTON_SELECTED: u32 = 0x5eead4;
-const TEXT_PRIMARY: u32 = 0xd8d8d8;
-const TEXT_MUTED: u32 = 0x808080;
+use crate::ui::ActiveTheme;
 
 /// Number of icons to show per page
 const ICONS_PER_PAGE: usize = 100;
+
+#[derive(Clone, Copy)]
+struct LucideSearchPalette {
+    overlay: gpui::Hsla,
+    modal_bg: gpui::Hsla,
+    modal_border: gpui::Hsla,
+    header_bg: gpui::Hsla,
+    icon_button_bg: gpui::Hsla,
+    icon_button_hover: gpui::Hsla,
+    icon_button_selected: gpui::Hsla,
+    text_primary: gpui::Hsla,
+    text_muted: gpui::Hsla,
+    selected_text: gpui::Hsla,
+}
+
+fn lucide_search_palette(cx: &App) -> LucideSearchPalette {
+    LucideSearchPalette {
+        overlay: cx.theme().overlay,
+        modal_bg: cx.theme().background,
+        modal_border: cx.theme().border,
+        header_bg: cx.theme().secondary,
+        icon_button_bg: cx.theme().muted,
+        icon_button_hover: cx.theme().list_hover,
+        icon_button_selected: cx.theme().primary,
+        text_primary: cx.theme().foreground,
+        text_muted: cx.theme().muted_foreground,
+        selected_text: cx.theme().primary_foreground,
+    }
+}
 
 /// Lucide icon search modal state.
 ///
@@ -124,12 +144,13 @@ impl Render for LucideSearchModal {
         let current_value = self.current_value.clone();
         let remaining = filtered_icons.len().saturating_sub(self.visible_count);
         let total_count = filtered_icons.len();
+        let palette = lucide_search_palette(cx);
 
         div()
             .id("lucide-search-overlay")
             .absolute()
             .inset_0()
-            .bg(rgba(0x00000080))
+            .bg(palette.overlay)
             .flex()
             .items_center()
             .justify_center()
@@ -144,9 +165,9 @@ impl Render for LucideSearchModal {
                     .id("lucide-search-modal")
                     .w(px(600.))
                     .max_h(px(500.))
-                    .bg(rgb(MODAL_BG))
+                    .bg(palette.modal_bg)
                     .border_1()
-                    .border_color(rgb(MODAL_BORDER))
+                    .border_color(palette.modal_border)
                     .rounded(px(8.))
                     .flex()
                     .flex_col()
@@ -154,28 +175,29 @@ impl Render for LucideSearchModal {
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
                     })
-                    .child(self.render_header(cx))
+                    .child(self.render_header(cx, palette))
                     .child(self.render_icon_grid(
                         visible_icons.as_slice(),
                         &current_value,
                         has_more,
                         remaining,
                         &search_query,
+                        palette,
                         cx,
                     ))
-                    .child(self.render_footer(total_count)),
+                    .child(self.render_footer(total_count, palette)),
             )
     }
 }
 
 impl LucideSearchModal {
-    fn render_header(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn render_header(&self, cx: &Context<Self>, palette: LucideSearchPalette) -> impl IntoElement {
         div()
             .px(px(16.))
             .py(px(12.))
-            .bg(rgb(HEADER_BG))
+            .bg(palette.header_bg)
             .border_b_1()
-            .border_color(rgb(MODAL_BORDER))
+            .border_color(palette.modal_border)
             .flex()
             .items_center()
             .gap(px(12.))
@@ -183,7 +205,7 @@ impl LucideSearchModal {
                 div()
                     .text_lg()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(palette.text_primary)
                     .child("Select Icon"),
             )
             .child(div().flex_1().child(self.search_input.clone()))
@@ -196,7 +218,7 @@ impl LucideSearchModal {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(rgb(ICON_BUTTON_HOVER)))
+                    .hover(|s| s.bg(palette.icon_button_hover))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| {
@@ -206,7 +228,7 @@ impl LucideSearchModal {
                     .child(
                         Icon::new(IconName::X)
                             .size(IconSize::Medium)
-                            .color(rgb(TEXT_MUTED)),
+                            .color(palette.text_muted),
                     ),
             )
     }
@@ -218,6 +240,7 @@ impl LucideSearchModal {
         has_more: bool,
         remaining: usize,
         search_query: &str,
+        palette: LucideSearchPalette,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let query_for_load_more = search_query.to_string();
@@ -249,13 +272,13 @@ impl LucideSearchModal {
                             .justify_center()
                             .gap(px(2.))
                             .bg(if is_selected {
-                                rgb(ICON_BUTTON_SELECTED)
+                                palette.icon_button_selected
                             } else {
-                                rgb(ICON_BUTTON_BG)
+                                palette.icon_button_bg
                             })
                             .hover(|s| {
                                 if !is_selected {
-                                    s.bg(rgb(ICON_BUTTON_HOVER))
+                                    s.bg(palette.icon_button_hover)
                                 } else {
                                     s
                                 }
@@ -268,9 +291,9 @@ impl LucideSearchModal {
                             )
                             .child(Icon::lucide(&name).size(IconSize::Medium).color(
                                 if is_selected {
-                                    rgb(0x000000)
+                                    palette.selected_text
                                 } else {
-                                    rgb(TEXT_PRIMARY)
+                                    palette.text_primary
                                 },
                             ))
                     })),
@@ -289,11 +312,12 @@ impl LucideSearchModal {
                                 .py(px(8.))
                                 .rounded(px(4.))
                                 .cursor_pointer()
-                                .bg(rgb(ICON_BUTTON_BG))
-                                .text_color(rgb(TEXT_MUTED))
+                                .bg(palette.icon_button_bg)
+                                .text_color(palette.text_muted)
                                 .text_sm()
                                 .hover(|s| {
-                                    s.bg(rgb(ICON_BUTTON_HOVER)).text_color(rgb(TEXT_PRIMARY))
+                                    s.bg(palette.icon_button_hover)
+                                        .text_color(palette.text_primary)
                                 })
                                 .on_mouse_down(MouseButton::Left, {
                                     cx.listener(move |this, _, _, cx| {
@@ -307,14 +331,14 @@ impl LucideSearchModal {
             })
     }
 
-    fn render_footer(&self, total_count: usize) -> impl IntoElement {
+    fn render_footer(&self, total_count: usize, palette: LucideSearchPalette) -> impl IntoElement {
         div()
             .px(px(16.))
             .py(px(8.))
             .border_t_1()
-            .border_color(rgb(MODAL_BORDER))
+            .border_color(palette.modal_border)
             .text_xs()
-            .text_color(rgb(TEXT_MUTED))
+            .text_color(palette.text_muted)
             .child(format!("{} icons available", total_count))
     }
 }

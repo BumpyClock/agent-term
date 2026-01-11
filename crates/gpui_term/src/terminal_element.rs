@@ -35,7 +35,9 @@ use gpui::{
 };
 use itertools::Itertools;
 
-use crate::{IndexedCell, Terminal, TerminalBounds, TerminalContent};
+use crate::{
+    IndexedCell, Terminal, TerminalBounds, TerminalContent, terminal_palette::terminal_palette,
+};
 
 /// Layout state computed during prepaint, used for painting.
 pub struct LayoutState {
@@ -791,7 +793,7 @@ impl Element for TerminalElement {
                         cursor_position,
                         block_width,
                         dimensions.line_height,
-                        Hsla::white(),
+                        terminal_palette().cursor,
                         shape,
                         text,
                     )
@@ -900,36 +902,37 @@ pub fn convert_color(color: &AnsiColor) -> Hsla {
 
 /// Converts a named ANSI color to Hsla.
 fn named_color_to_hsla(named: NamedColor) -> Hsla {
+    let palette = terminal_palette();
     match named {
-        NamedColor::Black => hsla_from_rgb(0x00, 0x00, 0x00),
-        NamedColor::Red => hsla_from_rgb(0xCD, 0x00, 0x00),
-        NamedColor::Green => hsla_from_rgb(0x00, 0xCD, 0x00),
-        NamedColor::Yellow => hsla_from_rgb(0xCD, 0xCD, 0x00),
-        NamedColor::Blue => hsla_from_rgb(0x00, 0x00, 0xEE),
-        NamedColor::Magenta => hsla_from_rgb(0xCD, 0x00, 0xCD),
-        NamedColor::Cyan => hsla_from_rgb(0x00, 0xCD, 0xCD),
-        NamedColor::White => hsla_from_rgb(0xE5, 0xE5, 0xE5),
-        NamedColor::BrightBlack => hsla_from_rgb(0x7F, 0x7F, 0x7F),
-        NamedColor::BrightRed => hsla_from_rgb(0xFF, 0x00, 0x00),
-        NamedColor::BrightGreen => hsla_from_rgb(0x00, 0xFF, 0x00),
-        NamedColor::BrightYellow => hsla_from_rgb(0xFF, 0xFF, 0x00),
-        NamedColor::BrightBlue => hsla_from_rgb(0x5C, 0x5C, 0xFF),
-        NamedColor::BrightMagenta => hsla_from_rgb(0xFF, 0x00, 0xFF),
-        NamedColor::BrightCyan => hsla_from_rgb(0x00, 0xFF, 0xFF),
-        NamedColor::BrightWhite => hsla_from_rgb(0xFF, 0xFF, 0xFF),
-        NamedColor::Foreground => hsla_from_rgb(0xE5, 0xE5, 0xE5),
-        NamedColor::Background => hsla_from_rgb(0x00, 0x00, 0x00),
-        NamedColor::Cursor => hsla_from_rgb(0xFF, 0xFF, 0xFF),
-        NamedColor::DimBlack => hsla_from_rgb(0x00, 0x00, 0x00),
-        NamedColor::DimRed => hsla_from_rgb(0x8B, 0x00, 0x00),
-        NamedColor::DimGreen => hsla_from_rgb(0x00, 0x8B, 0x00),
-        NamedColor::DimYellow => hsla_from_rgb(0x8B, 0x8B, 0x00),
-        NamedColor::DimBlue => hsla_from_rgb(0x00, 0x00, 0x8B),
-        NamedColor::DimMagenta => hsla_from_rgb(0x8B, 0x00, 0x8B),
-        NamedColor::DimCyan => hsla_from_rgb(0x00, 0x8B, 0x8B),
-        NamedColor::DimWhite => hsla_from_rgb(0xA8, 0xA8, 0xA8),
-        NamedColor::BrightForeground => hsla_from_rgb(0xFF, 0xFF, 0xFF),
-        NamedColor::DimForeground => hsla_from_rgb(0xA8, 0xA8, 0xA8),
+        NamedColor::Black => palette.black,
+        NamedColor::Red => palette.red,
+        NamedColor::Green => palette.green,
+        NamedColor::Yellow => palette.yellow,
+        NamedColor::Blue => palette.blue,
+        NamedColor::Magenta => palette.magenta,
+        NamedColor::Cyan => palette.cyan,
+        NamedColor::White => palette.white,
+        NamedColor::BrightBlack => palette.bright_black,
+        NamedColor::BrightRed => palette.bright_red,
+        NamedColor::BrightGreen => palette.bright_green,
+        NamedColor::BrightYellow => palette.bright_yellow,
+        NamedColor::BrightBlue => palette.bright_blue,
+        NamedColor::BrightMagenta => palette.bright_magenta,
+        NamedColor::BrightCyan => palette.bright_cyan,
+        NamedColor::BrightWhite => palette.bright_white,
+        NamedColor::Foreground => palette.foreground,
+        NamedColor::Background => palette.background,
+        NamedColor::Cursor => palette.cursor,
+        NamedColor::DimBlack => palette.dim_black,
+        NamedColor::DimRed => palette.dim_red,
+        NamedColor::DimGreen => palette.dim_green,
+        NamedColor::DimYellow => palette.dim_yellow,
+        NamedColor::DimBlue => palette.dim_blue,
+        NamedColor::DimMagenta => palette.dim_magenta,
+        NamedColor::DimCyan => palette.dim_cyan,
+        NamedColor::DimWhite => palette.dim_white,
+        NamedColor::BrightForeground => palette.bright_foreground,
+        NamedColor::DimForeground => palette.dim_foreground,
     }
 }
 
