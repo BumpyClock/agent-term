@@ -7,19 +7,11 @@ use std::rc::Rc;
 
 use gpui::{
     App, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, Window,
-    div, prelude::*, px, rgb,
+    div, prelude::*, px,
 };
 
 use crate::icons::{Icon, IconDescriptor, IconSize, TOOL_ICONS};
-
-/// Colors for the icon picker
-const SECTION_TITLE: u32 = 0xa0a0a0;
-const ICON_BUTTON_BG: u32 = 0x2a2a2a;
-const ICON_BUTTON_HOVER: u32 = 0x3a3a3a;
-const ICON_BUTTON_SELECTED: u32 = 0x5eead4;
-const DEFAULT_BUTTON_BG: u32 = 0x2a2a2a;
-const TEXT_PRIMARY: u32 = 0xd8d8d8;
-const TEXT_MUTED: u32 = 0x808080;
+use crate::ui::ActiveTheme;
 
 /// Common Lucide icons shown in the picker (subset for quick access)
 const COMMON_LUCIDE_ICONS: &[(&str, &str)] = &[
@@ -60,6 +52,33 @@ pub struct IconPicker {
     on_open_search: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
 }
 
+#[derive(Clone, Copy)]
+struct IconPickerPalette {
+    section_title: gpui::Hsla,
+    icon_button_bg: gpui::Hsla,
+    icon_button_hover: gpui::Hsla,
+    icon_button_selected: gpui::Hsla,
+    default_button_bg: gpui::Hsla,
+    text_primary: gpui::Hsla,
+    text_muted: gpui::Hsla,
+    selected_text: gpui::Hsla,
+    icon_unselected: gpui::Hsla,
+}
+
+fn icon_picker_palette(cx: &App) -> IconPickerPalette {
+    IconPickerPalette {
+        section_title: cx.theme().muted_foreground,
+        icon_button_bg: cx.theme().muted,
+        icon_button_hover: cx.theme().list_hover,
+        icon_button_selected: cx.theme().primary,
+        default_button_bg: cx.theme().muted,
+        text_primary: cx.theme().foreground,
+        text_muted: cx.theme().muted_foreground,
+        selected_text: cx.theme().primary_foreground,
+        icon_unselected: cx.theme().foreground.alpha(0.8),
+    }
+}
+
 impl IconPicker {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
@@ -90,29 +109,30 @@ impl IconPicker {
 }
 
 impl RenderOnce for IconPicker {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let value = self.value.clone();
         let on_change = self.on_change.clone();
         let on_open_search = self.on_open_search.clone();
+        let palette = icon_picker_palette(cx);
 
         div()
             .id(self.id)
             .flex()
             .flex_col()
             .gap(px(12.))
-            .child(render_default_button(&value, on_change.clone()))
-            .child(render_section("Tool icons"))
-            .child(render_tool_icons_grid(&value, on_change.clone()))
-            .child(render_section("Icons"))
-            .child(render_lucide_icons_grid(&value, on_change))
-            .child(render_more_button(on_open_search))
+            .child(render_default_button(&value, on_change.clone(), palette))
+            .child(render_section("Tool icons", palette))
+            .child(render_tool_icons_grid(&value, on_change.clone(), palette))
+            .child(render_section("Icons", palette))
+            .child(render_lucide_icons_grid(&value, on_change, palette))
+            .child(render_more_button(on_open_search, palette))
     }
 }
 
-fn render_section(title: &str) -> impl IntoElement {
+fn render_section(title: &str, palette: IconPickerPalette) -> impl IntoElement {
     div()
         .text_xs()
-        .text_color(rgb(SECTION_TITLE))
+        .text_color(palette.section_title)
         .font_weight(gpui::FontWeight::MEDIUM)
         .child(title.to_string())
 }
@@ -120,6 +140,7 @@ fn render_section(title: &str) -> impl IntoElement {
 fn render_default_button(
     value: &Option<IconDescriptor>,
     on_change: Option<Rc<dyn Fn(Option<IconDescriptor>, &mut Window, &mut App)>>,
+    palette: IconPickerPalette,
 ) -> impl IntoElement {
     let is_selected = value.is_none();
 
@@ -130,19 +151,19 @@ fn render_default_button(
         .rounded(px(4.))
         .cursor_pointer()
         .bg(if is_selected {
-            rgb(ICON_BUTTON_SELECTED)
+            palette.icon_button_selected
         } else {
-            rgb(DEFAULT_BUTTON_BG)
+            palette.default_button_bg
         })
         .text_color(if is_selected {
-            rgb(0x000000)
+            palette.selected_text
         } else {
-            rgb(TEXT_PRIMARY)
+            palette.text_primary
         })
         .text_sm()
         .hover(|s| {
             if !is_selected {
-                s.bg(rgb(ICON_BUTTON_HOVER))
+                s.bg(palette.icon_button_hover)
             } else {
                 s
             }
@@ -158,6 +179,7 @@ fn render_default_button(
 fn render_tool_icons_grid(
     value: &Option<IconDescriptor>,
     on_change: Option<Rc<dyn Fn(Option<IconDescriptor>, &mut Window, &mut App)>>,
+    palette: IconPickerPalette,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -170,6 +192,7 @@ fn render_tool_icons_grid(
                 Icon::tool(info.id),
                 value,
                 on_change.clone(),
+                palette,
             )
         }))
 }
@@ -177,6 +200,7 @@ fn render_tool_icons_grid(
 fn render_lucide_icons_grid(
     value: &Option<IconDescriptor>,
     on_change: Option<Rc<dyn Fn(Option<IconDescriptor>, &mut Window, &mut App)>>,
+    palette: IconPickerPalette,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -193,6 +217,7 @@ fn render_lucide_icons_grid(
                         Icon::lucide(name),
                         value,
                         on_change.clone(),
+                        palette,
                     )
                 }),
         )
@@ -204,6 +229,7 @@ fn render_icon_button(
     icon: Icon,
     current_value: &Option<IconDescriptor>,
     on_change: Option<Rc<dyn Fn(Option<IconDescriptor>, &mut Window, &mut App)>>,
+    palette: IconPickerPalette,
 ) -> impl IntoElement {
     let is_selected = current_value.as_ref() == Some(&descriptor);
     let descriptor_clone = descriptor.clone();
@@ -217,13 +243,13 @@ fn render_icon_button(
         .items_center()
         .justify_center()
         .bg(if is_selected {
-            rgb(ICON_BUTTON_SELECTED)
+            palette.icon_button_selected
         } else {
-            rgb(ICON_BUTTON_BG)
+            palette.icon_button_bg
         })
         .hover(|s| {
             if !is_selected {
-                s.bg(rgb(ICON_BUTTON_HOVER))
+                s.bg(palette.icon_button_hover)
             } else {
                 s
             }
@@ -234,14 +260,15 @@ fn render_icon_button(
             })
         })
         .child(icon.size(IconSize::Medium).color(if is_selected {
-            gpui::hsla(0., 0., 0., 1.)
+            palette.selected_text
         } else {
-            gpui::hsla(0., 0., 0.85, 1.)
+            palette.icon_unselected
         }))
 }
 
 fn render_more_button(
     on_open_search: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    palette: IconPickerPalette,
 ) -> impl IntoElement {
     div()
         .id("icon-more")
@@ -249,10 +276,13 @@ fn render_more_button(
         .py(px(6.))
         .rounded(px(4.))
         .cursor_pointer()
-        .bg(rgb(DEFAULT_BUTTON_BG))
-        .text_color(rgb(TEXT_MUTED))
+        .bg(palette.default_button_bg)
+        .text_color(palette.text_muted)
         .text_sm()
-        .hover(|s| s.bg(rgb(ICON_BUTTON_HOVER)).text_color(rgb(TEXT_PRIMARY)))
+        .hover(|s| {
+            s.bg(palette.icon_button_hover)
+                .text_color(palette.text_primary)
+        })
         .when_some(on_open_search, |el, callback| {
             el.on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 callback(window, cx);

@@ -98,3 +98,53 @@ rfd.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
 raw-window-handle = "0.6"
+
+# =============================================================================
+# Packaging Configuration
+# =============================================================================
+
+[package.metadata.bundle]
+name = "Agent Term"
+identifier = "com.adityasharma.agentterm"
+icon = ["assets/AppIcon.icns"]
+version = "0.1.4"
+copyright = "Copyright © 2025 Aditya Sharma"
+category = "Developer Tools"
+short_description = "Terminal emulator optimized for Agentic coding workflows"
+long_description = """
+Agent Term is a cross-platform terminal emulator optimized for Agentic coding workflows.
+Users can run multiple AI coding tools like Claude Code and Codex CLI in parallel,
+organizing open tabs by project for easy session management.
+"""
+osx_minimum_system_version = "11.0"
+
+[package.metadata.deb]
+maintainer = "Aditya Sharma"
+copyright = "2025, Aditya Sharma"
+license-file = ["LICENSE", "0"]
+extended-description = """
+Agent Term is a cross-platform terminal emulator optimized for Agentic coding workflows.
+Users can run multiple AI coding tools like Claude Code and Codex CLI in parallel,
+organizing open tabs by project for easy session management.
+"""
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/agentterm", "usr/bin/", "755"],
+    ["assets/agentterm.png", "usr/share/icons/hicolor/256x256/apps/agentterm.png", "644"],
+    ["agentterm.desktop", "usr/share/applications/", "644"]
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/agentterm", dest = "/usr/bin/agentterm", mode = "755" },
+    { source = "assets/agentterm.png", dest = "/usr/share/icons/hicolor/256x256/apps/agentterm.png", mode = "644" },
+    { source = "agentterm.desktop", dest = "/usr/share/applications/agentterm.desktop", mode = "644" },
+]
+
+[package.metadata.wix]
+upgrade-guid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+path-guid = "B2C3D4E5-F6A7-8901-BCDE-F12345678901"
+license = false
+eula = false

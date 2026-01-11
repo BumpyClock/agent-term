@@ -4,20 +4,24 @@
 
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    ParentElement, Render, Rgba, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::*, px,
 };
 
 use crate::fonts::{FontOption, find_font_index, font_presets};
 use crate::settings::{AppSettings, Theme};
+use crate::terminal_schemes;
+use crate::theme::{accent_colors, resolve_accent_color};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
 };
 use gpui_component::IndexPath;
+use gpui_component::button::ButtonCustomVariant;
 use gpui_component::input::{
     InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction,
 };
 use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
+use gpui_component::theme::ThemeMode;
 
 /// A font item for the Select dropdown that wraps FontOption.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +51,42 @@ impl SelectItem for FontItem {
     }
 }
 
+/// A terminal scheme item for the Select dropdown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TerminalSchemeItem {
+    name: SharedString,
+    id: String,
+    has_light_variant: bool,
+}
+
+impl TerminalSchemeItem {
+    fn from_option(option: &terminal_schemes::TerminalSchemeOption) -> Self {
+        let label = if option.has_light_variant {
+            option.name.to_string()
+        } else {
+            format!("{} (dark only)", option.name)
+        };
+
+        Self {
+            name: label.into(),
+            id: option.id.to_string(),
+            has_light_variant: option.has_light_variant,
+        }
+    }
+}
+
+impl SelectItem for TerminalSchemeItem {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        self.name.clone()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.id
+    }
+}
+
 /// Settings dialog state.
 pub struct SettingsDialog {
     focus_handle: FocusHandle,
@@ -58,6 +98,7 @@ pub struct SettingsDialog {
     letter_spacing_input: Entity<GpuiInputState>,
     transparency_slider: Entity<SliderState>,
     font_select: Entity<SelectState<Vec<FontItem>>>,
+    terminal_scheme_select: Entity<SelectState<Vec<TerminalSchemeItem>>>,
     on_close: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_save: Option<Box<dyn Fn(AppSettings, &mut Window, &mut App) + 'static>>,
     on_change: Option<Box<dyn Fn(AppSettings, &mut Window, &mut App) + 'static>>,
@@ -98,6 +139,17 @@ impl SettingsDialog {
         let font_select =
             cx.new(|cx| SelectState::new(font_items, selected_font_index, window, cx));
 
+        let scheme_items: Vec<TerminalSchemeItem> = terminal_schemes::terminal_scheme_options()
+            .iter()
+            .map(TerminalSchemeItem::from_option)
+            .collect();
+        let selected_scheme_index = scheme_items
+            .iter()
+            .position(|item| item.id == settings.terminal_color_scheme)
+            .map(|idx| IndexPath::default().row(idx));
+        let terminal_scheme_select =
+            cx.new(|cx| SelectState::new(scheme_items, selected_scheme_index, window, cx));
+
         // Subscribe to font select events
         cx.subscribe_in(
             &font_select,
@@ -105,6 +157,18 @@ impl SettingsDialog {
             |this, _, event: &SelectEvent<Vec<FontItem>>, window, cx| {
                 if let SelectEvent::Confirm(Some(family)) = event {
                     this.settings.font_family = family.clone();
+                    this.notify_change(window, cx);
+                }
+            },
+        )
+        .detach();
+
+        cx.subscribe_in(
+            &terminal_scheme_select,
+            window,
+            |this, _, event: &SelectEvent<Vec<TerminalSchemeItem>>, window, cx| {
+                if let SelectEvent::Confirm(Some(scheme_id)) = event {
+                    this.settings.terminal_color_scheme = scheme_id.clone();
                     this.notify_change(window, cx);
                 }
             },
@@ -236,6 +300,7 @@ impl SettingsDialog {
             letter_spacing_input,
             transparency_slider,
             font_select,
+            terminal_scheme_select,
             on_close: None,
             on_save: None,
             on_change: None,
@@ -362,6 +427,24 @@ impl SettingsDialog {
                     .child("Theme"),
             )
             .child(self.render_theme_selector(cx))
+            .child(
+                div()
+                    .mt(px(16.))
+                    .text_lg()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().foreground)
+                    .child("Accent Color"),
+            )
+            .child(self.render_accent_selector(cx))
+            .child(
+                div()
+                    .mt(px(16.))
+                    .text_lg()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().foreground)
+                    .child("Terminal Colors"),
+            )
+            .child(self.render_terminal_scheme_selector(cx))
             // Font section
             .child(
                 div()
@@ -546,6 +629,118 @@ impl SettingsDialog {
             .into_any_element()
     }
 
+    fn render_accent_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        let current = resolve_accent_color(&self.settings.accent_color);
+        let border_color = cx.theme().border.alpha(0.6);
+        let ring_color = cx.theme().ring;
+        let muted = cx.theme().muted_foreground;
+
+        let swatches = accent_colors().iter().map(|color| {
+            let is_selected = current.id == color.id;
+            let fill = parse_hex_color(color.hex);
+            let stroke = if is_selected {
+                ring_color
+            } else {
+                border_color
+            };
+            let id = format!("accent-{}", color.id);
+            let value = color.id.to_string();
+
+            Button::new(id)
+                .custom(
+                    ButtonCustomVariant::new(cx)
+                        .color(fill)
+                        .border(stroke)
+                        .hover(fill)
+                        .active(fill),
+                )
+                .rounded(px(999.0))
+                .compact()
+                .w(px(28.0))
+                .h(px(28.0))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.settings.accent_color = value.clone();
+                    this.notify_change(window, cx);
+                }))
+        });
+
+        let summary = if current.id == "custom" {
+            format!("Custom — {}", current.hex)
+        } else {
+            format!("{} — {}", current.name, current.description)
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(div().flex().items_center().gap(px(8.)).children(swatches))
+            .child(div().text_xs().text_color(muted).child(summary))
+            .into_any_element()
+    }
+
+    fn render_terminal_scheme_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mode = if cx.theme().is_dark() {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        };
+
+        let preview_colors =
+            terminal_schemes::terminal_preview_colors(&self.settings.terminal_color_scheme, mode);
+        let options = terminal_schemes::terminal_scheme_options();
+        let has_light_variant = options
+            .iter()
+            .find(|option| option.id == self.settings.terminal_color_scheme)
+            .map(|option| option.has_light_variant)
+            .unwrap_or(false);
+
+        let helper = if has_light_variant {
+            "Automatically uses light variant in light mode."
+        } else {
+            "This scheme uses the same colors in both light and dark modes."
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().foreground)
+                    .child("Color Scheme"),
+            )
+            .child(
+                Select::new(&self.terminal_scheme_select)
+                    .placeholder("Select a scheme...")
+                    .w(px(260.)),
+            )
+            .child(
+                div()
+                    .mt(px(4.))
+                    .p(px(8.))
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background)
+                    .child(
+                        div().flex().items_center().gap(px(4.)).children(
+                            preview_colors.into_iter().map(|color| {
+                                div().w(px(14.0)).h(px(14.0)).rounded(px(3.0)).bg(color)
+                            }),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(helper),
+            )
+            .into_any_element()
+    }
+
     fn render_font_selector(&self, _cx: &mut Context<Self>) -> AnyElement {
         Select::new(&self.font_select)
             .placeholder("Select a font...")
@@ -616,6 +811,16 @@ impl SettingsDialog {
             .child(control)
             .into_any_element()
     }
+}
+
+fn parse_hex_color(color: &str) -> gpui::Hsla {
+    let rgba = Rgba::try_from(color).unwrap_or_else(|_| Rgba {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    });
+    rgba.into()
 }
 
 impl Focusable for SettingsDialog {

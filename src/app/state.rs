@@ -16,6 +16,7 @@ use gpui::{
 use gpui_term::{Terminal, TerminalBuilder, TerminalView};
 
 use crate::settings::AppSettings;
+use crate::theme;
 use crate::ui::SectionItem;
 
 /// The main application state for AgentTerm.
@@ -448,7 +449,9 @@ impl AgentTermApp {
             window.set_background_appearance(appearance);
         }
 
-        // Store the new settings
+        let resolved_mode = theme::apply_theme_from_settings(&settings, Some(window), cx);
+        theme::apply_terminal_scheme(&settings, resolved_mode);
+
         self.settings = settings;
 
         // Trigger re-render for transparency and other changes

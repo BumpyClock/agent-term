@@ -4,10 +4,12 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine,
-    SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, hsla,
-    point, prelude::*, px, relative, rgba, size,
+    SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill,
+    point, prelude::*, px, relative, size,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
+
+use crate::ui::ActiveTheme;
 
 actions!(
     agentterm_text_input,
@@ -492,9 +494,9 @@ impl Render for TextInput {
             .w_full()
             .p(px(6.))
             .rounded(px(8.))
-            .bg(rgba(0xffffff10))
+            .bg(cx.theme().muted.alpha(0.2))
             .border_1()
-            .border_color(rgba(0xffffff18))
+            .border_color(cx.theme().border.alpha(0.3))
             .child(TextElement { input: cx.entity() })
     }
 }
@@ -564,7 +566,10 @@ impl Element for TextElement {
         let style = window.text_style();
 
         let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), hsla(0., 0., 1., 0.4))
+            (
+                input.placeholder.clone(),
+                cx.theme().muted_foreground.alpha(0.7),
+            )
         } else {
             (content, style.color)
         };
@@ -619,7 +624,7 @@ impl Element for TextElement {
                         point(bounds.left() + cursor_pos, bounds.top()),
                         size(px(2.), bounds.bottom() - bounds.top()),
                     ),
-                    rgba(0xffffffcc),
+                    cx.theme().caret,
                 )),
             )
         } else {
@@ -635,7 +640,7 @@ impl Element for TextElement {
                             bounds.bottom(),
                         ),
                     ),
-                    rgba(0x5eead433),
+                    cx.theme().selection,
                 )),
                 None,
             )

@@ -5,7 +5,6 @@ use agentterm_tools::ShellType;
 use gpui::{
     BoxShadow, ClickEvent, Context, Corner, Entity, IntoElement, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window, div, hsla, point, prelude::*, px,
-    rgba,
 };
 use gpui_component::TITLE_BAR_HEIGHT;
 
@@ -51,7 +50,13 @@ impl AgentTermApp {
         let exp_factor = (1.0 - self.settings.window_transparency).powf(2.0);
         // Clamp to minimum 15% opacity so sidebar is never fully transparent
         let bg_alpha = (SIDEBAR_GLASS_BASE_ALPHA * exp_factor).max(0.15);
-        let base = rgba(rgba_u32(SURFACE_SIDEBAR, bg_alpha));
+        let sidebar_base = cx.theme().sidebar;
+        let sidebar_alpha = (sidebar_base.a * bg_alpha).clamp(0.0, 1.0);
+        let base = gpui::Hsla {
+            a: sidebar_alpha,
+            ..sidebar_base
+        };
+        let border_color = cx.theme().border.alpha(BORDER_SOFT_ALPHA);
 
         div()
             .id("sidebar-shell")
@@ -67,7 +72,7 @@ impl AgentTermApp {
                     .rounded(px(16.0))
                     .overflow_hidden()
                     .border_1()
-                    .border_color(rgba(rgba_u32(BORDER_SOFT, BORDER_SOFT_ALPHA)))
+                    .border_color(border_color)
                     .bg(base)
                     .shadow(Self::sidebar_shadow())
                     .child(
@@ -116,6 +121,7 @@ impl AgentTermApp {
     }
 
     pub fn render_sidebar_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let border_color = cx.theme().border.alpha(BORDER_SOFT_ALPHA);
         div()
             .h(px(44.0))
             .pl(px(SIDEBAR_HEADER_LEFT_PADDING))
@@ -124,7 +130,7 @@ impl AgentTermApp {
             .items_center()
             .justify_between()
             .border_b_1()
-            .border_color(rgba(rgba_u32(BORDER_SOFT, BORDER_SOFT_ALPHA)))
+            .border_color(border_color)
             .when(cfg!(target_os = "macos"), |el| el.items_end().pb(px(6.0)))
             .child(
                 div()

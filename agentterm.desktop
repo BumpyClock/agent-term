@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Agent Term
+GenericName=Terminal Emulator
+Comment=Terminal emulator optimized for Agentic coding workflows
+Exec=agentterm %F
+Icon=agentterm
+Type=Application
+Categories=Development;TerminalEmulator;System;
+Keywords=terminal;console;command;prompt;shell;ai;agent;
+Terminal=false
+StartupNotify=true
+StartupWMClass=agentterm
