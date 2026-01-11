@@ -5,12 +5,12 @@
 use std::rc::Rc;
 
 use gpui::{
-    div, prelude::*, px, rgb, rgba, App, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window,
+    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::*, px, rgb, rgba,
 };
 
-use crate::icons::{search_lucide_icons, Icon, IconDescriptor, IconName, IconSize};
+use crate::icons::{Icon, IconDescriptor, IconName, IconSize, search_lucide_icons};
 use crate::text_input::TextInput;
 
 /// Colors for the search modal
@@ -266,15 +266,13 @@ impl LucideSearchModal {
                                     this.select_icon(&name_for_click, window, cx);
                                 }),
                             )
-                            .child(
-                                Icon::lucide(&name).size(IconSize::Medium).color(
-                                    if is_selected {
-                                        rgb(0x000000)
-                                    } else {
-                                        rgb(TEXT_PRIMARY)
-                                    },
-                                ),
-                            )
+                            .child(Icon::lucide(&name).size(IconSize::Medium).color(
+                                if is_selected {
+                                    rgb(0x000000)
+                                } else {
+                                    rgb(TEXT_PRIMARY)
+                                },
+                            ))
                     })),
             )
             .when(has_more, |el| {

@@ -179,7 +179,11 @@ impl AgentTermApp {
         list
     }
 
-    pub fn render_section(&self, section: &SectionItem, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_section(
+        &self,
+        section: &SectionItem,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let sessions: Vec<&SessionRecord> = self
             .sessions
             .iter()
@@ -238,7 +242,10 @@ impl AgentTermApp {
                 move |menu, _window, _cx| {
                     menu.menu("Edit Project...", Box::new(EditSection(section_id.clone())))
                         .separator()
-                        .menu("Remove Project", Box::new(RemoveSection(section_id.clone())))
+                        .menu(
+                            "Remove Project",
+                            Box::new(RemoveSection(section_id.clone())),
+                        )
                 }
             });
 
@@ -333,7 +340,10 @@ impl AgentTermApp {
                 let session_id = session_id.clone();
                 move |menu, _window, _cx| {
                     menu.menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
-                        .menu("Restart", Box::new(RestartSessionAction(session_id.clone())))
+                        .menu(
+                            "Restart",
+                            Box::new(RestartSessionAction(session_id.clone())),
+                        )
                         .separator()
                         .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
                 }
@@ -398,9 +408,7 @@ impl AgentTermApp {
             return;
         };
         let next = !section.collapsed;
-        let _ = self
-            .session_store
-            .set_section_collapsed(&section_id, next);
+        let _ = self.session_store.set_section_collapsed(&section_id, next);
         self.reload_from_store(cx);
     }
 

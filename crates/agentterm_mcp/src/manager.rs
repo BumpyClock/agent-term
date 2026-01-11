@@ -1,10 +1,6 @@
 use super::config::{
-    get_config_path,
-    get_managed_global_mcp_path,
+    MCPServerConfig, McpJsonConfig, UserConfig, get_config_path, get_managed_global_mcp_path,
     get_managed_project_mcp_path,
-    MCPServerConfig,
-    McpJsonConfig,
-    UserConfig,
 };
 use super::error::{McpError, McpResult};
 use super::pool_manager;
@@ -175,11 +171,7 @@ impl McpManager {
             return None;
         }
         let path = get_managed_project_mcp_path(project_path).ok()?;
-        if path.exists() {
-            Some(path)
-        } else {
-            None
-        }
+        if path.exists() { Some(path) } else { None }
     }
 
     /// Get attached MCPs for a given scope
@@ -215,16 +207,14 @@ impl McpManager {
             return Ok(Vec::new());
         }
 
-        let contents = fs::read_to_string(&config_path)
-            .await
-            .map_err(|e| {
-                diagnostics::log(format!(
-                    "mcp_global_read_failed path={} error={}",
-                    config_path.display(),
-                    e
-                ));
-                McpError::IoError(format!("{}: {}", config_path.display(), e))
-            })?;
+        let contents = fs::read_to_string(&config_path).await.map_err(|e| {
+            diagnostics::log(format!(
+                "mcp_global_read_failed path={} error={}",
+                config_path.display(),
+                e
+            ));
+            McpError::IoError(format!("{}: {}", config_path.display(), e))
+        })?;
 
         let config: McpJsonConfig = serde_json::from_str(&contents).map_err(|e| {
             diagnostics::log(format!(
@@ -303,7 +293,11 @@ impl McpManager {
     }
 
     /// Attach MCP to global scope
-    async fn attach_mcp_global(&self, mcp_name: &str, mcp_def: &super::config::MCPDef) -> McpResult<()> {
+    async fn attach_mcp_global(
+        &self,
+        mcp_name: &str,
+        mcp_def: &super::config::MCPDef,
+    ) -> McpResult<()> {
         let config_path = get_managed_global_mcp_path()?;
         let mut config = if config_path.exists() {
             let contents = fs::read_to_string(&config_path)
@@ -585,7 +579,10 @@ impl McpManager {
     }
 
     /// Set global MCPs
-    async fn set_mcps_global(&self, mcp_defs: &HashMap<String, super::config::MCPDef>) -> McpResult<()> {
+    async fn set_mcps_global(
+        &self,
+        mcp_defs: &HashMap<String, super::config::MCPDef>,
+    ) -> McpResult<()> {
         let config_path = get_managed_global_mcp_path()?;
         let mut config = McpJsonConfig::default();
         for (name, mcp_def) in mcp_defs {
@@ -709,8 +706,8 @@ impl Default for McpManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::config::expand_tilde;
+    use super::*;
     use tempfile::TempDir;
 
     fn test_manager() -> (TempDir, McpManager) {

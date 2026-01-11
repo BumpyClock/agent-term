@@ -8,14 +8,19 @@ use gpui_component::input::InputState as GpuiInputState;
 
 use crate::dialogs::{McpManagerDialog, ProjectEditorDialog, SessionEditorDialog, TabPickerDialog};
 use crate::settings_dialog::SettingsDialog;
-use crate::ui::{ActiveTheme, Button, ButtonVariants, Sizable, v_flex, WindowExt};
+use crate::ui::{ActiveTheme, Button, ButtonVariants, Sizable, WindowExt, v_flex};
 
 use super::actions::*;
 use super::state::AgentTermApp;
 
 impl AgentTermApp {
     // Window action handlers
-    pub fn toggle_sidebar(&mut self, _: &ToggleSidebar, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn toggle_sidebar(
+        &mut self,
+        _: &ToggleSidebar,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.sidebar_visible = !self.sidebar_visible;
         cx.notify();
     }
@@ -35,11 +40,8 @@ impl AgentTermApp {
         let main_window_handle = window.window_handle();
 
         // Compute bounds before opening window to avoid borrow conflict
-        let window_bounds = WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(600.0), px(700.0)),
-            cx,
-        ));
+        let window_bounds =
+            WindowBounds::Windowed(Bounds::centered(None, size(px(600.0), px(700.0)), cx));
 
         let _ = cx.open_window(
             WindowOptions {
@@ -326,8 +328,7 @@ impl AgentTermApp {
         });
 
         let dialog_entity = cx.new(|_cx| {
-            let mut dialog =
-                McpManagerDialog::new(tokio, mcp_manager, session_title, project_path);
+            let mut dialog = McpManagerDialog::new(tokio, mcp_manager, session_title, project_path);
             dialog.load_data();
             dialog
         });
@@ -455,11 +456,10 @@ impl AgentTermApp {
             let mut content = v_flex().gap(px(12.));
 
             // Confirmation message
-            content = content.child(
-                div()
-                    .text_sm()
-                    .child(format!("Are you sure you want to remove \"{}\"?", section_name)),
-            );
+            content = content.child(div().text_sm().child(format!(
+                "Are you sure you want to remove \"{}\"?",
+                section_name
+            )));
 
             // Session info warning
             if session_count > 0 {

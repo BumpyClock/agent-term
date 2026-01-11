@@ -3,19 +3,21 @@
 //! Opens in its own window with 3 tabs: General, Appearance, and Tools.
 
 use gpui::{
-    div, prelude::*, px, AnyElement, App, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::*, px,
 };
 
-use crate::fonts::{find_font_index, font_presets, FontOption};
+use crate::fonts::{FontOption, find_font_index, font_presets};
 use crate::settings::{AppSettings, Theme};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
 };
-use gpui_component::input::{InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction};
-use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::IndexPath;
+use gpui_component::input::{
+    InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction,
+};
+use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
 
 /// A font item for the Select dropdown that wraps FontOption.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,18 +69,15 @@ impl SettingsDialog {
         let original_settings = settings.clone();
 
         let font_size_input = cx.new(|cx| {
-            GpuiInputState::new(window, cx)
-                .default_value(settings.font_size.to_string())
+            GpuiInputState::new(window, cx).default_value(settings.font_size.to_string())
         });
 
         let line_height_input = cx.new(|cx| {
-            GpuiInputState::new(window, cx)
-                .default_value(format!("{:.1}", settings.line_height))
+            GpuiInputState::new(window, cx).default_value(format!("{:.1}", settings.line_height))
         });
 
         let letter_spacing_input = cx.new(|cx| {
-            GpuiInputState::new(window, cx)
-                .default_value(format!("{:.1}", settings.letter_spacing))
+            GpuiInputState::new(window, cx).default_value(format!("{:.1}", settings.letter_spacing))
         });
 
         let transparency_slider = cx.new(|_| {
@@ -94,100 +93,127 @@ impl SettingsDialog {
             .iter()
             .map(FontItem::from_font_option)
             .collect();
-        let selected_font_index = find_font_index(&settings.font_family)
-            .map(|idx| IndexPath::default().row(idx));
-        let font_select = cx.new(|cx| {
-            SelectState::new(font_items, selected_font_index, window, cx)
-        });
+        let selected_font_index =
+            find_font_index(&settings.font_family).map(|idx| IndexPath::default().row(idx));
+        let font_select =
+            cx.new(|cx| SelectState::new(font_items, selected_font_index, window, cx));
 
         // Subscribe to font select events
-        cx.subscribe_in(&font_select, window, |this, _, event: &SelectEvent<Vec<FontItem>>, window, cx| {
-            if let SelectEvent::Confirm(Some(family)) = event {
-                this.settings.font_family = family.clone();
-                this.notify_change(window, cx);
-            }
-        })
+        cx.subscribe_in(
+            &font_select,
+            window,
+            |this, _, event: &SelectEvent<Vec<FontItem>>, window, cx| {
+                if let SelectEvent::Confirm(Some(family)) = event {
+                    this.settings.font_family = family.clone();
+                    this.notify_change(window, cx);
+                }
+            },
+        )
         .detach();
 
         // Subscribe to font size NumberInput events
-        cx.subscribe_in(&font_size_input, window, |this, input, event: &NumberInputEvent, window, cx| {
-            if let NumberInputEvent::Step(action) = event {
-                input.update(cx, |input, cx| {
-                    let value = input.value().parse::<f32>().unwrap_or(14.0);
-                    let new_value = match action {
-                        StepAction::Increment => (value + 1.0).min(32.0),
-                        StepAction::Decrement => (value - 1.0).max(8.0),
-                    };
-                    this.settings.font_size = new_value;
-                    input.set_value(new_value.to_string(), window, cx);
-                });
-                this.notify_change(window, cx);
-            }
-        })
-        .detach();
-
-        cx.subscribe_in(&font_size_input, window, |this, input, event: &InputEvent, window, cx| {
-            if let InputEvent::Change = event {
-                if let Ok(value) = input.read(cx).value().parse::<f32>() {
-                    this.settings.font_size = value.clamp(8.0, 32.0);
+        cx.subscribe_in(
+            &font_size_input,
+            window,
+            |this, input, event: &NumberInputEvent, window, cx| {
+                if let NumberInputEvent::Step(action) = event {
+                    input.update(cx, |input, cx| {
+                        let value = input.value().parse::<f32>().unwrap_or(14.0);
+                        let new_value = match action {
+                            StepAction::Increment => (value + 1.0).min(32.0),
+                            StepAction::Decrement => (value - 1.0).max(8.0),
+                        };
+                        this.settings.font_size = new_value;
+                        input.set_value(new_value.to_string(), window, cx);
+                    });
                     this.notify_change(window, cx);
                 }
-            }
-        })
+            },
+        )
+        .detach();
+
+        cx.subscribe_in(
+            &font_size_input,
+            window,
+            |this, input, event: &InputEvent, window, cx| {
+                if let InputEvent::Change = event {
+                    if let Ok(value) = input.read(cx).value().parse::<f32>() {
+                        this.settings.font_size = value.clamp(8.0, 32.0);
+                        this.notify_change(window, cx);
+                    }
+                }
+            },
+        )
         .detach();
 
         // Subscribe to line height NumberInput events
-        cx.subscribe_in(&line_height_input, window, |this, input, event: &NumberInputEvent, window, cx| {
-            if let NumberInputEvent::Step(action) = event {
-                input.update(cx, |input, cx| {
-                    let value = input.value().parse::<f32>().unwrap_or(1.4);
-                    let new_value = match action {
-                        StepAction::Increment => (value + 0.1).min(2.5),
-                        StepAction::Decrement => (value - 0.1).max(1.0),
-                    };
-                    this.settings.line_height = new_value;
-                    input.set_value(format!("{:.1}", new_value), window, cx);
-                });
-                this.notify_change(window, cx);
-            }
-        })
-        .detach();
-
-        cx.subscribe_in(&line_height_input, window, |this, input, event: &InputEvent, window, cx| {
-            if let InputEvent::Change = event {
-                if let Ok(value) = input.read(cx).value().parse::<f32>() {
-                    this.settings.line_height = value.clamp(1.0, 2.5);
+        cx.subscribe_in(
+            &line_height_input,
+            window,
+            |this, input, event: &NumberInputEvent, window, cx| {
+                if let NumberInputEvent::Step(action) = event {
+                    input.update(cx, |input, cx| {
+                        let value = input.value().parse::<f32>().unwrap_or(1.4);
+                        let new_value = match action {
+                            StepAction::Increment => (value + 0.1).min(2.5),
+                            StepAction::Decrement => (value - 0.1).max(1.0),
+                        };
+                        this.settings.line_height = new_value;
+                        input.set_value(format!("{:.1}", new_value), window, cx);
+                    });
                     this.notify_change(window, cx);
                 }
-            }
-        })
+            },
+        )
+        .detach();
+
+        cx.subscribe_in(
+            &line_height_input,
+            window,
+            |this, input, event: &InputEvent, window, cx| {
+                if let InputEvent::Change = event {
+                    if let Ok(value) = input.read(cx).value().parse::<f32>() {
+                        this.settings.line_height = value.clamp(1.0, 2.5);
+                        this.notify_change(window, cx);
+                    }
+                }
+            },
+        )
         .detach();
 
         // Subscribe to letter spacing NumberInput events
-        cx.subscribe_in(&letter_spacing_input, window, |this, input, event: &NumberInputEvent, window, cx| {
-            if let NumberInputEvent::Step(action) = event {
-                input.update(cx, |input, cx| {
-                    let value = input.value().parse::<f32>().unwrap_or(0.0);
-                    let new_value = match action {
-                        StepAction::Increment => (value + 0.5).min(10.0),
-                        StepAction::Decrement => (value - 0.5).max(-2.0),
-                    };
-                    this.settings.letter_spacing = new_value;
-                    input.set_value(format!("{:.1}", new_value), window, cx);
-                });
-                this.notify_change(window, cx);
-            }
-        })
-        .detach();
-
-        cx.subscribe_in(&letter_spacing_input, window, |this, input, event: &InputEvent, window, cx| {
-            if let InputEvent::Change = event {
-                if let Ok(value) = input.read(cx).value().parse::<f32>() {
-                    this.settings.letter_spacing = value.clamp(-2.0, 10.0);
+        cx.subscribe_in(
+            &letter_spacing_input,
+            window,
+            |this, input, event: &NumberInputEvent, window, cx| {
+                if let NumberInputEvent::Step(action) = event {
+                    input.update(cx, |input, cx| {
+                        let value = input.value().parse::<f32>().unwrap_or(0.0);
+                        let new_value = match action {
+                            StepAction::Increment => (value + 0.5).min(10.0),
+                            StepAction::Decrement => (value - 0.5).max(-2.0),
+                        };
+                        this.settings.letter_spacing = new_value;
+                        input.set_value(format!("{:.1}", new_value), window, cx);
+                    });
                     this.notify_change(window, cx);
                 }
-            }
-        })
+            },
+        )
+        .detach();
+
+        cx.subscribe_in(
+            &letter_spacing_input,
+            window,
+            |this, input, event: &InputEvent, window, cx| {
+                if let InputEvent::Change = event {
+                    if let Ok(value) = input.read(cx).value().parse::<f32>() {
+                        this.settings.letter_spacing = value.clamp(-2.0, 10.0);
+                        this.notify_change(window, cx);
+                    }
+                }
+            },
+        )
         .detach();
 
         // Subscribe to transparency slider events
@@ -283,22 +309,26 @@ impl SettingsDialog {
                     .text_color(cx.theme().foreground)
                     .child("Updates"),
             )
-            .child(self.render_setting_row(
-                "Check for updates",
-                "Automatically check for new versions",
-                Switch::new("check-updates")
-                    .checked(self.settings.check_for_updates)
-                    .into_any_element(),
-                cx,
-            ))
-            .child(self.render_setting_row(
-                "Auto update",
-                "Automatically install updates when available",
-                Switch::new("auto-update")
-                    .checked(self.settings.auto_update)
-                    .into_any_element(),
-                cx,
-            ))
+            .child(
+                self.render_setting_row(
+                    "Check for updates",
+                    "Automatically check for new versions",
+                    Switch::new("check-updates")
+                        .checked(self.settings.check_for_updates)
+                        .into_any_element(),
+                    cx,
+                ),
+            )
+            .child(
+                self.render_setting_row(
+                    "Auto update",
+                    "Automatically install updates when available",
+                    Switch::new("auto-update")
+                        .checked(self.settings.auto_update)
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .child(
                 div()
                     .mt(px(16.))
@@ -351,29 +381,42 @@ impl SettingsDialog {
                     .text_color(cx.theme().foreground)
                     .child("Typography"),
             )
-            .child(self.render_setting_row(
-                "Font Size",
-                "8-32 px",
-                NumberInput::new(&self.font_size_input)
-                    .suffix(div().text_xs().text_color(cx.theme().muted_foreground).child("px"))
-                    .into_any_element(),
-                cx,
-            ))
+            .child(
+                self.render_setting_row(
+                    "Font Size",
+                    "8-32 px",
+                    NumberInput::new(&self.font_size_input)
+                        .suffix(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("px"),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .child(self.render_setting_row(
                 "Line Height",
                 "1.0-2.5",
-                NumberInput::new(&self.line_height_input)
-                    .into_any_element(),
+                NumberInput::new(&self.line_height_input).into_any_element(),
                 cx,
             ))
-            .child(self.render_setting_row(
-                "Letter Spacing",
-                "-2 to 10 px",
-                NumberInput::new(&self.letter_spacing_input)
-                    .suffix(div().text_xs().text_color(cx.theme().muted_foreground).child("px"))
-                    .into_any_element(),
-                cx,
-            ))
+            .child(
+                self.render_setting_row(
+                    "Letter Spacing",
+                    "-2 to 10 px",
+                    NumberInput::new(&self.letter_spacing_input)
+                        .suffix(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("px"),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             // Window section
             .child(
                 div()
@@ -389,18 +432,20 @@ impl SettingsDialog {
                 Slider::new(&self.transparency_slider).into_any_element(),
                 cx,
             ))
-            .child(self.render_setting_row(
-                "Background Blur",
-                "Enable macOS vibrancy effect",
-                Switch::new("blur-enabled")
-                    .checked(self.settings.blur_enabled)
-                    .on_click(cx.listener(|this, checked: &bool, window, cx| {
-                        this.settings.blur_enabled = *checked;
-                        this.notify_change(window, cx);
-                    }))
-                    .into_any_element(),
-                cx,
-            ))
+            .child(
+                self.render_setting_row(
+                    "Background Blur",
+                    "Enable macOS vibrancy effect",
+                    Switch::new("blur-enabled")
+                        .checked(self.settings.blur_enabled)
+                        .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                            this.settings.blur_enabled = *checked;
+                            this.notify_change(window, cx);
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 
@@ -439,7 +484,10 @@ impl SettingsDialog {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("{} custom tools configured", self.settings.custom_tools.len())),
+                    .child(format!(
+                        "{} custom tools configured",
+                        self.settings.custom_tools.len()
+                    )),
             )
             .into_any_element()
     }
@@ -523,7 +571,12 @@ impl SettingsDialog {
                     .flex()
                     .flex_col()
                     .gap(px(2.))
-                    .child(div().text_sm().text_color(cx.theme().foreground).child(label))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .child(label),
+                    )
                     .child(
                         div()
                             .text_xs()
@@ -552,7 +605,12 @@ impl SettingsDialog {
                 div()
                     .flex()
                     .justify_between()
-                    .child(div().text_sm().text_color(cx.theme().foreground).child(label))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .child(label),
+                    )
                     .child(div().text_sm().text_color(cx.theme().accent).child(value)),
             )
             .child(control)

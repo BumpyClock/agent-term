@@ -5,8 +5,9 @@ use gpui_component::input::InputState as GpuiInputState;
 
 use crate::icons::IconDescriptor;
 use crate::ui::{
+    ActiveTheme, IconPicker, WindowExt,
     helpers::{agentterm_input_field, icon_descriptor_from_string, icon_descriptor_to_string},
-    ActiveTheme, IconPicker, v_flex, WindowExt,
+    v_flex,
 };
 
 use super::AgentTermApp;
@@ -98,7 +99,11 @@ impl Render for ProjectEditorDialog {
                     )
                     .child(
                         IconPicker::new("project-icon-picker")
-                            .value(current_icon.as_ref().map(|s| icon_descriptor_from_string(s)))
+                            .value(
+                                current_icon
+                                    .as_ref()
+                                    .map(|s| icon_descriptor_from_string(s)),
+                            )
                             .on_change(move |icon, _window, cx| {
                                 entity.update(cx, |this, cx| {
                                     this.set_icon(icon, cx);

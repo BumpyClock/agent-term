@@ -10,7 +10,7 @@ use crate::diagnostics;
 use super::config::{MCPDef, UserConfig};
 use super::error::{McpError, McpResult};
 use super::pool::types::PoolStatusResponse;
-use super::pool::{socket_alive, socket_path_for, Pool, PoolConfig};
+use super::pool::{Pool, PoolConfig, socket_alive, socket_path_for};
 
 static GLOBAL_POOL: OnceLock<Mutex<Option<Arc<Pool>>>> = OnceLock::new();
 
@@ -92,13 +92,8 @@ pub fn start_pool_mcp(pool: &Pool, name: &str, def: &MCPDef) -> McpResult<()> {
             name
         )));
     }
-    pool.start(
-        name,
-        def.command.clone(),
-        def.args.clone(),
-        def.env.clone(),
-    )
-    .map_err(|err| McpError::IoError(err.to_string()))
+    pool.start(name, def.command.clone(), def.args.clone(), def.env.clone())
+        .map_err(|err| McpError::IoError(err.to_string()))
 }
 
 fn start_pool_mcps(pool: &Pool, mcps: &HashMap<String, MCPDef>) -> McpResult<()> {
@@ -117,7 +112,10 @@ fn start_pool_mcps(pool: &Pool, mcps: &HashMap<String, MCPDef>) -> McpResult<()>
         }
         if let Err(err) = start_pool_mcp(pool, name, def) {
             let msg = err.to_string().replace('.', "");
-            diagnostics::log(format!("pool_proxy_start_failed name={} error={}", name, msg));
+            diagnostics::log(format!(
+                "pool_proxy_start_failed name={} error={}",
+                name, msg
+            ));
         }
     }
     Ok(())
@@ -143,7 +141,10 @@ pub fn get_pool_status() -> PoolStatusResponse {
 /// Restart a specific MCP server in the pool
 pub async fn restart_pool_server(name: &str) -> McpResult<bool> {
     match get_global_pool() {
-        Some(pool) => pool.restart(name).await.map_err(|e| McpError::IoError(e.to_string())),
+        Some(pool) => pool
+            .restart(name)
+            .await
+            .map_err(|e| McpError::IoError(e.to_string())),
         None => Ok(false),
     }
 }
@@ -151,7 +152,9 @@ pub async fn restart_pool_server(name: &str) -> McpResult<bool> {
 /// Stop a specific MCP server in the pool
 pub fn stop_pool_server(name: &str) -> McpResult<bool> {
     match get_global_pool() {
-        Some(pool) => pool.stop_server(name).map_err(|e| McpError::IoError(e.to_string())),
+        Some(pool) => pool
+            .stop_server(name)
+            .map_err(|e| McpError::IoError(e.to_string())),
         None => Ok(false),
     }
 }

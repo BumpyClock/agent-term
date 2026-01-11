@@ -291,8 +291,7 @@ impl TerminalBuilder {
                 shell_cmd = std::env::var("SHELL").ok();
             }
 
-            let alac_shell =
-                shell_cmd.map(|program| tty::Shell::new(program, shell_args));
+            let alac_shell = shell_cmd.map(|program| tty::Shell::new(program, shell_args));
 
             let pty_options = tty::Options {
                 shell: alac_shell,

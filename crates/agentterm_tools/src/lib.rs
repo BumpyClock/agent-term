@@ -50,7 +50,12 @@ pub async fn get_pinned_shells(manager: &McpManager) -> McpResult<Vec<String>> {
 pub async fn toggle_pin_shell(manager: &McpManager, shell_id: String) -> McpResult<Vec<String>> {
     let mut config = manager.load_config().await?;
 
-    if let Some(pos) = config.shell.pinned_shells.iter().position(|id| id == &shell_id) {
+    if let Some(pos) = config
+        .shell
+        .pinned_shells
+        .iter()
+        .position(|id| id == &shell_id)
+    {
         config.shell.pinned_shells.remove(pos);
     } else {
         config.shell.pinned_shells.push(shell_id);
@@ -146,10 +151,7 @@ pub fn detect_default_shell() -> String {
 
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = std::process::Command::new("where")
-            .arg("pwsh.exe")
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("where").arg("pwsh.exe").output() {
             if output.status.success() {
                 if let Some(path) = String::from_utf8_lossy(&output.stdout).lines().next() {
                     if !path.trim().is_empty() {
@@ -275,12 +277,18 @@ fn detect_windows_shells() -> Vec<ShellInfo> {
 
     if let Some(shell) = detect_powershell_7() {
         let is_default = shell.command == default_shell;
-        shells.push(ShellInfo { is_default, ..shell });
+        shells.push(ShellInfo {
+            is_default,
+            ..shell
+        });
     }
 
     if let Some(shell) = detect_windows_powershell() {
         let is_default = shell.command == default_shell;
-        shells.push(ShellInfo { is_default, ..shell });
+        shells.push(ShellInfo {
+            is_default,
+            ..shell
+        });
     }
 
     shells.push(ShellInfo {
@@ -482,4 +490,3 @@ fn get_distro_icon(distro: &str) -> &'static str {
         "/tool-icons/linux.svg"
     }
 }
-

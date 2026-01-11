@@ -14,26 +14,27 @@ pub use lucide_search::*;
 
 // Re-export gpui-component UI primitives
 pub use gpui_component::{
+    // Theme and styling
+    ActiveTheme,
+    Sizable,
+    // Window extensions for dialogs
+    WindowExt,
     // Button components
     button::{Button, ButtonVariants},
     // Dialog components
     dialog::Dialog,
     // Divider components
     divider::Divider,
+    // Layout helpers
+    h_flex,
+    // List components
+    list::ListItem,
+    // Menu components
+    menu::ContextMenuExt,
     // Form controls
     slider::{Slider, SliderEvent, SliderState},
     switch::Switch,
-    // List components
-    list::ListItem,
     // Tab components
     tab::{Tab, TabBar},
-    // Menu components
-    menu::ContextMenuExt,
-    // Theme and styling
-    ActiveTheme,
-    Sizable,
-    // Layout helpers
-    h_flex, v_flex,
-    // Window extensions for dialogs
-    WindowExt,
+    v_flex,
 };

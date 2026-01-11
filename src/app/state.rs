@@ -143,7 +143,12 @@ impl AgentTermApp {
             .map(|s| &s.section)
     }
 
-    pub fn set_active_session_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_active_session_id(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.active_session_id.as_deref() == Some(&id) {
             return;
         }
@@ -203,13 +208,19 @@ impl AgentTermApp {
             section_id,
             tool,
             command,
-            args: if final_args.is_empty() { None } else { Some(final_args) },
+            args: if final_args.is_empty() {
+                None
+            } else {
+                Some(final_args)
+            },
             icon,
         };
 
         match self.session_store.create_session(input) {
             Ok(record) => {
-                let _ = self.session_store.set_active_session(Some(record.id.clone()));
+                let _ = self
+                    .session_store
+                    .set_active_session(Some(record.id.clone()));
                 self.reload_from_store(cx);
                 self.ensure_active_terminal(window, cx);
             }
@@ -222,7 +233,12 @@ impl AgentTermApp {
     }
 
     /// Inject --mcp-config argument for supported tools if a managed MCP config exists
-    fn maybe_inject_mcp_config(&self, tool: &SessionTool, mut args: Vec<String>, project_path: &str) -> Vec<String> {
+    fn maybe_inject_mcp_config(
+        &self,
+        tool: &SessionTool,
+        mut args: Vec<String>,
+        project_path: &str,
+    ) -> Vec<String> {
         if matches!(tool, SessionTool::Claude) {
             if let Some(config_path) = self.mcp_manager.get_project_mcp_config_path(project_path) {
                 args.push("--mcp-config".to_string());
@@ -309,7 +325,12 @@ impl AgentTermApp {
     }
 
     /// Updates the application settings and propagates changes to terminal views.
-    pub fn update_settings(&mut self, settings: AppSettings, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn update_settings(
+        &mut self,
+        settings: AppSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Update font settings for all terminal views
         let font_family = settings.font_family.clone();
         let font_size = settings.font_size;
