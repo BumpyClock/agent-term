@@ -3,13 +3,11 @@
 //! Re-exports gpui-component UI primitives and provides
 //! app-specific components (IconPicker, LucideSearchModal).
 
-mod blurred_dropdown;
 pub mod helpers;
 mod icon_picker;
 mod lucide_search;
 
 // App-specific components
-pub use blurred_dropdown::*;
 pub use helpers::*;
 pub use icon_picker::*;
 pub use lucide_search::*;
