@@ -94,14 +94,19 @@ impl AgentTermApp {
 
     pub fn render_sidebar_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let top_offset_for_title_bar = TITLE_BAR_HEIGHT - px(SIDEBAR_INSET);
+        // On macOS we draw into the title bar so the sidebar can visually reach the top, but we
+        // still need a bit of space so the header doesn't sit beneath the traffic lights.
+        let top_offset = if cfg!(target_os = "macos") {
+            px(20.0)
+        } else {
+            top_offset_for_title_bar
+        };
         div()
             .id("sidebar-content")
             .size_full()
             .flex()
             .flex_col()
-            .when(cfg!(not(target_os = "macos")), |el| {
-                el.child(div().h(top_offset_for_title_bar).flex_shrink_0())
-            })
+            .child(div().h(top_offset).flex_shrink_0())
             .child(self.render_sidebar_header(cx))
             .child(self.render_add_project(cx))
             .child(self.render_sections_list(cx))
@@ -117,10 +122,11 @@ impl AgentTermApp {
             .justify_between()
             .border_b_1()
             .border_color(rgba(rgba_u32(BORDER_SOFT, BORDER_SOFT_ALPHA)))
+            .when(cfg!(target_os = "macos"), |el| el.items_end().pb(px(6.0)))
             .child(
                 div()
                     .text_sm()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui::FontWeight::BOLD)
                     .text_color(cx.theme().foreground)
                     .child("AGENT TERM"),
             )
