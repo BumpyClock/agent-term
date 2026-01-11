@@ -134,18 +134,37 @@ impl AgentTermApp {
                     .child("AGENT TERM"),
             )
             .child(
-                Button::new("sidebar-mcp")
-                    // Tool SVGs use `currentColor`; set a color explicitly so it isn't invisible on dark themes.
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
                     .child(
-                        Icon::asset("tool-icons/mcp.svg")
-                            .size(IconSize::Small)
-                            .color(cx.theme().muted_foreground),
+                        Button::new("sidebar-settings")
+                            .child(
+                                Icon::new(IconName::Settings)
+                                    .size(IconSize::Small)
+                                    .color(cx.theme().muted_foreground),
+                            )
+                            .ghost()
+                            .compact()
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.open_settings(&OpenSettings, window, cx);
+                            })),
                     )
-                    .ghost()
-                    .compact()
-                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.open_mcp_manager(&ToggleMcpManager, window, cx);
-                    })),
+                    .child(
+                        Button::new("sidebar-mcp")
+                            // Tool SVGs use `currentColor`; set a color explicitly so it isn't invisible on dark themes.
+                            .child(
+                                Icon::asset("tool-icons/mcp.svg")
+                                    .size(IconSize::Small)
+                                    .color(cx.theme().muted_foreground),
+                            )
+                            .ghost()
+                            .compact()
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.open_mcp_manager(&ToggleMcpManager, window, cx);
+                            })),
+                    ),
             )
     }
 
