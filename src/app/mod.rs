@@ -23,7 +23,7 @@ use gpui_component::{
     TITLE_BAR_HEIGHT, TitleBar,
     theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
 };
-use gpui_term::{Clear, Copy, Paste, SelectAll};
+use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::ui::ActiveTheme as _;
 use constants::{SIDEBAR_GAP, SIDEBAR_INSET, SURFACE_ROOT, SURFACE_ROOT_ALPHA, rgba_u32};
@@ -86,6 +86,10 @@ pub fn run() {
             KeyBinding::new("cmd-v", Paste, Some("Terminal")),
             KeyBinding::new("cmd-a", SelectAll, Some("Terminal")),
             KeyBinding::new("cmd-k", Clear, Some("Terminal")),
+            // Terminal tab handling - intercept tab/shift-tab to send to terminal
+            KeyBinding::new("tab", SendTab, Some("Terminal")),
+            KeyBinding::new("shift-tab", SendShiftTab, Some("Terminal")),
+            KeyBinding::new("alt-shift-tab", FocusOut, Some("Terminal")),
         ]);
         crate::text_input::bind_keys(cx);
 

@@ -8,6 +8,6 @@ pub use terminal::{
 };
 pub use terminal_element::{TerminalElement, TextStyle, convert_color};
 pub use terminal_view::{
-    Clear, Copy, Paste, ScrollLineDown, ScrollLineUp, ScrollPageDown, ScrollPageUp, SelectAll,
-    TerminalView,
+    Clear, Copy, FocusOut, Paste, ScrollLineDown, ScrollLineUp, ScrollPageDown, ScrollPageUp,
+    SelectAll, SendShiftTab, SendTab, TerminalView,
 };
