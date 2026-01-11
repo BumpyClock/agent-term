@@ -382,7 +382,14 @@ impl TerminalElement {
         focused: bool,
         cursor_visible: bool,
     ) -> Self {
-        Self::with_settings(terminal, focus, focused, cursor_visible, "JetBrains Mono", 14.0)
+        Self::with_settings(
+            terminal,
+            focus,
+            focused,
+            cursor_visible,
+            "JetBrains Mono",
+            14.0,
+        )
     }
 
     /// Creates a new terminal element with custom font settings.

@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 
-use agentterm_shared::socket_path::socket_path_for;
-use crate::diagnostics;
-use crate::config::get_agent_term_mcp_run_dir;
 use super::socket_proxy::SocketProxy;
 use super::types::{McpServerStatus, PoolStatusResponse, ServerStatus};
+use crate::config::get_agent_term_mcp_run_dir;
+use crate::diagnostics;
+use agentterm_shared::socket_path::socket_path_for;
 
 #[derive(Debug, Clone)]
 pub struct PoolConfig {

@@ -1,8 +1,8 @@
 use std::fs;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -87,8 +87,8 @@ impl Storage {
         self.rotate_backups(&path);
         let tmp_path = path.with_extension("json.tmp");
         // Stream directly to file to avoid large intermediate String allocation
-        let file = fs::File::create(&tmp_path)
-            .map_err(|e| StorageError::WriteError(e.to_string()))?;
+        let file =
+            fs::File::create(&tmp_path).map_err(|e| StorageError::WriteError(e.to_string()))?;
         let mut writer = BufWriter::new(file);
         serde_json::to_writer_pretty(&mut writer, snapshot)
             .map_err(|e| StorageError::SerializeError(e.to_string()))?;

@@ -9,7 +9,7 @@ use gpui::{
 };
 use gpui_component::Size as ComponentSize;
 
-use crate::app::constants::{rgba_u32, BORDER_SOFT};
+use crate::app::constants::{BORDER_SOFT, rgba_u32};
 use crate::ui::{ActiveTheme, Sizable, Tab, TabBar, v_flex};
 
 #[derive(Clone)]
@@ -296,11 +296,7 @@ impl Render for McpManagerDialog {
             .collect();
         available.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let selected_index = if self.scope == McpScope::Global {
-            0
-        } else {
-            1
-        };
+        let selected_index = if self.scope == McpScope::Global { 0 } else { 1 };
 
         v_flex()
             .gap(px(10.0))
@@ -311,26 +307,22 @@ impl Render for McpManagerDialog {
                     .child(self.session_title.clone()),
             )
             .child(
-                div()
-                    .flex()
-                    .gap(px(8.0))
-                    .items_center()
-                    .child(
-                        TabBar::new("mcp-scope-tabs")
-                            .pill()
-                            .with_size(ComponentSize::Small)
-                            .child(Tab::new().label("Shared"))
-                            .child(Tab::new().label("Project").disabled(!self.has_project))
-                            .selected_index(selected_index)
-                            .on_click(cx.listener(|this, ix: &usize, _w, cx| {
-                                let scope = if *ix == 0 {
-                                    McpScope::Global
-                                } else {
-                                    McpScope::Local
-                                };
-                                this.set_scope(scope, cx);
-                            })),
-                    ),
+                div().flex().gap(px(8.0)).items_center().child(
+                    TabBar::new("mcp-scope-tabs")
+                        .pill()
+                        .with_size(ComponentSize::Small)
+                        .child(Tab::new().label("Shared"))
+                        .child(Tab::new().label("Project").disabled(!self.has_project))
+                        .selected_index(selected_index)
+                        .on_click(cx.listener(|this, ix: &usize, _w, cx| {
+                            let scope = if *ix == 0 {
+                                McpScope::Global
+                            } else {
+                                McpScope::Local
+                            };
+                            this.set_scope(scope, cx);
+                        })),
+                ),
             )
             .child(
                 div()

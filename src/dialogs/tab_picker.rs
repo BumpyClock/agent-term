@@ -49,7 +49,10 @@ impl TabPickerDialog {
         self.loading = true;
         self.error = None;
 
-        let tools = match self.tokio.block_on(agentterm_tools::tools_list(&self.mcp_manager)) {
+        let tools = match self
+            .tokio
+            .block_on(agentterm_tools::tools_list(&self.mcp_manager))
+        {
             Ok(list) => list.into_iter().filter(|t| t.enabled).collect(),
             Err(e) => {
                 self.error = Some(e.to_string().into());
@@ -75,10 +78,10 @@ impl TabPickerDialog {
     }
 
     fn toggle_pin(&mut self, shell_id: String, cx: &mut Context<Self>) {
-        match self
-            .tokio
-            .block_on(agentterm_tools::toggle_pin_shell(&self.mcp_manager, shell_id))
-        {
+        match self.tokio.block_on(agentterm_tools::toggle_pin_shell(
+            &self.mcp_manager,
+            shell_id,
+        )) {
             Ok(pinned) => self.pinned_shell_ids = pinned,
             Err(e) => self.error = Some(e.to_string().into()),
         }
@@ -269,11 +272,8 @@ impl TabPickerDialog {
 
 impl Render for TabPickerDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let pinned_set: std::collections::HashSet<&str> = self
-            .pinned_shell_ids
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
+        let pinned_set: std::collections::HashSet<&str> =
+            self.pinned_shell_ids.iter().map(|s| s.as_str()).collect();
 
         let mut pinned_shells: Vec<ShellInfo> = self
             .shells

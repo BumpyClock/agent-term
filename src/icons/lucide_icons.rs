@@ -25,10 +25,7 @@ pub static LUCIDE_ICONS: Lazy<Vec<LucideIconMeta>> = Lazy::new(|| {
     let mut icons: Vec<_> = IconAssets::iter()
         .filter(|p| p.starts_with("icons/") && p.ends_with(".svg"))
         .filter_map(|p| {
-            let name = p
-                .strip_prefix("icons/")?
-                .strip_suffix(".svg")?
-                .to_string();
+            let name = p.strip_prefix("icons/")?.strip_suffix(".svg")?.to_string();
             let display_name = to_display_name(&name);
             Some(LucideIconMeta { name, display_name })
         })
@@ -45,9 +42,7 @@ fn to_display_name(name: &str) -> String {
         .map(|word| {
             let mut chars = word.chars();
             match chars.next() {
-                Some(first) => {
-                    first.to_uppercase().chain(chars).collect::<String>()
-                }
+                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
                 None => String::new(),
             }
         })

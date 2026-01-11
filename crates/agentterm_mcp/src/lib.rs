@@ -16,4 +16,3 @@ pub async fn build_mcp_manager() -> McpResult<McpManager> {
     manager.create_example_config().await?;
     Ok(manager)
 }
-

@@ -28,7 +28,11 @@ fn diagnostics_path() -> Option<PathBuf> {
     static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
     PATH.get_or_init(|| {
         let home = dirs::home_dir()?;
-        Some(home.join(".agent-term").join("logs").join("diagnostics.log"))
+        Some(
+            home.join(".agent-term")
+                .join("logs")
+                .join("diagnostics.log"),
+        )
     })
     .clone()
 }

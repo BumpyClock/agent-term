@@ -82,7 +82,5 @@ pub fn font_presets() -> Vec<FontOption> {
 
 /// Find the index of a font by its family name.
 pub fn find_font_index(family: &str) -> Option<usize> {
-    font_presets()
-        .iter()
-        .position(|f| f.family == family)
+    font_presets().iter().position(|f| f.family == family)
 }

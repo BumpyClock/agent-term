@@ -10,7 +10,7 @@ mod tool_icons;
 pub use lucide_icons::*;
 pub use tool_icons::*;
 
-use gpui::{prelude::*, px, svg, Hsla, IntoElement, SharedString, Styled, Window, App};
+use gpui::{App, Hsla, IntoElement, SharedString, Styled, Window, prelude::*, px, svg};
 
 /// Common UI icons with type safety (subset of Lucide).
 /// These are the most frequently used icons with compile-time safety.

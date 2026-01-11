@@ -5,9 +5,8 @@ use crate::diagnostics;
 
 /// Get the agent-term directory
 pub fn get_agent_term_dir() -> io::Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "Home directory not found")
-    })?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Home directory not found"))?;
     Ok(home.join(".agent-term"))
 }
 
@@ -28,7 +27,10 @@ fn platform_socket_path(safe_name: &str) -> PathBuf {
     // TODO: Consider adding always-on logging for fallback scenarios, currently
     // diagnostics::log only outputs when AGENT_TERM_DIAG env var is enabled.
     let base = get_agent_term_mcp_run_dir().unwrap_or_else(|e| {
-        diagnostics::log(format!("Failed to get MCP run dir: {}, falling back to /tmp", e));
+        diagnostics::log(format!(
+            "Failed to get MCP run dir: {}, falling back to /tmp",
+            e
+        ));
         PathBuf::from("/tmp")
     });
     base.join(format!("agentterm-mcp-{}.sock", safe_name))

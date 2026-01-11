@@ -1,17 +1,17 @@
 use std::collections::HashMap;
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::io;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
-use tokio::sync::{mpsc, oneshot, Notify};
-use tokio::time::{sleep, Duration, Instant};
+use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::time::{Duration, Instant, sleep};
 
 // TODO: Consider making these configurable in future
 const REQUEST_TTL_SECS: u64 = 300;
@@ -20,9 +20,9 @@ const CLEANUP_INTERVAL: u32 = 100;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-use crate::diagnostics;
 use super::transport::{self, LocalListener, LocalStream};
 use super::types::ServerStatus;
+use crate::diagnostics;
 
 type ClientSender = mpsc::Sender<String>;
 
@@ -99,7 +99,9 @@ impl SocketProxy {
     }
 
     pub fn uptime_seconds(&self) -> Option<u64> {
-        self.started_at.lock().map(|start| start.elapsed().as_secs())
+        self.started_at
+            .lock()
+            .map(|start| start.elapsed().as_secs())
     }
 
     pub fn connection_count(&self) -> u32 {
@@ -214,10 +216,7 @@ impl SocketProxy {
             }
 
             if let Ok(exit) = exit {
-                diagnostics::log(format!(
-                    "pool_child_exited name={} status={}",
-                    name, exit
-                ));
+                diagnostics::log(format!("pool_child_exited name={} status={}", name, exit));
             }
         });
 
@@ -349,10 +348,7 @@ impl SocketProxy {
                         });
                     }
                     Err(err) => {
-                        diagnostics::log(format!(
-                            "pool_accept_error name={} error={}",
-                            name, err
-                        ));
+                        diagnostics::log(format!("pool_accept_error name={} error={}", name, err));
                         sleep(Duration::from_millis(50)).await;
                     }
                 }
@@ -568,10 +564,7 @@ async fn route_response(
             target = request_map.lock().remove(&id).map(|(cid, _)| cid);
         }
     } else {
-        diagnostics::log(format!(
-            "pool_response_parse_failed bytes={}",
-            line.len()
-        ));
+        diagnostics::log(format!("pool_response_parse_failed bytes={}", line.len()));
     }
 
     if let Some(client_id) = target {
@@ -584,10 +577,7 @@ async fn route_response(
                     line.len()
                 ));
             } else {
-                diagnostics::log(format!(
-                    "pool_response_send_failed client_id={}",
-                    client_id
-                ));
+                diagnostics::log(format!("pool_response_send_failed client_id={}", client_id));
             }
         } else {
             broadcast_to_all(line, clients).await;

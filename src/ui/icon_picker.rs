@@ -6,8 +6,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    div, prelude::*, px, rgb, App, ElementId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Styled, Window,
+    App, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, Window,
+    div, prelude::*, px, rgb,
 };
 
 use crate::icons::{Icon, IconDescriptor, IconSize, TOOL_ICONS};
@@ -233,13 +233,11 @@ fn render_icon_button(
                 callback(Some(descriptor_clone.clone()), window, cx);
             })
         })
-        .child(
-            icon.size(IconSize::Medium).color(if is_selected {
-                gpui::hsla(0., 0., 0., 1.)
-            } else {
-                gpui::hsla(0., 0., 0.85, 1.)
-            }),
-        )
+        .child(icon.size(IconSize::Medium).color(if is_selected {
+            gpui::hsla(0., 0., 0., 1.)
+        } else {
+            gpui::hsla(0., 0., 0.85, 1.)
+        }))
 }
 
 fn render_more_button(

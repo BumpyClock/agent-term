@@ -19,12 +19,15 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowOptions, div,
     prelude::*, px, rgba,
 };
-use gpui_component::{TitleBar, theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode}};
+use gpui_component::{
+    TitleBar,
+    theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
+};
 use gpui_term::{Clear, Copy, Paste, SelectAll};
 
-use constants::{rgba_u32, SIDEBAR_GAP, SIDEBAR_INSET, SURFACE_ROOT, SURFACE_ROOT_ALPHA};
-use menus::{app_menus, configure_macos_titlebar};
 use crate::ui::ActiveTheme as _;
+use constants::{SIDEBAR_GAP, SIDEBAR_INSET, SURFACE_ROOT, SURFACE_ROOT_ALPHA, rgba_u32};
+use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
 pub fn run() {
@@ -182,8 +185,7 @@ impl Render for AgentTermApp {
                     .right_0()
                     .h(px(34.0))
                     // Keep the visual strip but let the window/terminal background show through.
-                    .bg(cx.theme().transparent)
-                    ,
+                    .bg(cx.theme().transparent),
             )
             // Main content (full-window). Titlebar is drawn as an overlay above this so the sidebar
             // can visually extend to the top while Windows still hit-tests the titlebar controls.
@@ -196,7 +198,9 @@ impl Render for AgentTermApp {
                     .right_0()
                     .bottom_0()
                     .child(self.render_terminal_container(cx))
-                    .when(self.sidebar_visible, |el| el.child(self.render_sidebar_shell(cx))),
+                    .when(self.sidebar_visible, |el| {
+                        el.child(self.render_sidebar_shell(cx))
+                    }),
             )
             // TitleBar overlay for window controls and dragging (keep above content for Windows hit-testing).
             .child(

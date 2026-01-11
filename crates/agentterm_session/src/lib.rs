@@ -50,14 +50,14 @@ impl SessionStore {
 
     pub fn set_active_session(&self, id: Option<String>) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
-        
+
         // Validate session exists when setting a specific id
         if let Some(ref session_id) = id {
             if !snapshot.sessions.iter().any(|s| &s.id == session_id) {
                 return Err("Session not found".to_string());
             }
         }
-        
+
         snapshot.active_session_id = id;
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
@@ -127,18 +127,18 @@ impl SessionStore {
 
     pub fn reorder_sections(&self, ordered_section_ids: &[String]) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
-        
+
         // Collect missing section IDs
         let missing_ids: Vec<String> = ordered_section_ids
             .iter()
             .filter(|id| !snapshot.sections.iter().any(|s| &s.id == *id))
             .cloned()
             .collect();
-        
+
         if !missing_ids.is_empty() {
             return Err(format!("Section(s) not found: {}", missing_ids.join(", ")));
         }
-        
+
         for (index, id) in ordered_section_ids.iter().enumerate() {
             if let Some(section) = snapshot.sections.iter_mut().find(|s| &s.id == id) {
                 section.order = (index as u32).saturating_add(1);
@@ -205,12 +205,12 @@ impl SessionStore {
 
     pub fn move_session(&self, id: &str, section_id: String) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
-        
+
         // Validate target section exists
         if !snapshot.sections.iter().any(|s| s.id == section_id) {
             return Err("Section not found".to_string());
         }
-        
+
         let session = snapshot
             .sessions
             .iter_mut()
@@ -247,13 +247,13 @@ impl SessionStore {
             .iter_mut()
             .find(|session| session.id == id)
             .ok_or_else(|| "Session not found".to_string())?;
-        
+
         // Clone only when needed
         if !session.is_custom_title {
             session.title = title.clone();
         }
         session.dynamic_title = Some(title);
-        
+
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 

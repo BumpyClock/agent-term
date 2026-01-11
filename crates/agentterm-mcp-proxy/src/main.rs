@@ -47,14 +47,20 @@ async fn main() {
 
     let (reader, writer) = tokio::io::split(stream);
 
-    diagnostics::log(format!("mcp_proxy_pump_start name={} dir=stdin->socket", name));
+    diagnostics::log(format!(
+        "mcp_proxy_pump_start name={} dir=stdin->socket",
+        name
+    ));
     let stdin_name = name.clone();
     let stdin_task = tokio::spawn(async move {
         let stdin = tokio::io::stdin();
         pump(stdin, writer, "stdin->socket", &stdin_name, false).await;
     });
 
-    diagnostics::log(format!("mcp_proxy_pump_start name={} dir=socket->stdout", name));
+    diagnostics::log(format!(
+        "mcp_proxy_pump_start name={} dir=socket->stdout",
+        name
+    ));
     let stdout = tokio::io::stdout();
     pump(reader, stdout, "socket->stdout", &name, true).await;
     let _ = stdin_task.await;
@@ -86,7 +92,11 @@ fn parse_args() -> ProxyArgs {
         std::process::exit(2);
     };
 
-    ProxyArgs { name, endpoint, debug }
+    ProxyArgs {
+        name,
+        endpoint,
+        debug,
+    }
 }
 
 async fn connect_with_retry(path: &PathBuf) -> io::Result<transport::LocalStream> {
@@ -100,9 +110,8 @@ async fn connect_with_retry(path: &PathBuf) -> io::Result<transport::LocalStream
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "mcp proxy connect failed")
-    }))
+    Err(last_err
+        .unwrap_or_else(|| io::Error::new(io::ErrorKind::Other, "mcp proxy connect failed")))
 }
 
 async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(

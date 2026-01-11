@@ -9,8 +9,7 @@ pub enum ServerStatus {
     Failed,
 }
 
-impl ServerStatus {
-}
+impl ServerStatus {}
 
 /// Detailed status for a single MCP server in the pool
 #[derive(Debug, Clone, Serialize, Deserialize)]

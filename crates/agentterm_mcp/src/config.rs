@@ -487,9 +487,8 @@ pub fn get_agent_term_dir() -> McpResult<PathBuf> {
         return Ok(PathBuf::from(custom_dir));
     }
 
-    let home = dirs::home_dir().ok_or_else(|| McpError::ConfigNotFound(
-        "Home directory not found".to_string(),
-    ))?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| McpError::ConfigNotFound("Home directory not found".to_string()))?;
 
     Ok(home.join(".agent-term"))
 }
@@ -515,7 +514,9 @@ pub fn get_user_project_mcp_path(project_path: &str) -> PathBuf {
 /// This keeps AgentTerm's MCP configs separate from the user's project .mcp.json
 pub fn get_managed_project_mcp_path(project_path: &str) -> McpResult<PathBuf> {
     let identifier = project_path_to_identifier(project_path);
-    let dir = get_agent_term_dir()?.join("project-configs").join(&identifier);
+    let dir = get_agent_term_dir()?
+        .join("project-configs")
+        .join(&identifier);
     Ok(dir.join(".mcp.json"))
 }
 
@@ -590,9 +591,8 @@ pub fn get_claude_config_dir() -> McpResult<PathBuf> {
     }
 
     // Default to ~/.claude
-    let home = dirs::home_dir().ok_or_else(|| McpError::ConfigNotFound(
-        "Home directory not found".to_string(),
-    ))?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| McpError::ConfigNotFound("Home directory not found".to_string()))?;
 
     Ok(home.join(".claude"))
 }
