@@ -8,84 +8,19 @@ use gpui::{
     prelude::*, px,
 };
 
-use crate::fonts::{FontOption, find_font_index, font_presets};
+use crate::fonts::font_presets;
 use crate::settings::{AppSettings, Theme};
 use crate::terminal_schemes;
 use crate::theme::{accent_colors, resolve_accent_color, surface_background};
 use crate::ui::{
-    ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
+    ActiveTheme, BlurredDropdown, BlurredDropdownEvent, Button, ButtonVariants, DropdownOption,
+    Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
 };
-use gpui_component::IndexPath;
 use gpui_component::button::ButtonCustomVariant;
 use gpui_component::input::{
     InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction,
 };
-use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::theme::ThemeMode;
-
-/// A font item for the Select dropdown that wraps FontOption.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FontItem {
-    name: SharedString,
-    family: String,
-}
-
-impl FontItem {
-    fn from_font_option(opt: &FontOption) -> Self {
-        Self {
-            name: opt.name.into(),
-            family: opt.family.to_string(),
-        }
-    }
-}
-
-impl SelectItem for FontItem {
-    type Value = String;
-
-    fn title(&self) -> SharedString {
-        self.name.clone()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.family
-    }
-}
-
-/// A terminal scheme item for the Select dropdown.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TerminalSchemeItem {
-    name: SharedString,
-    id: String,
-    has_light_variant: bool,
-}
-
-impl TerminalSchemeItem {
-    fn from_option(option: &terminal_schemes::TerminalSchemeOption) -> Self {
-        let label = if option.has_light_variant {
-            option.name.to_string()
-        } else {
-            format!("{} (dark only)", option.name)
-        };
-
-        Self {
-            name: label.into(),
-            id: option.id.to_string(),
-            has_light_variant: option.has_light_variant,
-        }
-    }
-}
-
-impl SelectItem for TerminalSchemeItem {
-    type Value = String;
-
-    fn title(&self) -> SharedString {
-        self.name.clone()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.id
-    }
-}
 
 /// Settings dialog state.
 pub struct SettingsDialog {
@@ -97,8 +32,8 @@ pub struct SettingsDialog {
     line_height_input: Entity<GpuiInputState>,
     letter_spacing_input: Entity<GpuiInputState>,
     transparency_slider: Entity<SliderState>,
-    font_select: Entity<SelectState<Vec<FontItem>>>,
-    terminal_scheme_select: Entity<SelectState<Vec<TerminalSchemeItem>>>,
+    font_dropdown: Entity<BlurredDropdown>,
+    terminal_scheme_dropdown: Entity<BlurredDropdown>,
     on_close: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
     on_save: Option<Box<dyn Fn(AppSettings, &mut Window, &mut App) + 'static>>,
     on_change: Option<Box<dyn Fn(AppSettings, &mut Window, &mut App) + 'static>>,
@@ -129,33 +64,54 @@ impl SettingsDialog {
                 .default_value(settings.window_transparency * 100.0)
         });
 
-        // Create font select with initial selection
-        let font_items: Vec<FontItem> = font_presets()
+        let font_options: Vec<DropdownOption> = font_presets()
             .iter()
-            .map(FontItem::from_font_option)
+            .map(|option| DropdownOption {
+                label: option.name.into(),
+                value: option.family.to_string(),
+            })
             .collect();
-        let selected_font_index =
-            find_font_index(&settings.font_family).map(|idx| IndexPath::default().row(idx));
-        let font_select =
-            cx.new(|cx| SelectState::new(font_items, selected_font_index, window, cx));
+        let font_dropdown = cx.new(|cx| {
+            BlurredDropdown::new(
+                font_options,
+                Some(settings.font_family.clone()),
+                "Select a font...",
+                px(280.0),
+                settings.blur_enabled,
+                cx,
+            )
+        });
 
-        let scheme_items: Vec<TerminalSchemeItem> = terminal_schemes::terminal_scheme_options()
+        let scheme_options: Vec<DropdownOption> = terminal_schemes::terminal_scheme_options()
             .iter()
-            .map(TerminalSchemeItem::from_option)
+            .map(|option| {
+                let label = if option.has_light_variant {
+                    option.name.to_string()
+                } else {
+                    format!("{} (dark only)", option.name)
+                };
+                DropdownOption {
+                    label: label.into(),
+                    value: option.id.to_string(),
+                }
+            })
             .collect();
-        let selected_scheme_index = scheme_items
-            .iter()
-            .position(|item| item.id == settings.terminal_color_scheme)
-            .map(|idx| IndexPath::default().row(idx));
-        let terminal_scheme_select =
-            cx.new(|cx| SelectState::new(scheme_items, selected_scheme_index, window, cx));
+        let terminal_scheme_dropdown = cx.new(|cx| {
+            BlurredDropdown::new(
+                scheme_options,
+                Some(settings.terminal_color_scheme.clone()),
+                "Select a scheme...",
+                px(260.0),
+                settings.blur_enabled,
+                cx,
+            )
+        });
 
-        // Subscribe to font select events
         cx.subscribe_in(
-            &font_select,
+            &font_dropdown,
             window,
-            |this, _, event: &SelectEvent<Vec<FontItem>>, window, cx| {
-                if let SelectEvent::Confirm(Some(family)) = event {
+            |this, _, event: &BlurredDropdownEvent, window, cx| {
+                if let BlurredDropdownEvent::Confirm(family) = event {
                     this.settings.font_family = family.clone();
                     this.notify_change(window, cx);
                 }
@@ -164,10 +120,10 @@ impl SettingsDialog {
         .detach();
 
         cx.subscribe_in(
-            &terminal_scheme_select,
+            &terminal_scheme_dropdown,
             window,
-            |this, _, event: &SelectEvent<Vec<TerminalSchemeItem>>, window, cx| {
-                if let SelectEvent::Confirm(Some(scheme_id)) = event {
+            |this, _, event: &BlurredDropdownEvent, window, cx| {
+                if let BlurredDropdownEvent::Confirm(scheme_id) = event {
                     this.settings.terminal_color_scheme = scheme_id.clone();
                     this.notify_change(window, cx);
                 }
@@ -299,8 +255,8 @@ impl SettingsDialog {
             line_height_input,
             letter_spacing_input,
             transparency_slider,
-            font_select,
-            terminal_scheme_select,
+            font_dropdown,
+            terminal_scheme_dropdown,
             on_close: None,
             on_save: None,
             on_change: None,
@@ -523,6 +479,12 @@ impl SettingsDialog {
                         .checked(self.settings.blur_enabled)
                         .on_click(cx.listener(|this, checked: &bool, window, cx| {
                             this.settings.blur_enabled = *checked;
+                            this.font_dropdown.update(cx, |dropdown, cx| {
+                                dropdown.set_blur_enabled(*checked, cx);
+                            });
+                            this.terminal_scheme_dropdown.update(cx, |dropdown, cx| {
+                                dropdown.set_blur_enabled(*checked, cx);
+                            });
                             this.notify_change(window, cx);
                         }))
                         .into_any_element(),
@@ -711,11 +673,7 @@ impl SettingsDialog {
                     .text_color(cx.theme().foreground)
                     .child("Color Scheme"),
             )
-            .child(
-                Select::new(&self.terminal_scheme_select)
-                    .placeholder("Select a scheme...")
-                    .w(px(260.)),
-            )
+            .child(self.terminal_scheme_dropdown.clone())
             .child(
                 div()
                     .mt(px(4.))
@@ -742,10 +700,7 @@ impl SettingsDialog {
     }
 
     fn render_font_selector(&self, _cx: &mut Context<Self>) -> AnyElement {
-        Select::new(&self.font_select)
-            .placeholder("Select a font...")
-            .w(px(280.))
-            .into_any_element()
+        self.font_dropdown.clone().into_any_element()
     }
 
     fn render_setting_row(
