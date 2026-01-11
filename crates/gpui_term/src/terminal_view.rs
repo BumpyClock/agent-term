@@ -38,7 +38,10 @@ actions!(
         ScrollLineUp,
         ScrollLineDown,
         ScrollPageUp,
-        ScrollPageDown
+        ScrollPageDown,
+        SendTab,
+        SendShiftTab,
+        FocusOut
     ]
 );
 
@@ -301,6 +304,29 @@ impl TerminalView {
             terminal.sync(window, cx);
         });
     }
+
+    /// Sends a tab character to the terminal.
+    fn send_tab(&mut self, _: &SendTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_bell(cx);
+        self.terminal.update(cx, |terminal, _| {
+            // Send tab character (0x09) directly to terminal
+            terminal.input("\x09".as_bytes());
+        });
+    }
+
+    /// Sends shift-tab escape sequence to the terminal.
+    fn send_shift_tab(&mut self, _: &SendShiftTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_bell(cx);
+        self.terminal.update(cx, |terminal, _| {
+            // Send shift-tab escape sequence (CSI Z) to terminal
+            terminal.input("\x1b[Z".as_bytes());
+        });
+    }
+
+    /// Moves focus out of the terminal to the next focusable element.
+    fn focus_out(&mut self, _: &FocusOut, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus_next(cx);
+    }
 }
 
 impl Focusable for TerminalView {
@@ -345,6 +371,9 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::scroll_line_down))
             .on_action(cx.listener(Self::scroll_page_up))
             .on_action(cx.listener(Self::scroll_page_down))
+            .on_action(cx.listener(Self::send_tab))
+            .on_action(cx.listener(Self::send_shift_tab))
+            .on_action(cx.listener(Self::focus_out))
             .child(TerminalElement::with_settings(
                 terminal,
                 focus_handle.clone(),
