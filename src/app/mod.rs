@@ -21,6 +21,7 @@ use gpui::{
 };
 use gpui_component::{
     TitleBar,
+    TITLE_BAR_HEIGHT,
     theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
 };
 use gpui_term::{Clear, Copy, Paste, SelectAll};
@@ -183,7 +184,7 @@ impl Render for AgentTermApp {
                     .top_0()
                     .left_0()
                     .right_0()
-                    .h(px(34.0))
+                    .h(TITLE_BAR_HEIGHT)
                     // Keep the visual strip but let the window/terminal background show through.
                     .bg(cx.theme().transparent),
             )
@@ -202,15 +203,19 @@ impl Render for AgentTermApp {
                         el.child(self.render_sidebar_shell(cx))
                     }),
             )
-            // TitleBar overlay for window controls and dragging (keep above content for Windows hit-testing).
+            // TitleBar overlay for window controls and dragging.
+            // On Windows/Linux, the transparent overlay must occlude mouse hit-testing so that
+            // underlying content (e.g. terminal widgets) can't intercept clicks in the titlebar region.
             .child(
-                TitleBar::new()
-                    .bg(gpui::transparent_black())
-                    .border_b_0()
+                div()
+                    .id("agentterm-titlebar")
                     .absolute()
                     .top_0()
                     .left_0()
-                    .right_0(),
+                    .right_0()
+                    .h(TITLE_BAR_HEIGHT)
+                    .when(cfg!(not(target_os = "macos")), |el| el.occlude())
+                    .child(TitleBar::new().bg(gpui::transparent_black()).border_b_0()),
             )
             // Dialog and sheet layers at full opacity
             .children(gpui_component::Root::render_dialog_layer(window, cx))
