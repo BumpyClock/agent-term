@@ -9,6 +9,7 @@ use agentterm_mcp::McpManager;
 use agentterm_session::{
     DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
 };
+use agentterm_tools::{ShellInfo, ToolInfo};
 use gpui::{
     App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity, Window, prelude::*,
 };
@@ -42,6 +43,11 @@ pub struct AgentTermApp {
     pub(crate) session_menu_session_id: Option<String>,
 
     pub(crate) settings: AppSettings,
+
+    // Cached data for tab picker dropdown
+    pub(crate) cached_shells: Vec<ShellInfo>,
+    pub(crate) cached_tools: Vec<ToolInfo>,
+    pub(crate) cached_pinned_shell_ids: Vec<String>,
 }
 
 impl AgentTermApp {
@@ -84,9 +90,13 @@ impl AgentTermApp {
             session_menu_open: false,
             session_menu_session_id: None,
             settings: AppSettings::load(),
+            cached_shells: Vec::new(),
+            cached_tools: Vec::new(),
+            cached_pinned_shell_ids: Vec::new(),
         };
 
         this.reload_from_store(cx);
+        this.load_tab_picker_cache();
         this.ensure_active_terminal(window, cx);
         this
     }
@@ -232,6 +242,59 @@ impl AgentTermApp {
         cx.notify();
     }
 
+    /// Create a new session in a specific section (project).
+    /// Similar to `create_session_from_tool` but allows specifying the target section.
+    pub fn create_session_in_section(
+        &mut self,
+        section_id: String,
+        tool: SessionTool,
+        title: String,
+        command: String,
+        args: Vec<String>,
+        icon: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Look up the section to get its project path
+        let project_path = self
+            .sections
+            .iter()
+            .find(|s| s.section.id == section_id)
+            .map(|s| s.section.path.clone())
+            .unwrap_or_default();
+
+        // Inject --mcp-config for Claude if project has managed MCP config
+        let final_args = self.maybe_inject_mcp_config(&tool, args, &project_path);
+
+        let input = NewSessionInput {
+            title,
+            project_path,
+            section_id,
+            tool,
+            command,
+            args: if final_args.is_empty() {
+                None
+            } else {
+                Some(final_args)
+            },
+            icon,
+        };
+
+        match self.session_store.create_session(input) {
+            Ok(record) => {
+                let _ = self
+                    .session_store
+                    .set_active_session(Some(record.id.clone()));
+                self.reload_from_store(cx);
+                self.ensure_active_terminal(window, cx);
+            }
+            Err(e) => {
+                eprintln!("Failed to create session: {}", e);
+            }
+        }
+        cx.notify();
+    }
+
     /// Inject --mcp-config argument for supported tools if a managed MCP config exists
     fn maybe_inject_mcp_config(
         &self,
@@ -246,6 +309,41 @@ impl AgentTermApp {
             }
         }
         args
+    }
+
+    /// Load cached shells and tools data for tab picker dropdown menus.
+    /// Called once at startup and can be refreshed if needed.
+    pub fn load_tab_picker_cache(&mut self) {
+        // Load available shells (synchronous, no async needed)
+        self.cached_shells = agentterm_tools::available_shells();
+
+        // Load enabled tools (async, block on tokio)
+        match self
+            .tokio
+            .block_on(agentterm_tools::tools_list(&self.mcp_manager))
+        {
+            Ok(list) => {
+                self.cached_tools = list.into_iter().filter(|t| t.enabled).collect();
+            }
+            Err(e) => {
+                eprintln!("Failed to load tools: {}", e);
+                self.cached_tools = Vec::new();
+            }
+        }
+
+        // Load pinned shell IDs
+        match self
+            .tokio
+            .block_on(agentterm_tools::get_pinned_shells(&self.mcp_manager))
+        {
+            Ok(list) => {
+                self.cached_pinned_shell_ids = list;
+            }
+            Err(e) => {
+                eprintln!("Failed to load pinned shells: {}", e);
+                self.cached_pinned_shell_ids = Vec::new();
+            }
+        }
     }
 
     pub fn ensure_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {

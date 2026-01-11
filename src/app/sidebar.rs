@@ -1,15 +1,18 @@
 //! Sidebar rendering and interaction methods.
 
-use agentterm_session::{DEFAULT_SECTION_ID, SessionRecord};
+use agentterm_session::{DEFAULT_SECTION_ID, SessionRecord, SessionTool};
+use agentterm_tools::ShellType;
 use gpui::{
-    BoxShadow, ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Styled, Window, div, hsla, point, prelude::*, px, rgba,
+    BoxShadow, ClickEvent, Context, Corner, Entity, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window, div, hsla, point, prelude::*, px,
+    rgba,
 };
 use gpui_component::TITLE_BAR_HEIGHT;
 
 use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
-    ActiveTheme, Button, ButtonVariants, ContextMenuExt, Divider, SectionItem, v_flex,
+    ActiveTheme, Button, ButtonVariants, ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem,
+    SectionItem,
 };
 
 use super::actions::*;
@@ -131,32 +134,18 @@ impl AgentTermApp {
                     .child("AGENT TERM"),
             )
             .child(
-                div()
-                    .flex()
-                    .gap(px(10.0))
+                Button::new("sidebar-mcp")
+                    // Tool SVGs use `currentColor`; set a color explicitly so it isn't invisible on dark themes.
                     .child(
-                        Button::new("sidebar-new-tab")
-                            .label("T")
-                            .ghost()
-                            .compact()
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.new_shell_tab(&NewShellTab, window, cx);
-                            })),
+                        Icon::asset("tool-icons/mcp.svg")
+                            .size(IconSize::Small)
+                            .color(cx.theme().muted_foreground),
                     )
-                    .child(
-                        Button::new("sidebar-mcp")
-                            // Tool SVGs use `currentColor`; set a color explicitly so it isn't invisible on dark themes.
-                            .child(
-                                Icon::asset("tool-icons/mcp.svg")
-                                    .size(IconSize::Small)
-                                    .color(cx.theme().muted_foreground),
-                            )
-                            .ghost()
-                            .compact()
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.open_mcp_manager(&ToggleMcpManager, window, cx);
-                            })),
-                    ),
+                    .ghost()
+                    .compact()
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.open_mcp_manager(&ToggleMcpManager, window, cx);
+                    })),
             )
     }
 
@@ -201,10 +190,23 @@ impl AgentTermApp {
         let section_id = section.section.id.clone();
         let is_collapsed = section.section.collapsed;
         let section_icon = section.section.icon.clone();
+        let group_id = format!("section-group-{}", section.section.id);
 
+        // Collect theme colors before building the add button
         let hover_bg = cx.theme().list_hover;
+        let muted_fg = cx.theme().muted_foreground;
+        let foreground = cx.theme().foreground;
+
+        // Clone data needed for the add button dropdown
+        let view = cx.entity().clone();
+        let shells = self.cached_shells.clone();
+        let tools = self.cached_tools.clone();
+        let pinned_ids = self.cached_pinned_shell_ids.clone();
+        let section_id_for_menu = section_id.clone();
+
         let section_header = div()
             .id(format!("section-header-{}", section.section.id))
+            .group(group_id.clone())
             .px(px(8.0))
             .py(px(6.0))
             .flex()
@@ -227,7 +229,7 @@ impl AgentTermApp {
                     IconName::ChevronDown
                 })
                 .size(IconSize::Small)
-                .color(cx.theme().muted_foreground),
+                .color(muted_fg),
             )
             .child(
                 section_icon
@@ -235,15 +237,39 @@ impl AgentTermApp {
                     .map(|s| icon_from_string(s))
                     .unwrap_or_else(|| Icon::new(IconName::Folder))
                     .size(IconSize::Medium)
-                    .color(cx.theme().foreground),
+                    .color(foreground),
             )
             .child(
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(cx.theme().foreground)
+                    .text_color(foreground)
                     .flex_1()
                     .child(section.section.name.clone()),
+            )
+            .child(
+                div()
+                    .invisible()
+                    .group_hover(group_id.clone(), |this| this.visible())
+                    .child(
+                        Button::new(format!("section-add-{}", section_id))
+                            .label("+")
+                            .ghost()
+                            .compact()
+                            .dropdown_menu_with_anchor(
+                                Corner::TopRight,
+                                move |menu, _window, _cx| {
+                                    Self::build_add_menu(
+                                        menu,
+                                        section_id_for_menu.clone(),
+                                        view.clone(),
+                                        shells.clone(),
+                                        tools.clone(),
+                                        pinned_ids.clone(),
+                                    )
+                                },
+                            ),
+                    ),
             )
             .context_menu({
                 let section_id = section_id.clone();
@@ -269,7 +295,7 @@ impl AgentTermApp {
                     .px(px(12.0))
                     .py(px(4.0))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(muted_fg)
                     .child("No terminals"),
             );
             return container;
@@ -280,6 +306,180 @@ impl AgentTermApp {
         }
 
         container
+    }
+
+    /// Build the popup menu items for adding a new tab to a section
+    fn build_add_menu(
+        menu: PopupMenu,
+        section_id: String,
+        view: Entity<Self>,
+        shells: Vec<agentterm_tools::ShellInfo>,
+        tools: Vec<agentterm_tools::ToolInfo>,
+        pinned_ids: Vec<String>,
+    ) -> PopupMenu {
+        use std::collections::HashSet;
+        let pinned_set: HashSet<&str> = pinned_ids.iter().map(|s| s.as_str()).collect();
+
+        // Separate shells into pinned and unpinned
+        let mut pinned_shells: Vec<_> = shells
+            .iter()
+            .filter(|s| pinned_set.contains(s.id.as_str()))
+            .cloned()
+            .collect();
+        pinned_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut native_shells: Vec<_> = shells
+            .iter()
+            .filter(|s| s.shell_type == ShellType::Native && !pinned_set.contains(s.id.as_str()))
+            .cloned()
+            .collect();
+        native_shells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Separate tools into builtin and custom
+        let builtin_tools: Vec<_> = tools.iter().filter(|t| t.is_builtin).cloned().collect();
+        let custom_tools: Vec<_> = tools.iter().filter(|t| !t.is_builtin).cloned().collect();
+
+        let mut menu = menu;
+
+        // Add pinned shells first (if any)
+        if !pinned_shells.is_empty() {
+            menu = menu.label("Pinned");
+            for shell in pinned_shells {
+                let section_id = section_id.clone();
+                let view = view.clone();
+                let shell_clone = shell.clone();
+                menu = menu.item(PopupMenuItem::new(shell.name.clone()).on_click(
+                    move |_event, window, cx| {
+                        let icon = if shell_clone.icon.is_empty() {
+                            None
+                        } else {
+                            Some(shell_clone.icon.clone())
+                        };
+                        view.update(cx, |app, cx| {
+                            app.create_session_in_section(
+                                section_id.clone(),
+                                SessionTool::Shell,
+                                shell_clone.name.clone(),
+                                shell_clone.command.clone(),
+                                shell_clone.args.clone(),
+                                icon,
+                                window,
+                                cx,
+                            );
+                        });
+                    },
+                ));
+            }
+            menu = menu.separator();
+        }
+
+        // Add shells section
+        if !native_shells.is_empty() {
+            menu = menu.label("Shells");
+            for shell in native_shells {
+                let section_id = section_id.clone();
+                let view = view.clone();
+                let shell_clone = shell.clone();
+                menu = menu.item(PopupMenuItem::new(shell.name.clone()).on_click(
+                    move |_event, window, cx| {
+                        let icon = if shell_clone.icon.is_empty() {
+                            None
+                        } else {
+                            Some(shell_clone.icon.clone())
+                        };
+                        view.update(cx, |app, cx| {
+                            app.create_session_in_section(
+                                section_id.clone(),
+                                SessionTool::Shell,
+                                shell_clone.name.clone(),
+                                shell_clone.command.clone(),
+                                shell_clone.args.clone(),
+                                icon,
+                                window,
+                                cx,
+                            );
+                        });
+                    },
+                ));
+            }
+            menu = menu.separator();
+        }
+
+        // Add tools section
+        let has_builtin_tools = !builtin_tools.is_empty();
+        let has_custom_tools = !custom_tools.is_empty();
+
+        if has_builtin_tools || has_custom_tools {
+            menu = menu.label("Tools");
+
+            for tool in builtin_tools {
+                let section_id = section_id.clone();
+                let view = view.clone();
+                let tool_clone = tool.clone();
+                menu = menu.item(PopupMenuItem::new(tool.name.clone()).on_click(
+                    move |_event, window, cx| {
+                        let session_tool = match tool_clone.id.as_str() {
+                            "claude" => SessionTool::Claude,
+                            "gemini" => SessionTool::Gemini,
+                            "codex" => SessionTool::Codex,
+                            "openCode" => SessionTool::OpenCode,
+                            _ => SessionTool::Custom(tool_clone.id.clone()),
+                        };
+                        let icon = if tool_clone.icon.is_empty() {
+                            None
+                        } else {
+                            Some(tool_clone.icon.clone())
+                        };
+                        view.update(cx, |app, cx| {
+                            app.create_session_in_section(
+                                section_id.clone(),
+                                session_tool,
+                                tool_clone.name.clone(),
+                                tool_clone.command.clone(),
+                                tool_clone.args.clone(),
+                                icon,
+                                window,
+                                cx,
+                            );
+                        });
+                    },
+                ));
+            }
+
+            if has_custom_tools && has_builtin_tools {
+                menu = menu.separator();
+            }
+
+            for tool in custom_tools {
+                let section_id = section_id.clone();
+                let view = view.clone();
+                let tool_clone = tool.clone();
+                menu = menu.item(PopupMenuItem::new(tool.name.clone()).on_click(
+                    move |_event, window, cx| {
+                        let session_tool = SessionTool::Custom(tool_clone.id.clone());
+                        let icon = if tool_clone.icon.is_empty() {
+                            None
+                        } else {
+                            Some(tool_clone.icon.clone())
+                        };
+                        view.update(cx, |app, cx| {
+                            app.create_session_in_section(
+                                section_id.clone(),
+                                session_tool,
+                                tool_clone.name.clone(),
+                                tool_clone.command.clone(),
+                                tool_clone.args.clone(),
+                                icon,
+                                window,
+                                cx,
+                            );
+                        });
+                    },
+                ));
+            }
+        }
+
+        menu
     }
 
     pub fn render_session_row(
