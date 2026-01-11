@@ -20,8 +20,7 @@ use gpui::{
     prelude::*, px, rgba,
 };
 use gpui_component::{
-    TitleBar,
-    TITLE_BAR_HEIGHT,
+    TITLE_BAR_HEIGHT, TitleBar,
     theme::{Theme as GpuiTheme, ThemeMode as GpuiThemeMode},
 };
 use gpui_term::{Clear, Copy, Paste, SelectAll};

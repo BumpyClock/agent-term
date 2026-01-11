@@ -6,7 +6,7 @@ mod session_editor;
 mod tab_picker;
 
 pub use mcp_manager::{McpItem, McpManagerDialog};
-pub use project_editor::ProjectEditorDialog;
+pub use project_editor::{AddProjectDialog, ProjectEditorDialog};
 pub use session_editor::SessionEditorDialog;
 pub use tab_picker::TabPickerDialog;
 
