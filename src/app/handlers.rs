@@ -1,12 +1,16 @@
 //! Action handlers for AgentTermApp.
 
+use std::collections::HashSet;
+
 use gpui::{
     Bounds, Context, Focusable, IntoElement, ParentElement, Styled, Window, WindowBounds,
     WindowOptions, div, prelude::*, px, size,
 };
 use gpui_component::input::InputState as GpuiInputState;
 
-use crate::dialogs::{McpManagerDialog, ProjectEditorDialog, SessionEditorDialog, TabPickerDialog};
+use crate::dialogs::{
+    AddProjectDialog, McpManagerDialog, ProjectEditorDialog, SessionEditorDialog, TabPickerDialog,
+};
 use crate::settings_dialog::SettingsDialog;
 use crate::ui::{ActiveTheme, Button, ButtonVariants, Sizable, WindowExt, v_flex};
 
@@ -100,6 +104,76 @@ impl AgentTermApp {
         );
     }
 
+    fn recent_project_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        let mut seen = HashSet::new();
+        for section in &self.sections {
+            if section.is_default {
+                continue;
+            }
+            let path = section.section.path.trim();
+            if path.is_empty() {
+                continue;
+            }
+            if seen.insert(path.to_string()) {
+                paths.push(path.to_string());
+            }
+        }
+        paths
+    }
+
+    // Add project dialog
+    pub fn open_add_project_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.entity().clone();
+        let recent_paths = self.recent_project_paths();
+
+        let name_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Project name"));
+        let path_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Project path"));
+        let name_focus = name_input.read(cx).focus_handle(cx);
+
+        let dialog_entity = cx.new(|_cx| {
+            AddProjectDialog::new(
+                view.clone(),
+                name_input.clone(),
+                path_input.clone(),
+                recent_paths.clone(),
+            )
+        });
+
+        dialog_entity.update(cx, |dialog, cx| {
+            dialog.setup_path_input_subscriptions(window, cx);
+        });
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title("Add Project")
+                .w(px(400.))
+                .child(dialog_entity.clone())
+                .footer({
+                    let dialog_entity = dialog_entity.clone();
+                    move |_ok, cancel, window, cx| {
+                        vec![
+                            cancel(window, cx),
+                            Button::new("save")
+                                .primary()
+                                .label("Save")
+                                .on_click({
+                                    let dialog_entity = dialog_entity.clone();
+                                    move |_, window, cx| {
+                                        dialog_entity.update(cx, |dialog, cx| {
+                                            dialog.save(window, cx);
+                                        });
+                                    }
+                                })
+                                .into_any_element(),
+                        ]
+                    }
+                })
+        });
+
+        name_focus.focus(window, cx);
+    }
+
     // Project editor dialog
     pub fn open_project_editor(
         &mut self,
@@ -117,8 +191,8 @@ impl AgentTermApp {
         };
 
         let view = cx.entity().clone();
+        let recent_paths = self.recent_project_paths();
 
-        // Create inputs
         let name_input = cx.new(|cx| {
             GpuiInputState::new(window, cx)
                 .placeholder("Project name")
@@ -132,7 +206,6 @@ impl AgentTermApp {
 
         let name_focus = name_input.read(cx).focus_handle(cx);
 
-        // Create the dialog entity
         let dialog_entity = cx.new(|_cx| {
             ProjectEditorDialog::new(
                 view.clone(),
@@ -140,7 +213,12 @@ impl AgentTermApp {
                 name_input.clone(),
                 path_input.clone(),
                 section.icon.clone(),
+                recent_paths.clone(),
             )
+        });
+
+        dialog_entity.update(cx, |dialog, cx| {
+            dialog.setup_path_input_subscriptions(window, cx);
         });
 
         window.open_dialog(cx, move |dialog, _window, _cx| {

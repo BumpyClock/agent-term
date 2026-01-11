@@ -168,11 +168,8 @@ impl AgentTermApp {
                 .text_color(cx.theme().muted_foreground)
                 .cursor_pointer()
                 .hover(|s| s.text_color(cx.theme().foreground))
-                .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                    let name = "New Project".to_string();
-                    let path = String::new();
-                    let _ = this.session_store.create_section(name, path);
-                    this.reload_from_store(cx);
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.open_add_project_dialog(window, cx);
                 }))
                 .child("+ Add Project"),
         )
