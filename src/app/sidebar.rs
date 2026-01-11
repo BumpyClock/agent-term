@@ -23,19 +23,19 @@ impl AgentTermApp {
         vec![
             BoxShadow {
                 // subtle near-edge shadow for elevation
-                color: hsla(0., 0., 0., 0.18),
+                color: hsla(0., 0., 0., 0.04),
                 offset: point(px(0.0), px(1.0)),
                 blur_radius: px(6.0),
                 spread_radius: px(0.0),
             },
             BoxShadow {
-                color: hsla(0., 0., 0., 0.22),
+                color: hsla(0., 0., 0., 0.08),
                 offset: point(px(0.0), px(8.0)),
                 blur_radius: px(22.0),
                 spread_radius: px(0.0),
             },
             BoxShadow {
-                color: hsla(0., 0., 0., 0.18),
+                color: hsla(0., 0., 0., 0.12),
                 offset: point(px(0.0), px(22.0)),
                 blur_radius: px(54.0),
                 spread_radius: px(0.0),
@@ -48,8 +48,8 @@ impl AgentTermApp {
         // Apply window_transparency to sidebar background alpha with exponential curve
         // Higher transparency = lower alpha (more see-through), accelerating at higher values
         let exp_factor = (1.0 - self.settings.window_transparency).powf(2.0);
-        // Clamp to minimum 50% opacity so sidebar is never fully transparent
-        let bg_alpha = (SIDEBAR_GLASS_BASE_ALPHA * exp_factor).max(0.50);
+        // Clamp to minimum 10% opacity so blur stays visible during testing
+        let bg_alpha = (SIDEBAR_GLASS_BASE_ALPHA * exp_factor).max(0.60);
         let sidebar_base = cx.theme().sidebar;
         let sidebar_alpha = (sidebar_base.a * bg_alpha).clamp(0.0, 1.0);
         let base = gpui::Hsla {
