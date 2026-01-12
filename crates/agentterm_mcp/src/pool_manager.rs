@@ -146,7 +146,7 @@ pub async fn restart_pool_server(name: &str) -> McpResult<bool> {
 }
 
 /// Stop a specific MCP server in the pool
-/// 
+///
 /// This is intentionally synchronous (unlike restart_pool_server) because the underlying
 /// Pool::stop_server is a fire-and-forget operation that signals the process to stop
 /// without waiting for it to exit. In contrast, restart_pool_server is async because

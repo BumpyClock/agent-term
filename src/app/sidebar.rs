@@ -6,7 +6,7 @@ use gpui::{
     BoxShadow, ClickEvent, Context, Corner, Entity, IntoElement, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window, div, hsla, point, prelude::*, px,
 };
-use gpui_component::{TITLE_BAR_HEIGHT, NoiseIntensity, render_noise_overlay};
+use gpui_component::{SurfaceContext, SurfacePreset, TITLE_BAR_HEIGHT};
 
 use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
@@ -43,27 +43,29 @@ impl AgentTermApp {
         ]
     }
 
-    pub fn render_sidebar_shell(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_sidebar_shell(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
-        // Apply window_transparency to sidebar background alpha with exponential curve
-        // Higher transparency = lower alpha (more see-through), accelerating at higher values
-        let exp_factor = (1.0 - self.settings.window_transparency).powf(2.0);
-        // Clamp to minimum 60% opacity so blur stays visible during testing
-        let bg_alpha = (SIDEBAR_GLASS_BASE_ALPHA * exp_factor).max(0.60);
         let window_bounds = window.window_bounds().get_bounds();
         let window_height = window_bounds.size.height;
         let sidebar_height = window_height - px(SIDEBAR_INSET * 2.0);
         let sidebar_width = px(self.sidebar_width);
-        let scale_factor = window.scale_factor();
         let blur_enabled = self.settings.blur_enabled;
-
-        // Get theme colors before rendering content to avoid borrow conflicts
-        let sidebar_bg = cx.theme().sidebar.opacity(bg_alpha);
-        let border_color = cx.theme().border_subtle.opacity(BORDER_SOFT_ALPHA);
-        let radius = px(16.0); // Panel preset uses 16px radius
-
-        // Capture sidebar content
-        let sidebar_content = self.render_sidebar_content(cx);
+        let sidebar_surface = SurfacePreset::panel()
+            .wrap_with_bounds(
+                div(),
+                sidebar_width,
+                sidebar_height,
+                window,
+                cx,
+                SurfaceContext { blur_enabled },
+            )
+            .child(self.render_sidebar_content(cx))
+            .id("sidebar-surface")
+            .size_full();
 
         div()
             .id("sidebar-shell")
@@ -77,29 +79,7 @@ impl AgentTermApp {
                     .id("sidebar-shadow-wrapper")
                     .size_full()
                     .shadow(Self::sidebar_shadow())
-                    .child(
-                        // Manually construct panel surface to avoid borrow conflicts
-                        div()
-                            .id("sidebar-surface")
-                            .relative()
-                            .size_full()
-                            .bg(sidebar_bg)
-                            .rounded(radius)
-                            .overflow_hidden()
-                            .border_1()
-                            .border_color(border_color)
-                            .when(blur_enabled, |el| el.backdrop_blur(px(120.0)))
-                            .when(blur_enabled, |el| {
-                                el.child(render_noise_overlay(
-                                    sidebar_width,
-                                    sidebar_height,
-                                    radius,
-                                    NoiseIntensity::Heavy.opacity(),
-                                    scale_factor,
-                                ))
-                            })
-                            .child(sidebar_content),
-                    ),
+                    .child(sidebar_surface),
             )
             .child(
                 div()
@@ -541,7 +521,8 @@ impl AgentTermApp {
         };
         let session_id = session.id.clone();
         let session_icon = session.icon.clone();
-        let active_bg = cx.theme().list_hover;
+        let active_bg = cx.theme().accent;
+        let active_fg = cx.theme().accent_foreground;
         let hover_bg = cx.theme().list_active;
 
         div()
@@ -553,7 +534,7 @@ impl AgentTermApp {
             .gap(px(6.0))
             .rounded(px(6.0))
             .cursor_pointer()
-            .when(is_active, move |s| s.bg(active_bg))
+            .when(is_active, move |s| s.bg(active_bg).text_color(active_fg))
             .hover(move |s| s.bg(hover_bg))
             .child(
                 session_icon
