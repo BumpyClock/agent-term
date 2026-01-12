@@ -163,8 +163,17 @@ struct AppPalette {
     chart_5: &'static str,
 }
 
+struct AppElevation {
+    xs: &'static str,
+    sm: &'static str,
+    md: &'static str,
+    lg: &'static str,
+    xl: &'static str,
+}
+
 fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     let palette = palette_for_mode(mode);
+    let elevation = elevation_for_mode(mode);
     let mut colors = ThemeConfigColors::default();
 
     colors.background = Some(palette.background.into());
@@ -203,8 +212,32 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
             ThemeMode::Dark => "AgentTerm Dark".into(),
         },
         mode,
+        elevation_xs: Some(elevation.xs.into()),
+        elevation_sm: Some(elevation.sm.into()),
+        elevation_md: Some(elevation.md.into()),
+        elevation_lg: Some(elevation.lg.into()),
+        elevation_xl: Some(elevation.xl.into()),
         colors,
         ..ThemeConfig::default()
+    }
+}
+
+fn elevation_for_mode(mode: ThemeMode) -> AppElevation {
+    match mode {
+        ThemeMode::Light => AppElevation {
+            xs: "0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14)",
+            sm: "0 0 2px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.14)",
+            md: "0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14)",
+            lg: "0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14)",
+            xl: "0 0 8px rgba(0,0,0,0.12), 0 14px 28px rgba(0,0,0,0.14)",
+        },
+        ThemeMode::Dark => AppElevation {
+            xs: "0 0 2px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.28)",
+            sm: "0 0 2px rgba(0,0,0,0.24), 0 2px 4px rgba(0,0,0,0.28)",
+            md: "0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28)",
+            lg: "0 0 2px rgba(0,0,0,0.24), 0 8px 16px rgba(0,0,0,0.28)",
+            xl: "0 0 8px rgba(0,0,0,0.24), 0 14px 28px rgba(0,0,0,0.28)",
+        },
     }
 }
 
