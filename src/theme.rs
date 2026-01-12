@@ -225,18 +225,18 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
 fn elevation_for_mode(mode: ThemeMode) -> AppElevation {
     match mode {
         ThemeMode::Light => AppElevation {
-            xs: "0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14)",
-            sm: "0 0 2px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.14)",
-            md: "0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14)",
-            lg: "0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14)",
-            xl: "0 0 8px rgba(0,0,0,0.12), 0 14px 28px rgba(0,0,0,0.14)",
+            xs: " 0 1px 2px rgba(0,0,0,0.04)",
+            sm: " 0 2px 4px rgba(0,0,0,0.04)",
+            md: " 0 4px 6px rgba(0, 0, 0, 0.08)",
+            lg: " 0 8px 16px rgba(0, 0, 0, 0.14)",
+            xl: " 0 2px 21px rgba(0, 0, 0, 0.15) 0 32px 64px rgba(0, 0, 0, 0.19)",
         },
         ThemeMode::Dark => AppElevation {
-            xs: "0 0 2px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.28)",
-            sm: "0 0 2px rgba(0,0,0,0.24), 0 2px 4px rgba(0,0,0,0.28)",
-            md: "0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28)",
-            lg: "0 0 2px rgba(0,0,0,0.24), 0 8px 16px rgba(0,0,0,0.28)",
-            xl: "0 0 8px rgba(0,0,0,0.24), 0 14px 28px rgba(0,0,0,0.28)",
+            xs: " 0 1px 2px rgba(0, 0, 0, 0.04)",
+            sm: " 0 2px 4px rgba(0, 0, 0, 0.13)",
+            md: " 0 4px 6px rgba(0, 0, 0, 0.13)",
+            lg: " 0 8px 16px rgba(0, 0, 0, 0.26)",
+            xl: " 0 32px 64px rgba(0, 0, 0, 0.37)",
         },
     }
 }
