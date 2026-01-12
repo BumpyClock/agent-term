@@ -19,6 +19,8 @@ pub const SIDEBAR_GLASS_BASE_ALPHA: f32 = 0.65;
 // At transparency=100%: window is fully transparent (blur shows through)
 pub const SURFACE_ROOT_ALPHA: f32 = 0.85;
 pub const BORDER_SOFT_ALPHA: f32 = 0.50;
+pub const GLASS_NOISE_OPACITY: f32 = 0.02;
+pub const GLASS_NOISE_ASSET_PATH: &str = "NoiseAsset_256.png";
 
 // Feature flags
 pub const ENABLE_BLUR: bool = true;

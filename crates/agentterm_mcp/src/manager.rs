@@ -435,7 +435,7 @@ impl McpManager {
 
         let config = self.load_config().await?;
         if config.mcp_pool.enabled {
-            let pool = pool_manager::ensure_global_pool(&config)?;
+            let pool = pool_manager::initialize_global_pool(&config)?;
             if let Some(pool) = pool.as_ref() {
                 if pool.should_pool(mcp_name) {
                     if config.mcp_pool.start_on_demand {

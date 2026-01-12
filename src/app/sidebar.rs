@@ -80,6 +80,9 @@ impl AgentTermApp {
                             .id("sidebar-glass")
                             .size_full()
                             .relative()
+                            .when(self.settings.blur_enabled, |el| {
+                                el.child(self.render_glass_noise_overlay())
+                            })
                             .child(self.render_sidebar_content(cx)),
                     ),
             )
