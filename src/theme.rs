@@ -161,6 +161,26 @@ struct AppPalette {
     chart_3: &'static str,
     chart_4: &'static str,
     chart_5: &'static str,
+
+    // === SURFACE TOKENS ===
+    surface_base: &'static str,
+    surface_subtle: &'static str,
+    surface_raised: &'static str,
+    surface_elevated: &'static str,
+    surface_sunken: &'static str,
+
+    // === BORDER TOKENS ===
+    border_subtle: &'static str,
+    border_default: &'static str,
+    border_strong: &'static str,
+
+    // === STATE TOKENS ===
+    state_hover: &'static str,
+    state_active: &'static str,
+    state_selected: &'static str,
+
+    // === OVERLAY TOKENS ===
+    overlay_scrim: &'static str,
 }
 
 struct AppElevation {
@@ -204,6 +224,31 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.chart_3 = Some(palette.chart_3.into());
     colors.chart_4 = Some(palette.chart_4.into());
     colors.chart_5 = Some(palette.chart_5.into());
+
+    // Surface tokens
+    colors.surface_base = Some(palette.surface_base.into());
+    colors.surface_base_foreground = Some(palette.foreground.into());
+    colors.surface_subtle = Some(palette.surface_subtle.into());
+    colors.surface_subtle_foreground = Some(palette.foreground.into());
+    colors.surface_raised = Some(palette.surface_raised.into());
+    colors.surface_raised_foreground = Some(palette.foreground.into());
+    colors.surface_elevated = Some(palette.surface_elevated.into());
+    colors.surface_elevated_foreground = Some(palette.foreground.into());
+    colors.surface_sunken = Some(palette.surface_sunken.into());
+    colors.surface_sunken_foreground = Some(palette.foreground.into());
+
+    // Border tokens
+    colors.border_subtle = Some(palette.border_subtle.into());
+    colors.border_default = Some(palette.border_default.into());
+    colors.border_strong = Some(palette.border_strong.into());
+
+    // State tokens
+    colors.state_hover = Some(palette.state_hover.into());
+    colors.state_active = Some(palette.state_active.into());
+    colors.state_selected = Some(palette.state_selected.into());
+
+    // Overlay tokens
+    colors.overlay_scrim = Some(palette.overlay_scrim.into());
 
     ThemeConfig {
         is_default: true,
@@ -269,6 +314,22 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             chart_3: "#104e64",
             chart_4: "#ffb900",
             chart_5: "#fe9a00",
+            // Surface tokens
+            surface_base: "#F7F6F3",
+            surface_subtle: "#FBFAF8",
+            surface_raised: "#FFFFFF",
+            surface_elevated: "#FFFFFF",
+            surface_sunken: "#F3F1EE",
+            // Border tokens
+            border_subtle: "#E9E5DF",
+            border_default: "#DED7CF",
+            border_strong: "#CBBFB4",
+            // State tokens
+            state_hover: "rgba(28, 26, 23, 0.04)",
+            state_active: "rgba(28, 26, 23, 0.08)",
+            state_selected: "rgba(59, 130, 246, 0.16)",
+            // Overlay tokens
+            overlay_scrim: "rgba(28, 26, 23, 0.28)",
         },
         ThemeMode::Dark => AppPalette {
             background: "#111111",
@@ -296,6 +357,22 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             chart_3: "#fe9900",
             chart_4: "#ad46ff",
             chart_5: "#ff2058",
+            // Surface tokens
+            surface_base: "#171615",
+            surface_subtle: "#1D1C1B",
+            surface_raised: "#232120",
+            surface_elevated: "#282625",
+            surface_sunken: "#121110",
+            // Border tokens
+            border_subtle: "#2C2A29",
+            border_default: "#343130",
+            border_strong: "#4A4643",
+            // State tokens
+            state_hover: "rgba(245, 242, 238, 0.04)",
+            state_active: "rgba(245, 242, 238, 0.08)",
+            state_selected: "rgba(96, 165, 250, 0.20)",
+            // Overlay tokens
+            overlay_scrim: "rgba(0, 0, 0, 0.48)",
         },
     }
 }
