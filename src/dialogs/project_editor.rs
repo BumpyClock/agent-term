@@ -3,10 +3,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use gpui::{ClickEvent, Context, Entity, IntoElement, Render, Styled, Window, div, prelude::*, px};
+use gpui::{
+    AsyncWindowContext, ClickEvent, Context, Entity, IntoElement, Render, Styled, WeakEntity,
+    Window, WindowHandle, div, prelude::*, px,
+};
 use gpui_component::input::{InputEvent, InputState as GpuiInputState};
 use gpui_component::theme::ThemeMode;
-use rfd::FileDialog;
+use rfd::AsyncFileDialog;
 
 use crate::icons::IconDescriptor;
 use crate::theme::surface_background;

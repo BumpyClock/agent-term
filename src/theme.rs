@@ -178,9 +178,13 @@ struct AppPalette {
     state_hover: &'static str,
     state_active: &'static str,
     state_selected: &'static str,
+    state_disabled: &'static str,
+    state_focus: &'static str,
 
     // === OVERLAY TOKENS ===
     overlay_scrim: &'static str,
+    overlay_popover: &'static str,
+    overlay_tooltip: &'static str,
 }
 
 struct AppElevation {
@@ -231,9 +235,9 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.surface_subtle = Some(palette.surface_subtle.into());
     colors.surface_subtle_foreground = Some(palette.foreground.into());
     colors.surface_raised = Some(palette.surface_raised.into());
-    colors.surface_raised_foreground = Some(palette.foreground.into());
+    colors.surface_raised_foreground = Some(palette.popover_foreground.into());
     colors.surface_elevated = Some(palette.surface_elevated.into());
-    colors.surface_elevated_foreground = Some(palette.foreground.into());
+    colors.surface_elevated_foreground = Some(palette.popover_foreground.into());
     colors.surface_sunken = Some(palette.surface_sunken.into());
     colors.surface_sunken_foreground = Some(palette.foreground.into());
 
@@ -246,9 +250,13 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.state_hover = Some(palette.state_hover.into());
     colors.state_active = Some(palette.state_active.into());
     colors.state_selected = Some(palette.state_selected.into());
+    colors.state_disabled = Some(palette.state_disabled.into());
+    colors.state_focus = Some(palette.state_focus.into());
 
     // Overlay tokens
     colors.overlay_scrim = Some(palette.overlay_scrim.into());
+    colors.overlay_popover = Some(palette.overlay_popover.into());
+    colors.overlay_tooltip = Some(palette.overlay_tooltip.into());
 
     ThemeConfig {
         is_default: true,
@@ -328,8 +336,12 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             state_hover: "rgba(28, 26, 23, 0.04)",
             state_active: "rgba(28, 26, 23, 0.08)",
             state_selected: "rgba(59, 130, 246, 0.16)",
+            state_disabled: "rgba(28, 26, 23, 0.24)",
+            state_focus: "rgba(59, 130, 246, 0.24)",
             // Overlay tokens
             overlay_scrim: "rgba(28, 26, 23, 0.28)",
+            overlay_popover: "rgba(255, 255, 255, 0.72)",
+            overlay_tooltip: "rgba(28, 26, 23, 0.90)",
         },
         ThemeMode::Dark => AppPalette {
             background: "#111111",
@@ -371,8 +383,12 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             state_hover: "rgba(245, 242, 238, 0.04)",
             state_active: "rgba(245, 242, 238, 0.08)",
             state_selected: "rgba(96, 165, 250, 0.20)",
+            state_disabled: "rgba(245, 242, 238, 0.24)",
+            state_focus: "rgba(96, 165, 250, 0.24)",
             // Overlay tokens
             overlay_scrim: "rgba(0, 0, 0, 0.48)",
+            overlay_popover: "rgba(18, 17, 16, 0.72)",
+            overlay_tooltip: "rgba(0, 0, 0, 0.85)",
         },
     }
 }
