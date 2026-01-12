@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    AsyncWindowContext, ClickEvent, Context, Entity, IntoElement, Render, Styled, WeakEntity,
-    Window, WindowHandle, div, prelude::*, px,
+    AsyncApp, ClickEvent, Context, Entity, IntoElement, Render, Styled, WeakEntity, Window, div,
+    prelude::*, px,
 };
 use gpui_component::input::{InputEvent, InputState as GpuiInputState};
 use gpui_component::theme::ThemeMode;
@@ -135,18 +135,32 @@ impl ProjectEditorDialog {
 
     fn browse_for_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current_value = self.path_input.read(cx).value().to_string();
-        let mut dialog = FileDialog::new();
-        if let Some(start_dir) = resolve_picker_start_path(&current_value) {
-            dialog = dialog.set_directory(start_dir);
-        }
-        if let Some(path) = dialog.pick_folder() {
-            self.path_input.update(cx, |input, cx| {
-                input.set_value(path.to_string_lossy().to_string(), window, cx);
-            });
-            self.path_state.set_error(None);
-            self.path_state.clear_suggestions();
-            cx.notify();
-        }
+        let start_dir = resolve_picker_start_path(&current_value);
+        let window_handle = window.window_handle();
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                let mut dialog = AsyncFileDialog::new();
+                if let Some(dir) = start_dir {
+                    dialog = dialog.set_directory(dir);
+                }
+                if let Some(handle) = dialog.pick_folder().await {
+                    let path = handle.path().to_string_lossy().to_string();
+                    let _ = cx.update_window(window_handle, |_, window, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            this.path_input.update(cx, |input, cx| {
+                                input.set_value(path, window, cx);
+                            });
+                            this.path_state.set_error(None);
+                            this.path_state.clear_suggestions();
+                            cx.notify();
+                        });
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -403,18 +417,32 @@ impl AddProjectDialog {
 
     fn browse_for_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current_value = self.path_input.read(cx).value().to_string();
-        let mut dialog = FileDialog::new();
-        if let Some(start_dir) = resolve_picker_start_path(&current_value) {
-            dialog = dialog.set_directory(start_dir);
-        }
-        if let Some(path) = dialog.pick_folder() {
-            self.path_input.update(cx, |input, cx| {
-                input.set_value(path.to_string_lossy().to_string(), window, cx);
-            });
-            self.path_state.set_error(None);
-            self.path_state.clear_suggestions();
-            cx.notify();
-        }
+        let start_dir = resolve_picker_start_path(&current_value);
+        let window_handle = window.window_handle();
+
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                let mut dialog = AsyncFileDialog::new();
+                if let Some(dir) = start_dir {
+                    dialog = dialog.set_directory(dir);
+                }
+                if let Some(handle) = dialog.pick_folder().await {
+                    let path = handle.path().to_string_lossy().to_string();
+                    let _ = cx.update_window(window_handle, |_, window, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            this.path_input.update(cx, |input, cx| {
+                                input.set_value(path, window, cx);
+                            });
+                            this.path_state.set_error(None);
+                            this.path_state.clear_suggestions();
+                            cx.notify();
+                        });
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
