@@ -18,7 +18,7 @@ use gpui::{
     App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ParentElement, Render,
     Styled, Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
-use gpui_component::{TITLE_BAR_HEIGHT, TitleBar, NoiseIntensity, render_noise_overlay};
+use gpui_component::{NoiseIntensity, TITLE_BAR_HEIGHT, TitleBar, render_noise_overlay};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
