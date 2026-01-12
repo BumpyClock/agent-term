@@ -15,18 +15,15 @@ pub use actions::*;
 pub use state::AgentTermApp;
 
 use gpui::{
-    App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ObjectFit,
-    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Window,
-    WindowBackgroundAppearance, WindowOptions, div, img, prelude::*, px,
+    App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ParentElement, Render,
+    Styled, Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
-use gpui_component::{TITLE_BAR_HEIGHT, TitleBar};
+use gpui_component::{TITLE_BAR_HEIGHT, TitleBar, NoiseIntensity, render_noise_overlay};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
 use crate::ui::ActiveTheme as _;
-use constants::{
-    GLASS_NOISE_ASSET_PATH, GLASS_NOISE_OPACITY, GLASS_NOISE_TILE_SIZE, SURFACE_ROOT_ALPHA,
-};
+use constants::SURFACE_ROOT_ALPHA;
 use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
@@ -146,50 +143,6 @@ pub fn run() {
     });
 }
 
-impl AgentTermApp {
-    fn render_glass_noise_overlay(
-        &self,
-        width: Pixels,
-        height: Pixels,
-        scale_factor: f32,
-    ) -> impl IntoElement {
-        let tile_size_value = (GLASS_NOISE_TILE_SIZE / scale_factor.max(1.0)).round();
-        let tile_size = px(tile_size_value);
-        let cols = ((width / tile_size).max(0.0).ceil() as usize).max(1) + 12;
-        let rows = ((height / tile_size).max(0.0).ceil() as usize).max(1) + 12;
-        let tiled_width = px(tile_size_value * cols as f32);
-        let tiled_height = px(tile_size_value * rows as f32);
-        let tiles = cols.saturating_mul(rows);
-
-        div()
-            .id("glass-noise-overlay")
-            .absolute()
-            .inset_0()
-            .size_full()
-            .overflow_hidden()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .w(tiled_width)
-                    .h(tiled_height)
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .justify_start()
-                    .children((0..tiles).map(|_| {
-                        img(GLASS_NOISE_ASSET_PATH)
-                            .w(tile_size)
-                            .h(tile_size)
-                            .flex_none()
-                            .object_fit(ObjectFit::Cover)
-                            .opacity(GLASS_NOISE_OPACITY)
-                    })),
-            )
-    }
-}
-
 impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Calculate base surface alpha based on transparency setting
@@ -208,16 +161,20 @@ impl Render for AgentTermApp {
         let window_width = window_bounds.size.width;
         let window_height = window_bounds.size.height;
         let scale_factor = window.scale_factor();
+        let blur_enabled = self.settings.blur_enabled;
 
         div()
             .id("agentterm-gpui")
             .size_full()
             .relative()
             .bg(base_bg)
-            .when(self.settings.blur_enabled, |el| {
-                el.child(self.render_glass_noise_overlay(
+            .when(blur_enabled, |el| {
+                // Use the surface module's noise overlay with Heavy intensity (0.04)
+                el.child(render_noise_overlay(
                     window_width,
                     window_height,
+                    px(0.0), // No corner radius for full-window surface
+                    NoiseIntensity::Heavy.opacity(),
                     scale_factor,
                 ))
             })

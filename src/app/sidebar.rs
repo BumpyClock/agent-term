@@ -6,7 +6,7 @@ use gpui::{
     BoxShadow, ClickEvent, Context, Corner, Entity, IntoElement, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window, div, hsla, point, prelude::*, px,
 };
-use gpui_component::TITLE_BAR_HEIGHT;
+use gpui_component::{TITLE_BAR_HEIGHT, NoiseIntensity, render_noise_overlay};
 
 use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
@@ -48,19 +48,22 @@ impl AgentTermApp {
         // Apply window_transparency to sidebar background alpha with exponential curve
         // Higher transparency = lower alpha (more see-through), accelerating at higher values
         let exp_factor = (1.0 - self.settings.window_transparency).powf(2.0);
-        // Clamp to minimum 10% opacity so blur stays visible during testing
+        // Clamp to minimum 60% opacity so blur stays visible during testing
         let bg_alpha = (SIDEBAR_GLASS_BASE_ALPHA * exp_factor).max(0.60);
-        let sidebar_base = cx.theme().sidebar;
-        let sidebar_alpha = (sidebar_base.a * bg_alpha).clamp(0.0, 1.0);
-        let base = gpui::Hsla {
-            a: sidebar_alpha,
-            ..sidebar_base
-        };
-        let border_color = cx.theme().border.alpha(BORDER_SOFT_ALPHA);
-        let window_height = window.window_bounds().get_bounds().size.height;
+        let window_bounds = window.window_bounds().get_bounds();
+        let window_height = window_bounds.size.height;
         let sidebar_height = window_height - px(SIDEBAR_INSET * 2.0);
         let sidebar_width = px(self.sidebar_width);
         let scale_factor = window.scale_factor();
+        let blur_enabled = self.settings.blur_enabled;
+
+        // Get theme colors before rendering content to avoid borrow conflicts
+        let sidebar_bg = cx.theme().sidebar.opacity(bg_alpha);
+        let border_color = cx.theme().border_subtle.opacity(BORDER_SOFT_ALPHA);
+        let radius = px(16.0); // Panel preset uses 16px radius
+
+        // Capture sidebar content
+        let sidebar_content = self.render_sidebar_content(cx);
 
         div()
             .id("sidebar-shell")
@@ -71,27 +74,31 @@ impl AgentTermApp {
             .w(px(self.sidebar_width))
             .child(
                 div()
-                    .id("sidebar-wrapper")
+                    .id("sidebar-shadow-wrapper")
                     .size_full()
-                    .rounded(px(16.0))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(border_color)
-                    .bg(base)
                     .shadow(Self::sidebar_shadow())
                     .child(
+                        // Manually construct panel surface to avoid borrow conflicts
                         div()
-                            .id("sidebar-glass")
-                            .size_full()
+                            .id("sidebar-surface")
                             .relative()
-                            .when(self.settings.blur_enabled, |el| {
-                                el.child(self.render_glass_noise_overlay(
+                            .size_full()
+                            .bg(sidebar_bg)
+                            .rounded(radius)
+                            .overflow_hidden()
+                            .border_1()
+                            .border_color(border_color)
+                            .when(blur_enabled, |el| el.backdrop_blur(px(120.0)))
+                            .when(blur_enabled, |el| {
+                                el.child(render_noise_overlay(
                                     sidebar_width,
                                     sidebar_height,
+                                    radius,
+                                    NoiseIntensity::Heavy.opacity(),
                                     scale_factor,
                                 ))
                             })
-                            .child(self.render_sidebar_content(cx)),
+                            .child(sidebar_content),
                     ),
             )
             .child(
