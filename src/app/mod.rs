@@ -15,16 +15,16 @@ pub use actions::*;
 pub use state::AgentTermApp;
 
 use gpui::{
-    App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance, WindowOptions, div,
-    prelude::*, px,
+    App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ObjectFit,
+    ParentElement, Render, StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance,
+    WindowOptions, div, img, prelude::*, px,
 };
 use gpui_component::{TITLE_BAR_HEIGHT, TitleBar};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
 use crate::ui::ActiveTheme as _;
-use constants::SURFACE_ROOT_ALPHA;
+use constants::{GLASS_NOISE_ASSET_PATH, GLASS_NOISE_OPACITY, SURFACE_ROOT_ALPHA};
 use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
@@ -144,6 +144,19 @@ pub fn run() {
     });
 }
 
+impl AgentTermApp {
+    fn render_glass_noise_overlay(&self) -> impl IntoElement {
+        img(GLASS_NOISE_ASSET_PATH)
+            .id("glass-noise-overlay")
+            .absolute()
+            .inset_0()
+            .w_full()
+            .h_full()
+            .object_fit(ObjectFit::Cover)
+            .opacity(GLASS_NOISE_OPACITY)
+    }
+}
+
 impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Calculate base surface alpha based on transparency setting
@@ -163,6 +176,9 @@ impl Render for AgentTermApp {
             .size_full()
             .relative()
             .bg(base_bg)
+            .when(self.settings.blur_enabled, |el| {
+                el.child(self.render_glass_noise_overlay())
+            })
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::open_mcp_manager))
