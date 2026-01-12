@@ -16,15 +16,17 @@ pub use state::AgentTermApp;
 
 use gpui::{
     App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ObjectFit,
-    ParentElement, Render, StatefulInteractiveElement, Styled, Window, WindowBackgroundAppearance,
-    WindowOptions, div, img, prelude::*, px,
+    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Window,
+    WindowBackgroundAppearance, WindowOptions, div, img, prelude::*, px,
 };
 use gpui_component::{TITLE_BAR_HEIGHT, TitleBar};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
 use crate::ui::ActiveTheme as _;
-use constants::{GLASS_NOISE_ASSET_PATH, GLASS_NOISE_OPACITY, SURFACE_ROOT_ALPHA};
+use constants::{
+    GLASS_NOISE_ASSET_PATH, GLASS_NOISE_OPACITY, GLASS_NOISE_TILE_SIZE, SURFACE_ROOT_ALPHA,
+};
 use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
@@ -145,15 +147,46 @@ pub fn run() {
 }
 
 impl AgentTermApp {
-    fn render_glass_noise_overlay(&self) -> impl IntoElement {
-        img(GLASS_NOISE_ASSET_PATH)
+    fn render_glass_noise_overlay(
+        &self,
+        width: Pixels,
+        height: Pixels,
+        scale_factor: f32,
+    ) -> impl IntoElement {
+        let tile_size_value = (GLASS_NOISE_TILE_SIZE / scale_factor.max(1.0)).round();
+        let tile_size = px(tile_size_value);
+        let cols = ((width / tile_size).max(0.0).ceil() as usize).max(1) + 12;
+        let rows = ((height / tile_size).max(0.0).ceil() as usize).max(1) + 12;
+        let tiled_width = px(tile_size_value * cols as f32);
+        let tiled_height = px(tile_size_value * rows as f32);
+        let tiles = cols.saturating_mul(rows);
+
+        div()
             .id("glass-noise-overlay")
             .absolute()
             .inset_0()
-            .w_full()
-            .h_full()
-            .object_fit(ObjectFit::Cover)
-            .opacity(GLASS_NOISE_OPACITY)
+            .size_full()
+            .overflow_hidden()
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w(tiled_width)
+                    .h(tiled_height)
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .justify_start()
+                    .children((0..tiles).map(|_| {
+                        img(GLASS_NOISE_ASSET_PATH)
+                            .w(tile_size)
+                            .h(tile_size)
+                            .flex_none()
+                            .object_fit(ObjectFit::Cover)
+                            .opacity(GLASS_NOISE_OPACITY)
+                    })),
+            )
     }
 }
 
@@ -171,13 +204,22 @@ impl Render for AgentTermApp {
         };
         let base_bg = theme::surface_background(mode).alpha(base_alpha);
 
+        let window_bounds = window.window_bounds().get_bounds();
+        let window_width = window_bounds.size.width;
+        let window_height = window_bounds.size.height;
+        let scale_factor = window.scale_factor();
+
         div()
             .id("agentterm-gpui")
             .size_full()
             .relative()
             .bg(base_bg)
             .when(self.settings.blur_enabled, |el| {
-                el.child(self.render_glass_noise_overlay())
+                el.child(self.render_glass_noise_overlay(
+                    window_width,
+                    window_height,
+                    scale_factor,
+                ))
             })
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
@@ -217,7 +259,7 @@ impl Render for AgentTermApp {
                     .bottom_0()
                     .child(self.render_terminal_container(cx))
                     .when(self.sidebar_visible, |el| {
-                        el.child(self.render_sidebar_shell(cx))
+                        el.child(self.render_sidebar_shell(window, cx))
                     }),
             )
             // TitleBar overlay for window controls and dragging.

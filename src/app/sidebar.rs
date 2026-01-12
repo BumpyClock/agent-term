@@ -43,7 +43,7 @@ impl AgentTermApp {
         ]
     }
 
-    pub fn render_sidebar_shell(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_sidebar_shell(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
         // Apply window_transparency to sidebar background alpha with exponential curve
         // Higher transparency = lower alpha (more see-through), accelerating at higher values
@@ -57,6 +57,10 @@ impl AgentTermApp {
             ..sidebar_base
         };
         let border_color = cx.theme().border.alpha(BORDER_SOFT_ALPHA);
+        let window_height = window.window_bounds().get_bounds().size.height;
+        let sidebar_height = window_height - px(SIDEBAR_INSET * 2.0);
+        let sidebar_width = px(self.sidebar_width);
+        let scale_factor = window.scale_factor();
 
         div()
             .id("sidebar-shell")
@@ -81,7 +85,11 @@ impl AgentTermApp {
                             .size_full()
                             .relative()
                             .when(self.settings.blur_enabled, |el| {
-                                el.child(self.render_glass_noise_overlay())
+                                el.child(self.render_glass_noise_overlay(
+                                    sidebar_width,
+                                    sidebar_height,
+                                    scale_factor,
+                                ))
                             })
                             .child(self.render_sidebar_content(cx)),
                     ),
