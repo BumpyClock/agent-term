@@ -10,7 +10,7 @@ use std::borrow::Cow;
 #[folder = "assets"]
 #[include = "icons/*.svg"]
 #[include = "tool-icons/*"]
-#[include = "NoiseAsset_256.png"]
+#[include = "noise/*"]
 pub struct Assets;
 
 impl AssetSource for Assets {

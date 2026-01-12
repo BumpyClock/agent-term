@@ -10,7 +10,7 @@ pub const SIDEBAR_HEADER_LEFT_PADDING: f32 = 16.0;
 // Sidebar glass effect constants
 // SIDEBAR_GLASS_BASE_ALPHA: Base opacity for sidebar's glass panel
 // This is layered on top of the root surface
-pub const SIDEBAR_GLASS_BASE_ALPHA: f32 = 0.65;
+pub const SIDEBAR_GLASS_BASE_ALPHA: f32 = 0.85;
 
 // Alpha values for glass effect
 // SURFACE_ROOT_ALPHA: Base opacity when transparency slider is at 0%
@@ -19,8 +19,6 @@ pub const SIDEBAR_GLASS_BASE_ALPHA: f32 = 0.65;
 // At transparency=100%: window is fully transparent (blur shows through)
 pub const SURFACE_ROOT_ALPHA: f32 = 0.85;
 pub const BORDER_SOFT_ALPHA: f32 = 0.50;
-pub const GLASS_NOISE_OPACITY: f32 = 0.02;
-pub const GLASS_NOISE_ASSET_PATH: &str = "NoiseAsset_256.png";
-
-// Feature flags
-pub const ENABLE_BLUR: bool = true;
+pub const GLASS_NOISE_OPACITY: f32 = 0.04;
+pub const GLASS_NOISE_ASSET_PATH: &str = "noise/NoiseAsset_256.png";
+pub const GLASS_NOISE_TILE_SIZE: f32 = 64.0;
