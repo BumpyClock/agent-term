@@ -542,12 +542,20 @@ impl AgentTermApp {
                     .map(|s| icon_from_string(s))
                     .unwrap_or_else(|| Icon::new(IconName::Terminal))
                     .size(IconSize::Small)
-                    .color(cx.theme().muted_foreground),
+                    .color(if is_active {
+                        cx.theme().accent_foreground
+                    } else {
+                        cx.theme().muted_foreground
+                    }),
             )
             .child(
                 div()
                     .text_sm()
-                    .text_color(cx.theme().foreground)
+                    .text_color(if is_active {
+                        cx.theme().accent_foreground
+                    } else {
+                        cx.theme().foreground
+                    })
                     .truncate()
                     .flex_1()
                     .child(title.clone()),

@@ -209,8 +209,8 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.primary_foreground = Some(palette.primary_foreground.into());
     colors.secondary = Some(palette.secondary.into());
     colors.secondary_foreground = Some(palette.secondary_foreground.into());
-    colors.accent = Some(palette.accent.into());
-    colors.accent_foreground = Some(palette.accent_foreground.into());
+    colors.accent = Some(accent.hex.into());
+    colors.accent_foreground = Some(palette.primary_foreground.into());
     colors.danger = Some(palette.danger.into());
     colors.input = Some(palette.input.into());
     colors.ring = Some(accent.hex.into());
