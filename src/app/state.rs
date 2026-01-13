@@ -29,6 +29,8 @@ pub struct AgentTermApp {
 
     pub(crate) sidebar_visible: bool,
     pub(crate) sidebar_width: f32,
+
+    // Sidebar resize state (consumer-managed for SidebarShell)
     pub(crate) resizing_sidebar: bool,
     pub(crate) resize_start_x: Pixels,
     pub(crate) resize_start_width: f32,
@@ -81,8 +83,8 @@ impl AgentTermApp {
             sidebar_visible: true,
             sidebar_width: 250.0,
             resizing_sidebar: false,
-            resize_start_x: Pixels::ZERO,
-            resize_start_width: 250.0,
+            resize_start_x: gpui::px(0.0),
+            resize_start_width: 0.0,
             sections: Vec::new(),
             sessions: Vec::new(),
             active_session_id: None,

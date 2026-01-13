@@ -15,10 +15,10 @@ pub use actions::*;
 pub use state::AgentTermApp;
 
 use gpui::{
-    App, Application, Context, InteractiveElement, KeyBinding, MouseButton, ParentElement, Render,
-    Styled, Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
+    App, Application, Context, InteractiveElement, KeyBinding, ParentElement, Render, Styled,
+    Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
-use gpui_component::{NoiseIntensity, TITLE_BAR_HEIGHT, TitleBar, render_noise_overlay};
+use gpui_component::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
@@ -162,22 +162,70 @@ impl Render for AgentTermApp {
         let window_height = window_bounds.size.height;
         let scale_factor = window.scale_factor();
         let blur_enabled = self.settings.blur_enabled;
+        let sidebar_visible = self.sidebar_visible;
 
+        // Build background noise overlay
+        let background = if blur_enabled {
+            Some(render_noise_overlay(
+                window_width,
+                window_height,
+                px(0.0), // No corner radius for full-window surface
+                NoiseIntensity::Heavy.opacity(),
+                scale_factor,
+            ))
+        } else {
+            None
+        };
+
+        // Build overlay children (dialog and sheet layers) first to avoid borrow conflicts
+        let dialog_layer = gpui_component::Root::render_dialog_layer(window, cx);
+        let sheet_layer = gpui_component::Root::render_sheet_layer(window, cx);
+        let overlay_children = div()
+            .id("agentterm-overlays")
+            .children(dialog_layer)
+            .children(sheet_layer)
+            .into_any_element();
+
+        // Build sidebar (only if visible) - convert to AnyElement to release borrow
+        let sidebar_left: Option<gpui::AnyElement> = if sidebar_visible {
+            Some(self.render_sidebar_shell(window, cx).into_any_element())
+        } else {
+            None
+        };
+
+        // Build main content after sidebar - convert to AnyElement
+        let main_content = self.render_terminal_container(cx).into_any_element();
+
+        // Build WindowShell with FloatingPanels mode
+        let window_shell = WindowShell::new()
+            .layout_mode(WindowLayoutMode::FloatingPanels)
+            .blur_enabled(blur_enabled)
+            .bg(base_bg)
+            .when_some(background, |shell, bg| shell.background(bg))
+            .when_some(sidebar_left, |shell, sidebar| shell.sidebar_left(sidebar))
+            .main(main_content)
+            .overlay_children(overlay_children)
+            .on_mouse_move({
+                let entity = cx.entity().clone();
+                move |event, window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.update_sidebar_resize(event, window, cx);
+                    });
+                }
+            })
+            .on_mouse_up({
+                let entity = cx.entity().clone();
+                move |event, window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.stop_sidebar_resize(event, window, cx);
+                    });
+                }
+            });
+
+        // Wrap WindowShell in a focusable div for action handlers
         div()
             .id("agentterm-gpui")
             .size_full()
-            .relative()
-            .bg(base_bg)
-            .when(blur_enabled, |el| {
-                // Use the surface module's noise overlay with Heavy intensity (0.04)
-                el.child(render_noise_overlay(
-                    window_width,
-                    window_height,
-                    px(0.0), // No corner radius for full-window surface
-                    NoiseIntensity::Heavy.opacity(),
-                    scale_factor,
-                ))
-            })
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::open_mcp_manager))
@@ -190,51 +238,6 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::handle_remove_section))
             .on_action(cx.listener(Self::minimize_window))
             .on_action(cx.listener(Self::zoom_window))
-            .on_mouse_move(cx.listener(Self::update_sidebar_resize))
-            .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize))
-            // Visual titlebar background across the whole window (no hit-testing).
-            .child(
-                div()
-                    .id("agentterm-titlebar-bg")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .h(TITLE_BAR_HEIGHT)
-                    // Keep the visual strip but let the window/terminal background show through.
-                    .bg(cx.theme().transparent),
-            )
-            // Main content (full-window). Titlebar is drawn as an overlay above this so the sidebar
-            // can visually extend to the top while Windows still hit-tests the titlebar controls.
-            .child(
-                div()
-                    .id("agentterm-content")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .child(self.render_terminal_container(cx))
-                    .when(self.sidebar_visible, |el| {
-                        el.child(self.render_sidebar_shell(window, cx))
-                    }),
-            )
-            // TitleBar overlay for window controls and dragging.
-            // On Windows/Linux, the transparent overlay must occlude mouse hit-testing so that
-            // underlying content (e.g. terminal widgets) can't intercept clicks in the titlebar region.
-            .child(
-                div()
-                    .id("agentterm-titlebar")
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .h(TITLE_BAR_HEIGHT)
-                    .when(cfg!(not(target_os = "macos")), |el| el.occlude())
-                    .child(TitleBar::new().bg(gpui::transparent_black()).border_b_0()),
-            )
-            // Dialog and sheet layers at full opacity
-            .children(gpui_component::Root::render_dialog_layer(window, cx))
-            .children(gpui_component::Root::render_sheet_layer(window, cx))
+            .child(window_shell)
     }
 }

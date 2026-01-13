@@ -3,10 +3,12 @@
 use agentterm_session::{DEFAULT_SECTION_ID, SessionRecord, SessionTool};
 use agentterm_tools::ShellType;
 use gpui::{
-    BoxShadow, ClickEvent, Context, Corner, Entity, IntoElement, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window, div, hsla, point, prelude::*, px,
+    ClickEvent, Context, Corner, Entity, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Styled, Window, div, prelude::*, px,
 };
-use gpui_component::{SurfaceContext, SurfacePreset, TITLE_BAR_HEIGHT};
+use gpui_component::{SidebarShell, TITLE_BAR_HEIGHT};
+
+use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 
 use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
@@ -19,83 +21,63 @@ use super::constants::*;
 use super::state::AgentTermApp;
 
 impl AgentTermApp {
-    pub fn sidebar_shadow() -> Vec<BoxShadow> {
-        vec![
-            BoxShadow {
-                // subtle near-edge shadow for elevation
-                color: hsla(0., 0., 0., 0.04),
-                offset: point(px(0.0), px(1.0)),
-                blur_radius: px(6.0),
-                spread_radius: px(0.0),
-            },
-            BoxShadow {
-                color: hsla(0., 0., 0., 0.08),
-                offset: point(px(0.0), px(8.0)),
-                blur_radius: px(22.0),
-                spread_radius: px(0.0),
-            },
-            BoxShadow {
-                color: hsla(0., 0., 0., 0.12),
-                offset: point(px(0.0), px(22.0)),
-                blur_radius: px(54.0),
-                spread_radius: px(0.0),
-            },
-        ]
-    }
-
     pub fn render_sidebar_shell(
         &self,
-        window: &Window,
+        _window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let resizer_hover_bg = cx.theme().foreground.alpha(0.20);
-        let window_bounds = window.window_bounds().get_bounds();
-        let window_height = window_bounds.size.height;
-        let sidebar_height = window_height - px(SIDEBAR_INSET * 2.0);
-        let sidebar_width = px(self.sidebar_width);
-        let blur_enabled = self.settings.blur_enabled;
-        let sidebar_surface = SurfacePreset::panel()
-            .wrap_with_bounds(
-                div(),
-                sidebar_width,
-                sidebar_height,
-                window,
-                cx,
-                SurfaceContext { blur_enabled },
-            )
-            .child(self.render_sidebar_content(cx))
-            .id("sidebar-surface")
-            .size_full();
+        let entity = cx.entity().clone();
+        let entity_for_end = entity.clone();
 
-        div()
-            .id("sidebar-shell")
-            .absolute()
-            .left(px(SIDEBAR_INSET))
-            .top(px(SIDEBAR_INSET))
-            .bottom(px(SIDEBAR_INSET))
-            .w(px(self.sidebar_width))
-            .child(
-                div()
-                    .id("sidebar-shadow-wrapper")
-                    .size_full()
-                    .shadow(Self::sidebar_shadow())
-                    .child(sidebar_surface),
-            )
-            .child(
-                div()
-                    .id("sidebar-resizer")
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left(px(self.sidebar_width - 3.0))
-                    .w(px(6.0))
-                    .rounded(px(999.0))
-                    .bg(gpui::transparent_black())
-                    .cursor_col_resize()
-                    .hover(move |s| s.bg(resizer_hover_bg))
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::start_sidebar_resize))
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::stop_sidebar_resize)),
-            )
+        SidebarShell::left(px(self.sidebar_width))
+            .min_width(px(SIDEBAR_MIN_WIDTH))
+            .max_width(px(SIDEBAR_MAX_WIDTH))
+            .inset(px(SIDEBAR_INSET))
+            .blur_enabled(self.settings.blur_enabled)
+            .on_resize_start(move |width, x, _window, cx| {
+                entity.update(cx, |this, _cx| {
+                    this.resizing_sidebar = true;
+                    this.resize_start_x = x;
+                    this.resize_start_width = width / px(1.0);
+                });
+            })
+            .on_resize_end(move |_window, cx| {
+                entity_for_end.update(cx, |this, _cx| {
+                    this.resizing_sidebar = false;
+                });
+            })
+            .child(self.render_sidebar_content(cx))
+    }
+
+    /// Handler for mouse move events during sidebar resize.
+    /// Should be attached at the root level to capture moves outside the resizer.
+    pub fn update_sidebar_resize(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.resizing_sidebar {
+            return;
+        }
+
+        let delta_x = event.position.x - self.resize_start_x;
+        let new_width = (self.resize_start_width + delta_x / px(1.0))
+            .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+
+        self.sidebar_width = new_width;
+        cx.notify();
+    }
+
+    /// Handler for mouse up events to stop sidebar resize.
+    /// Should be attached at the root level.
+    pub fn stop_sidebar_resize(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        self.resizing_sidebar = false;
     }
 
     pub fn render_sidebar_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -588,50 +570,6 @@ impl AgentTermApp {
                         .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
                 }
             })
-    }
-
-    // Sidebar resize methods
-    pub fn start_sidebar_resize(
-        &mut self,
-        event: &MouseDownEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.resizing_sidebar = true;
-        self.resize_start_x = event.position.x;
-        self.resize_start_width = self.sidebar_width;
-        cx.notify();
-    }
-
-    pub fn stop_sidebar_resize(
-        &mut self,
-        _event: &MouseUpEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.resizing_sidebar {
-            self.resizing_sidebar = false;
-            cx.notify();
-        }
-    }
-
-    pub fn update_sidebar_resize(
-        &mut self,
-        event: &MouseMoveEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.resizing_sidebar || !event.dragging() {
-            return;
-        }
-
-        let delta = event.position.x - self.resize_start_x;
-        let next_width =
-            (self.resize_start_width + delta / px(1.0)).clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
-        if (next_width - self.sidebar_width).abs() > 0.1 {
-            self.sidebar_width = next_width;
-            cx.notify();
-        }
     }
 
     // Section management methods
