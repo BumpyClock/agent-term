@@ -8,10 +8,10 @@
 
 use std::sync::Arc;
 
-use agentterm_search::SearchManager;
+use agentterm_search::{MessageSource, SearchManager};
 use gpui::{
-    actions, div, prelude::*, px, App, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyBinding, MouseButton, ParentElement, Render, Styled, Subscription, Window,
+    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
+    MouseButton, ParentElement, Render, Styled, Subscription, Window, actions, div, prelude::*, px,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 
@@ -54,6 +54,13 @@ pub enum CommandResult {
         snippet: String,
         session_id: String,
     },
+    /// Past Codex conversation from sessions
+    CodexConversation {
+        file_path: String,
+        project: String,
+        snippet: String,
+        session_id: String,
+    },
     /// Static app action
     Action {
         name: String,
@@ -68,6 +75,7 @@ impl CommandResult {
             CommandResult::Session { title, .. } => title,
             CommandResult::Workspace { name, .. } => name,
             CommandResult::PastConversation { project, .. } => project,
+            CommandResult::CodexConversation { project, .. } => project,
             CommandResult::Action { name, .. } => name,
         }
     }
@@ -77,6 +85,7 @@ impl CommandResult {
             CommandResult::Session { project, .. } => Some(project),
             CommandResult::Workspace { created_at, .. } => Some(created_at),
             CommandResult::PastConversation { snippet, .. } => Some(snippet),
+            CommandResult::CodexConversation { snippet, .. } => Some(snippet),
             CommandResult::Action { .. } => None,
         }
     }
@@ -86,6 +95,7 @@ impl CommandResult {
             CommandResult::Session { .. } => IconName::Terminal,
             CommandResult::Workspace { .. } => IconName::Folder,
             CommandResult::PastConversation { .. } => IconName::Sparkles,
+            CommandResult::CodexConversation { .. } => IconName::Code,
             CommandResult::Action { icon, .. } => *icon,
         }
     }
@@ -94,7 +104,8 @@ impl CommandResult {
         match self {
             CommandResult::Session { .. } => "Sessions",
             CommandResult::Workspace { .. } => "Workspaces",
-            CommandResult::PastConversation { .. } => "Past Conversations",
+            CommandResult::PastConversation { .. } => "Claude History",
+            CommandResult::CodexConversation { .. } => "Codex History",
             CommandResult::Action { .. } => "Actions",
         }
     }
@@ -191,12 +202,21 @@ impl CommandPalette {
                 let search_results = manager.search(&query, 10);
                 for result in search_results {
                     if let Some(session_id) = result.session_id {
-                        self.filtered_results.push(CommandResult::PastConversation {
-                            file_path: result.file_path,
-                            project: result.project_name,
-                            snippet: result.snippet,
-                            session_id,
-                        });
+                        let cmd_result = match result.source {
+                            MessageSource::Claude => CommandResult::PastConversation {
+                                file_path: result.file_path,
+                                project: result.project_name,
+                                snippet: result.snippet,
+                                session_id,
+                            },
+                            MessageSource::Codex => CommandResult::CodexConversation {
+                                file_path: result.file_path,
+                                project: result.project_name,
+                                snippet: result.snippet,
+                                session_id,
+                            },
+                        };
+                        self.filtered_results.push(cmd_result);
                     }
                 }
             }
