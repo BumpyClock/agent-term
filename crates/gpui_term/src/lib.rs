@@ -5,7 +5,8 @@ mod terminal_palette;
 mod terminal_view;
 
 pub use terminal::{
-    Event, IndexedCell, Terminal, TerminalBounds, TerminalBuilder, TerminalContent, ZedListener,
+    DetectedUrl, Event, IndexedCell, Terminal, TerminalBounds, TerminalBuilder, TerminalContent,
+    ZedListener,
 };
 pub use terminal_element::{TerminalElement, TextStyle, convert_color};
 pub use terminal_palette::{TerminalPalette, set_terminal_palette, terminal_palette};
