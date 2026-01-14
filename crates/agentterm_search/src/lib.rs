@@ -1,6 +1,8 @@
-//! Global Search module for indexing and searching Claude JSONL conversation logs.
+//! Global Search module for indexing and searching conversation logs.
 //!
-//! Provides in-memory indexing of conversation logs from `~/.claude/projects/*/`
+//! Provides in-memory indexing of conversation logs from:
+//! - `~/.claude/projects/*/` (Claude CLI)
+//! - `~/.codex/sessions/` (Codex CLI)
 //! and fuzzy search with snippet previews.
 
 use parking_lot::Mutex;
@@ -10,7 +12,7 @@ use std::sync::Arc;
 mod index;
 mod query;
 
-pub use index::{IndexStatus, IndexedMessage, MessageRef, SearchIndex};
+pub use index::{IndexStatus, IndexedMessage, MessageRef, MessageSource, SearchIndex};
 pub use query::SearchResult;
 
 use query::SearchEngine;
@@ -21,18 +23,24 @@ pub struct SearchConfig {
     /// Number of days to look back when indexing (default: 90).
     pub recent_days: u32,
     /// Root directory for Claude logs (default: ~/.claude/projects).
-    pub log_root: Option<String>,
+    pub claude_log_root: Option<String>,
+    /// Root directory for Codex logs (default: ~/.codex/sessions).
+    pub codex_log_root: Option<String>,
     /// Path for storing index metadata (enables incremental indexing).
     pub metadata_path: Option<PathBuf>,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        let metadata_path =
-            dirs::home_dir().map(|h| h.join(".agentterm").join("search").join("index_metadata.json"));
+        let metadata_path = dirs::home_dir().map(|h| {
+            h.join(".agentterm")
+                .join("search")
+                .join("index_metadata.json")
+        });
         Self {
             recent_days: 90,
-            log_root: None,
+            claude_log_root: None,
+            codex_log_root: None,
             metadata_path,
         }
     }
@@ -69,16 +77,32 @@ impl SearchManager {
         self.index.lock().status()
     }
 
-    /// Trigger a full re-index of all JSONL logs.
+    /// Trigger a full re-index of all JSONL logs from both Claude and Codex.
     pub fn reindex(&self) -> Result<IndexStatus, String> {
-        let log_root = self.config.log_root.clone().unwrap_or_else(|| {
+        let claude_root = self.config.claude_log_root.clone().unwrap_or_else(|| {
             dirs::home_dir()
-                .map(|h| h.join(".claude").join("projects").to_string_lossy().to_string())
+                .map(|h| {
+                    h.join(".claude")
+                        .join("projects")
+                        .to_string_lossy()
+                        .to_string()
+                })
                 .unwrap_or_else(|| "~/.claude/projects".to_string())
         });
 
+        let codex_root = self.config.codex_log_root.clone().unwrap_or_else(|| {
+            dirs::home_dir()
+                .map(|h| {
+                    h.join(".codex")
+                        .join("sessions")
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .unwrap_or_else(|| "~/.codex/sessions".to_string())
+        });
+
         let mut index = self.index.lock();
-        index.reindex(&log_root, self.config.recent_days)?;
+        index.reindex(&claude_root, &codex_root, self.config.recent_days)?;
         Ok(index.status())
     }
 
@@ -113,7 +137,8 @@ mod tests {
         // Use config without persistence to avoid loading existing index
         SearchManager::with_config(SearchConfig {
             recent_days: 90,
-            log_root: None,
+            claude_log_root: None,
+            codex_log_root: None,
             metadata_path: None,
         })
     }

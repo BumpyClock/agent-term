@@ -4,12 +4,14 @@
 //! snippet previews showing context around matches.
 //! Content is loaded on-demand from source files.
 
-use super::index::{MessageRef, SearchIndex};
+use super::index::{MessageRef, MessageSource, SearchIndex};
 use serde::{Deserialize, Serialize};
 
 /// A search result with snippet and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
+    /// Source of this result (Claude or Codex).
+    pub source: MessageSource,
     /// Path to the source JSONL file.
     pub file_path: String,
     /// Project name derived from directory.
@@ -24,7 +26,7 @@ pub struct SearchResult {
     pub match_positions: Vec<(usize, usize)>,
     /// Relevance score (higher is better).
     pub score: f32,
-    /// Claude session ID extracted from file path.
+    /// Session ID for resumption (Claude session ID or Codex session ID).
     pub session_id: Option<String>,
 }
 
@@ -90,7 +92,11 @@ impl SearchEngine {
             })
             .collect();
 
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored.truncate(limit);
 
         scored.into_iter().map(|c| self.build_result(c)).collect()
@@ -155,19 +161,26 @@ impl SearchEngine {
 
     /// Build final result from scored candidate.
     fn build_result(&self, candidate: ScoredCandidate) -> SearchResult {
-        let (snippet, match_positions) =
-            self.build_snippet(&candidate.content, &candidate.matches);
+        let (snippet, match_positions) = self.build_snippet(&candidate.content, &candidate.matches);
 
-        // Extract session ID from file path (e.g., /path/to/abc123.jsonl -> abc123)
-        let session_id = candidate
-            .msg_ref
-            .file_path
-            .rsplit('/')
-            .next()
-            .and_then(|filename| filename.strip_suffix(".jsonl"))
-            .map(|s| s.to_string());
+        // For session ID: prefer uuid from message if available, otherwise extract from filename
+        let session_id = candidate.msg_ref.uuid.clone().or_else(|| {
+            // Extract session ID from file path (e.g., /path/to/abc123.jsonl -> abc123)
+            candidate
+                .msg_ref
+                .file_path
+                .rsplit('/')
+                .next()
+                .and_then(|filename| {
+                    filename
+                        .strip_suffix(".jsonl")
+                        .or_else(|| filename.strip_suffix(".json"))
+                })
+                .map(|s| s.to_string())
+        });
 
         SearchResult {
+            source: candidate.msg_ref.source,
             file_path: candidate.msg_ref.file_path,
             project_name: candidate.msg_ref.project_name,
             message_type: candidate.msg_ref.message_type,
@@ -306,6 +319,7 @@ mod tests {
     #[test]
     fn test_session_id_extraction() {
         let msg_ref = MessageRef {
+            source: MessageSource::Claude,
             file_path: "/Users/test/.claude/projects/my-project/abc123def.jsonl".to_string(),
             project_name: "my-project".to_string(),
             message_type: "user".to_string(),
@@ -326,5 +340,6 @@ mod tests {
         let result = engine.build_result(candidate);
 
         assert_eq!(result.session_id, Some("abc123def".to_string()));
+        assert_eq!(result.source, MessageSource::Claude);
     }
 }
