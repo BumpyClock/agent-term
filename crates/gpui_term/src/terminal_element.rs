@@ -24,6 +24,7 @@ use std::mem;
 
 use alacritty_terminal::{
     index::Point as AlacPoint,
+    selection::SelectionRange,
     term::{TermMode, cell::Flags},
     vte::ansi::{Color as AnsiColor, CursorShape as AlacCursorShape, NamedColor},
 };
@@ -423,9 +424,17 @@ impl TerminalElement {
     }
 
     /// Lays out the grid of cells, producing batched text runs and background rects.
+    ///
+    /// # Arguments
+    /// * `grid` - Iterator over indexed cells to render
+    /// * `text_style` - Text styling configuration
+    /// * `selection` - Optional selection range for highlighting selected text
+    /// * `display_offset` - Current scroll offset for selection coordinate conversion
     fn layout_grid(
         grid: impl Iterator<Item = IndexedCell>,
         text_style: &TextStyle,
+        selection: Option<&SelectionRange>,
+        display_offset: usize,
     ) -> (Vec<LayoutRect>, Vec<BatchedTextRun>) {
         let estimated_cells = grid.size_hint().0;
         let estimated_runs = estimated_cells / 10;
@@ -452,8 +461,37 @@ impl TerminalElement {
                     mem::swap(&mut fg, &mut bg);
                 }
 
-                if !matches!(bg, AnsiColor::Named(NamedColor::Background)) {
-                    let color = convert_color(&bg);
+                // Check if this cell is selected and swap colors for selection highlighting.
+                // The cell.point uses viewport-relative coordinates, but SelectionRange uses
+                // grid-absolute coordinates, so we need to convert.
+                let is_selected = selection.is_some_and(|sel| {
+                    // Convert viewport line to grid line by subtracting display_offset
+                    let grid_line =
+                        alacritty_terminal::index::Line(cell.point.line.0 - display_offset as i32);
+                    let grid_point = alacritty_terminal::index::Point::new(
+                        grid_line,
+                        alacritty_terminal::index::Column(cell.point.column.0),
+                    );
+                    sel.contains(grid_point)
+                });
+
+                if is_selected {
+                    mem::swap(&mut fg, &mut bg);
+                }
+
+                // Paint background if it's not transparent, OR if cell is selected
+                // (selected cells need a visible highlight even if originally transparent)
+                let needs_background =
+                    is_selected || !matches!(bg, AnsiColor::Named(NamedColor::Background));
+
+                if needs_background {
+                    // For selected cells with transparent bg, use the foreground color as bg
+                    let color =
+                        if is_selected && matches!(bg, AnsiColor::Named(NamedColor::Background)) {
+                            convert_color(&fg)
+                        } else {
+                            convert_color(&bg)
+                        };
                     let col = cell.point.column.0 as i32;
 
                     if let Some(last_region) = background_regions.last_mut() {
@@ -483,7 +521,8 @@ impl TerminalElement {
                     matches!(cell.zerowidth(), Some(chars) if !chars.is_empty());
 
                 if !is_blank(&cell) {
-                    let cell_style = Self::cell_style(&cell, fg, text_style);
+                    let has_hyperlink = cell.hyperlink().is_some();
+                    let cell_style = Self::cell_style(&cell, fg, text_style, has_hyperlink);
                     let cell_point = AlacPoint::new(alac_line, cell.point.column.0 as i32);
                     let zero_width_chars = cell.zerowidth();
 
@@ -573,7 +612,12 @@ impl TerminalElement {
     }
 
     /// Converts Alacritty cell styles to a GPUI TextRun.
-    fn cell_style(indexed: &IndexedCell, fg: AnsiColor, text_style: &TextStyle) -> TextRun {
+    fn cell_style(
+        indexed: &IndexedCell,
+        fg: AnsiColor,
+        text_style: &TextStyle,
+        has_hyperlink: bool,
+    ) -> TextRun {
         let flags = indexed.cell.flags;
         let mut fg_color = convert_color(&fg);
 
@@ -581,13 +625,23 @@ impl TerminalElement {
             fg_color.a *= 0.7;
         }
 
-        let underline = flags
-            .intersects(Flags::ALL_UNDERLINES)
-            .then(|| UnderlineStyle {
+        // Apply underline for cells with underline flags OR hyperlinks
+        let underline = if flags.intersects(Flags::ALL_UNDERLINES) {
+            Some(UnderlineStyle {
                 color: Some(fg_color),
                 thickness: Pixels::from(1.0),
                 wavy: flags.contains(Flags::UNDERCURL),
-            });
+            })
+        } else if has_hyperlink {
+            // Hyperlinks get a subtle underline
+            Some(UnderlineStyle {
+                color: Some(fg_color),
+                thickness: Pixels::from(1.0),
+                wavy: false,
+            })
+        } else {
+            None
+        };
 
         let strikethrough = flags
             .intersects(Flags::STRIKEOUT)
@@ -750,12 +804,18 @@ impl Element for TerminalElement {
             display_offset,
             cursor_char,
             cursor,
+            selection,
             ..
         } = &self.terminal.read(cx).last_content;
         let mode = *mode;
         let display_offset = *display_offset;
 
-        let (rects, batched_text_runs) = Self::layout_grid(cells.iter().cloned(), &text_style);
+        let (rects, batched_text_runs) = Self::layout_grid(
+            cells.iter().cloned(),
+            &text_style,
+            selection.as_ref(),
+            display_offset,
+        );
 
         let cursor_layout = if let AlacCursorShape::Hidden = cursor.shape {
             None

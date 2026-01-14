@@ -77,6 +77,8 @@ pub enum Event {
     SelectionsChanged,
     /// Terminal process exited
     CloseTerminal,
+    /// A hyperlink was clicked and should be opened
+    OpenHyperlink(String),
 }
 
 impl EventEmitter<Event> for Terminal {}
@@ -615,6 +617,23 @@ impl Terminal {
         self.last_content.mode.intersects(TermMode::MOUSE_MODE) && !shift
     }
 
+    /// Returns the hyperlink at the given grid point, if any.
+    fn hyperlink_at_point(&self, point: AlacPoint) -> Option<String> {
+        let term = self.term.lock();
+        // Convert viewport point to grid point
+        let grid_line = alacritty_terminal::index::Line(point.line.0);
+        let grid_col = alacritty_terminal::index::Column(point.column.0 as usize);
+        let grid_point = alacritty_terminal::index::Point::new(grid_line, grid_col);
+
+        // Check if point is within grid bounds
+        if grid_line.0 < 0 || grid_col.0 >= term.columns() {
+            return None;
+        }
+
+        let cell = &term.grid()[grid_point];
+        cell.hyperlink().map(|h| h.uri().to_string())
+    }
+
     fn mouse_changed(&mut self, point: AlacPoint, side: AlacDirection) -> bool {
         match self.last_mouse {
             Some((old_point, old_side)) => {
@@ -632,13 +651,24 @@ impl Terminal {
         }
     }
 
-    pub fn mouse_down(&mut self, e: &MouseDownEvent, _cx: &mut Context<Self>) {
+    pub fn mouse_down(&mut self, e: &MouseDownEvent, cx: &mut Context<Self>) {
         let position = e.position - self.last_content.terminal_bounds.bounds.origin;
         let point = grid_point(
             position,
             self.last_content.terminal_bounds,
             self.last_content.display_offset,
         );
+
+        // Handle Cmd+click (macOS) or Ctrl+click (Linux/Windows) to open hyperlinks
+        if e.button == MouseButton::Left
+            && e.click_count == 1
+            && (e.modifiers.platform || e.modifiers.control)
+        {
+            if let Some(url) = self.hyperlink_at_point(point) {
+                cx.emit(Event::OpenHyperlink(url));
+                return;
+            }
+        }
 
         if self.mouse_mode(e.modifiers.shift) {
             if let Some(bytes) =
