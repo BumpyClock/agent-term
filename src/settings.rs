@@ -46,6 +46,9 @@ pub struct AppSettings {
     /// Enable macOS vibrancy blur effect
     #[serde(default = "default_blur_enabled")]
     pub blur_enabled: bool,
+    /// Warm search index on startup (background thread)
+    #[serde(default = "default_warm_search_index")]
+    pub warm_search_index: bool,
 
     // Tools
     pub default_shell_id: Option<String>,
@@ -53,6 +56,10 @@ pub struct AppSettings {
 }
 
 fn default_blur_enabled() -> bool {
+    true
+}
+
+fn default_warm_search_index() -> bool {
     true
 }
 
@@ -73,6 +80,7 @@ impl Default for AppSettings {
             letter_spacing: 0.0,
             window_transparency: 0.0, // 0.0 = solid (no transparency)
             blur_enabled: true,
+            warm_search_index: true,
 
             // Tools
             default_shell_id: None,

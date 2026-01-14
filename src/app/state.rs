@@ -25,7 +25,7 @@ use crate::settings::AppSettings;
 use crate::theme;
 use crate::ui::SectionItem;
 
-use super::command_palette::CommandPalette;
+use gpui_component::command_palette::CommandPaletteState;
 
 /// The main application state for AgentTerm.
 pub struct AgentTermApp {
@@ -73,8 +73,8 @@ pub struct AgentTermApp {
     /// Used to look up window-specific layout (tabs, section order, etc.).
     pub(crate) layout_window_id: String,
 
-    /// Command palette entity when open.
-    pub(crate) command_palette: Option<Entity<CommandPalette>>,
+    /// Command palette state entity when open.
+    pub(crate) command_palette: Option<Entity<CommandPaletteState>>,
 }
 
 impl AgentTermApp {

@@ -21,6 +21,7 @@
 use std::{
     borrow::Cow, cmp, collections::VecDeque, ops::Deref, path::PathBuf, sync::Arc, time::Duration,
 };
+use sysinfo::{Pid, System};
 
 use alacritty_terminal::{
     Term,
@@ -376,6 +377,14 @@ impl TerminalBuilder {
             let pty = tty::new(&pty_options, TerminalBounds::default().into(), window_id)
                 .context("failed to create PTY")?;
 
+            // Capture the shell PID before the PTY is consumed by the event loop.
+            // On Unix, we can get the child PID directly from the PTY.
+            // On Windows, we'll set it to None for now (can be enhanced later).
+            #[cfg(unix)]
+            let shell_pid = Some(pty.child().id());
+            #[cfg(not(unix))]
+            let shell_pid: Option<u32> = None;
+
             let (events_tx, events_rx) = unbounded();
 
             let term = Term::new(
@@ -409,6 +418,7 @@ impl TerminalBuilder {
                 scroll_px: px(0.),
                 selection_phase: SelectionPhase::Ended,
                 event_loop_task: Task::ready(Ok(())),
+                shell_pid,
             };
 
             Ok(TerminalBuilder {
@@ -497,6 +507,9 @@ pub struct Terminal {
     scroll_px: Pixels,
     selection_phase: SelectionPhase,
     event_loop_task: Task<Result<(), anyhow::Error>>,
+    /// PID of the shell process spawned by the PTY.
+    /// Used to check for running child processes.
+    shell_pid: Option<u32>,
 }
 
 impl Terminal {
@@ -504,6 +517,33 @@ impl Terminal {
         if let Some(pty_tx) = &self.pty_tx {
             let _ = pty_tx.0.send(Msg::Shutdown);
         }
+    }
+
+    /// Checks if the shell has any actively running child processes.
+    ///
+    /// Returns `true` if there are child processes running under the shell
+    /// (e.g., a command is executing). Returns `false` if the terminal is
+    /// idle at a shell prompt.
+    ///
+    /// This is used to show confirmation dialogs when closing tabs or windows
+    /// with running processes.
+    pub fn has_running_child_process(&self) -> bool {
+        let Some(shell_pid) = self.shell_pid else {
+            return false;
+        };
+
+        let mut sys = System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+        // Check if any process has our shell as its parent
+        let shell_pid = Pid::from_u32(shell_pid);
+        for (_, process) in sys.processes() {
+            if process.parent() == Some(shell_pid) {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Writes bytes to the PTY.

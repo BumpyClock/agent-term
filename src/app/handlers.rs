@@ -1,6 +1,7 @@
 //! Action handlers for AgentTermApp.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use gpui::{
     AnyWindowHandle, Bounds, Context, Focusable, IntoElement, ParentElement, Styled, Window,
@@ -9,7 +10,7 @@ use gpui::{
 
 use super::window_registry::WindowRegistry;
 use super::{
-    LayoutManager, MoveSessionToWindow, OpenSessionInNewWindow, create_new_window,
+    LayoutManager, MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool, create_new_window,
     create_new_window_with_session, create_window_from_layout,
 };
 use agentterm_session::DEFAULT_SECTION_ID;
@@ -22,12 +23,10 @@ use crate::settings_dialog::SettingsDialog;
 use crate::ui::{ActiveTheme, Button, ButtonVariants, WindowExt, v_flex};
 
 use super::actions::*;
-use super::command_palette::{
-    CommandPalette, CommandPaletteDismissEvent, CommandPaletteSelectEvent, CommandResult,
-    default_actions,
-};
-use super::search_manager::global_search_manager;
+use super::command_palette_provider::{AgentTermProvider, CommandPalettePayload};
+use super::search_manager;
 use super::state::AgentTermApp;
+use gpui_component::command_palette::{CommandPalette, CommandPaletteEvent};
 
 impl AgentTermApp {
     // Window action handlers
@@ -49,7 +48,7 @@ impl AgentTermApp {
         cx: &mut Context<Self>,
     ) {
         if self.command_palette.is_some() {
-            self.close_command_palette(cx);
+            self.close_command_palette(window, cx);
         } else {
             self.open_command_palette(window, cx);
         }
@@ -57,162 +56,127 @@ impl AgentTermApp {
 
     /// Open the command palette.
     fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Get the global search manager for past conversation search
-        let search_manager = global_search_manager();
+        // Ensure search indexing starts in the background (non-blocking)
+        search_manager::warm_search_manager_async(std::time::Duration::from_millis(0));
 
-        // Clone data for use in closure
-        let sessions = self.sessions.clone();
-        let layout_store = self.layout_store.clone();
+        // Create the provider with current app state
+        let provider = Arc::new(AgentTermProvider::new(
+            self.sessions.clone(),
+            self.layout_store.clone(),
+        ));
 
-        let palette = cx.new(|cx| {
-            let mut palette = CommandPalette::new(window, cx);
-
-            // Set the search manager for past conversation search
-            palette.set_search_manager(search_manager);
-
-            // Populate with default actions and current sessions
-            let mut results = default_actions();
-
-            // Add current sessions to results
-            for session in &sessions {
-                results.push(CommandResult::Session {
-                    id: session.id.clone(),
-                    title: session.title.clone(),
-                    project: format!("{:?}", session.tool),
-                });
-            }
-
-            // Add saved workspaces to results
-            for workspace in layout_store.list_workspaces() {
-                results.push(CommandResult::Workspace {
-                    id: workspace.id,
-                    name: workspace.name,
-                    created_at: workspace.created_at,
-                });
-            }
-
-            palette.set_results(results, cx);
-            palette
-        });
+        // Open the palette using the new gpui-component CommandPalette
+        let handle = CommandPalette::open(window, cx, provider);
 
         // Subscribe to palette events
         cx.subscribe_in(
-            &palette,
+            handle.state(),
             window,
-            |this, _, event: &CommandPaletteSelectEvent, window, cx| {
-                this.handle_command_palette_select(&event.0, window, cx);
+            |this, _, event: &CommandPaletteEvent, window, cx| match event {
+                CommandPaletteEvent::Selected { item } => {
+                    this.handle_command_palette_select(item, window, cx);
+                }
+                CommandPaletteEvent::Dismissed => {
+                    this.close_command_palette(window, cx);
+                }
             },
         )
         .detach();
 
-        cx.subscribe_in(
-            &palette,
-            window,
-            |this, _, _: &CommandPaletteDismissEvent, _window, cx| {
-                this.close_command_palette(cx);
-            },
-        )
-        .detach();
-
-        // Focus the palette
-        palette.update(cx, |palette, cx| {
-            palette.focus(window, cx);
-        });
-
-        self.command_palette = Some(palette);
+        self.command_palette = Some(handle.state().clone());
         cx.notify();
     }
 
     /// Close the command palette.
-    fn close_command_palette(&mut self, cx: &mut Context<Self>) {
+    fn close_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.command_palette = None;
+        window.close_dialog(cx);
         cx.notify();
     }
 
     /// Handle selection from the command palette.
     fn handle_command_palette_select(
         &mut self,
-        result: &CommandResult,
+        item: &gpui_component::command_palette::CommandPaletteItem,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match result {
-            CommandResult::Session { id, .. } => {
-                // Switch to the selected session
-                self.active_session_id = Some(id.clone());
-                self.close_command_palette(cx);
-                cx.notify();
-            }
-            CommandResult::Workspace { id, .. } => {
-                // Load the saved workspace
-                // TODO: Implement workspace loading
-                eprintln!("Load workspace: {}", id);
-                self.close_command_palette(cx);
-            }
-            CommandResult::PastConversation {
-                session_id,
-                project,
-                ..
-            } => {
-                // Resume the past Claude conversation with claude --resume
-                self.close_command_palette(cx);
+        // Close the palette first
+        self.close_command_palette(window, cx);
 
-                // Create a new Claude session with the --resume flag
-                let title = format!("Resume: {}", project);
-                let command = "claude".to_string();
-                let args = vec!["--resume".to_string(), session_id.clone()];
+        // Extract payload and handle based on type
+        if let Some(payload) = &item.payload {
+            if let Some(payload) = payload.downcast_ref::<CommandPalettePayload>() {
+                match payload {
+                    CommandPalettePayload::Session { id } => {
+                        // Switch to the selected session
+                        self.active_session_id = Some(id.clone());
+                        cx.notify();
+                    }
+                    CommandPalettePayload::Workspace { id } => {
+                        // Load the saved workspace
+                        // TODO: Implement workspace loading
+                        eprintln!("Load workspace: {}", id);
+                    }
+                    CommandPalettePayload::ClaudeConversation {
+                        session_id,
+                        project,
+                        ..
+                    } => {
+                        // Resume the past Claude conversation with claude --resume
+                        let title = format!("Resume: {}", project);
+                        let command = "claude".to_string();
+                        let args = vec!["--resume".to_string(), session_id.clone()];
 
-                self.create_session_from_tool(
-                    agentterm_session::SessionTool::Claude,
-                    title,
-                    command,
-                    args,
-                    None,
-                    window,
-                    cx,
-                );
-            }
-            CommandResult::CodexConversation {
-                session_id,
-                project,
-                ..
-            } => {
-                // Resume the past Codex conversation with codex --resume
-                self.close_command_palette(cx);
+                        self.create_session_from_tool(
+                            agentterm_session::SessionTool::Claude,
+                            title,
+                            command,
+                            args,
+                            None,
+                            window,
+                            cx,
+                        );
+                    }
+                    CommandPalettePayload::CodexConversation {
+                        session_id,
+                        project,
+                        ..
+                    } => {
+                        // Resume the past Codex conversation with codex --resume
+                        let title = format!("Resume: {}", project);
+                        let command = "codex".to_string();
+                        let args = vec!["--resume".to_string(), session_id.clone()];
 
-                // Create a new Codex session with the --resume flag
-                let title = format!("Resume: {}", project);
-                let command = "codex".to_string();
-                let args = vec!["--resume".to_string(), session_id.clone()];
-
-                self.create_session_from_tool(
-                    agentterm_session::SessionTool::Codex,
-                    title,
-                    command,
-                    args,
-                    None,
-                    window,
-                    cx,
-                );
-            }
-            CommandResult::Action { action_id, .. } => {
-                self.close_command_palette(cx);
-                // Execute the action
-                match action_id.as_str() {
-                    "new_tab" => {
-                        self.create_default_shell_tab(window, cx);
+                        self.create_session_from_tool(
+                            agentterm_session::SessionTool::Codex,
+                            title,
+                            command,
+                            args,
+                            None,
+                            window,
+                            cx,
+                        );
                     }
-                    "new_window" => {
-                        // New window is handled via the global NewWindow action
-                        window.dispatch_action(Box::new(NewWindow), cx);
+                    CommandPalettePayload::Action { action_id } => {
+                        // Execute the action
+                        match action_id.as_str() {
+                            "new_tab" => {
+                                self.create_default_shell_tab(window, cx);
+                            }
+                            "new_window" => {
+                                // New window is handled via the global NewWindow action
+                                window.dispatch_action(Box::new(NewWindow), cx);
+                            }
+                            "settings" => {
+                                self.open_settings(&OpenSettings, window, cx);
+                            }
+                            "toggle_sidebar" => {
+                                self.toggle_sidebar(&ToggleSidebar, window, cx);
+                            }
+                            _ => {}
+                        }
                     }
-                    "settings" => {
-                        self.open_settings(&OpenSettings, window, cx);
-                    }
-                    "toggle_sidebar" => {
-                        self.toggle_sidebar(&ToggleSidebar, window, cx);
-                    }
-                    _ => {}
                 }
             }
         }
@@ -675,7 +639,125 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_session(action.0.clone(), window, cx);
+        let session_id = action.0.clone();
+
+        // Check if the session has a running child process
+        if self.session_has_running_process(&session_id, cx) {
+            // Show confirmation dialog
+            let view = cx.entity().clone();
+            let session_id_for_close = session_id.clone();
+
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                dialog
+                    .title("Close Tab")
+                    .w(px(400.))
+                    .child(div().text_sm().child(
+                        "This tab has a running process. Are you sure you want to close it?",
+                    ))
+                    .footer({
+                        let view = view.clone();
+                        let session_id = session_id_for_close.clone();
+                        move |_ok, cancel, window, cx| {
+                            vec![
+                                cancel(window, cx),
+                                Button::new("close")
+                                    .danger()
+                                    .label("Close")
+                                    .on_click({
+                                        let view = view.clone();
+                                        let session_id = session_id.clone();
+                                        move |_, window, cx| {
+                                            window.close_dialog(cx);
+                                            view.update(cx, |app, cx| {
+                                                app.close_session(session_id.clone(), window, cx);
+                                            });
+                                        }
+                                    })
+                                    .into_any_element(),
+                            ]
+                        }
+                    })
+            });
+        } else {
+            self.close_session(session_id, window, cx);
+        }
+    }
+
+    /// Helper method to check if a session has a running child process.
+    fn session_has_running_process(&self, session_id: &str, cx: &Context<Self>) -> bool {
+        let pool = TerminalPool::global();
+        if let Some(terminal) = pool.get(session_id) {
+            return terminal.read(cx).has_running_child_process();
+        }
+        false
+    }
+
+    /// Handle the CloseWindow action.
+    /// Shows confirmation if any tabs have running processes.
+    pub fn handle_close_window(
+        &mut self,
+        _: &CloseWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Count tabs with running processes in this window
+        let running_count = self.count_running_sessions(cx);
+
+        if running_count > 0 {
+            // Show confirmation dialog
+            let tabs_text = if running_count == 1 {
+                "1 tab has a running process".to_string()
+            } else {
+                format!("{} tabs have running processes", running_count)
+            };
+
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                dialog
+                    .title("Close Window")
+                    .w(px(400.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(format!("{}. Close window anyway?", tabs_text)),
+                    )
+                    .footer(move |_ok, cancel, window, cx| {
+                        vec![
+                            cancel(window, cx),
+                            Button::new("close")
+                                .danger()
+                                .label("Close Window")
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    window.remove_window();
+                                })
+                                .into_any_element(),
+                        ]
+                    })
+            });
+        } else {
+            // No running processes, close immediately
+            window.remove_window();
+        }
+    }
+
+    /// Count the number of sessions in this window that have running child processes.
+    fn count_running_sessions(&self, cx: &Context<Self>) -> usize {
+        let Some(window_layout) = self.window_layout() else {
+            return 0;
+        };
+
+        let pool = TerminalPool::global();
+        let mut count = 0;
+
+        for tab in &window_layout.tabs {
+            if let Some(terminal) = pool.get(&tab.session_id) {
+                if terminal.read(cx).has_running_child_process() {
+                    count += 1;
+                }
+            }
+        }
+
+        count
     }
 
     pub fn handle_restart_session(

@@ -10,6 +10,7 @@ actions!(
         ToggleMcpManager,
         NewShellTab,
         NewWindow,
+        CloseWindow,
         ReopenClosed,
         OpenSettings,
         // Window actions (cross-platform)
