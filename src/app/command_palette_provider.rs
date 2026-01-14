@@ -57,11 +57,7 @@ impl CommandPaletteProvider for AgentTermProvider {
     fn items(&self, _cx: &App) -> Vec<CommandPaletteItem> {
         let mut items = Vec::new();
 
-        if let Some(status_item) = indexing_status_item(None) {
-            items.push(status_item);
-        }
-
-        // Add static actions
+        // Add static commands
         items.push(
             CommandPaletteItem::new("new_tab", "New Tab")
                 .category("Actions")
@@ -99,10 +95,24 @@ impl CommandPaletteProvider for AgentTermProvider {
                 }),
         );
 
-        // Add current sessions
+        items
+    }
+
+    fn query(&self, query: &str, _cx: &App) -> Task<Vec<CommandPaletteItem>> {
+        let mut items = Vec::new();
+
+        let Some(search_manager) = search_manager::try_global_search_manager() else {
+            return Task::ready(items);
+        };
+
+        if query.is_empty() {
+            return Task::ready(items);
+        }
+
+        // Add current sessions (query-based results)
         for session in &self.sessions {
             items.push(
-                CommandPaletteItem::new(&session.id, &session.title)
+                CommandPaletteItem::new(format!("session_{}", session.id), &session.title)
                     .category("Sessions")
                     .subtitle(format!("{:?}", session.tool))
                     .icon(IconName::SquareTerminal)
@@ -112,10 +122,10 @@ impl CommandPaletteProvider for AgentTermProvider {
             );
         }
 
-        // Add saved workspaces
+        // Add saved workspaces (query-based results)
         for workspace in self.layout_store.list_workspaces() {
             items.push(
-                CommandPaletteItem::new(&workspace.id, &workspace.name)
+                CommandPaletteItem::new(format!("workspace_{}", workspace.id), &workspace.name)
                     .category("Workspaces")
                     .subtitle(&workspace.created_at)
                     .icon(IconName::Folder)
@@ -125,21 +135,7 @@ impl CommandPaletteProvider for AgentTermProvider {
             );
         }
 
-        items
-    }
-
-    fn query(&self, query: &str, _cx: &App) -> Task<Vec<CommandPaletteItem>> {
-        let mut items = Vec::new();
-
-        if let Some(status_item) = indexing_status_item(Some(query)) {
-            items.push(status_item);
-        }
-
-        let Some(search_manager) = search_manager::try_global_search_manager() else {
-            return Task::ready(items);
-        };
-
-        if query.is_empty() {
+        if search_manager::search_indexing_in_progress() {
             return Task::ready(items);
         }
 
@@ -179,24 +175,4 @@ impl CommandPaletteProvider for AgentTermProvider {
 
         Task::ready(items)
     }
-}
-
-fn indexing_status_item(query: Option<&str>) -> Option<CommandPaletteItem> {
-    if !search_manager::search_indexing_in_progress() {
-        return None;
-    }
-
-    let mut item = CommandPaletteItem::new("search-indexing-status", "Indexing search history...")
-        .category("Status")
-        .subtitle("Building search index in the background")
-        .icon(IconName::LoaderCircle)
-        .disabled(true);
-
-    if let Some(query) = query {
-        if !query.is_empty() {
-            item = item.keyword(query.to_string());
-        }
-    }
-
-    Some(item)
 }
