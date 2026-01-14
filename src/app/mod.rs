@@ -82,6 +82,14 @@ pub fn run() {
                 placeholder: "Search sessions, workspaces, actions...".into(),
                 width: 600.0,
                 max_height: 500.0,
+                results_section_title: Some("Session History".into()),
+                status_provider: Some(std::sync::Arc::new(|_| {
+                    if search_manager::search_indexing_in_progress() {
+                        Some("Indexing search history...".into())
+                    } else {
+                        None
+                    }
+                })),
                 ..Default::default()
             },
         );

@@ -42,11 +42,7 @@ pub fn warm_search_manager_async(delay: Duration) {
 
 /// Returns true if index build has started but is not yet ready.
 pub fn search_indexing_in_progress() -> bool {
-    if let Some(manager) = INSTANCE.get() {
-        !manager.status().indexed
-    } else {
-        INIT_STARTED.load(Ordering::SeqCst)
-    }
+    INDEXING.load(Ordering::SeqCst)
 }
 
 fn init_manager() -> Arc<SearchManager> {
@@ -54,12 +50,15 @@ fn init_manager() -> Arc<SearchManager> {
     // Trigger initial indexing in background
     let manager_clone = manager.clone();
     std::thread::spawn(move || {
+        INDEXING.store(true, Ordering::SeqCst);
         if let Err(e) = manager_clone.reindex() {
             eprintln!("Search index error: {}", e);
         }
+        INDEXING.store(false, Ordering::SeqCst);
     });
     manager
 }
 
 static INSTANCE: OnceLock<Arc<SearchManager>> = OnceLock::new();
 static INIT_STARTED: AtomicBool = AtomicBool::new(false);
+static INDEXING: AtomicBool = AtomicBool::new(false);
