@@ -37,7 +37,8 @@ use gpui::{
 use itertools::Itertools;
 
 use crate::{
-    IndexedCell, Terminal, TerminalBounds, TerminalContent, terminal_palette::terminal_palette,
+    DetectedUrl, IndexedCell, Terminal, TerminalBounds, TerminalContent,
+    terminal_palette::terminal_palette,
 };
 
 /// Layout state computed during prepaint, used for painting.
@@ -430,11 +431,13 @@ impl TerminalElement {
     /// * `text_style` - Text styling configuration
     /// * `selection` - Optional selection range for highlighting selected text
     /// * `display_offset` - Current scroll offset for selection coordinate conversion
+    /// * `detected_urls` - URLs detected via regex pattern matching
     fn layout_grid(
         grid: impl Iterator<Item = IndexedCell>,
         text_style: &TextStyle,
         selection: Option<&SelectionRange>,
         display_offset: usize,
+        detected_urls: &[DetectedUrl],
     ) -> (Vec<LayoutRect>, Vec<BatchedTextRun>) {
         let estimated_cells = grid.size_hint().0;
         let estimated_runs = estimated_cells / 10;
@@ -445,8 +448,8 @@ impl TerminalElement {
         let mut current_batch: Option<BatchedTextRun> = None;
 
         let linegroups = grid.into_iter().chunk_by(|i| i.point.line);
-        for (line_index, (_, line)) in linegroups.into_iter().enumerate() {
-            let alac_line = line_index as i32;
+        for (_line_index, (actual_line, line)) in linegroups.into_iter().enumerate() {
+            let alac_line = actual_line.0;
 
             if let Some(batch) = current_batch.take() {
                 batched_runs.push(batch);
@@ -521,7 +524,10 @@ impl TerminalElement {
                     matches!(cell.zerowidth(), Some(chars) if !chars.is_empty());
 
                 if !is_blank(&cell) {
-                    let has_hyperlink = cell.hyperlink().is_some();
+                    // Check for OSC 8 hyperlinks OR regex-detected URLs
+                    let col = cell.point.column.0;
+                    let has_hyperlink = cell.hyperlink().is_some()
+                        || detected_urls.iter().any(|u| u.contains(alac_line, col));
                     let cell_style = Self::cell_style(&cell, fg, text_style, has_hyperlink);
                     let cell_point = AlacPoint::new(alac_line, cell.point.column.0 as i32);
                     let zero_width_chars = cell.zerowidth();
@@ -805,6 +811,7 @@ impl Element for TerminalElement {
             cursor_char,
             cursor,
             selection,
+            detected_urls,
             ..
         } = &self.terminal.read(cx).last_content;
         let mode = *mode;
@@ -815,6 +822,7 @@ impl Element for TerminalElement {
             &text_style,
             selection.as_ref(),
             display_offset,
+            detected_urls,
         );
 
         let cursor_layout = if let AlacCursorShape::Hidden = cursor.shape {

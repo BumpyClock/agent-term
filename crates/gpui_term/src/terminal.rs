@@ -46,6 +46,8 @@ use gpui::{
     MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent, Size, Task, TouchPhase, Window,
     px,
 };
+use once_cell::sync::Lazy;
+use regex::Regex;
 
 use crate::mappings::{
     keys::to_esc_str,
@@ -61,6 +63,57 @@ const DEBUG_TERMINAL_WIDTH: Pixels = px(500.);
 const DEBUG_TERMINAL_HEIGHT: Pixels = px(30.);
 const DEBUG_CELL_WIDTH: Pixels = px(5.);
 const DEBUG_LINE_HEIGHT: Pixels = px(5.);
+
+/// URL regex pattern for detecting URLs in terminal output.
+/// Matches http://, https://, file://, and common URL patterns.
+static URL_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?x)
+        # Protocol-based URLs
+        (?:https?://|file://|ftp://|mailto:|git://|ssh://)
+        # Domain and path
+        [^\s<>\[\]{}|\\^`\x00-\x1f\x7f]+
+        |
+        # www. URLs without protocol
+        www\.[^\s<>\[\]{}|\\^`\x00-\x1f\x7f]+
+        |
+        # localhost URLs
+        localhost(?::\d+)?(?:/[^\s<>\[\]{}|\\^`\x00-\x1f\x7f]*)?
+        ",
+    )
+    .expect("URL regex should be valid")
+});
+
+/// A URL detected via regex pattern matching in terminal content.
+#[derive(Clone, Debug)]
+pub struct DetectedUrl {
+    /// The URL string
+    pub url: String,
+    /// Starting line (viewport-relative)
+    pub start_line: i32,
+    /// Starting column
+    pub start_col: usize,
+    /// Ending line (viewport-relative)
+    pub end_line: i32,
+    /// Ending column (exclusive)
+    pub end_col: usize,
+}
+
+impl DetectedUrl {
+    /// Check if a viewport point is within this URL's range.
+    pub fn contains(&self, line: i32, col: usize) -> bool {
+        if line < self.start_line || line > self.end_line {
+            return false;
+        }
+        if line == self.start_line && col < self.start_col {
+            return false;
+        }
+        if line == self.end_line && col >= self.end_col {
+            return false;
+        }
+        true
+    }
+}
 
 /// Events emitted by the Terminal for the view layer to handle.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -227,6 +280,8 @@ pub struct TerminalContent {
     pub terminal_bounds: TerminalBounds,
     pub scrolled_to_top: bool,
     pub scrolled_to_bottom: bool,
+    /// URLs detected via regex pattern matching
+    pub detected_urls: Vec<DetectedUrl>,
 }
 
 impl Default for TerminalContent {
@@ -245,6 +300,7 @@ impl Default for TerminalContent {
             terminal_bounds: TerminalBounds::default(),
             scrolled_to_top: false,
             scrolled_to_bottom: true,
+            detected_urls: Vec::new(),
         }
     }
 }
@@ -537,6 +593,9 @@ impl Terminal {
             None
         };
 
+        // Detect URLs in the terminal content using regex
+        let detected_urls = Self::detect_urls_in_cells(&cells);
+
         TerminalContent {
             cells,
             mode: content.mode,
@@ -548,7 +607,118 @@ impl Terminal {
             terminal_bounds: last_content.terminal_bounds,
             scrolled_to_top: content.display_offset == term.history_size(),
             scrolled_to_bottom: content.display_offset == 0,
+            detected_urls,
         }
+    }
+
+    /// Detects URLs in the terminal cells using regex pattern matching.
+    /// Handles URLs that wrap across multiple lines by joining wrapped lines.
+    fn detect_urls_in_cells(cells: &[IndexedCell]) -> Vec<DetectedUrl> {
+        use alacritty_terminal::term::cell::Flags;
+
+        let mut detected_urls = Vec::new();
+
+        // Group cells by line
+        let mut lines: std::collections::BTreeMap<i32, Vec<(usize, char, Flags)>> =
+            std::collections::BTreeMap::new();
+
+        for cell in cells {
+            let line = cell.point.line.0;
+            let col = cell.point.column.0;
+            let c = cell.c;
+            let flags = cell.cell.flags;
+            lines.entry(line).or_default().push((col, c, flags));
+        }
+
+        // Check if a line is wrapped (ends with WRAPLINE flag on last cell)
+        let is_wrapped = |chars: &[(usize, char, Flags)]| -> bool {
+            if let Some((_, _, flags)) = chars.iter().max_by_key(|(col, _, _)| col) {
+                flags.contains(Flags::WRAPLINE)
+            } else {
+                false
+            }
+        };
+
+        // Process lines, joining wrapped ones together
+        let line_nums: Vec<i32> = lines.keys().copied().collect();
+        let mut processed_lines: std::collections::HashSet<i32> = std::collections::HashSet::new();
+
+        for &start_line in &line_nums {
+            if processed_lines.contains(&start_line) {
+                continue;
+            }
+
+            // Collect all wrapped lines starting from this one
+            let mut current_line = start_line;
+            let mut joined_text = String::new();
+            // Maps character index in joined_text to (line, column)
+            let mut char_to_pos: Vec<(i32, usize)> = Vec::new();
+
+            loop {
+                processed_lines.insert(current_line);
+
+                if let Some(chars) = lines.get(&current_line) {
+                    let mut sorted_chars = chars.clone();
+                    sorted_chars.sort_by_key(|(col, _, _)| *col);
+
+                    for (col, c, _) in &sorted_chars {
+                        char_to_pos.push((current_line, *col));
+                        joined_text.push(*c);
+                    }
+
+                    // Check if this line wraps to the next
+                    if is_wrapped(chars) {
+                        // Look for the next line
+                        if let Some(&next_line) = line_nums.iter().find(|&&l| l == current_line + 1)
+                        {
+                            current_line = next_line;
+                            continue;
+                        }
+                    }
+                }
+                break;
+            }
+
+            // Find URLs in the joined text
+            for m in URL_REGEX.find_iter(&joined_text) {
+                let start_char_idx = m.start();
+                let end_char_idx = m.end();
+
+                if start_char_idx >= char_to_pos.len() || end_char_idx > char_to_pos.len() {
+                    continue;
+                }
+
+                let (start_line_num, start_col) = char_to_pos[start_char_idx];
+                let (end_line_num, end_col) =
+                    if end_char_idx > 0 && end_char_idx <= char_to_pos.len() {
+                        let (l, c) = char_to_pos[end_char_idx - 1];
+                        (l, c + 1) // end_col is exclusive
+                    } else {
+                        char_to_pos[start_char_idx]
+                    };
+
+                let mut url = m.as_str().to_string();
+
+                // Add https:// prefix if it starts with www.
+                if url.starts_with("www.") {
+                    url = format!("https://{}", url);
+                }
+                // Add http:// prefix for localhost
+                if url.starts_with("localhost") {
+                    url = format!("http://{}", url);
+                }
+
+                detected_urls.push(DetectedUrl {
+                    url,
+                    start_line: start_line_num,
+                    start_col,
+                    end_line: end_line_num,
+                    end_col,
+                });
+            }
+        }
+
+        detected_urls
     }
 
     pub fn scroll_line_up(&mut self) {
@@ -618,20 +788,33 @@ impl Terminal {
     }
 
     /// Returns the hyperlink at the given grid point, if any.
+    /// Checks both OSC 8 hyperlinks and regex-detected URLs.
     fn hyperlink_at_point(&self, point: AlacPoint) -> Option<String> {
-        let term = self.term.lock();
-        // Convert viewport point to grid point
-        let grid_line = alacritty_terminal::index::Line(point.line.0);
-        let grid_col = alacritty_terminal::index::Column(point.column.0 as usize);
-        let grid_point = alacritty_terminal::index::Point::new(grid_line, grid_col);
+        // First, check for OSC 8 hyperlinks in the cell
+        {
+            let term = self.term.lock();
+            let grid_line = alacritty_terminal::index::Line(point.line.0);
+            let grid_col = alacritty_terminal::index::Column(point.column.0 as usize);
+            let grid_point = alacritty_terminal::index::Point::new(grid_line, grid_col);
 
-        // Check if point is within grid bounds
-        if grid_line.0 < 0 || grid_col.0 >= term.columns() {
-            return None;
+            if grid_line.0 >= 0 && grid_col.0 < term.columns() {
+                let cell = &term.grid()[grid_point];
+                if let Some(hyperlink) = cell.hyperlink() {
+                    return Some(hyperlink.uri().to_string());
+                }
+            }
         }
 
-        let cell = &term.grid()[grid_point];
-        cell.hyperlink().map(|h| h.uri().to_string())
+        // Then, check for regex-detected URLs
+        let line = point.line.0;
+        let col = point.column.0 as usize;
+        for detected_url in &self.last_content.detected_urls {
+            if detected_url.contains(line, col) {
+                return Some(detected_url.url.clone());
+            }
+        }
+
+        None
     }
 
     fn mouse_changed(&mut self, point: AlacPoint, side: AlacDirection) -> bool {
