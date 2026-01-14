@@ -1,10 +1,10 @@
 //! Sidebar rendering and interaction methods.
 
-use agentterm_session::{SessionRecord, SessionTool, DEFAULT_SECTION_ID};
+use agentterm_session::{DEFAULT_SECTION_ID, SessionRecord, SessionTool};
 use agentterm_tools::ShellType;
 use gpui::{
-    div, prelude::*, px, AnyWindowHandle, ClickEvent, Context, Corner, Entity, IntoElement,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window,
+    AnyWindowHandle, ClickEvent, Context, Corner, Entity, IntoElement, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Styled, Window, div, prelude::*, px,
 };
 
 use super::window_registry::WindowRegistry;
@@ -12,7 +12,7 @@ use gpui_component::{SidebarShell, TITLE_BAR_HEIGHT};
 
 use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 
-use crate::icons::{icon_from_string, Icon, IconName, IconSize};
+use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem,
     SectionItem,
@@ -177,8 +177,8 @@ impl AgentTermApp {
             .flex_1()
             .overflow_y_scroll()
             .px(px(8.0));
-        for section in &self.sections {
-            list = list.child(self.render_section(section, cx));
+        for section in self.ordered_sections() {
+            list = list.child(self.render_section(&section, cx));
         }
         list
     }
@@ -188,16 +188,12 @@ impl AgentTermApp {
         section: &SectionItem,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let sessions: Vec<&SessionRecord> = self
-            .sessions
-            .iter()
-            .filter(|s| s.section_id == section.section.id)
-            .filter(|s| self.visible_session_ids.contains(&s.id)) // Per-window filtering
-            .collect();
+        let sessions: Vec<&SessionRecord> = self.ordered_sessions_for_section(&section.section.id);
 
         let section_id = section.section.id.clone();
-        let is_collapsed = section.section.collapsed;
+        let is_collapsed = self.is_section_collapsed(&section_id);
         let section_icon = section.section.icon.clone();
+        let is_default = section.is_default;
         let group_id = format!("section-group-{}", section.section.id);
 
         // Collect theme colors before building the add button
@@ -240,18 +236,22 @@ impl AgentTermApp {
                 .color(muted_fg),
             )
             .child(
-                section_icon
-                    .as_ref()
-                    .map(|s| icon_from_string(s))
-                    .unwrap_or_else(|| Icon::new(IconName::Folder))
-                    .size(IconSize::Medium)
-                    .color(foreground),
+                if is_default {
+                    Icon::new(IconName::Terminal)
+                } else {
+                    section_icon
+                        .as_ref()
+                        .map(|s| icon_from_string(s))
+                        .unwrap_or_else(|| Icon::new(IconName::Folder))
+                }
+                .size(IconSize::Medium)
+                .color(if is_default { muted_fg } else { foreground }),
             )
             .child(
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(foreground)
+                    .text_color(if is_default { muted_fg } else { foreground })
                     .flex_1()
                     .child(section.section.name.clone()),
             )
@@ -281,13 +281,47 @@ impl AgentTermApp {
             )
             .context_menu({
                 let section_id = section_id.clone();
-                move |menu, _window, _cx| {
-                    menu.menu("Edit Project...", Box::new(EditSection(section_id.clone())))
-                        .separator()
+                let is_default = is_default;
+                move |menu, window, cx| {
+                    if is_default {
+                        return menu;
+                    }
+                    let current_handle: AnyWindowHandle = window.window_handle().into();
+                    let other_windows = WindowRegistry::global().list_other_windows(current_handle);
+
+                    let mut menu =
+                        menu.menu("Edit Project...", Box::new(EditSection(section_id.clone())));
+
+                    if !other_windows.is_empty() {
+                        menu = menu.submenu("Move Project to Window", window, cx, {
+                            let section_id = section_id.clone();
+                            let other_windows = other_windows.clone();
+                            move |submenu, _window, _cx| {
+                                let mut submenu = submenu;
+                                for (_handle, info) in &other_windows {
+                                    let section_id = section_id.clone();
+                                    let window_id = info.number as u64;
+                                    let title = info.title.clone();
+                                    submenu = submenu.menu(
+                                        &title,
+                                        Box::new(MoveSectionToWindow {
+                                            section_id,
+                                            target_window_id: window_id,
+                                        }),
+                                    );
+                                }
+                                submenu
+                            }
+                        });
+                    }
+
+                    menu.separator()
                         .menu(
                             "Remove Project",
                             Box::new(RemoveSection(section_id.clone())),
                         )
+                        .separator()
+                        .menu("Save Workspace...", Box::new(SaveWorkspace))
                 }
             });
 
@@ -613,38 +647,54 @@ impl AgentTermApp {
         if section_id == DEFAULT_SECTION_ID {
             return;
         }
-        let Some(section) = self
-            .sections
-            .iter()
-            .find(|s| s.section.id == section_id)
-            .map(|s| s.section.clone())
-        else {
-            return;
-        };
-        let next = !section.collapsed;
-        let _ = self.session_store.set_section_collapsed(&section_id, next);
-        self.reload_from_store(cx);
+        let next = !self.is_section_collapsed(&section_id);
+        self.layout_store
+            .update_window(&self.layout_window_id, |window| {
+                if next {
+                    if !window.collapsed_sections.contains(&section_id) {
+                        window.collapsed_sections.push(section_id.clone());
+                    }
+                } else {
+                    window.collapsed_sections.retain(|id| id != &section_id);
+                }
+            });
+        cx.notify();
     }
 
     pub fn move_section(&mut self, section_id: String, delta: isize, cx: &mut Context<Self>) {
-        let mut ordered: Vec<agentterm_session::SectionRecord> = self
-            .sections
-            .iter()
-            .filter(|s| s.section.id != DEFAULT_SECTION_ID)
-            .map(|s| s.section.clone())
-            .collect();
-        ordered.sort_by_key(|s| s.order);
+        let Some(window) = self.window_layout() else {
+            return;
+        };
 
-        let idx = ordered.iter().position(|s| s.id == section_id);
-        let Some(idx) = idx else { return };
-        let new_idx = (idx as isize + delta).clamp(0, ordered.len().saturating_sub(1) as isize);
+        let mut ordered_ids = if window.section_order.is_empty() {
+            self.sections.iter().map(|s| s.section.id.clone()).collect()
+        } else {
+            window.section_order
+        };
+
+        let mut moveable: Vec<String> = ordered_ids
+            .iter()
+            .filter(|id| *id != DEFAULT_SECTION_ID)
+            .cloned()
+            .collect();
+        let idx = moveable.iter().position(|id| id == &section_id);
+        let Some(idx) = idx else {
+            return;
+        };
+        let new_idx = (idx as isize + delta).clamp(0, moveable.len().saturating_sub(1) as isize);
         if new_idx as usize == idx {
             return;
         }
-        let item = ordered.remove(idx);
-        ordered.insert(new_idx as usize, item);
-        let ids: Vec<String> = ordered.into_iter().map(|s| s.id).collect();
-        let _ = self.session_store.reorder_sections(&ids);
-        self.reload_from_store(cx);
+        let item = moveable.remove(idx);
+        moveable.insert(new_idx as usize, item);
+
+        ordered_ids.retain(|id| id == DEFAULT_SECTION_ID);
+        ordered_ids.extend(moveable);
+
+        self.layout_store
+            .update_window(&self.layout_window_id, |window| {
+                window.section_order = ordered_ids;
+            });
+        cx.notify();
     }
 }
