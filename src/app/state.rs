@@ -1,6 +1,6 @@
 //! Core AgentTermApp state and lifecycle methods.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,11 +11,13 @@ use agentterm_session::{
 };
 use agentterm_tools::{ShellInfo, ToolInfo};
 use gpui::{
-    App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity, Window, prelude::*,
+    AnyWindowHandle, App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity,
+    Window, prelude::*,
 };
 use gpui_term::{TerminalBuilder, TerminalView};
 
 use super::terminal_pool::TerminalPool;
+use super::window_registry::WindowRegistry;
 
 use crate::settings::AppSettings;
 use crate::theme;
@@ -24,6 +26,11 @@ use crate::ui::SectionItem;
 /// The main application state for AgentTerm.
 pub struct AgentTermApp {
     pub(crate) focus_handle: FocusHandle,
+
+    /// Weak reference to self for callbacks and external access.
+    pub(crate) weak_self: WeakEntity<Self>,
+    /// Handle to this app's window for cross-window operations.
+    pub(crate) window_handle: AnyWindowHandle,
 
     pub session_store: SessionStore,
     pub(crate) mcp_manager: McpManager,
@@ -53,12 +60,36 @@ pub struct AgentTermApp {
     pub(crate) cached_shells: Vec<ShellInfo>,
     pub(crate) cached_tools: Vec<ToolInfo>,
     pub(crate) cached_pinned_shell_ids: Vec<String>,
+
+    /// Session IDs visible in this window (per-window filtering for multi-window support).
+    /// New windows start empty; sessions can be moved between windows.
+    pub(crate) visible_session_ids: HashSet<String>,
 }
 
 impl AgentTermApp {
+    /// Creates a new AgentTermApp with all sessions visible (for first window on app launch).
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_sessions(window, cx, None)
+    }
+
+    /// Creates a new AgentTermApp with specific sessions visible.
+    ///
+    /// - `initial_sessions: None` - Show all sessions (for first window on app launch)
+    /// - `initial_sessions: Some(set)` - Show only sessions in the set (for new windows)
+    pub fn new_with_sessions(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        initial_sessions: Option<HashSet<String>>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
+
+        // Get self-reference and window handle for registration
+        let weak_self = cx.entity().downgrade();
+        let window_handle: AnyWindowHandle = window.window_handle().into();
+
+        // Register with WindowRegistry (self-registration pattern like Zed's Workspace)
+        WindowRegistry::global().register(window_handle, weak_self.clone());
 
         let tokio = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -77,8 +108,20 @@ impl AgentTermApp {
             agentterm_mcp::diagnostics::log(format!("pool_startup_init_failed error={}", e));
         }
 
+        // Determine which sessions are visible in this window
+        let visible_session_ids = initial_sessions.unwrap_or_else(|| {
+            // None means show all sessions (first window on app launch)
+            session_store
+                .list_sessions()
+                .iter()
+                .map(|s| s.id.clone())
+                .collect()
+        });
+
         let mut this = Self {
             focus_handle,
+            weak_self,
+            window_handle,
             session_store,
             mcp_manager,
             tokio,
@@ -97,11 +140,30 @@ impl AgentTermApp {
             cached_shells: Vec::new(),
             cached_tools: Vec::new(),
             cached_pinned_shell_ids: Vec::new(),
+            visible_session_ids,
         };
 
         this.reload_from_store(cx);
         this.load_tab_picker_cache();
-        this.ensure_active_terminal(window, cx);
+
+        // Ensure active session is visible in this window (for multi-window support)
+        if let Some(active_id) = &this.active_session_id {
+            if !this.visible_session_ids.contains(active_id) {
+                // Active session is not visible, choose first visible session instead
+                this.active_session_id = this
+                    .sessions
+                    .iter()
+                    .find(|s| this.visible_session_ids.contains(&s.id))
+                    .map(|s| s.id.clone());
+            }
+        }
+
+        // Defer terminal initialization to avoid focus calls during window creation
+        // (focus during event processing causes "method can only be called during layout" panic)
+        cx.defer_in(window, |app, window, cx| {
+            app.ensure_active_terminal(window, cx);
+        });
+
         this
     }
 
@@ -232,6 +294,8 @@ impl AgentTermApp {
 
         match self.session_store.create_session(input) {
             Ok(record) => {
+                // Add to this window's visible sessions
+                self.visible_session_ids.insert(record.id.clone());
                 let _ = self
                     .session_store
                     .set_active_session(Some(record.id.clone()));
@@ -286,6 +350,8 @@ impl AgentTermApp {
 
         match self.session_store.create_session(input) {
             Ok(record) => {
+                // Add to this window's visible sessions
+                self.visible_session_ids.insert(record.id.clone());
                 let _ = self
                     .session_store
                     .set_active_session(Some(record.id.clone()));
@@ -481,5 +547,12 @@ impl AgentTermApp {
 impl Focusable for AgentTermApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
+    }
+}
+
+impl Drop for AgentTermApp {
+    fn drop(&mut self) {
+        // Unregister from WindowRegistry when the app is dropped
+        WindowRegistry::global().unregister(&self.window_handle);
     }
 }
