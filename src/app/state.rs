@@ -1,10 +1,11 @@
 //! Core AgentTermApp state and lifecycle methods.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use agentterm_layout::{LayoutStore, WindowSnapshot, closed_tab_from};
 use agentterm_mcp::McpManager;
 use agentterm_session::{
     DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
@@ -16,12 +17,15 @@ use gpui::{
 };
 use gpui_term::{TerminalBuilder, TerminalView};
 
+use super::layout_manager::LayoutManager;
 use super::terminal_pool::TerminalPool;
 use super::window_registry::WindowRegistry;
 
 use crate::settings::AppSettings;
 use crate::theme;
 use crate::ui::SectionItem;
+
+use super::command_palette::CommandPalette;
 
 /// The main application state for AgentTerm.
 pub struct AgentTermApp {
@@ -61,34 +65,46 @@ pub struct AgentTermApp {
     pub(crate) cached_tools: Vec<ToolInfo>,
     pub(crate) cached_pinned_shell_ids: Vec<String>,
 
-    /// Session IDs visible in this window (per-window filtering for multi-window support).
-    /// New windows start empty; sessions can be moved between windows.
-    pub(crate) visible_session_ids: HashSet<String>,
+    /// Shared layout store for multi-window session management.
+    /// Created once and shared across all windows via Arc.
+    pub(crate) layout_store: Arc<LayoutStore>,
+
+    /// This window's unique ID in the layout store.
+    /// Used to look up window-specific layout (tabs, section order, etc.).
+    pub(crate) layout_window_id: String,
+
+    /// Command palette entity when open.
+    pub(crate) command_palette: Option<Entity<CommandPalette>>,
 }
 
 impl AgentTermApp {
     /// Creates a new AgentTermApp with all sessions visible (for first window on app launch).
+    /// This is the primary window constructor that uses the shared LayoutManager.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_with_sessions(window, cx, None)
+        let layout_manager = LayoutManager::global();
+        let layout_store = layout_manager.store().clone();
+        let layout_window_id = layout_manager.create_window();
+
+        Self::new_with_layout(window, cx, layout_store, layout_window_id)
     }
 
-    /// Creates a new AgentTermApp with specific sessions visible.
+    /// Creates a new AgentTermApp with a specific layout window ID and shared layout store.
     ///
-    /// - `initial_sessions: None` - Show all sessions (for first window on app launch)
-    /// - `initial_sessions: Some(set)` - Show only sessions in the set (for new windows)
-    pub fn new_with_sessions(
+    /// - `layout_store` - Shared layout store (created by first window, passed to subsequent windows)
+    /// - `layout_window_id` - Unique ID for this window in the layout store
+    pub fn new_with_layout(
         window: &mut Window,
         cx: &mut Context<Self>,
-        initial_sessions: Option<HashSet<String>>,
+        layout_store: Arc<LayoutStore>,
+        layout_window_id: String,
     ) -> Self {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
-        // Get self-reference and window handle for registration
         let weak_self = cx.entity().downgrade();
         let window_handle: AnyWindowHandle = window.window_handle().into();
 
-        // Register with WindowRegistry (self-registration pattern like Zed's Workspace)
+        LayoutManager::global().register_handle(layout_window_id.clone(), window_handle);
         WindowRegistry::global().register(window_handle, weak_self.clone());
 
         let tokio = Arc::new(
@@ -107,16 +123,6 @@ impl AgentTermApp {
         if let Err(e) = tokio.block_on(mcp_manager.initialize_pool()) {
             agentterm_mcp::diagnostics::log(format!("pool_startup_init_failed error={}", e));
         }
-
-        // Determine which sessions are visible in this window
-        let visible_session_ids = initial_sessions.unwrap_or_else(|| {
-            // None means show all sessions (first window on app launch)
-            session_store
-                .list_sessions()
-                .iter()
-                .map(|s| s.id.clone())
-                .collect()
-        });
 
         let mut this = Self {
             focus_handle,
@@ -140,20 +146,32 @@ impl AgentTermApp {
             cached_shells: Vec::new(),
             cached_tools: Vec::new(),
             cached_pinned_shell_ids: Vec::new(),
-            visible_session_ids,
+            layout_store,
+            layout_window_id,
+            command_palette: None,
         };
 
         this.reload_from_store(cx);
         this.load_tab_picker_cache();
 
+        if !this
+            .window_layout()
+            .map(|w| !w.tabs.is_empty())
+            .unwrap_or(false)
+        {
+            cx.defer_in(window, |app, window, cx| {
+                app.create_default_shell_tab(window, cx);
+            });
+        }
+
         // Ensure active session is visible in this window (for multi-window support)
         if let Some(active_id) = &this.active_session_id {
-            if !this.visible_session_ids.contains(active_id) {
+            if !this.is_session_visible(active_id) {
                 // Active session is not visible, choose first visible session instead
                 this.active_session_id = this
                     .sessions
                     .iter()
-                    .find(|s| this.visible_session_ids.contains(&s.id))
+                    .find(|s| this.is_session_visible(&s.id))
                     .map(|s| s.id.clone());
             }
         }
@@ -167,6 +185,116 @@ impl AgentTermApp {
         this
     }
 
+    /// Returns the current window's layout snapshot.
+    pub fn window_layout(&self) -> Option<WindowSnapshot> {
+        self.layout_store.get_window(&self.layout_window_id)
+    }
+
+    /// Checks if a session is visible in this window.
+    ///
+    /// A session is visible if it has a tab in this window's layout.
+    pub fn is_session_visible(&self, session_id: &str) -> bool {
+        self.window_layout()
+            .map(|w| w.tabs.iter().any(|t| t.session_id == session_id))
+            .unwrap_or(false)
+    }
+
+    /// Adds a session to this window's layout.
+    pub fn add_session_to_layout(&self, session_id: &str, section_id: &str) {
+        let session_id = session_id.to_string();
+        let section_id = section_id.to_string();
+        self.layout_store
+            .update_window(&self.layout_window_id, |window| {
+                if !window.section_order.contains(&section_id) {
+                    window.section_order.push(section_id.clone());
+                }
+                window.append_tab(session_id, section_id);
+            });
+    }
+
+    /// Returns sections ordered by this window's layout.
+    pub fn ordered_sections(&self) -> Vec<SectionItem> {
+        let Some(window) = self.window_layout() else {
+            return self.sections.clone();
+        };
+
+        if window.tabs.is_empty() {
+            return self
+                .sections
+                .iter()
+                .filter(|s| s.is_default)
+                .cloned()
+                .collect();
+        }
+
+        let mut visible_sections: Vec<String> = window
+            .tabs
+            .iter()
+            .map(|tab| tab.section_id.clone())
+            .collect();
+        visible_sections.sort();
+        visible_sections.dedup();
+
+        let mut ordered = Vec::new();
+        for section_id in window.section_order {
+            if visible_sections.contains(&section_id) {
+                if let Some(section) = self.sections.iter().find(|s| s.section.id == section_id) {
+                    ordered.push(section.clone());
+                }
+            }
+        }
+
+        for section_id in visible_sections {
+            if !ordered.iter().any(|s| s.section.id == section_id) {
+                if let Some(section) = self.sections.iter().find(|s| s.section.id == section_id) {
+                    ordered.push(section.clone());
+                }
+            }
+        }
+
+        ordered
+    }
+
+    /// Returns session records ordered by this window's layout for a section.
+    pub fn ordered_sessions_for_section(&self, section_id: &str) -> Vec<&SessionRecord> {
+        let Some(window) = self.window_layout() else {
+            return self
+                .sessions
+                .iter()
+                .filter(|s| s.section_id == section_id)
+                .collect();
+        };
+
+        let mut tabs: Vec<_> = window
+            .tabs
+            .iter()
+            .filter(|t| t.section_id == section_id)
+            .collect();
+        tabs.sort_by_key(|tab| tab.order);
+
+        let mut ordered = Vec::new();
+        for tab in tabs {
+            if let Some(session) = self.sessions.iter().find(|s| s.id == tab.session_id) {
+                ordered.push(session);
+            }
+        }
+
+        ordered
+    }
+
+    /// Returns whether a section is collapsed in this window.
+    pub fn is_section_collapsed(&self, section_id: &str) -> bool {
+        let Some(window) = self.window_layout() else {
+            return self
+                .sections
+                .iter()
+                .find(|s| s.section.id == section_id)
+                .map(|s| s.section.collapsed)
+                .unwrap_or(false);
+        };
+
+        window.collapsed_sections.contains(&section_id.to_string())
+    }
     pub fn reload_from_store(&mut self, cx: &mut Context<Self>) {
         let mut sections: Vec<SectionItem> = self
             .session_store
@@ -195,9 +323,11 @@ impl AgentTermApp {
         );
 
         let sessions = self.session_store.list_sessions();
-        let active_session_id = self
-            .session_store
-            .active_session_id()
+        let layout_active = self
+            .window_layout()
+            .and_then(|window| window.active_session_id);
+        let active_session_id = layout_active
+            .or_else(|| self.session_store.active_session_id())
             .or_else(|| sessions.first().map(|s| s.id.clone()));
 
         self.sections = sections;
@@ -235,13 +365,44 @@ impl AgentTermApp {
     }
 
     pub fn close_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let current_session = self.layout_store.current_session();
+        let tab_count: usize = current_session
+            .windows
+            .iter()
+            .map(|window| window.tabs.len())
+            .sum();
+        if tab_count == 1 {
+            let _ = self.layout_store.save_closed_session(current_session);
+        }
+
+        if let Some(window_layout) = self.window_layout() {
+            if let Some(tab) = window_layout.tabs.iter().find(|tab| tab.session_id == id) {
+                let closed = closed_tab_from(tab, Some(self.layout_window_id.clone()));
+                let _ = self.layout_store.push_closed_tab(closed);
+            }
+        }
+
         self.terminal_views.remove(&id);
 
         if let Some(terminal) = TerminalPool::global().remove(&id) {
             terminal.update(cx, |terminal, _| terminal.shutdown());
         }
 
-        let _ = self.session_store.delete_session(&id);
+        self.layout_store
+            .update_window(&self.layout_window_id, |window_layout| {
+                window_layout.remove_tab(&id);
+                if window_layout.active_session_id.as_deref() == Some(&id) {
+                    window_layout.active_session_id =
+                        window_layout.tabs.first().map(|tab| tab.session_id.clone());
+                }
+            });
+
+        self.active_session_id = self
+            .sessions
+            .iter()
+            .find(|s| self.is_session_visible(&s.id))
+            .map(|s| s.id.clone());
+
         self.reload_from_store(cx);
         if self.active_session_id.is_none() {
             self.ensure_active_terminal(window, cx);
@@ -294,8 +455,8 @@ impl AgentTermApp {
 
         match self.session_store.create_session(input) {
             Ok(record) => {
-                // Add to this window's visible sessions
-                self.visible_session_ids.insert(record.id.clone());
+                // Add to this window's layout
+                self.add_session_to_layout(&record.id, &record.section_id);
                 let _ = self
                     .session_store
                     .set_active_session(Some(record.id.clone()));
@@ -350,8 +511,8 @@ impl AgentTermApp {
 
         match self.session_store.create_session(input) {
             Ok(record) => {
-                // Add to this window's visible sessions
-                self.visible_session_ids.insert(record.id.clone());
+                // Add to this window's layout
+                self.add_session_to_layout(&record.id, &record.section_id);
                 let _ = self
                     .session_store
                     .set_active_session(Some(record.id.clone()));
@@ -413,6 +574,39 @@ impl AgentTermApp {
                 eprintln!("Failed to load pinned shells: {}", e);
                 self.cached_pinned_shell_ids = Vec::new();
             }
+        }
+    }
+
+    /// Creates a default shell tab for this window.
+    ///
+    /// Uses the user's default shell preference or falls back to the system default.
+    pub fn create_default_shell_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shells = agentterm_tools::available_shells();
+        let default_shell = self
+            .settings
+            .default_shell_id
+            .as_ref()
+            .and_then(|id| shells.iter().find(|s| &s.id == id))
+            .or_else(|| shells.iter().find(|s| s.is_default))
+            .or_else(|| shells.first())
+            .cloned();
+
+        if let Some(shell) = default_shell {
+            let icon = if shell.icon.is_empty() {
+                None
+            } else {
+                Some(shell.icon.clone())
+            };
+
+            self.create_session_from_tool(
+                SessionTool::Shell,
+                shell.name.clone(),
+                shell.command.clone(),
+                shell.args.clone(),
+                icon,
+                window,
+                cx,
+            );
         }
     }
 
@@ -552,7 +746,16 @@ impl Focusable for AgentTermApp {
 
 impl Drop for AgentTermApp {
     fn drop(&mut self) {
-        // Unregister from WindowRegistry when the app is dropped
+        let layout_manager = LayoutManager::global();
+        let layout_store = layout_manager.store().clone();
+        layout_store.remove_window(&self.layout_window_id);
+        layout_manager.unregister(&self.layout_window_id);
         WindowRegistry::global().unregister(&self.window_handle);
+
+        if layout_manager.window_count() == 0 {
+            let session = layout_store.current_session();
+            let _ = layout_store.save_closed_session(session.clone());
+            let _ = layout_store.save_last_session(session);
+        }
     }
 }

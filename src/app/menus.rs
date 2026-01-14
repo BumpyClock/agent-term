@@ -53,6 +53,7 @@ pub fn app_menus() -> Vec<Menu> {
             name: "Window".into(),
             items: vec![
                 MenuItem::action("New Window", NewWindow),
+                MenuItem::action("Reopen Closed", ReopenClosed),
                 MenuItem::separator(),
                 MenuItem::action("Minimize", Minimize),
                 MenuItem::action("Zoom", Zoom),

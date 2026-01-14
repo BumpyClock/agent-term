@@ -4,22 +4,24 @@
 //! between the various sub-modules.
 
 pub mod actions;
+pub mod command_palette;
 pub mod constants;
 mod handlers;
+mod layout_manager;
 mod menus;
+mod search_manager;
 mod sidebar;
 mod state;
 mod terminal_container;
 mod terminal_pool;
 mod window_registry;
 
+pub use layout_manager::LayoutManager;
 pub use terminal_pool::TerminalPool;
 pub use window_registry::WindowRegistry;
 
 pub use actions::*;
 pub use state::AgentTermApp;
-
-use std::collections::HashSet;
 
 use gpui::{
     AnyWindowHandle, App, Application, Context, InteractiveElement, KeyBinding, ParentElement,
@@ -80,7 +82,10 @@ pub fn run() {
             KeyBinding::new("cmd-b", ToggleSidebar, None),
             KeyBinding::new("cmd-m", ToggleMcpManager, None),
             KeyBinding::new("cmd-t", NewShellTab, None),
+            KeyBinding::new("cmd-shift-t", ReopenClosed, None),
+            KeyBinding::new("ctrl-shift-t", ReopenClosed, None),
             KeyBinding::new("cmd-,", OpenSettings, None),
+            KeyBinding::new("cmd-p", ToggleCommandPalette, None), // Command palette
             KeyBinding::new("cmd-c", Copy, Some("Terminal")),
             KeyBinding::new("cmd-v", Paste, Some("Terminal")),
             KeyBinding::new("cmd-a", SelectAll, Some("Terminal")),
@@ -90,6 +95,7 @@ pub fn run() {
             KeyBinding::new("shift-tab", SendShiftTab, Some("Terminal")),
             KeyBinding::new("alt-shift-tab", FocusOut, Some("Terminal")),
         ]);
+        command_palette::init(cx); // Initialize command palette keybindings
         crate::text_input::bind_keys(cx);
 
         // Set up application menu bar
@@ -116,45 +122,30 @@ pub fn run() {
             create_new_window(cx);
         });
 
-        // Load settings to determine initial window appearance
-        let settings = crate::settings::AppSettings::load();
-        let resolved_mode = theme::apply_theme_from_settings(&settings, None, cx);
-        theme::apply_terminal_scheme(&settings, resolved_mode);
-        let background_appearance = if settings.blur_enabled {
-            WindowBackgroundAppearance::Blurred
-        } else {
-            WindowBackgroundAppearance::Transparent
-        };
-
-        let window_options = WindowOptions {
-            titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Agent Term".into()),
-                appears_transparent: true,
-                traffic_light_position: Some(gpui::point(px(16.0), px(16.0))),
-                ..Default::default()
-            }),
-            window_background: background_appearance,
-            // Enable client-side decorations on Windows/Linux for custom title bar
-            window_decorations: if cfg!(not(target_os = "macos")) {
-                Some(gpui::WindowDecorations::Client)
+        let layout_manager = LayoutManager::global();
+        let layout_store = layout_manager.store().clone();
+        if let Some(session) = layout_store.load_last_session() {
+            layout_store.set_current_session(session.clone());
+            let mut windows = session.windows;
+            windows.sort_by_key(|window| window.order);
+            let next_order = windows
+                .iter()
+                .map(|window| window.order)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1);
+            layout_manager.set_next_order(next_order);
+            if windows.is_empty() {
+                create_new_window(cx);
             } else {
-                None
-            },
-            ..Default::default()
-        };
+                for window in windows {
+                    let _ = create_window_from_layout(window.id, cx);
+                }
+            }
+        } else {
+            create_new_window(cx);
+        }
 
-        // AgentTermApp::new() handles window registration internally
-        let _window_handle = cx
-            .open_window(window_options, |window, cx| {
-                window.set_background_appearance(background_appearance);
-                #[cfg(target_os = "macos")]
-                configure_macos_titlebar(window);
-                let app = cx.new(|cx| AgentTermApp::new(window, cx));
-                cx.new(|cx| gpui_component::Root::new(app, window, cx))
-            })
-            .unwrap();
-
-        // Activate the app (bring to front)
         cx.activate(true);
     });
 }
@@ -256,7 +247,34 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::zoom_window))
             .on_action(cx.listener(Self::handle_move_session_to_window))
             .on_action(cx.listener(Self::handle_open_session_in_new_window))
+            .on_action(cx.listener(Self::handle_move_section_to_window))
+            .on_action(cx.listener(Self::reopen_closed))
+            .on_action(cx.listener(Self::save_workspace))
+            .on_action(cx.listener(Self::toggle_command_palette))
             .child(window_shell)
+            .when_some(self.command_palette.clone(), |this, palette| {
+                this.child(
+                    div()
+                        .id("command-palette-backdrop")
+                        .absolute()
+                        .inset_0()
+                        .bg(gpui::black().opacity(0.5))
+                        .flex()
+                        .items_start()
+                        .justify_center()
+                        .pt(px(100.))
+                        .on_mouse_down(gpui::MouseButton::Left, {
+                            let entity = cx.entity().clone();
+                            move |_, _window, cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.command_palette = None;
+                                    cx.notify();
+                                });
+                            }
+                        })
+                        .child(palette),
+                )
+            })
     }
 }
 
@@ -267,7 +285,7 @@ impl Render for AgentTermApp {
 ///
 /// Returns the window handle if successful.
 pub fn create_new_window(cx: &mut App) -> Option<AnyWindowHandle> {
-    create_new_window_with_sessions(HashSet::new(), cx)
+    create_new_window_internal(None, None, cx)
 }
 
 /// Creates a new AgentTerm window with a specific session.
@@ -275,22 +293,32 @@ pub fn create_new_window(cx: &mut App) -> Option<AnyWindowHandle> {
 /// Used by "Open in New Window" to move a session to its own window.
 ///
 /// Returns the window handle if successful.
-pub fn create_new_window_with_session(session_id: String, cx: &mut App) -> Option<AnyWindowHandle> {
-    let mut sessions = HashSet::new();
-    sessions.insert(session_id);
-    create_new_window_with_sessions(sessions, cx)
+pub fn create_new_window_with_session(
+    session_id: String,
+    section_id: String,
+    cx: &mut App,
+) -> Option<AnyWindowHandle> {
+    create_new_window_internal(Some((session_id, section_id)), None, cx)
 }
 
-/// Creates a new AgentTerm window with the specified visible sessions.
+pub fn create_window_from_layout(
+    layout_window_id: String,
+    cx: &mut App,
+) -> Option<AnyWindowHandle> {
+    create_new_window_internal(None, Some(layout_window_id), cx)
+}
+
+/// Creates a new AgentTerm window.
 ///
 /// Internal helper that handles all window creation including:
 /// - Loading settings and applying theme
 /// - Configuring window options (titlebar, background, etc.)
-/// - Creating the AgentTermApp instance with the specified sessions
+/// - Creating the AgentTermApp instance
 ///
 /// Returns the window handle if successful.
-fn create_new_window_with_sessions(
-    sessions: HashSet<String>,
+fn create_new_window_internal(
+    session_info: Option<(String, String)>,
+    layout_window_id: Option<String>,
     cx: &mut App,
 ) -> Option<AnyWindowHandle> {
     let settings = crate::settings::AppSettings::load();
@@ -326,12 +354,32 @@ fn create_new_window_with_sessions(
         ..Default::default()
     };
 
-    // Create window with specified sessions (empty for new windows)
+    let layout_manager = LayoutManager::global();
+    let layout_store = layout_manager.store().clone();
+    let layout_window_id = layout_window_id.unwrap_or_else(|| layout_manager.create_window());
+
+    if let Some((session_id, section_id)) = session_info.clone() {
+        layout_store.update_window(&layout_window_id, |layout| {
+            if !layout.section_order.contains(&section_id) {
+                layout.section_order.push(section_id.clone());
+            }
+            layout.append_tab(session_id.clone(), section_id);
+            layout.active_session_id = Some(session_id);
+        });
+    }
+
     let result = cx.open_window(window_options, |window, cx| {
         window.set_background_appearance(background_appearance);
         #[cfg(target_os = "macos")]
         configure_macos_titlebar(window);
-        let app = cx.new(|cx| AgentTermApp::new_with_sessions(window, cx, Some(sessions)));
+        let app = cx.new(|cx| {
+            AgentTermApp::new_with_layout(
+                window,
+                cx,
+                layout_store.clone(),
+                layout_window_id.clone(),
+            )
+        });
         cx.new(|cx| gpui_component::Root::new(app, window, cx))
     });
 

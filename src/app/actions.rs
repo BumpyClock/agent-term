@@ -10,6 +10,7 @@ actions!(
         ToggleMcpManager,
         NewShellTab,
         NewWindow,
+        ReopenClosed,
         OpenSettings,
         // Window actions (cross-platform)
         Minimize,
@@ -51,3 +52,22 @@ pub struct MoveSessionToWindow {
 /// Open a session in a new window (moves from current window).
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 pub struct OpenSessionInNewWindow(pub String);
+
+/// Move a section (project) to another window.
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct MoveSectionToWindow {
+    pub section_id: String,
+    pub target_window_id: u64,
+}
+
+// Workspace actions
+
+/// Save the current workspace layout with a name.
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct SaveWorkspace;
+
+// Command palette actions
+
+/// Toggle the command palette (Cmd+K).
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct ToggleCommandPalette;

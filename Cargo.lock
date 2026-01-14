@@ -33,7 +33,9 @@ dependencies = [
 name = "agentterm"
 version = "0.1.4"
 dependencies = [
+ "agentterm_layout",
  "agentterm_mcp",
+ "agentterm_search",
  "agentterm_session",
  "agentterm_tools",
  "anyhow",
@@ -53,6 +55,7 @@ dependencies = [
  "tokio",
  "toml 0.9.10+spec-1.1.0",
  "unicode-segmentation",
+ "uuid",
 ]
 
 [[package]]
@@ -73,6 +76,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentterm_layout"
+version = "0.1.0"
+dependencies = [
+ "dirs 6.0.0",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "uuid",
+]
+
+[[package]]
 name = "agentterm_mcp"
 version = "0.1.0"
 dependencies = [
@@ -85,6 +101,19 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.9.10+spec-1.1.0",
+]
+
+[[package]]
+name = "agentterm_search"
+version = "0.1.0"
+dependencies = [
+ "dirs 6.0.0",
+ "parking_lot",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
 ]
 
 [[package]]
