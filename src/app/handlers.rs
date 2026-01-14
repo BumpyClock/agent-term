@@ -96,13 +96,23 @@ impl AgentTermApp {
         });
 
         // Subscribe to palette events
-        cx.subscribe_in(&palette, window, |this, _, event: &CommandPaletteSelectEvent, window, cx| {
-            this.handle_command_palette_select(&event.0, window, cx);
-        }).detach();
+        cx.subscribe_in(
+            &palette,
+            window,
+            |this, _, event: &CommandPaletteSelectEvent, window, cx| {
+                this.handle_command_palette_select(&event.0, window, cx);
+            },
+        )
+        .detach();
 
-        cx.subscribe_in(&palette, window, |this, _, _: &CommandPaletteDismissEvent, _window, cx| {
-            this.close_command_palette(cx);
-        }).detach();
+        cx.subscribe_in(
+            &palette,
+            window,
+            |this, _, _: &CommandPaletteDismissEvent, _window, cx| {
+                this.close_command_palette(cx);
+            },
+        )
+        .detach();
 
         // Focus the palette
         palette.update(cx, |palette, cx| {
@@ -144,7 +154,7 @@ impl AgentTermApp {
                 project,
                 ..
             } => {
-                // Resume the past conversation with claude --resume
+                // Resume the past Claude conversation with claude --resume
                 self.close_command_palette(cx);
 
                 // Create a new Claude session with the --resume flag
@@ -154,6 +164,29 @@ impl AgentTermApp {
 
                 self.create_session_from_tool(
                     agentterm_session::SessionTool::Claude,
+                    title,
+                    command,
+                    args,
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            CommandResult::CodexConversation {
+                session_id,
+                project,
+                ..
+            } => {
+                // Resume the past Codex conversation with codex --resume
+                self.close_command_palette(cx);
+
+                // Create a new Codex session with the --resume flag
+                let title = format!("Resume: {}", project);
+                let command = "codex".to_string();
+                let args = vec!["--resume".to_string(), session_id.clone()];
+
+                self.create_session_from_tool(
+                    agentterm_session::SessionTool::Codex,
                     title,
                     command,
                     args,
@@ -1152,12 +1185,15 @@ impl AgentTermApp {
     }
 
     // Workspace management handlers
-    pub fn save_workspace(&mut self, _: &SaveWorkspace, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn save_workspace(
+        &mut self,
+        _: &SaveWorkspace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let layout_store = self.layout_store.clone();
 
-        let name_input = cx.new(|cx| {
-            GpuiInputState::new(window, cx).placeholder("Workspace name")
-        });
+        let name_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Workspace name"));
         let name_focus = name_input.read(cx).focus_handle(cx);
 
         window.open_dialog(cx, move |dialog, _window, _cx| {
