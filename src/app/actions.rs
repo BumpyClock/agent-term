@@ -9,6 +9,7 @@ actions!(
         ToggleSidebar,
         ToggleMcpManager,
         NewShellTab,
+        NewWindow,
         OpenSettings,
         // Window actions (cross-platform)
         Minimize,
@@ -37,3 +38,16 @@ pub struct EditSection(pub String);
 
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 pub struct RemoveSection(pub String);
+
+// Multi-window session transfer actions
+
+/// Move a session to another window (terminal stays running in pool).
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct MoveSessionToWindow {
+    pub session_id: String,
+    pub target_window_id: u64,
+}
+
+/// Open a session in a new window (moves from current window).
+#[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
+pub struct OpenSessionInNewWindow(pub String);

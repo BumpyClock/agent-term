@@ -13,7 +13,9 @@ use agentterm_tools::{ShellInfo, ToolInfo};
 use gpui::{
     App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity, Window, prelude::*,
 };
-use gpui_term::{Terminal, TerminalBuilder, TerminalView};
+use gpui_term::{TerminalBuilder, TerminalView};
+
+use super::terminal_pool::TerminalPool;
 
 use crate::settings::AppSettings;
 use crate::theme;
@@ -39,7 +41,7 @@ pub struct AgentTermApp {
     pub(crate) sessions: Vec<SessionRecord>,
     pub(crate) active_session_id: Option<String>,
 
-    pub(crate) terminals: HashMap<String, Entity<Terminal>>,
+    // Terminal views are window-specific; terminals live in global TerminalPool
     pub(crate) terminal_views: HashMap<String, Entity<TerminalView>>,
 
     pub(crate) session_menu_open: bool,
@@ -88,7 +90,6 @@ impl AgentTermApp {
             sections: Vec::new(),
             sessions: Vec::new(),
             active_session_id: None,
-            terminals: HashMap::new(),
             terminal_views: HashMap::new(),
             session_menu_open: false,
             session_menu_session_id: None,
@@ -172,10 +173,11 @@ impl AgentTermApp {
     }
 
     pub fn close_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(terminal) = self.terminals.remove(&id) {
+        self.terminal_views.remove(&id);
+
+        if let Some(terminal) = TerminalPool::global().remove(&id) {
             terminal.update(cx, |terminal, _| terminal.shutdown());
         }
-        self.terminal_views.remove(&id);
 
         let _ = self.session_store.delete_session(&id);
         self.reload_from_store(cx);
@@ -185,13 +187,12 @@ impl AgentTermApp {
     }
 
     pub fn restart_session(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        // Shutdown the existing terminal if it exists
-        if let Some(terminal) = self.terminals.remove(&id) {
-            terminal.update(cx, |terminal, _| terminal.shutdown());
-        }
         self.terminal_views.remove(&id);
 
-        // Set this session as active and recreate the terminal
+        if let Some(terminal) = TerminalPool::global().remove(&id) {
+            terminal.update(cx, |terminal, _| terminal.shutdown());
+        }
+
         self.active_session_id = Some(id);
         self.ensure_active_terminal(window, cx);
         cx.notify();
@@ -360,6 +361,21 @@ impl AgentTermApp {
             return;
         }
 
+        let pool = TerminalPool::global();
+        if let Some(terminal) = pool.get(&session.id) {
+            let font_family = self.settings.font_family.clone();
+            let font_size = self.settings.font_size;
+            let terminal_view = cx.new(|cx| {
+                TerminalView::with_settings(terminal.clone(), window, cx, font_family, font_size)
+            });
+            self.terminal_views
+                .insert(session.id.clone(), terminal_view.clone());
+            let focus_handle = terminal_view.read(cx).focus_handle(cx);
+            focus_handle.focus(window, cx);
+            cx.notify();
+            return;
+        }
+
         let shell = Some(session.command.clone());
         let shell_args = if session.args.is_empty() {
             None
@@ -400,6 +416,8 @@ impl AgentTermApp {
                 let _ = cx.update_window(window_handle, |_, window, cx| {
                     let _ = this.update(cx, |app, cx| {
                         let terminal = cx.new(|cx| builder.subscribe(cx));
+                        TerminalPool::global().insert(session_id.clone(), terminal.clone());
+
                         let font_family = app.settings.font_family.clone();
                         let font_size = app.settings.font_size;
                         let terminal_view = cx.new(|cx| {
@@ -411,7 +429,6 @@ impl AgentTermApp {
                                 font_size,
                             )
                         });
-                        app.terminals.insert(session_id.clone(), terminal);
                         app.terminal_views
                             .insert(session_id.clone(), terminal_view.clone());
 
