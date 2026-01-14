@@ -408,6 +408,28 @@ impl SettingsDialog {
                     .text_color(cx.theme().muted_foreground)
                     .child("AgentTerm v0.1.0"),
             )
+            .child(
+                div()
+                    .mt(px(16.))
+                    .text_lg()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().foreground)
+                    .child("Search"),
+            )
+            .child(
+                self.render_setting_row(
+                    "Warm search index",
+                    "Build the command palette search index in the background after launch",
+                    Switch::new("warm-search-index")
+                        .checked(self.settings.warm_search_index)
+                        .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                            this.settings.warm_search_index = *checked;
+                            this.notify_change(window, cx);
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 

@@ -18,3 +18,4 @@ itertools.workspace = true
 smallvec.workspace = true
 regex.workspace = true
 once_cell = "1.19"
+sysinfo = "0.33"

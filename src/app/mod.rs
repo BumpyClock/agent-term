@@ -4,7 +4,7 @@
 //! between the various sub-modules.
 
 pub mod actions;
-pub mod command_palette;
+pub mod command_palette_provider;
 pub mod constants;
 mod handlers;
 mod layout_manager;
@@ -75,17 +75,36 @@ pub fn run() {
         // Initialize gpui-component (theme, input bindings, dialogs, menus, etc.)
         gpui_component::init(cx);
 
+        // Initialize the new CommandPalette from gpui-component
+        gpui_component::command_palette::CommandPalette::init(
+            cx,
+            gpui_component::command_palette::CommandPaletteConfig {
+                placeholder: "Search sessions, workspaces, actions...".into(),
+                width: 600.0,
+                max_height: 500.0,
+                ..Default::default()
+            },
+        );
+
+        // Warm the search index in the background after startup (optional).
+        let warm_search_index = crate::settings::AppSettings::load().warm_search_index;
+        if warm_search_index {
+            search_manager::warm_search_manager_async(std::time::Duration::from_millis(500));
+        }
+
         // Set up key bindings
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-n", NewWindow, None),
+            KeyBinding::new("cmd-shift-w", CloseWindow, None),
+            KeyBinding::new("ctrl-shift-w", CloseWindow, None),
             KeyBinding::new("cmd-b", ToggleSidebar, None),
             KeyBinding::new("cmd-m", ToggleMcpManager, None),
             KeyBinding::new("cmd-t", NewShellTab, None),
             KeyBinding::new("cmd-shift-t", ReopenClosed, None),
             KeyBinding::new("ctrl-shift-t", ReopenClosed, None),
             KeyBinding::new("cmd-,", OpenSettings, None),
-            KeyBinding::new("cmd-p", ToggleCommandPalette, None), // Command palette
+            KeyBinding::new("cmd-p", ToggleCommandPalette, None), // Additional command palette binding
             KeyBinding::new("cmd-c", Copy, Some("Terminal")),
             KeyBinding::new("cmd-v", Paste, Some("Terminal")),
             KeyBinding::new("cmd-a", SelectAll, Some("Terminal")),
@@ -95,7 +114,6 @@ pub fn run() {
             KeyBinding::new("shift-tab", SendShiftTab, Some("Terminal")),
             KeyBinding::new("alt-shift-tab", FocusOut, Some("Terminal")),
         ]);
-        command_palette::init(cx); // Initialize command palette keybindings
         crate::text_input::bind_keys(cx);
 
         // Set up application menu bar
@@ -245,6 +263,7 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::handle_remove_section))
             .on_action(cx.listener(Self::minimize_window))
             .on_action(cx.listener(Self::zoom_window))
+            .on_action(cx.listener(Self::handle_close_window))
             .on_action(cx.listener(Self::handle_move_session_to_window))
             .on_action(cx.listener(Self::handle_open_session_in_new_window))
             .on_action(cx.listener(Self::handle_move_section_to_window))
@@ -252,29 +271,6 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::save_workspace))
             .on_action(cx.listener(Self::toggle_command_palette))
             .child(window_shell)
-            .when_some(self.command_palette.clone(), |this, palette| {
-                this.child(
-                    div()
-                        .id("command-palette-backdrop")
-                        .absolute()
-                        .inset_0()
-                        .bg(gpui::black().opacity(0.5))
-                        .flex()
-                        .items_start()
-                        .justify_center()
-                        .pt(px(100.))
-                        .on_mouse_down(gpui::MouseButton::Left, {
-                            let entity = cx.entity().clone();
-                            move |_, _window, cx| {
-                                entity.update(cx, |this, cx| {
-                                    this.command_palette = None;
-                                    cx.notify();
-                                });
-                            }
-                        })
-                        .child(palette),
-                )
-            })
     }
 }
 
