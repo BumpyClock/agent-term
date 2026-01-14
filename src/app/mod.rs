@@ -19,6 +19,8 @@ pub use window_registry::WindowRegistry;
 pub use actions::*;
 pub use state::AgentTermApp;
 
+use std::collections::HashSet;
+
 use gpui::{
     AnyWindowHandle, App, Application, Context, InteractiveElement, KeyBinding, ParentElement,
     Render, Styled, Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
@@ -141,25 +143,16 @@ pub fn run() {
             ..Default::default()
         };
 
-        let app_weak: std::cell::RefCell<Option<gpui::WeakEntity<AgentTermApp>>> =
-            std::cell::RefCell::new(None);
-        let app_weak_ref = &app_weak;
-
-        let window_handle = cx
+        // AgentTermApp::new() handles window registration internally
+        let _window_handle = cx
             .open_window(window_options, |window, cx| {
                 window.set_background_appearance(background_appearance);
                 #[cfg(target_os = "macos")]
                 configure_macos_titlebar(window);
                 let app = cx.new(|cx| AgentTermApp::new(window, cx));
-                *app_weak_ref.borrow_mut() = Some(app.downgrade());
                 cx.new(|cx| gpui_component::Root::new(app, window, cx))
             })
             .unwrap();
-
-        // Register window after it's fully created
-        if let Some(weak_app) = app_weak.borrow().clone() {
-            WindowRegistry::global().register(window_handle.into(), weak_app);
-        }
 
         // Activate the app (bring to front)
         cx.activate(true);
@@ -267,16 +260,39 @@ impl Render for AgentTermApp {
     }
 }
 
-/// Creates a new AgentTerm window.
+/// Creates a new empty AgentTerm window.
 ///
-/// This function handles all window creation including:
-/// - Loading settings and applying theme
-/// - Configuring window options (titlebar, background, etc.)
-/// - Registering the window in the global WindowRegistry
-/// - Creating the AgentTermApp instance
+/// New windows start with no sessions visible (like browser windows).
+/// Users can create new sessions or move existing ones from other windows.
 ///
 /// Returns the window handle if successful.
 pub fn create_new_window(cx: &mut App) -> Option<AnyWindowHandle> {
+    create_new_window_with_sessions(HashSet::new(), cx)
+}
+
+/// Creates a new AgentTerm window with a specific session.
+///
+/// Used by "Open in New Window" to move a session to its own window.
+///
+/// Returns the window handle if successful.
+pub fn create_new_window_with_session(session_id: String, cx: &mut App) -> Option<AnyWindowHandle> {
+    let mut sessions = HashSet::new();
+    sessions.insert(session_id);
+    create_new_window_with_sessions(sessions, cx)
+}
+
+/// Creates a new AgentTerm window with the specified visible sessions.
+///
+/// Internal helper that handles all window creation including:
+/// - Loading settings and applying theme
+/// - Configuring window options (titlebar, background, etc.)
+/// - Creating the AgentTermApp instance with the specified sessions
+///
+/// Returns the window handle if successful.
+fn create_new_window_with_sessions(
+    sessions: HashSet<String>,
+    cx: &mut App,
+) -> Option<AnyWindowHandle> {
     let settings = crate::settings::AppSettings::load();
     let resolved_mode = theme::apply_theme_from_settings(&settings, None, cx);
     theme::apply_terminal_scheme(&settings, resolved_mode);
@@ -310,24 +326,17 @@ pub fn create_new_window(cx: &mut App) -> Option<AnyWindowHandle> {
         ..Default::default()
     };
 
-    let app_weak: std::cell::RefCell<Option<gpui::WeakEntity<AgentTermApp>>> =
-        std::cell::RefCell::new(None);
-    let app_weak_ref = &app_weak;
-
+    // Create window with specified sessions (empty for new windows)
     let result = cx.open_window(window_options, |window, cx| {
         window.set_background_appearance(background_appearance);
         #[cfg(target_os = "macos")]
         configure_macos_titlebar(window);
-        let app = cx.new(|cx| AgentTermApp::new(window, cx));
-        *app_weak_ref.borrow_mut() = Some(app.downgrade());
+        let app = cx.new(|cx| AgentTermApp::new_with_sessions(window, cx, Some(sessions)));
         cx.new(|cx| gpui_component::Root::new(app, window, cx))
     });
 
     match result {
         Ok(window_handle) => {
-            if let Some(weak_app) = app_weak.borrow().clone() {
-                WindowRegistry::global().register(window_handle.into(), weak_app);
-            }
             cx.activate(true);
             Some(window_handle.into())
         }

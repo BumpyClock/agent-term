@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use super::window_registry::WindowRegistry;
-use super::{create_new_window, MoveSessionToWindow, OpenSessionInNewWindow};
+use super::{create_new_window_with_session, MoveSessionToWindow, OpenSessionInNewWindow};
 use gpui_component::input::InputState as GpuiInputState;
 
 use crate::dialogs::{
@@ -680,23 +680,33 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Remove from this window's visibility set and terminal views
+        self.visible_session_ids.remove(&session_id);
         self.terminal_views.remove(&session_id);
 
+        // Select another visible session if this was active
         if self.active_session_id.as_deref() == Some(&session_id) {
             self.active_session_id = self
                 .sessions
                 .iter()
-                .find(|s| s.id != session_id)
+                .find(|s| s.id != session_id && self.visible_session_ids.contains(&s.id))
                 .map(|s| s.id.clone());
             self.ensure_active_terminal(window, cx);
         }
 
+        // Add to target window's visibility set and activate there
+        // Use deferred update to avoid calling focus() during event processing
         let session_id_for_target = session_id.clone();
-        let _ = cx.update_window(target_window, move |_root, window, cx| {
+        let _ = cx.update_window(target_window, move |_root, _window, cx| {
             if let Some(weak_app) = WindowRegistry::global().get_app(&target_window) {
                 if let Some(app) = weak_app.upgrade() {
                     app.update(cx, |app, cx| {
-                        app.set_active_session_id(session_id_for_target, window, cx);
+                        app.visible_session_ids.insert(session_id_for_target.clone());
+                        // Just update state - don't call ensure_active_terminal here
+                        // as it triggers focus which requires layout phase
+                        let _ = app.session_store.set_active_session(Some(session_id_for_target.clone()));
+                        app.active_session_id = Some(session_id_for_target);
+                        cx.notify();
                     });
                 }
             }
@@ -706,33 +716,27 @@ impl AgentTermApp {
     }
 
     /// Opens a session in a new window.
-    /// Creates the new window and moves the session there.
+    /// Creates the new window with just this session visible.
     pub fn open_session_in_new_window(
         &mut self,
         session_id: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Remove from this window's visibility set and terminal views
+        self.visible_session_ids.remove(&session_id);
         self.terminal_views.remove(&session_id);
 
-        if let Some(new_window) = create_new_window(cx) {
-            let session_id_for_target = session_id.clone();
-            let _ = cx.update_window(new_window, move |_root, window, cx| {
-                if let Some(weak_app) = WindowRegistry::global().get_app(&new_window) {
-                    if let Some(app) = weak_app.upgrade() {
-                        app.update(cx, |app, cx| {
-                            app.set_active_session_id(session_id_for_target, window, cx);
-                        });
-                    }
-                }
-            });
-        }
+        // Create new window with this session visible
+        // (create_new_window_with_session already handles visibility and activation)
+        let _ = create_new_window_with_session(session_id.clone(), cx);
 
+        // Select another visible session if this was active in current window
         if self.active_session_id.as_deref() == Some(&session_id) {
             self.active_session_id = self
                 .sessions
                 .iter()
-                .find(|s| s.id != session_id)
+                .find(|s| s.id != session_id && self.visible_session_ids.contains(&s.id))
                 .map(|s| s.id.clone());
             self.ensure_active_terminal(window, cx);
         }

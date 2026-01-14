@@ -192,6 +192,7 @@ impl AgentTermApp {
             .sessions
             .iter()
             .filter(|s| s.section_id == section.section.id)
+            .filter(|s| self.visible_session_ids.contains(&s.id)) // Per-window filtering
             .collect();
 
         let section_id = section.section.id.clone();
