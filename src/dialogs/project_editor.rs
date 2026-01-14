@@ -483,6 +483,11 @@ impl AddProjectDialog {
         view.update(cx, |app, cx| {
             if let Ok(section) = app.session_store.create_section(name, normalized_path) {
                 let _ = app.session_store.set_section_icon(&section.id, icon);
+                app.layout_store.update_window(&app.layout_window_id, |layout| {
+                    if !layout.section_order.contains(&section.id) {
+                        layout.section_order.push(section.id.clone());
+                    }
+                });
                 app.reload_from_store(cx);
                 app.ensure_active_terminal(window, cx);
             }

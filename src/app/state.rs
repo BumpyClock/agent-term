@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use agentterm_layout::{LayoutStore, WindowSnapshot, closed_tab_from};
 use agentterm_mcp::McpManager;
@@ -16,6 +17,7 @@ use gpui::{
     Window, prelude::*,
 };
 use gpui_term::{TerminalBuilder, TerminalView};
+use smol::Timer;
 
 use super::layout_manager::LayoutManager;
 use super::terminal_pool::TerminalPool;
@@ -26,6 +28,8 @@ use crate::theme;
 use crate::ui::SectionItem;
 
 use gpui_component::command_palette::CommandPaletteState;
+
+const RECENTLY_CLOSED_TERMINAL_TTL: Duration = Duration::from_secs(120);
 
 /// The main application state for AgentTerm.
 pub struct AgentTermApp {
@@ -187,7 +191,14 @@ impl AgentTermApp {
 
     /// Returns the current window's layout snapshot.
     pub fn window_layout(&self) -> Option<WindowSnapshot> {
-        self.layout_store.get_window(&self.layout_window_id)
+        let window = self.layout_store.get_window(&self.layout_window_id);
+        if window.is_some() {
+            return window;
+        }
+        if self.layout_store.ensure_window(&self.layout_window_id) {
+            return self.layout_store.get_window(&self.layout_window_id);
+        }
+        None
     }
 
     /// Checks if a session is visible in this window.
@@ -218,15 +229,6 @@ impl AgentTermApp {
             return self.sections.clone();
         };
 
-        if window.tabs.is_empty() {
-            return self
-                .sections
-                .iter()
-                .filter(|s| s.is_default)
-                .cloned()
-                .collect();
-        }
-
         let mut visible_sections: Vec<String> = window
             .tabs
             .iter()
@@ -237,10 +239,8 @@ impl AgentTermApp {
 
         let mut ordered = Vec::new();
         for section_id in window.section_order {
-            if visible_sections.contains(&section_id) {
-                if let Some(section) = self.sections.iter().find(|s| s.section.id == section_id) {
-                    ordered.push(section.clone());
-                }
+            if let Some(section) = self.sections.iter().find(|s| s.section.id == section_id) {
+                ordered.push(section.clone());
             }
         }
 
@@ -252,7 +252,15 @@ impl AgentTermApp {
             }
         }
 
-        ordered
+        if ordered.is_empty() {
+            self.sections
+                .iter()
+                .filter(|s| s.is_default)
+                .cloned()
+                .collect()
+        } else {
+            ordered
+        }
     }
 
     /// Returns session records ordered by this window's layout for a section.
@@ -384,8 +392,45 @@ impl AgentTermApp {
 
         self.terminal_views.remove(&id);
 
-        if let Some(terminal) = TerminalPool::global().remove(&id) {
-            terminal.update(cx, |terminal, _| terminal.shutdown());
+        if TerminalPool::global().contains(&id) {
+            let session_id = id.clone();
+            cx.spawn_in(window, async move |this, window| {
+                Timer::after(RECENTLY_CLOSED_TERMINAL_TTL).await;
+                let result = this.update_in(window, |app, _window, cx| {
+                    let still_open = app
+                        .layout_store
+                        .current_session()
+                        .windows
+                        .iter()
+                        .any(|window| {
+                            window
+                                .tabs
+                                .iter()
+                                .any(|tab| tab.session_id == session_id)
+                        });
+                    agentterm_session::diagnostics::log(format!(
+                        "recently_closed_terminal session_id={} still_open={}",
+                        session_id, still_open
+                    ));
+                    if still_open {
+                        return;
+                    }
+                    if let Some(terminal) = TerminalPool::global().remove(&session_id) {
+                        agentterm_session::diagnostics::log(format!(
+                            "recently_closed_terminal shutdown session_id={}",
+                            session_id
+                        ));
+                        terminal.update(cx, |terminal, _| terminal.shutdown());
+                    }
+                });
+                if let Err(e) = result {
+                    agentterm_session::diagnostics::log(format!(
+                        "recently_closed_terminal update_error session_id={} error={}",
+                        session_id, e
+                    ));
+                }
+            })
+            .detach();
         }
 
         self.layout_store
@@ -397,14 +442,20 @@ impl AgentTermApp {
                 }
             });
 
-        self.active_session_id = self
-            .sessions
-            .iter()
-            .find(|s| self.is_session_visible(&s.id))
-            .map(|s| s.id.clone());
+        let next_active_id = self
+            .window_layout()
+            .and_then(|layout| layout.active_session_id.clone())
+            .or_else(|| {
+                self.sessions
+                    .iter()
+                    .find(|s| self.is_session_visible(&s.id))
+                    .map(|s| s.id.clone())
+            });
 
+        let _ = self.session_store.set_active_session(next_active_id.clone());
+        self.active_session_id = next_active_id;
         self.reload_from_store(cx);
-        if self.active_session_id.is_none() {
+        if self.active_session_id.is_some() {
             self.ensure_active_terminal(window, cx);
         }
     }

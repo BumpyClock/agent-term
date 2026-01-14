@@ -10,6 +10,7 @@ actions!(
         ToggleMcpManager,
         NewShellTab,
         NewWindow,
+        CloseTab,
         CloseWindow,
         ReopenClosed,
         OpenSettings,

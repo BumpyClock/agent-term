@@ -586,6 +586,7 @@ impl AgentTermApp {
                     .ghost()
                     .compact()
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        cx.stop_propagation();
                         this.close_session(id.clone(), window, cx);
                     }))
             })
