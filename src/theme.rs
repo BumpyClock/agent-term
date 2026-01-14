@@ -210,7 +210,7 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.secondary = Some(palette.secondary.into());
     colors.secondary_foreground = Some(palette.secondary_foreground.into());
     colors.accent = Some(accent.hex.into());
-    colors.accent_foreground = Some(palette.primary_foreground.into());
+    colors.accent_foreground = Some(palette.accent_foreground.into());
     colors.danger = Some(palette.danger.into());
     colors.input = Some(palette.input.into());
     colors.ring = Some(accent.hex.into());
@@ -249,9 +249,13 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     // State tokens
     colors.state_hover = Some(palette.state_hover.into());
     colors.state_active = Some(palette.state_active.into());
-    colors.state_selected = Some(palette.state_selected.into());
+    let accent_selected =
+        rgba_hex_with_alpha(accent.hex, 0.16).unwrap_or_else(|| palette.state_selected.to_string());
+    let accent_focus =
+        rgba_hex_with_alpha(accent.hex, 0.24).unwrap_or_else(|| palette.state_focus.to_string());
+    colors.state_selected = Some(accent_selected.into());
     colors.state_disabled = Some(palette.state_disabled.into());
-    colors.state_focus = Some(palette.state_focus.into());
+    colors.state_focus = Some(accent_focus.into());
 
     // Overlay tokens
     colors.overlay_scrim = Some(palette.overlay_scrim.into());
@@ -282,7 +286,7 @@ fn elevation_for_mode(mode: ThemeMode) -> AppElevation {
             sm: " 0 2px 4px rgba(0,0,0,0.04)",
             md: " 0 4px 6px rgba(0, 0, 0, 0.08)",
             lg: " 0 8px 16px rgba(0, 0, 0, 0.14)",
-            xl: " 0 2px 21px rgba(0, 0, 0, 0.15) 0 32px 64px rgba(0, 0, 0, 0.19)",
+            xl: " 0 2px 21px rgba(0, 0, 0, 0.15), 0 32px 64px rgba(0, 0, 0, 0.19)",
         },
         ThemeMode::Dark => AppElevation {
             xs: " 0 1px 2px rgba(0, 0, 0, 0.04)",
@@ -405,4 +409,13 @@ fn parse_hex_color(color: &str) -> gpui::Hsla {
         a: 1.0,
     });
     rgba.into()
+}
+
+fn rgba_hex_with_alpha(color: &str, alpha: f32) -> Option<String> {
+    let rgba = gpui::Rgba::try_from(color).ok()?;
+    let r = (rgba.r * 255.0).round() as u8;
+    let g = (rgba.g * 255.0).round() as u8;
+    let b = (rgba.b * 255.0).round() as u8;
+    let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a))
 }

@@ -3,16 +3,19 @@
 use std::collections::HashSet;
 
 use gpui::{
-    Bounds, Context, Focusable, IntoElement, ParentElement, Styled, Window, WindowBounds,
-    WindowOptions, div, prelude::*, px, size,
+    div, prelude::*, px, size, AnyWindowHandle, Bounds, Context, Focusable, IntoElement,
+    ParentElement, Styled, Window, WindowBounds, WindowOptions,
 };
+
+use super::window_registry::WindowRegistry;
+use super::{create_new_window, MoveSessionToWindow, OpenSessionInNewWindow};
 use gpui_component::input::InputState as GpuiInputState;
 
 use crate::dialogs::{
     AddProjectDialog, McpManagerDialog, ProjectEditorDialog, SessionEditorDialog, TabPickerDialog,
 };
 use crate::settings_dialog::SettingsDialog;
-use crate::ui::{ActiveTheme, Button, ButtonVariants, Sizable, WindowExt, v_flex};
+use crate::ui::{v_flex, ActiveTheme, Button, ButtonVariants, Sizable, WindowExt};
 
 use super::actions::*;
 use super::state::AgentTermApp;
@@ -627,5 +630,113 @@ impl AgentTermApp {
                     }
                 })
         });
+    }
+
+    // Multi-window session transfer handlers
+
+    /// Handles the MoveSessionToWindow action.
+    /// Moves a session's view to another window while keeping the terminal running.
+    pub fn handle_move_session_to_window(
+        &mut self,
+        action: &MoveSessionToWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = action.session_id.clone();
+
+        let target_handle = WindowRegistry::global()
+            .list_windows()
+            .into_iter()
+            .find(|(handle, info)| {
+                info.number as u64 == action.target_window_id
+                    || handle.window_id().as_u64() == action.target_window_id
+            })
+            .map(|(handle, _)| handle);
+
+        let Some(target_window) = target_handle else {
+            return;
+        };
+
+        self.move_session_to_window(session_id, target_window, window, cx);
+    }
+
+    /// Handles the OpenSessionInNewWindow action.
+    /// Creates a new window and moves the session there.
+    pub fn handle_open_session_in_new_window(
+        &mut self,
+        action: &OpenSessionInNewWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_session_in_new_window(action.0.clone(), window, cx);
+    }
+
+    /// Moves a session's view to another window.
+    /// The terminal stays running in the global pool.
+    pub fn move_session_to_window(
+        &mut self,
+        session_id: String,
+        target_window: AnyWindowHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_views.remove(&session_id);
+
+        if self.active_session_id.as_deref() == Some(&session_id) {
+            self.active_session_id = self
+                .sessions
+                .iter()
+                .find(|s| s.id != session_id)
+                .map(|s| s.id.clone());
+            self.ensure_active_terminal(window, cx);
+        }
+
+        let session_id_for_target = session_id.clone();
+        let _ = cx.update_window(target_window, move |_root, window, cx| {
+            if let Some(weak_app) = WindowRegistry::global().get_app(&target_window) {
+                if let Some(app) = weak_app.upgrade() {
+                    app.update(cx, |app, cx| {
+                        app.set_active_session_id(session_id_for_target, window, cx);
+                    });
+                }
+            }
+        });
+
+        cx.notify();
+    }
+
+    /// Opens a session in a new window.
+    /// Creates the new window and moves the session there.
+    pub fn open_session_in_new_window(
+        &mut self,
+        session_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_views.remove(&session_id);
+
+        if let Some(new_window) = create_new_window(cx) {
+            let session_id_for_target = session_id.clone();
+            let _ = cx.update_window(new_window, move |_root, window, cx| {
+                if let Some(weak_app) = WindowRegistry::global().get_app(&new_window) {
+                    if let Some(app) = weak_app.upgrade() {
+                        app.update(cx, |app, cx| {
+                            app.set_active_session_id(session_id_for_target, window, cx);
+                        });
+                    }
+                }
+            });
+        }
+
+        if self.active_session_id.as_deref() == Some(&session_id) {
+            self.active_session_id = self
+                .sessions
+                .iter()
+                .find(|s| s.id != session_id)
+                .map(|s| s.id.clone());
+            self.ensure_active_terminal(window, cx);
+        }
+
+        cx.notify();
     }
 }

@@ -10,13 +10,18 @@ mod menus;
 mod sidebar;
 mod state;
 mod terminal_container;
+mod terminal_pool;
+mod window_registry;
+
+pub use terminal_pool::TerminalPool;
+pub use window_registry::WindowRegistry;
 
 pub use actions::*;
 pub use state::AgentTermApp;
 
 use gpui::{
-    App, Application, Context, InteractiveElement, KeyBinding, ParentElement, Render, Styled,
-    Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
+    AnyWindowHandle, App, Application, Context, InteractiveElement, KeyBinding, ParentElement,
+    Render, Styled, Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
 use gpui_component::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
@@ -53,8 +58,9 @@ pub fn run() {
     // Handle dock icon click when app has no visible windows (macOS)
     // Also handles similar scenarios on other platforms
     app.on_reopen(|cx| {
-        // Find existing windows and activate them
-        if let Some(window) = cx.windows().first() {
+        if cx.windows().is_empty() {
+            create_new_window(cx);
+        } else if let Some(window) = cx.windows().first() {
             let _ = cx.update_window(*window, |_root, window, _cx| {
                 window.activate_window();
             });
@@ -68,6 +74,7 @@ pub fn run() {
         // Set up key bindings
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-n", NewWindow, None),
             KeyBinding::new("cmd-b", ToggleSidebar, None),
             KeyBinding::new("cmd-m", ToggleMcpManager, None),
             KeyBinding::new("cmd-t", NewShellTab, None),
@@ -102,6 +109,11 @@ pub fn run() {
             // For now, just a no-op. Could show an about dialog later.
         });
 
+        // NewWindow action - creates a new window
+        cx.on_action(|_: &NewWindow, cx| {
+            create_new_window(cx);
+        });
+
         // Load settings to determine initial window appearance
         let settings = crate::settings::AppSettings::load();
         let resolved_mode = theme::apply_theme_from_settings(&settings, None, cx);
@@ -129,14 +141,25 @@ pub fn run() {
             ..Default::default()
         };
 
-        cx.open_window(window_options, |window, cx| {
-            window.set_background_appearance(background_appearance);
-            #[cfg(target_os = "macos")]
-            configure_macos_titlebar(window);
-            let app = cx.new(|cx| AgentTermApp::new(window, cx));
-            cx.new(|cx| gpui_component::Root::new(app, window, cx))
-        })
-        .unwrap();
+        let app_weak: std::cell::RefCell<Option<gpui::WeakEntity<AgentTermApp>>> =
+            std::cell::RefCell::new(None);
+        let app_weak_ref = &app_weak;
+
+        let window_handle = cx
+            .open_window(window_options, |window, cx| {
+                window.set_background_appearance(background_appearance);
+                #[cfg(target_os = "macos")]
+                configure_macos_titlebar(window);
+                let app = cx.new(|cx| AgentTermApp::new(window, cx));
+                *app_weak_ref.borrow_mut() = Some(app.downgrade());
+                cx.new(|cx| gpui_component::Root::new(app, window, cx))
+            })
+            .unwrap();
+
+        // Register window after it's fully created
+        if let Some(weak_app) = app_weak.borrow().clone() {
+            WindowRegistry::global().register(window_handle.into(), weak_app);
+        }
 
         // Activate the app (bring to front)
         cx.activate(true);
@@ -238,6 +261,76 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::handle_remove_section))
             .on_action(cx.listener(Self::minimize_window))
             .on_action(cx.listener(Self::zoom_window))
+            .on_action(cx.listener(Self::handle_move_session_to_window))
+            .on_action(cx.listener(Self::handle_open_session_in_new_window))
             .child(window_shell)
+    }
+}
+
+/// Creates a new AgentTerm window.
+///
+/// This function handles all window creation including:
+/// - Loading settings and applying theme
+/// - Configuring window options (titlebar, background, etc.)
+/// - Registering the window in the global WindowRegistry
+/// - Creating the AgentTermApp instance
+///
+/// Returns the window handle if successful.
+pub fn create_new_window(cx: &mut App) -> Option<AnyWindowHandle> {
+    let settings = crate::settings::AppSettings::load();
+    let resolved_mode = theme::apply_theme_from_settings(&settings, None, cx);
+    theme::apply_terminal_scheme(&settings, resolved_mode);
+    let background_appearance = if settings.blur_enabled {
+        WindowBackgroundAppearance::Blurred
+    } else {
+        WindowBackgroundAppearance::Transparent
+    };
+
+    let registry = WindowRegistry::global();
+    let window_count = registry.window_count();
+    let title = if window_count == 0 {
+        "Agent Term".into()
+    } else {
+        format!("Agent Term - {}", window_count + 1).into()
+    };
+
+    let window_options = WindowOptions {
+        titlebar: Some(gpui::TitlebarOptions {
+            title: Some(title),
+            appears_transparent: true,
+            traffic_light_position: Some(gpui::point(px(16.0), px(16.0))),
+            ..Default::default()
+        }),
+        window_background: background_appearance,
+        window_decorations: if cfg!(not(target_os = "macos")) {
+            Some(gpui::WindowDecorations::Client)
+        } else {
+            None
+        },
+        ..Default::default()
+    };
+
+    let app_weak: std::cell::RefCell<Option<gpui::WeakEntity<AgentTermApp>>> =
+        std::cell::RefCell::new(None);
+    let app_weak_ref = &app_weak;
+
+    let result = cx.open_window(window_options, |window, cx| {
+        window.set_background_appearance(background_appearance);
+        #[cfg(target_os = "macos")]
+        configure_macos_titlebar(window);
+        let app = cx.new(|cx| AgentTermApp::new(window, cx));
+        *app_weak_ref.borrow_mut() = Some(app.downgrade());
+        cx.new(|cx| gpui_component::Root::new(app, window, cx))
+    });
+
+    match result {
+        Ok(window_handle) => {
+            if let Some(weak_app) = app_weak.borrow().clone() {
+                WindowRegistry::global().register(window_handle.into(), weak_app);
+            }
+            cx.activate(true);
+            Some(window_handle.into())
+        }
+        Err(_) => None,
     }
 }

@@ -1,16 +1,18 @@
 //! Sidebar rendering and interaction methods.
 
-use agentterm_session::{DEFAULT_SECTION_ID, SessionRecord, SessionTool};
+use agentterm_session::{SessionRecord, SessionTool, DEFAULT_SECTION_ID};
 use agentterm_tools::ShellType;
 use gpui::{
-    ClickEvent, Context, Corner, Entity, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Styled, Window, div, prelude::*, px,
+    div, prelude::*, px, AnyWindowHandle, ClickEvent, Context, Corner, Entity, IntoElement,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window,
 };
+
+use super::window_registry::WindowRegistry;
 use gpui_component::{SidebarShell, TITLE_BAR_HEIGHT};
 
 use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 
-use crate::icons::{Icon, IconName, IconSize, icon_from_string};
+use crate::icons::{icon_from_string, Icon, IconName, IconSize};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem,
     SectionItem,
@@ -560,14 +562,47 @@ impl AgentTermApp {
             }))
             .context_menu({
                 let session_id = session_id.clone();
-                move |menu, _window, _cx| {
-                    menu.menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
+                move |menu, window, cx| {
+                    let current_handle: AnyWindowHandle = window.window_handle().into();
+                    let other_windows = WindowRegistry::global().list_other_windows(current_handle);
+
+                    let mut menu = menu
+                        .menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
                         .menu(
                             "Restart",
                             Box::new(RestartSessionAction(session_id.clone())),
                         )
-                        .separator()
-                        .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
+                        .separator();
+
+                    if !other_windows.is_empty() {
+                        menu = menu.submenu("Move to Window", window, cx, {
+                            let session_id = session_id.clone();
+                            let other_windows = other_windows.clone();
+                            move |submenu, _window, _cx| {
+                                let mut submenu = submenu;
+                                for (_handle, info) in &other_windows {
+                                    let session_id = session_id.clone();
+                                    let window_id = info.number as u64;
+                                    let title = info.title.clone();
+                                    submenu = submenu.menu(
+                                        &title,
+                                        Box::new(MoveSessionToWindow {
+                                            session_id,
+                                            target_window_id: window_id,
+                                        }),
+                                    );
+                                }
+                                submenu
+                            }
+                        });
+                    }
+
+                    menu.menu(
+                        "Open in New Window",
+                        Box::new(OpenSessionInNewWindow(session_id.clone())),
+                    )
+                    .separator()
+                    .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
                 }
             })
     }
