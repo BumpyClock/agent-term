@@ -95,6 +95,32 @@ impl CommandPaletteProvider for AgentTermProvider {
                 }),
         );
 
+        // Add current sessions
+        for session in &self.sessions {
+            items.push(
+                CommandPaletteItem::new(&session.id, &session.title)
+                    .category("Sessions")
+                    .subtitle(format!("{:?}", session.tool))
+                    .icon(IconName::SquareTerminal)
+                    .payload(CommandPalettePayload::Session {
+                        id: session.id.clone(),
+                    }),
+            );
+        }
+
+        // Add saved workspaces
+        for workspace in self.layout_store.list_workspaces() {
+            items.push(
+                CommandPaletteItem::new(&workspace.id, &workspace.name)
+                    .category("Workspaces")
+                    .subtitle(&workspace.created_at)
+                    .icon(IconName::Folder)
+                    .payload(CommandPalettePayload::Workspace {
+                        id: workspace.id.clone(),
+                    }),
+            );
+        }
+
         items
     }
 
@@ -107,32 +133,6 @@ impl CommandPaletteProvider for AgentTermProvider {
 
         if query.is_empty() {
             return Task::ready(items);
-        }
-
-        // Add current sessions (query-based results)
-        for session in &self.sessions {
-            items.push(
-                CommandPaletteItem::new(format!("session_{}", session.id), &session.title)
-                    .category("Sessions")
-                    .subtitle(format!("{:?}", session.tool))
-                    .icon(IconName::SquareTerminal)
-                    .payload(CommandPalettePayload::Session {
-                        id: session.id.clone(),
-                    }),
-            );
-        }
-
-        // Add saved workspaces (query-based results)
-        for workspace in self.layout_store.list_workspaces() {
-            items.push(
-                CommandPaletteItem::new(format!("workspace_{}", workspace.id), &workspace.name)
-                    .category("Workspaces")
-                    .subtitle(&workspace.created_at)
-                    .icon(IconName::Folder)
-                    .payload(CommandPalettePayload::Workspace {
-                        id: workspace.id.clone(),
-                    }),
-            );
         }
 
         if search_manager::search_indexing_in_progress() {

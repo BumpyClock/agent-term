@@ -114,9 +114,55 @@ impl AgentTermApp {
                         cx.notify();
                     }
                     CommandPalettePayload::Workspace { id } => {
-                        // Load the saved workspace
-                        // TODO: Implement workspace loading
-                        eprintln!("Load workspace: {}", id);
+                        let Some(workspace) = self.layout_store.get_workspace(id) else {
+                            return;
+                        };
+                        self.layout_store
+                            .set_active_workspace(Some(id.to_string()));
+
+                        let layout_manager = LayoutManager::global();
+                        let mut windows = workspace.session.windows;
+                        windows.sort_by_key(|window| window.order);
+
+                        let mut next_order = self
+                            .layout_store
+                            .current_session()
+                            .windows
+                            .iter()
+                            .map(|window| window.order)
+                            .max()
+                            .unwrap_or(0)
+                            .saturating_add(1);
+
+                        let mut new_window_ids = Vec::new();
+                        for window_snapshot in windows {
+                            let mut new_window = agentterm_layout::new_window_snapshot(next_order);
+                            new_window.active_session_id = window_snapshot.active_session_id.clone();
+                            new_window.section_order = window_snapshot.section_order.clone();
+                            new_window.tabs = window_snapshot.tabs.clone();
+                            new_window.collapsed_sections = window_snapshot.collapsed_sections.clone();
+
+                            next_order = next_order.saturating_add(1);
+                            let new_id = new_window.id.clone();
+                            self.layout_store.add_window(new_window);
+                            new_window_ids.push(new_id);
+                        }
+
+                        layout_manager.set_next_order(next_order);
+                        let mut failed_window_ids = Vec::new();
+                        for window_id in new_window_ids {
+                            if create_window_from_layout(window_id.clone(), cx).is_none() {
+                                eprintln!("Failed to create window from layout: {}", window_id);
+                                self.layout_store.remove_window(&window_id);
+                                failed_window_ids.push(window_id);
+                            }
+                        }
+                        if !failed_window_ids.is_empty() {
+                            eprintln!(
+                                "Failed to create {} window(s) from layout",
+                                failed_window_ids.len()
+                            );
+                        }
                     }
                     CommandPalettePayload::ClaudeConversation {
                         session_id,
@@ -681,6 +727,18 @@ impl AgentTermApp {
         } else {
             self.close_session(session_id, window, cx);
         }
+    }
+
+    pub fn handle_close_tab(
+        &mut self,
+        _: &CloseTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active_id) = self.active_session_id.clone() else {
+            return;
+        };
+        self.handle_close_session(&CloseSessionAction(active_id), window, cx);
     }
 
     /// Helper method to check if a session has a running child process.
@@ -1311,8 +1369,14 @@ impl AgentTermApp {
                                     return;
                                 }
                                 let current_session = layout_store.current_session();
-                                if let Err(e) = layout_store.save_workspace(name, current_session) {
-                                    eprintln!("Failed to save workspace: {}", e);
+                                match layout_store.save_workspace(name, current_session) {
+                                    Ok(workspace) => {
+                                        layout_store
+                                            .set_active_workspace(Some(workspace.id.clone()));
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to save workspace: {}", e);
+                                    }
                                 }
                                 window.close_dialog(cx);
                             })

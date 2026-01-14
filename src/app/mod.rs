@@ -104,6 +104,8 @@ pub fn run() {
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-n", NewWindow, None),
+            KeyBinding::new("cmd-w", CloseTab, None),
+            KeyBinding::new("ctrl-w", CloseTab, None),
             KeyBinding::new("cmd-shift-w", CloseWindow, None),
             KeyBinding::new("ctrl-shift-w", CloseWindow, None),
             KeyBinding::new("cmd-b", ToggleSidebar, None),
@@ -113,6 +115,8 @@ pub fn run() {
             KeyBinding::new("ctrl-shift-t", ReopenClosed, None),
             KeyBinding::new("cmd-,", OpenSettings, None),
             KeyBinding::new("cmd-p", ToggleCommandPalette, None), // Additional command palette binding
+            KeyBinding::new("cmd-w", CloseTab, Some("Terminal")),
+            KeyBinding::new("ctrl-w", CloseTab, Some("Terminal")),
             KeyBinding::new("cmd-c", Copy, Some("Terminal")),
             KeyBinding::new("cmd-v", Paste, Some("Terminal")),
             KeyBinding::new("cmd-a", SelectAll, Some("Terminal")),
@@ -266,6 +270,7 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::open_settings))
             .on_action(cx.listener(Self::handle_rename_session))
             .on_action(cx.listener(Self::handle_close_session))
+            .on_action(cx.listener(Self::handle_close_tab))
             .on_action(cx.listener(Self::handle_restart_session))
             .on_action(cx.listener(Self::handle_edit_section))
             .on_action(cx.listener(Self::handle_remove_section))
