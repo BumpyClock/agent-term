@@ -524,6 +524,7 @@ impl AgentTermApp {
         menu
     }
 
+    // TODO: Add an accessibility toggle to show +/- symbols in git status badges.
     pub fn render_session_row(
         &self,
         session: &SessionRecord,
@@ -543,8 +544,9 @@ impl AgentTermApp {
         let active_bg = cx.theme().accent;
         let active_fg = cx.theme().accent_foreground;
         let hover_bg = cx.theme().list_active;
+        let git_counts = self.git_diff_counts_for_session(&session.id);
 
-        div()
+        let mut row = div()
             .id(format!("session-row-{}", session.id))
             .px(px(8.0))
             .py(px(4.0))
@@ -578,69 +580,90 @@ impl AgentTermApp {
                     .truncate()
                     .flex_1()
                     .child(title.clone()),
-            )
-            .child({
-                let id = session.id.clone();
-                Button::new(format!("session-close-{}", session.id))
-                    .label("×")
-                    .ghost()
-                    .compact()
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        cx.stop_propagation();
-                        this.close_session(id.clone(), window, cx);
-                    }))
-            })
-            .on_click(cx.listener({
-                let id = session_id.clone();
-                move |this, _: &ClickEvent, window, cx| {
-                    this.set_active_session_id(id.clone(), window, cx);
-                }
-            }))
-            .context_menu({
-                let session_id = session_id.clone();
-                move |menu, window, cx| {
-                    let current_handle: AnyWindowHandle = window.window_handle().into();
-                    let other_windows = WindowRegistry::global().list_other_windows(current_handle);
+            );
 
-                    let mut menu = menu
-                        .menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
-                        .menu(
-                            "Restart",
-                            Box::new(RestartSessionAction(session_id.clone())),
-                        )
-                        .separator();
-
-                    if !other_windows.is_empty() {
-                        menu = menu.submenu("Move to Window", window, cx, {
-                            let session_id = session_id.clone();
-                            let other_windows = other_windows.clone();
-                            move |submenu, _window, _cx| {
-                                let mut submenu = submenu;
-                                for (_handle, info) in &other_windows {
-                                    let session_id = session_id.clone();
-                                    let window_id = info.number as u64;
-                                    let title = info.title.clone();
-                                    submenu = submenu.menu(
-                                        &title,
-                                        Box::new(MoveSessionToWindow {
-                                            session_id,
-                                            target_window_id: window_id,
-                                        }),
-                                    );
-                                }
-                                submenu
-                            }
-                        });
-                    }
-
-                    menu.menu(
-                        "Open in New Window",
-                        Box::new(OpenSessionInNewWindow(session_id.clone())),
+        if let Some(counts) = git_counts {
+            row = row.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_xs()
+                    .child(
+                        div()
+                            .text_color(cx.theme().success)
+                            .child(counts.additions.to_string()),
                     )
-                    .separator()
-                    .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
+                    .child(
+                        div()
+                            .text_color(cx.theme().danger)
+                            .child(counts.deletions.to_string()),
+                    ),
+            );
+        }
+
+        row.child({
+            let id = session.id.clone();
+            Button::new(format!("session-close-{}", session.id))
+                .label("×")
+                .ghost()
+                .compact()
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.close_session(id.clone(), window, cx);
+                }))
+        })
+        .on_click(cx.listener({
+            let id = session_id.clone();
+            move |this, _: &ClickEvent, window, cx| {
+                this.set_active_session_id(id.clone(), window, cx);
+            }
+        }))
+        .context_menu({
+            let session_id = session_id.clone();
+            move |menu, window, cx| {
+                let current_handle: AnyWindowHandle = window.window_handle().into();
+                let other_windows = WindowRegistry::global().list_other_windows(current_handle);
+
+                let mut menu = menu
+                    .menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
+                    .menu(
+                        "Restart",
+                        Box::new(RestartSessionAction(session_id.clone())),
+                    )
+                    .separator();
+
+                if !other_windows.is_empty() {
+                    menu = menu.submenu("Move to Window", window, cx, {
+                        let session_id = session_id.clone();
+                        let other_windows = other_windows.clone();
+                        move |submenu, _window, _cx| {
+                            let mut submenu = submenu;
+                            for (_handle, info) in &other_windows {
+                                let session_id = session_id.clone();
+                                let window_id = info.number as u64;
+                                let title = info.title.clone();
+                                submenu = submenu.menu(
+                                    &title,
+                                    Box::new(MoveSessionToWindow {
+                                        session_id,
+                                        target_window_id: window_id,
+                                    }),
+                                );
+                            }
+                            submenu
+                        }
+                    });
                 }
-            })
+
+                menu.menu(
+                    "Open in New Window",
+                    Box::new(OpenSessionInNewWindow(session_id.clone())),
+                )
+                .separator()
+                .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
+            }
+        })
     }
 
     // Section management methods

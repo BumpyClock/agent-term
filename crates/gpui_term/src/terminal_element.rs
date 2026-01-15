@@ -43,13 +43,13 @@ use crate::{
 
 /// Layout state computed during prepaint, used for painting.
 pub struct LayoutState {
-    hitbox: Hitbox,
+    _hitbox: Hitbox,
     batched_text_runs: Vec<BatchedTextRun>,
     background_rects: Vec<LayoutRect>,
     cursor: Option<CursorLayout>,
     background_color: Hsla,
     dimensions: TerminalBounds,
-    mode: TermMode,
+    _mode: TermMode,
 }
 
 /// Helper for converting Alacritty cursor points to display coordinates.
@@ -870,13 +870,13 @@ impl Element for TerminalElement {
         };
 
         LayoutState {
-            hitbox,
+            _hitbox: hitbox,
             batched_text_runs,
             background_rects: rects,
             cursor: cursor_layout,
             background_color,
             dimensions,
-            mode,
+            _mode: mode,
         }
     }
 

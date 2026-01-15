@@ -1,10 +1,8 @@
-use std::cmp::{self, max, min};
-use std::iter::repeat;
-
-use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column as GridCol, Line as GridLine, Point as AlacPoint, Side};
 use alacritty_terminal::term::TermMode;
 use gpui::{Modifiers, MouseButton, Pixels, Point, ScrollWheelEvent, px};
+use std::cmp::max;
+use std::iter::repeat;
 
 use crate::TerminalBounds;
 

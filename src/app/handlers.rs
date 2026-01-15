@@ -117,8 +117,7 @@ impl AgentTermApp {
                         let Some(workspace) = self.layout_store.get_workspace(id) else {
                             return;
                         };
-                        self.layout_store
-                            .set_active_workspace(Some(id.to_string()));
+                        self.layout_store.set_active_workspace(Some(id.to_string()));
 
                         let layout_manager = LayoutManager::global();
                         let mut windows = workspace.session.windows;
@@ -137,10 +136,12 @@ impl AgentTermApp {
                         let mut new_window_ids = Vec::new();
                         for window_snapshot in windows {
                             let mut new_window = agentterm_layout::new_window_snapshot(next_order);
-                            new_window.active_session_id = window_snapshot.active_session_id.clone();
+                            new_window.active_session_id =
+                                window_snapshot.active_session_id.clone();
                             new_window.section_order = window_snapshot.section_order.clone();
                             new_window.tabs = window_snapshot.tabs.clone();
-                            new_window.collapsed_sections = window_snapshot.collapsed_sections.clone();
+                            new_window.collapsed_sections =
+                                window_snapshot.collapsed_sections.clone();
 
                             next_order = next_order.saturating_add(1);
                             let new_id = new_window.id.clone();
@@ -729,12 +730,7 @@ impl AgentTermApp {
         }
     }
 
-    pub fn handle_close_tab(
-        &mut self,
-        _: &CloseTab,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn handle_close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
         let Some(active_id) = self.active_session_id.clone() else {
             return;
         };
@@ -1051,7 +1047,7 @@ impl AgentTermApp {
             return;
         };
 
-        let mut moved_tabs: Vec<String> = window_layout
+        let moved_tabs: Vec<String> = window_layout
             .tabs
             .iter()
             .filter(|tab| tab.section_id == section_id)

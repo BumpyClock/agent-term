@@ -1,8 +1,8 @@
 //! Core AgentTermApp state and lifecycle methods.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,12 +12,14 @@ use agentterm_session::{
     DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
 };
 use agentterm_tools::{ShellInfo, ToolInfo};
+use git2::{DiffOptions, Repository};
 use gpui::{
     AnyWindowHandle, App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity,
     Window, prelude::*,
 };
 use gpui_term::{TerminalBuilder, TerminalView};
-use smol::Timer;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
+use smol::{Timer, channel};
 
 use super::layout_manager::LayoutManager;
 use super::terminal_pool::TerminalPool;
@@ -30,6 +32,17 @@ use crate::ui::SectionItem;
 use gpui_component::command_palette::CommandPaletteState;
 
 const RECENTLY_CLOSED_TERMINAL_TTL: Duration = Duration::from_secs(120);
+const GIT_STATUS_DEBOUNCE: Duration = Duration::from_millis(500);
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GitDiffCounts {
+    pub(crate) additions: u64,
+    pub(crate) deletions: u64,
+}
+
+struct GitRepoWatcher {
+    _watcher: RecommendedWatcher,
+}
 
 /// The main application state for AgentTerm.
 pub struct AgentTermApp {
@@ -68,6 +81,11 @@ pub struct AgentTermApp {
     pub(crate) cached_shells: Vec<ShellInfo>,
     pub(crate) cached_tools: Vec<ToolInfo>,
     pub(crate) cached_pinned_shell_ids: Vec<String>,
+
+    pub(crate) git_repo_cache: HashMap<PathBuf, Option<PathBuf>>,
+    pub(crate) git_session_repo_roots: HashMap<String, PathBuf>,
+    pub(crate) git_status_counts: HashMap<PathBuf, GitDiffCounts>,
+    git_repo_watchers: HashMap<PathBuf, GitRepoWatcher>,
 
     /// Shared layout store for multi-window session management.
     /// Created once and shared across all windows via Arc.
@@ -150,6 +168,10 @@ impl AgentTermApp {
             cached_shells: Vec::new(),
             cached_tools: Vec::new(),
             cached_pinned_shell_ids: Vec::new(),
+            git_repo_cache: HashMap::new(),
+            git_session_repo_roots: HashMap::new(),
+            git_status_counts: HashMap::new(),
+            git_repo_watchers: HashMap::new(),
             layout_store,
             layout_window_id,
             command_palette: None,
@@ -341,7 +363,207 @@ impl AgentTermApp {
         self.sections = sections;
         self.sessions = sessions;
         self.active_session_id = active_session_id;
+        self.refresh_git_status(cx);
         cx.notify();
+    }
+
+    fn refresh_git_status(&mut self, cx: &mut Context<Self>) {
+        self.git_repo_cache.clear();
+        self.git_session_repo_roots.clear();
+        let repo_roots = self.collect_git_repo_roots();
+        self.sync_git_repo_watchers(repo_roots, cx);
+    }
+
+    fn collect_git_repo_roots(&mut self) -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        let section_paths: HashMap<String, String> = self
+            .sections
+            .iter()
+            .map(|section| (section.section.id.clone(), section.section.path.clone()))
+            .collect();
+        let sessions: Vec<(String, String, String)> = self
+            .sessions
+            .iter()
+            .map(|session| {
+                (
+                    session.id.clone(),
+                    session.project_path.clone(),
+                    session.section_id.clone(),
+                )
+            })
+            .collect();
+        for (session_id, project_path, section_id) in sessions {
+            let mut resolved_path = if project_path.is_empty() {
+                section_paths.get(&section_id).cloned().unwrap_or_default()
+            } else {
+                project_path
+            };
+            if resolved_path.is_empty() {
+                if let Ok(current_dir) = env::current_dir() {
+                    resolved_path = current_dir.to_string_lossy().to_string();
+                }
+            }
+            if resolved_path.is_empty() {
+                continue;
+            }
+            if let Some(root) = self.repo_root_for_path(&resolved_path) {
+                self.git_session_repo_roots.insert(session_id, root.clone());
+                roots.push(root);
+            }
+        }
+        roots.sort();
+        roots.dedup();
+        roots
+    }
+
+    fn repo_root_for_path(&mut self, project_path: &str) -> Option<PathBuf> {
+        if project_path.is_empty() {
+            return None;
+        }
+        let path = PathBuf::from(project_path);
+        if let Some(root) = self.git_repo_cache.get(&path) {
+            return root.clone();
+        }
+        let root = Repository::discover(&path)
+            .ok()
+            .and_then(|repo| repo.workdir().map(|dir| dir.to_path_buf()));
+        self.git_repo_cache.insert(path, root.clone());
+        root
+    }
+
+    fn sync_git_repo_watchers(&mut self, repo_roots: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let repo_root_set: HashSet<PathBuf> = repo_roots.iter().cloned().collect();
+        self.git_repo_watchers
+            .retain(|root, _| repo_root_set.contains(root));
+        self.git_status_counts
+            .retain(|root, _| repo_root_set.contains(root));
+        for root in repo_roots {
+            if !self.git_repo_watchers.contains_key(&root) {
+                if let Some(watcher) = self.start_git_repo_watcher(root.clone(), cx) {
+                    self.git_repo_watchers.insert(root.clone(), watcher);
+                }
+            }
+            self.queue_git_status_refresh(root.clone(), cx);
+        }
+    }
+
+    fn start_git_repo_watcher(
+        &self,
+        repo_root: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Option<GitRepoWatcher> {
+        let (tx, rx) = channel::bounded(100);
+        let repo_root_for_watch = repo_root.clone();
+        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                match event.kind {
+                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
+                        let _ = tx.send_blocking(());
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .ok()?;
+        if watcher
+            .watch(&repo_root_for_watch, RecursiveMode::Recursive)
+            .is_err()
+        {
+            return None;
+        }
+
+        let window_handle = self.window_handle;
+        let repo_root_for_task = repo_root.clone();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                loop {
+                    if rx.recv().await.is_err() {
+                        break;
+                    }
+                    loop {
+                        Timer::after(GIT_STATUS_DEBOUNCE).await;
+                        let mut had_more = false;
+                        while rx.try_recv().is_ok() {
+                            had_more = true;
+                        }
+                        if !had_more {
+                            break;
+                        }
+                    }
+                    let repo_root = repo_root_for_task.clone();
+                    let _ = cx.update_window(window_handle, |_, _window, cx| {
+                        let _ = this.update(cx, |app, cx| {
+                            app.queue_git_status_refresh(repo_root.clone(), cx);
+                        });
+                    });
+                }
+            }
+        })
+        .detach();
+
+        Some(GitRepoWatcher { _watcher: watcher })
+    }
+
+    fn queue_git_status_refresh(&mut self, repo_root: PathBuf, cx: &mut Context<Self>) {
+        let window_handle = self.window_handle;
+        let repo_root_for_task = repo_root.clone();
+        let repo_root_for_update = repo_root.clone();
+        cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                let counts =
+                    smol::unblock(move || Self::compute_git_diff_counts(&repo_root_for_task)).await;
+                let _ = cx.update_window(window_handle, |_, _window, cx| {
+                    let _ = this.update(cx, |app, cx| {
+                        match counts {
+                            Some(counts) if counts.additions > 0 || counts.deletions > 0 => {
+                                app.git_status_counts
+                                    .insert(repo_root_for_update.clone(), counts);
+                            }
+                            _ => {
+                                app.git_status_counts.remove(&repo_root_for_update);
+                            }
+                        }
+                        cx.notify();
+                    });
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn compute_git_diff_counts(repo_root: &Path) -> Option<GitDiffCounts> {
+        let repo = Repository::open(repo_root).ok()?;
+        let mut staged_options = DiffOptions::new();
+        staged_options.include_untracked(false);
+        staged_options.recurse_untracked_dirs(false);
+        let index = repo.index().ok()?;
+        let tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+        let staged_diff = repo
+            .diff_tree_to_index(tree.as_ref(), Some(&index), Some(&mut staged_options))
+            .ok()?;
+        let staged_stats = staged_diff.stats().ok()?;
+
+        let mut unstaged_options = DiffOptions::new();
+        unstaged_options.include_untracked(false);
+        unstaged_options.recurse_untracked_dirs(false);
+        let unstaged_diff = repo
+            .diff_index_to_workdir(Some(&index), Some(&mut unstaged_options))
+            .ok()?;
+        let unstaged_stats = unstaged_diff.stats().ok()?;
+
+        let additions = (staged_stats.insertions() + unstaged_stats.insertions()) as u64;
+        let deletions = (staged_stats.deletions() + unstaged_stats.deletions()) as u64;
+        Some(GitDiffCounts {
+            additions,
+            deletions,
+        })
+    }
+
+    pub(crate) fn git_diff_counts_for_session(&self, session_id: &str) -> Option<GitDiffCounts> {
+        let repo_root = self.git_session_repo_roots.get(session_id)?;
+        self.git_status_counts.get(repo_root).copied()
     }
 
     pub fn active_session(&self) -> Option<&SessionRecord> {
@@ -402,12 +624,7 @@ impl AgentTermApp {
                         .current_session()
                         .windows
                         .iter()
-                        .any(|window| {
-                            window
-                                .tabs
-                                .iter()
-                                .any(|tab| tab.session_id == session_id)
-                        });
+                        .any(|window| window.tabs.iter().any(|tab| tab.session_id == session_id));
                     agentterm_session::diagnostics::log(format!(
                         "recently_closed_terminal session_id={} still_open={}",
                         session_id, still_open
@@ -452,7 +669,9 @@ impl AgentTermApp {
                     .map(|s| s.id.clone())
             });
 
-        let _ = self.session_store.set_active_session(next_active_id.clone());
+        let _ = self
+            .session_store
+            .set_active_session(next_active_id.clone());
         self.active_session_id = next_active_id;
         self.reload_from_store(cx);
         if self.active_session_id.is_some() {
