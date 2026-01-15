@@ -158,6 +158,7 @@ enum InternalEvent {
     Resize(TerminalBounds),
     Clear,
     Scroll(AlacScroll),
+    #[allow(dead_code)]
     ScrollToAlacPoint(AlacPoint),
     SetSelection(Option<(Selection, AlacPoint)>),
     UpdateSelection(Point<Pixels>),

@@ -64,6 +64,7 @@ pub fn app_menus() -> Vec<Menu> {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
 pub fn configure_macos_titlebar(window: &mut Window) {
     use objc::{msg_send, sel, sel_impl};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
