@@ -3,14 +3,14 @@ pub mod error;
 pub mod model;
 pub mod storage;
 
-pub use model::{NewSessionInput, SectionRecord, SessionRecord, SessionStatus, SessionTool};
+pub use model::{NewSessionInput, SessionRecord, SessionStatus, SessionTool, WorkspaceRecord};
 
 use parking_lot::Mutex;
 use uuid::Uuid;
 
 use storage::{DebouncedStorage, Storage, StorageSnapshot, default_storage_root};
 
-pub const DEFAULT_SECTION_ID: &str = "default-section";
+pub const DEFAULT_WORKSPACE_ID: &str = "default-workspace";
 
 pub struct SessionStore {
     storage: DebouncedStorage,
@@ -40,8 +40,8 @@ impl SessionStore {
         self.snapshot.lock().sessions.clone()
     }
 
-    pub fn list_sections(&self) -> Vec<SectionRecord> {
-        self.snapshot.lock().sections.clone()
+    pub fn list_workspaces(&self) -> Vec<WorkspaceRecord> {
+        self.snapshot.lock().workspaces.clone()
     }
 
     pub fn active_session_id(&self) -> Option<String> {
@@ -62,98 +62,101 @@ impl SessionStore {
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn create_section(&self, name: String, path: String) -> Result<SectionRecord, String> {
+    pub fn create_workspace(&self, name: String, path: String) -> Result<WorkspaceRecord, String> {
         validate_path(&path)?;
         let id = Uuid::new_v4().to_string();
-        let section = SectionRecord {
+        let workspace = WorkspaceRecord {
             id,
             name,
             path,
             icon: None,
             collapsed: false,
-            order: self.next_section_order(),
+            order: self.next_workspace_order(),
         };
 
         let mut snapshot = self.snapshot.lock();
-        snapshot.sections.push(section.clone());
+        snapshot.workspaces.push(workspace.clone());
         self.storage.save(&snapshot).map_err(|e| e.to_string())?;
-        Ok(section)
+        Ok(workspace)
     }
 
-    pub fn rename_section(&self, id: &str, name: String) -> Result<(), String> {
+    pub fn rename_workspace(&self, id: &str, name: String) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
-        let section = snapshot
-            .sections
+        let workspace = snapshot
+            .workspaces
             .iter_mut()
-            .find(|section| section.id == id)
-            .ok_or_else(|| "Section not found".to_string())?;
-        section.name = name;
+            .find(|workspace| workspace.id == id)
+            .ok_or_else(|| "Workspace not found".to_string())?;
+        workspace.name = name;
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn set_section_path(&self, id: &str, path: String) -> Result<(), String> {
+    pub fn set_workspace_path(&self, id: &str, path: String) -> Result<(), String> {
         validate_path(&path)?;
         let mut snapshot = self.snapshot.lock();
-        let section = snapshot
-            .sections
+        let workspace = snapshot
+            .workspaces
             .iter_mut()
-            .find(|section| section.id == id)
-            .ok_or_else(|| "Section not found".to_string())?;
-        section.path = path;
+            .find(|workspace| workspace.id == id)
+            .ok_or_else(|| "Workspace not found".to_string())?;
+        workspace.path = path;
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn set_section_icon(&self, id: &str, icon: Option<String>) -> Result<(), String> {
+    pub fn set_workspace_icon(&self, id: &str, icon: Option<String>) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
-        let section = snapshot
-            .sections
+        let workspace = snapshot
+            .workspaces
             .iter_mut()
-            .find(|section| section.id == id)
-            .ok_or_else(|| "Section not found".to_string())?;
-        section.icon = icon;
+            .find(|workspace| workspace.id == id)
+            .ok_or_else(|| "Workspace not found".to_string())?;
+        workspace.icon = icon;
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn set_section_collapsed(&self, id: &str, collapsed: bool) -> Result<(), String> {
+    pub fn set_workspace_collapsed(&self, id: &str, collapsed: bool) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
-        let section = snapshot
-            .sections
+        let workspace = snapshot
+            .workspaces
             .iter_mut()
-            .find(|section| section.id == id)
-            .ok_or_else(|| "Section not found".to_string())?;
-        section.collapsed = collapsed;
+            .find(|workspace| workspace.id == id)
+            .ok_or_else(|| "Workspace not found".to_string())?;
+        workspace.collapsed = collapsed;
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn reorder_sections(&self, ordered_section_ids: &[String]) -> Result<(), String> {
+    pub fn reorder_workspaces(&self, ordered_workspace_ids: &[String]) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
 
-        // Collect missing section IDs
-        let missing_ids: Vec<String> = ordered_section_ids
+        // Collect missing workspace IDs
+        let missing_ids: Vec<String> = ordered_workspace_ids
             .iter()
-            .filter(|id| !snapshot.sections.iter().any(|s| &s.id == *id))
+            .filter(|id| !snapshot.workspaces.iter().any(|s| &s.id == *id))
             .cloned()
             .collect();
 
         if !missing_ids.is_empty() {
-            return Err(format!("Section(s) not found: {}", missing_ids.join(", ")));
+            return Err(format!(
+                "Workspace(s) not found: {}",
+                missing_ids.join(", ")
+            ));
         }
 
-        for (index, id) in ordered_section_ids.iter().enumerate() {
-            if let Some(section) = snapshot.sections.iter_mut().find(|s| &s.id == id) {
-                section.order = (index as u32).saturating_add(1);
+        for (index, id) in ordered_workspace_ids.iter().enumerate() {
+            if let Some(workspace) = snapshot.workspaces.iter_mut().find(|s| &s.id == id) {
+                workspace.order = (index as u32).saturating_add(1);
             }
         }
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn delete_section(&self, id: &str) -> Result<(), String> {
+    pub fn delete_workspace(&self, id: &str) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
-        snapshot.sections.retain(|section| section.id != id);
+        snapshot.workspaces.retain(|workspace| workspace.id != id);
 
         for session in &mut snapshot.sessions {
-            if session.section_id == id {
-                session.section_id = DEFAULT_SECTION_ID.to_string();
+            if session.workspace_id == id {
+                session.workspace_id = DEFAULT_WORKSPACE_ID.to_string();
             }
         }
 
@@ -161,13 +164,13 @@ impl SessionStore {
     }
 
     pub fn create_session(&self, input: NewSessionInput) -> Result<SessionRecord, String> {
-        validate_path(&input.project_path)?;
+        validate_path(&input.workspace_path)?;
         let id = Uuid::new_v4().to_string();
         let record = SessionRecord {
             id: id.clone(),
             title: input.title,
-            project_path: input.project_path,
-            section_id: input.section_id,
+            workspace_path: input.workspace_path,
+            workspace_id: input.workspace_id,
             tool: input.tool,
             command: input.command,
             args: input.args.unwrap_or_default(),
@@ -203,12 +206,12 @@ impl SessionStore {
         self.set_session_custom_title(id, title, is_custom)
     }
 
-    pub fn move_session(&self, id: &str, section_id: String) -> Result<(), String> {
+    pub fn move_session(&self, id: &str, workspace_id: String) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
 
-        // Validate target section exists
-        if !snapshot.sections.iter().any(|s| s.id == section_id) {
-            return Err("Section not found".to_string());
+        // Validate target workspace exists
+        if !snapshot.workspaces.iter().any(|s| s.id == workspace_id) {
+            return Err("Workspace not found".to_string());
         }
 
         let session = snapshot
@@ -216,13 +219,13 @@ impl SessionStore {
             .iter_mut()
             .find(|session| session.id == id)
             .ok_or_else(|| "Session not found".to_string())?;
-        session.section_id = section_id;
+        session.workspace_id = workspace_id;
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 
-    pub fn reorder_sessions_in_section(
+    pub fn reorder_sessions_in_workspace(
         &self,
-        section_id: &str,
+        workspace_id: &str,
         ordered_session_ids: &[String],
     ) -> Result<(), String> {
         let mut snapshot = self.snapshot.lock();
@@ -231,7 +234,7 @@ impl SessionStore {
             if let Some(session) = snapshot
                 .sessions
                 .iter_mut()
-                .find(|s| s.section_id == section_id && &s.id == id)
+                .find(|s| s.workspace_id == workspace_id && &s.id == id)
             {
                 session.tab_order = Some(index as u32);
             }
@@ -329,12 +332,12 @@ impl SessionStore {
             .saturating_add(1)
     }
 
-    fn next_section_order(&self) -> u32 {
+    fn next_workspace_order(&self) -> u32 {
         let snapshot = self.snapshot.lock();
         snapshot
-            .sections
+            .workspaces
             .iter()
-            .map(|section| section.order)
+            .map(|workspace| workspace.order)
             .max()
             .unwrap_or(0)
             .saturating_add(1)

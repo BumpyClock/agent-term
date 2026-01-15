@@ -30,8 +30,7 @@ pub mod storage;
 
 pub use error::{LayoutError, LayoutResult};
 pub use model::{
-    ClosedTabSnapshot, LayoutSessionSnapshot, LayoutSnapshot, SavedWorkspaceSnapshot, TabSnapshot,
-    WindowSnapshot,
+    ClosedTabSnapshot, LayoutSessionSnapshot, LayoutSnapshot, TabSnapshot, WindowSnapshot,
 };
 
 use parking_lot::Mutex;
@@ -39,8 +38,8 @@ use uuid::Uuid;
 
 use storage::{DebouncedStorage, Storage, default_storage_root};
 
-/// The default section ID for tabs not assigned to a project.
-pub const DEFAULT_SECTION_ID: &str = "default-section";
+/// The default workspace ID for tabs not assigned to a workspace.
+pub const DEFAULT_WORKSPACE_ID: &str = "default-workspace";
 
 /// Maximum number of closed tabs to keep in the stack.
 const MAX_CLOSED_TABS: usize = 50;
@@ -52,14 +51,13 @@ const MAX_CLOSED_TABS: usize = 50;
 ///
 /// The store maintains two separate concerns:
 /// 1. **Current session** - live window/tab state during runtime (in-memory)
-/// 2. **Persisted state** - last_session, closed_tab_stack, saved_workspaces (on disk)
+/// 2. **Persisted state** - last_session, closed_tab_stack (on disk)
 pub struct LayoutStore {
     storage: DebouncedStorage,
     snapshot: Mutex<LayoutSnapshot>,
     /// Current runtime session (windows currently open).
     /// This is separate from last_session which is only for restore.
     current_session: Mutex<LayoutSessionSnapshot>,
-    active_workspace_id: Mutex<Option<String>>,
 }
 
 impl LayoutStore {
@@ -81,7 +79,6 @@ impl LayoutStore {
                 created_at: now_rfc3339(),
                 windows: Vec::new(),
             }),
-            active_workspace_id: Mutex::new(None),
         })
     }
 
@@ -189,9 +186,9 @@ impl LayoutStore {
             id: window_id.to_string(),
             order: next_order,
             active_session_id: None,
-            section_order: Vec::new(),
+            workspace_order: Vec::new(),
             tabs: Vec::new(),
-            collapsed_sections: Vec::new(),
+            collapsed_workspaces: Vec::new(),
         });
         let snapshot = session.clone();
         drop(session);
@@ -257,76 +254,6 @@ impl LayoutStore {
         session
     }
 
-    /// Saves a named workspace for later restore.
-    pub fn save_workspace(
-        &self,
-        name: String,
-        session: LayoutSessionSnapshot,
-    ) -> Result<SavedWorkspaceSnapshot, String> {
-        let mut snapshot = self.snapshot.lock();
-        let workspace = SavedWorkspaceSnapshot {
-            id: Uuid::new_v4().to_string(),
-            name,
-            created_at: now_rfc3339(),
-            session,
-        };
-        snapshot.saved_workspaces.push(workspace);
-        let saved = snapshot.saved_workspaces.last().cloned();
-        self.storage.save(&snapshot).map_err(|e| e.to_string())?;
-        saved.ok_or_else(|| "Failed to save workspace".to_string())
-    }
-
-    /// Lists all saved workspaces.
-    pub fn list_workspaces(&self) -> Vec<SavedWorkspaceSnapshot> {
-        self.snapshot.lock().saved_workspaces.clone()
-    }
-
-    /// Deletes a saved workspace by ID.
-    pub fn delete_workspace(&self, id: &str) -> Result<(), String> {
-        let mut snapshot = self.snapshot.lock();
-        snapshot.saved_workspaces.retain(|w| w.id != id);
-        let mut active_workspace_id = self.active_workspace_id.lock();
-        if active_workspace_id.as_deref() == Some(id) {
-            *active_workspace_id = None;
-        }
-        self.storage.save(&snapshot).map_err(|e| e.to_string())
-    }
-
-    /// Gets a saved workspace by ID.
-    pub fn get_workspace(&self, id: &str) -> Option<SavedWorkspaceSnapshot> {
-        self.snapshot
-            .lock()
-            .saved_workspaces
-            .iter()
-            .find(|w| w.id == id)
-            .cloned()
-    }
-
-    pub fn set_active_workspace(&self, id: Option<String>) {
-        *self.active_workspace_id.lock() = id;
-        let session = self.current_session.lock().clone();
-        let _ = self.persist_session_snapshot(session);
-    }
-
-    pub fn active_workspace_id(&self) -> Option<String> {
-        self.active_workspace_id.lock().clone()
-    }
-
-    pub fn update_workspace_session(
-        &self,
-        id: &str,
-        session: LayoutSessionSnapshot,
-    ) -> Result<(), String> {
-        let mut snapshot = self.snapshot.lock();
-        let workspace = snapshot
-            .saved_workspaces
-            .iter_mut()
-            .find(|w| w.id == id)
-            .ok_or_else(|| "Workspace not found".to_string())?;
-        workspace.session = session;
-        self.storage.save(&snapshot).map_err(|e| e.to_string())
-    }
-
     /// Forces an immediate save (useful before app exit).
     pub fn flush(&self) -> Result<(), String> {
         let snapshot = self.snapshot.lock();
@@ -336,14 +263,8 @@ impl LayoutStore {
     }
 
     fn persist_session_snapshot(&self, session: LayoutSessionSnapshot) -> Result<(), String> {
-        let active_workspace_id = self.active_workspace_id.lock().clone();
         let mut snapshot = self.snapshot.lock();
-        snapshot.last_session = Some(session.clone());
-        if let Some(id) = active_workspace_id {
-            if let Some(workspace) = snapshot.saved_workspaces.iter_mut().find(|w| w.id == id) {
-                workspace.session = session;
-            }
-        }
+        snapshot.last_session = Some(session);
         self.storage.save(&snapshot).map_err(|e| e.to_string())
     }
 }
@@ -372,7 +293,7 @@ pub fn new_window_snapshot(order: u32) -> WindowSnapshot {
 pub fn closed_tab_from(tab: &TabSnapshot, window_id: Option<String>) -> ClosedTabSnapshot {
     ClosedTabSnapshot {
         session_id: tab.session_id.clone(),
-        section_id: tab.section_id.clone(),
+        workspace_id: tab.workspace_id.clone(),
         window_id,
         order: tab.order,
         closed_at: now_rfc3339(),

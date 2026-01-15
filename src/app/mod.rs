@@ -272,16 +272,16 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::handle_close_session))
             .on_action(cx.listener(Self::handle_close_tab))
             .on_action(cx.listener(Self::handle_restart_session))
-            .on_action(cx.listener(Self::handle_edit_section))
-            .on_action(cx.listener(Self::handle_remove_section))
+            .on_action(cx.listener(Self::handle_edit_workspace))
+            .on_action(cx.listener(Self::handle_remove_workspace))
             .on_action(cx.listener(Self::minimize_window))
             .on_action(cx.listener(Self::zoom_window))
             .on_action(cx.listener(Self::handle_close_window))
             .on_action(cx.listener(Self::handle_move_session_to_window))
             .on_action(cx.listener(Self::handle_open_session_in_new_window))
-            .on_action(cx.listener(Self::handle_move_section_to_window))
+            .on_action(cx.listener(Self::handle_move_workspace_to_window))
+            .on_action(cx.listener(Self::handle_move_workspace_to_new_window))
             .on_action(cx.listener(Self::reopen_closed))
-            .on_action(cx.listener(Self::save_workspace))
             .on_action(cx.listener(Self::toggle_command_palette))
             .child(window_shell)
     }
@@ -304,10 +304,10 @@ pub fn create_new_window(cx: &mut App) -> Option<AnyWindowHandle> {
 /// Returns the window handle if successful.
 pub fn create_new_window_with_session(
     session_id: String,
-    section_id: String,
+    workspace_id: String,
     cx: &mut App,
 ) -> Option<AnyWindowHandle> {
-    create_new_window_internal(Some((session_id, section_id)), None, cx)
+    create_new_window_internal(Some((session_id, workspace_id)), None, cx)
 }
 
 pub fn create_window_from_layout(
@@ -367,12 +367,12 @@ fn create_new_window_internal(
     let layout_store = layout_manager.store().clone();
     let layout_window_id = layout_window_id.unwrap_or_else(|| layout_manager.create_window());
 
-    if let Some((session_id, section_id)) = session_info.clone() {
+    if let Some((session_id, workspace_id)) = session_info.clone() {
         layout_store.update_window(&layout_window_id, |layout| {
-            if !layout.section_order.contains(&section_id) {
-                layout.section_order.push(section_id.clone());
+            if !layout.workspace_order.contains(&workspace_id) {
+                layout.workspace_order.push(workspace_id.clone());
             }
-            layout.append_tab(session_id.clone(), section_id);
+            layout.append_tab(session_id.clone(), workspace_id);
             layout.active_session_id = Some(session_id);
         });
     }

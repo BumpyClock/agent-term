@@ -26,7 +26,7 @@ pub struct McpItem {
 }
 
 /// McpManagerDialog - A dialog for managing MCP (Model Context Protocol) servers.
-/// Allows attaching/detaching MCPs at Global or Local (project) scope.
+/// Allows attaching/detaching MCPs at Global or Workspace scope.
 pub struct McpManagerDialog {
     tokio: Arc<tokio::runtime::Runtime>,
     mcp_manager: McpManager,
@@ -35,8 +35,8 @@ pub struct McpManagerDialog {
     available: Vec<McpItem>,
     error: Option<SharedString>,
     session_title: String,
-    project_path: Option<String>,
-    has_project: bool,
+    workspace_path: Option<String>,
+    has_workspace: bool,
     pool_status: PoolStatusResponse,
 }
 
@@ -45,9 +45,9 @@ impl McpManagerDialog {
         tokio: Arc<tokio::runtime::Runtime>,
         mcp_manager: McpManager,
         session_title: String,
-        project_path: Option<String>,
+        workspace_path: Option<String>,
     ) -> Self {
-        let has_project = project_path.is_some();
+        let has_workspace = workspace_path.is_some();
         Self {
             tokio,
             mcp_manager,
@@ -56,8 +56,8 @@ impl McpManagerDialog {
             available: Vec::new(),
             error: None,
             session_title,
-            project_path,
-            has_project,
+            workspace_path,
+            has_workspace,
             pool_status: PoolStatusResponse {
                 enabled: false,
                 server_count: 0,
@@ -67,8 +67,8 @@ impl McpManagerDialog {
     }
 
     pub fn load_data(&mut self) {
-        if self.scope == McpScope::Local && self.project_path.is_none() {
-            self.error = Some("Project path is required for local MCPs".into());
+        if self.scope == McpScope::Workspace && self.workspace_path.is_none() {
+            self.error = Some("Workspace path is required for workspace MCPs".into());
             self.attached.clear();
             self.available.clear();
             return;
@@ -78,7 +78,7 @@ impl McpManagerDialog {
             .tokio
             .block_on(
                 self.mcp_manager
-                    .get_attached_mcps(self.scope, self.project_path.as_deref()),
+                    .get_attached_mcps(self.scope, self.workspace_path.as_deref()),
             )
             .unwrap_or_default();
 
@@ -126,14 +126,14 @@ impl McpManagerDialog {
     }
 
     fn attach(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        if self.scope == McpScope::Local && self.project_path.is_none() {
-            self.error = Some("Project path is required for local MCPs".into());
+        if self.scope == McpScope::Workspace && self.workspace_path.is_none() {
+            self.error = Some("Workspace path is required for workspace MCPs".into());
             cx.notify();
             return;
         }
         let res = self.tokio.block_on(self.mcp_manager.attach_mcp(
             self.scope,
-            self.project_path.as_deref(),
+            self.workspace_path.as_deref(),
             &name,
         ));
         if let Err(e) = res {
@@ -144,14 +144,14 @@ impl McpManagerDialog {
     }
 
     fn detach(&mut self, name: SharedString, cx: &mut Context<Self>) {
-        if self.scope == McpScope::Local && self.project_path.is_none() {
-            self.error = Some("Project path is required for local MCPs".into());
+        if self.scope == McpScope::Workspace && self.workspace_path.is_none() {
+            self.error = Some("Workspace path is required for workspace MCPs".into());
             cx.notify();
             return;
         }
         let res = self.tokio.block_on(self.mcp_manager.detach_mcp(
             self.scope,
-            self.project_path.as_deref(),
+            self.workspace_path.as_deref(),
             &name,
         ));
         if let Err(e) = res {
@@ -521,13 +521,13 @@ impl Render for McpManagerDialog {
                         .pill()
                         .with_size(ComponentSize::Small)
                         .child(Tab::new().label("Shared"))
-                        .child(Tab::new().label("Project").disabled(!self.has_project))
+                        .child(Tab::new().label("Workspace").disabled(!self.has_workspace))
                         .selected_index(selected_index)
                         .on_click(cx.listener(|this, ix: &usize, _w, cx| {
                             let scope = if *ix == 0 {
                                 McpScope::Global
                             } else {
-                                McpScope::Local
+                                McpScope::Workspace
                             };
                             this.set_scope(scope, cx);
                         })),

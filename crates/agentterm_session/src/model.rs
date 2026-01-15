@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 /// let record = SessionRecord {
 ///     id: "session-1".to_string(),
 ///     title: "Terminal 1".to_string(),
-///     project_path: "/tmp".to_string(),
-///     section_id: "default".to_string(),
+///     workspace_path: "/tmp".to_string(),
+///     workspace_id: "default".to_string(),
 ///     tool: SessionTool::Shell,
 ///     command: "bash".to_string(),
 ///     status: SessionStatus::Idle,
@@ -19,6 +19,10 @@ use serde::{Deserialize, Serialize};
 ///     loaded_mcp_names: vec![],
 ///     is_open: true,
 ///     tab_order: Some(0),
+///     is_custom_title: false,
+///     dynamic_title: None,
+///     args: vec![],
+///     icon: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,8 +30,8 @@ use serde::{Deserialize, Serialize};
 pub struct SessionRecord {
     pub id: String,
     pub title: String,
-    pub project_path: String,
-    pub section_id: String,
+    pub workspace_path: String,
+    pub workspace_id: String,
     pub tool: SessionTool,
     pub command: String,
     /// Shell-specific arguments (e.g., ["-d", "Ubuntu"] for WSL)
@@ -51,13 +55,13 @@ pub struct SessionRecord {
     pub dynamic_title: Option<String>,
 }
 
-/// Section metadata for organizing sessions.
+/// Workspace metadata for organizing sessions.
 ///
 /// Example:
 /// ```rust,ignore
-/// let section = SectionRecord {
+/// let workspace = WorkspaceRecord {
 ///     id: "default".to_string(),
-///     name: "Default".to_string(),
+///     name: "Default Workspace".to_string(),
 ///     path: "".to_string(),
 ///     icon: None,
 ///     collapsed: false,
@@ -66,7 +70,7 @@ pub struct SessionRecord {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SectionRecord {
+pub struct WorkspaceRecord {
     pub id: String,
     pub name: String,
     pub path: String,
@@ -115,8 +119,8 @@ pub enum SessionTool {
 /// ```rust,ignore
 /// let input = NewSessionInput {
 ///     title: "My Session".to_string(),
-///     project_path: "/tmp".to_string(),
-///     section_id: "default".to_string(),
+///     workspace_path: "/tmp".to_string(),
+///     workspace_id: "default".to_string(),
 ///     tool: SessionTool::Shell,
 ///     command: "bash".to_string(),
 /// };
@@ -125,8 +129,8 @@ pub enum SessionTool {
 #[serde(rename_all = "camelCase")]
 pub struct NewSessionInput {
     pub title: String,
-    pub project_path: String,
-    pub section_id: String,
+    pub workspace_path: String,
+    pub workspace_id: String,
     pub tool: SessionTool,
     pub command: String,
     /// Shell-specific arguments (e.g., ["-d", "Ubuntu"] for WSL)

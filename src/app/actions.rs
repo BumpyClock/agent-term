@@ -37,10 +37,10 @@ pub struct CloseSessionAction(pub String);
 pub struct RestartSessionAction(pub String);
 
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
-pub struct EditSection(pub String);
+pub struct EditWorkspace(pub String);
 
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
-pub struct RemoveSection(pub String);
+pub struct RemoveWorkspace(pub String);
 
 // Multi-window session transfer actions
 
@@ -55,18 +55,16 @@ pub struct MoveSessionToWindow {
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 pub struct OpenSessionInNewWindow(pub String);
 
-/// Move a section (project) to another window.
+/// Move a workspace to another window.
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
-pub struct MoveSectionToWindow {
-    pub section_id: String,
+pub struct MoveWorkspaceToWindow {
+    pub workspace_id: String,
     pub target_window_id: u64,
 }
 
-// Workspace actions
-
-/// Save the current workspace layout with a name.
+/// Move a workspace to a new window.
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
-pub struct SaveWorkspace;
+pub struct MoveWorkspaceToNewWindow(pub String);
 
 // Command palette actions
 

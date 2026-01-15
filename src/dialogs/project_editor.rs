@@ -1,4 +1,4 @@
-//! Project editor dialog for editing project name, path, and icon.
+//! Workspace editor dialog for editing workspace name, path, and icon.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -56,20 +56,20 @@ impl PathAutocompleteState {
     }
 }
 
-/// ProjectEditorDialog - A dialog for editing project name, path, and icon.
-pub struct ProjectEditorDialog {
+/// WorkspaceEditorDialog - A dialog for editing workspace name, path, and icon.
+pub struct WorkspaceEditorDialog {
     view: Entity<AgentTermApp>,
-    section_id: String,
+    workspace_id: String,
     name_input: Entity<GpuiInputState>,
     path_input: Entity<GpuiInputState>,
     current_icon: Option<String>,
     path_state: PathAutocompleteState,
 }
 
-impl ProjectEditorDialog {
+impl WorkspaceEditorDialog {
     pub fn new(
         view: Entity<AgentTermApp>,
-        section_id: String,
+        workspace_id: String,
         name_input: Entity<GpuiInputState>,
         path_input: Entity<GpuiInputState>,
         current_icon: Option<String>,
@@ -77,7 +77,7 @@ impl ProjectEditorDialog {
     ) -> Self {
         Self {
             view,
-            section_id,
+            workspace_id,
             name_input,
             path_input,
             current_icon,
@@ -193,21 +193,21 @@ impl ProjectEditorDialog {
         window.close_dialog(cx);
 
         let view = self.view.clone();
-        let section_id = self.section_id.clone();
+        let workspace_id = self.workspace_id.clone();
         let icon = self.current_icon.clone();
         view.update(cx, |app, cx| {
-            let _ = app.session_store.rename_section(&section_id, name);
+            let _ = app.session_store.rename_workspace(&workspace_id, name);
             let _ = app
                 .session_store
-                .set_section_path(&section_id, normalized_path);
-            let _ = app.session_store.set_section_icon(&section_id, icon);
+                .set_workspace_path(&workspace_id, normalized_path);
+            let _ = app.session_store.set_workspace_icon(&workspace_id, icon);
             app.reload_from_store(cx);
             app.ensure_active_terminal(window, cx);
         });
     }
 }
 
-impl Render for ProjectEditorDialog {
+impl Render for WorkspaceEditorDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_icon = self.current_icon.clone();
         let entity = cx.entity().clone();
@@ -221,7 +221,7 @@ impl Render for ProjectEditorDialog {
 
         v_flex()
             .gap(px(16.))
-            // Icon section with inline IconPicker
+            // Icon workspace with inline IconPicker
             .child(
                 div()
                     .flex()
@@ -234,7 +234,7 @@ impl Render for ProjectEditorDialog {
                             .child("Icon"),
                     )
                     .child(
-                        IconPicker::new("project-icon-picker")
+                        IconPicker::new("workspace-icon-picker")
                             .value(
                                 current_icon
                                     .as_ref()
@@ -279,7 +279,7 @@ impl Render for ProjectEditorDialog {
                             .gap(px(8.))
                             .child(agentterm_input_field(&self.path_input).flex_1())
                             .child(
-                                Button::new("project-path-browse")
+                                Button::new("workspace-path-browse")
                                     .label("Browse")
                                     .compact()
                                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
@@ -307,7 +307,7 @@ impl Render for ProjectEditorDialog {
                                 let suggestion_value = suggestion.clone();
                                 list = list.child(
                                     div()
-                                        .id(format!("project-path-suggestion-{}", index))
+                                        .id(format!("workspace-path-suggestion-{}", index))
                                         .px(px(6.))
                                         .py(px(4.))
                                         .rounded(px(4.))
@@ -343,7 +343,7 @@ impl Render for ProjectEditorDialog {
     }
 }
 
-pub struct AddProjectDialog {
+pub struct AddWorkspaceDialog {
     view: Entity<AgentTermApp>,
     name_input: Entity<GpuiInputState>,
     path_input: Entity<GpuiInputState>,
@@ -351,7 +351,7 @@ pub struct AddProjectDialog {
     path_state: PathAutocompleteState,
 }
 
-impl AddProjectDialog {
+impl AddWorkspaceDialog {
     pub fn new(
         view: Entity<AgentTermApp>,
         name_input: Entity<GpuiInputState>,
@@ -481,12 +481,12 @@ impl AddProjectDialog {
             .or_else(|| Some(icon_descriptor_to_string(&IconDescriptor::lucide("folder"))));
 
         view.update(cx, |app, cx| {
-            if let Ok(section) = app.session_store.create_section(name, normalized_path) {
-                let _ = app.session_store.set_section_icon(&section.id, icon);
+            if let Ok(workspace) = app.session_store.create_workspace(name, normalized_path) {
+                let _ = app.session_store.set_workspace_icon(&workspace.id, icon);
                 app.layout_store
                     .update_window(&app.layout_window_id, |layout| {
-                        if !layout.section_order.contains(&section.id) {
-                            layout.section_order.push(section.id.clone());
+                        if !layout.workspace_order.contains(&workspace.id) {
+                            layout.workspace_order.push(workspace.id.clone());
                         }
                     });
                 app.reload_from_store(cx);
@@ -496,7 +496,7 @@ impl AddProjectDialog {
     }
 }
 
-impl Render for AddProjectDialog {
+impl Render for AddWorkspaceDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_icon = self.current_icon.clone();
         let entity = cx.entity().clone();
@@ -522,7 +522,7 @@ impl Render for AddProjectDialog {
                             .child("Icon"),
                     )
                     .child(
-                        IconPicker::new("add-project-icon-picker")
+                        IconPicker::new("add-workspace-icon-picker")
                             .value(
                                 current_icon
                                     .as_ref()
@@ -566,7 +566,7 @@ impl Render for AddProjectDialog {
                             .gap(px(8.))
                             .child(agentterm_input_field(&self.path_input).flex_1())
                             .child(
-                                Button::new("add-project-path-browse")
+                                Button::new("add-workspace-path-browse")
                                     .label("Browse")
                                     .compact()
                                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
@@ -594,7 +594,7 @@ impl Render for AddProjectDialog {
                                 let suggestion_value = suggestion.clone();
                                 list = list.child(
                                     div()
-                                        .id(format!("add-project-path-suggestion-{}", index))
+                                        .id(format!("add-workspace-path-suggestion-{}", index))
                                         .px(px(6.))
                                         .py(px(4.))
                                         .rounded(px(4.))

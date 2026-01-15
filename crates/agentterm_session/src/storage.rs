@@ -10,7 +10,7 @@ use parking_lot::Mutex as PLMutex;
 use serde::{Deserialize, Serialize};
 
 use super::error::{StorageError, StorageResult};
-use super::model::{SectionRecord, SessionRecord};
+use super::model::{SessionRecord, WorkspaceRecord};
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -20,7 +20,7 @@ pub struct StorageSnapshot {
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     pub sessions: Vec<SessionRecord>,
-    pub sections: Vec<SectionRecord>,
+    pub workspaces: Vec<WorkspaceRecord>,
     pub active_session_id: Option<String>,
 }
 
@@ -45,7 +45,7 @@ impl Storage {
             return Ok(StorageSnapshot {
                 schema_version: SCHEMA_VERSION,
                 sessions: Vec::new(),
-                sections: Vec::new(),
+                workspaces: Vec::new(),
                 active_session_id: None,
             });
         }
@@ -260,7 +260,7 @@ mod tests {
         let snapshot = storage.load().unwrap();
         assert_eq!(snapshot.schema_version, SCHEMA_VERSION);
         assert!(snapshot.sessions.is_empty());
-        assert!(snapshot.sections.is_empty());
+        assert!(snapshot.workspaces.is_empty());
         assert!(snapshot.active_session_id.is_none());
     }
 
@@ -272,7 +272,7 @@ mod tests {
         let snapshot = StorageSnapshot {
             schema_version: SCHEMA_VERSION,
             sessions: vec![],
-            sections: vec![],
+            workspaces: vec![],
             active_session_id: Some("test-id".to_string()),
         };
 
@@ -290,7 +290,7 @@ mod tests {
             let snapshot = StorageSnapshot {
                 schema_version: SCHEMA_VERSION,
                 sessions: vec![],
-                sections: vec![],
+                workspaces: vec![],
                 active_session_id: Some(format!("id-{}", i)),
             };
             storage.save(&snapshot).unwrap();
@@ -311,7 +311,7 @@ mod tests {
         let snapshot = StorageSnapshot {
             schema_version: SCHEMA_VERSION,
             sessions: vec![],
-            sections: vec![],
+            workspaces: vec![],
             active_session_id: Some("backup-id".to_string()),
         };
         // First save creates the file

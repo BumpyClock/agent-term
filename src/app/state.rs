@@ -9,7 +9,8 @@ use std::time::Duration;
 use agentterm_layout::{LayoutStore, WindowSnapshot, closed_tab_from};
 use agentterm_mcp::McpManager;
 use agentterm_session::{
-    DEFAULT_SECTION_ID, NewSessionInput, SectionRecord, SessionRecord, SessionStore, SessionTool,
+    DEFAULT_WORKSPACE_ID, NewSessionInput, SessionRecord, SessionStore, SessionTool,
+    WorkspaceRecord,
 };
 use agentterm_tools::{ShellInfo, ToolInfo};
 use git2::{DiffOptions, Repository};
@@ -27,7 +28,7 @@ use super::window_registry::WindowRegistry;
 
 use crate::settings::AppSettings;
 use crate::theme;
-use crate::ui::SectionItem;
+use crate::ui::WorkspaceItem;
 
 use gpui_component::command_palette::CommandPaletteState;
 
@@ -65,7 +66,7 @@ pub struct AgentTermApp {
     pub(crate) resize_start_x: Pixels,
     pub(crate) resize_start_width: f32,
 
-    pub(crate) sections: Vec<SectionItem>,
+    pub(crate) workspaces: Vec<WorkspaceItem>,
     pub(crate) sessions: Vec<SessionRecord>,
     pub(crate) active_session_id: Option<String>,
 
@@ -92,7 +93,7 @@ pub struct AgentTermApp {
     pub(crate) layout_store: Arc<LayoutStore>,
 
     /// This window's unique ID in the layout store.
-    /// Used to look up window-specific layout (tabs, section order, etc.).
+    /// Used to look up window-specific layout (tabs, workspace order, etc.).
     pub(crate) layout_window_id: String,
 
     /// Command palette state entity when open.
@@ -158,7 +159,7 @@ impl AgentTermApp {
             resizing_sidebar: false,
             resize_start_x: gpui::px(0.0),
             resize_start_width: 0.0,
-            sections: Vec::new(),
+            workspaces: Vec::new(),
             sessions: Vec::new(),
             active_session_id: None,
             terminal_views: HashMap::new(),
@@ -233,49 +234,57 @@ impl AgentTermApp {
     }
 
     /// Adds a session to this window's layout.
-    pub fn add_session_to_layout(&self, session_id: &str, section_id: &str) {
+    pub fn add_session_to_layout(&self, session_id: &str, workspace_id: &str) {
         let session_id = session_id.to_string();
-        let section_id = section_id.to_string();
+        let workspace_id = workspace_id.to_string();
         self.layout_store
             .update_window(&self.layout_window_id, |window| {
-                if !window.section_order.contains(&section_id) {
-                    window.section_order.push(section_id.clone());
+                if !window.workspace_order.contains(&workspace_id) {
+                    window.workspace_order.push(workspace_id.clone());
                 }
-                window.append_tab(session_id, section_id);
+                window.append_tab(session_id, workspace_id);
             });
     }
 
-    /// Returns sections ordered by this window's layout.
-    pub fn ordered_sections(&self) -> Vec<SectionItem> {
+    /// Returns workspaces ordered by this window's layout.
+    pub fn ordered_workspaces(&self) -> Vec<WorkspaceItem> {
         let Some(window) = self.window_layout() else {
-            return self.sections.clone();
+            return self.workspaces.clone();
         };
 
-        let mut visible_sections: Vec<String> = window
+        let mut visible_workspaces: Vec<String> = window
             .tabs
             .iter()
-            .map(|tab| tab.section_id.clone())
+            .map(|tab| tab.workspace_id.clone())
             .collect();
-        visible_sections.sort();
-        visible_sections.dedup();
+        visible_workspaces.sort();
+        visible_workspaces.dedup();
 
         let mut ordered = Vec::new();
-        for section_id in window.section_order {
-            if let Some(section) = self.sections.iter().find(|s| s.section.id == section_id) {
-                ordered.push(section.clone());
+        for workspace_id in window.workspace_order {
+            if let Some(workspace) = self
+                .workspaces
+                .iter()
+                .find(|s| s.workspace.id == workspace_id)
+            {
+                ordered.push(workspace.clone());
             }
         }
 
-        for section_id in visible_sections {
-            if !ordered.iter().any(|s| s.section.id == section_id) {
-                if let Some(section) = self.sections.iter().find(|s| s.section.id == section_id) {
-                    ordered.push(section.clone());
+        for workspace_id in visible_workspaces {
+            if !ordered.iter().any(|s| s.workspace.id == workspace_id) {
+                if let Some(workspace) = self
+                    .workspaces
+                    .iter()
+                    .find(|s| s.workspace.id == workspace_id)
+                {
+                    ordered.push(workspace.clone());
                 }
             }
         }
 
         if ordered.is_empty() {
-            self.sections
+            self.workspaces
                 .iter()
                 .filter(|s| s.is_default)
                 .cloned()
@@ -285,20 +294,20 @@ impl AgentTermApp {
         }
     }
 
-    /// Returns session records ordered by this window's layout for a section.
-    pub fn ordered_sessions_for_section(&self, section_id: &str) -> Vec<&SessionRecord> {
+    /// Returns session records ordered by this window's layout for a workspace.
+    pub fn ordered_sessions_for_workspace(&self, workspace_id: &str) -> Vec<&SessionRecord> {
         let Some(window) = self.window_layout() else {
             return self
                 .sessions
                 .iter()
-                .filter(|s| s.section_id == section_id)
+                .filter(|s| s.workspace_id == workspace_id)
                 .collect();
         };
 
         let mut tabs: Vec<_> = window
             .tabs
             .iter()
-            .filter(|t| t.section_id == section_id)
+            .filter(|t| t.workspace_id == workspace_id)
             .collect();
         tabs.sort_by_key(|tab| tab.order);
 
@@ -312,37 +321,39 @@ impl AgentTermApp {
         ordered
     }
 
-    /// Returns whether a section is collapsed in this window.
-    pub fn is_section_collapsed(&self, section_id: &str) -> bool {
+    /// Returns whether a workspace is collapsed in this window.
+    pub fn is_workspace_collapsed(&self, workspace_id: &str) -> bool {
         let Some(window) = self.window_layout() else {
             return self
-                .sections
+                .workspaces
                 .iter()
-                .find(|s| s.section.id == section_id)
-                .map(|s| s.section.collapsed)
+                .find(|s| s.workspace.id == workspace_id)
+                .map(|s| s.workspace.collapsed)
                 .unwrap_or(false);
         };
 
-        window.collapsed_sections.contains(&section_id.to_string())
+        window
+            .collapsed_workspaces
+            .contains(&workspace_id.to_string())
     }
     pub fn reload_from_store(&mut self, cx: &mut Context<Self>) {
-        let mut sections: Vec<SectionItem> = self
+        let mut workspaces: Vec<WorkspaceItem> = self
             .session_store
-            .list_sections()
+            .list_workspaces()
             .into_iter()
-            .map(|section| SectionItem {
-                section,
+            .map(|workspace| WorkspaceItem {
+                workspace,
                 is_default: false,
             })
             .collect();
 
-        sections.sort_by_key(|s| s.section.order);
-        sections.insert(
+        workspaces.sort_by_key(|s| s.workspace.order);
+        workspaces.insert(
             0,
-            SectionItem {
-                section: SectionRecord {
-                    id: DEFAULT_SECTION_ID.to_string(),
-                    name: "Default".to_string(),
+            WorkspaceItem {
+                workspace: WorkspaceRecord {
+                    id: DEFAULT_WORKSPACE_ID.to_string(),
+                    name: "Default Workspace".to_string(),
                     path: String::new(),
                     icon: None,
                     collapsed: false,
@@ -360,7 +371,7 @@ impl AgentTermApp {
             .or_else(|| self.session_store.active_session_id())
             .or_else(|| sessions.first().map(|s| s.id.clone()));
 
-        self.sections = sections;
+        self.workspaces = workspaces;
         self.sessions = sessions;
         self.active_session_id = active_session_id;
         self.refresh_git_status(cx);
@@ -376,10 +387,15 @@ impl AgentTermApp {
 
     fn collect_git_repo_roots(&mut self) -> Vec<PathBuf> {
         let mut roots = Vec::new();
-        let section_paths: HashMap<String, String> = self
-            .sections
+        let workspace_paths: HashMap<String, String> = self
+            .workspaces
             .iter()
-            .map(|section| (section.section.id.clone(), section.section.path.clone()))
+            .map(|workspace| {
+                (
+                    workspace.workspace.id.clone(),
+                    workspace.workspace.path.clone(),
+                )
+            })
             .collect();
         let sessions: Vec<(String, String, String)> = self
             .sessions
@@ -387,16 +403,19 @@ impl AgentTermApp {
             .map(|session| {
                 (
                     session.id.clone(),
-                    session.project_path.clone(),
-                    session.section_id.clone(),
+                    session.workspace_path.clone(),
+                    session.workspace_id.clone(),
                 )
             })
             .collect();
-        for (session_id, project_path, section_id) in sessions {
-            let mut resolved_path = if project_path.is_empty() {
-                section_paths.get(&section_id).cloned().unwrap_or_default()
+        for (session_id, workspace_path, workspace_id) in sessions {
+            let mut resolved_path = if workspace_path.is_empty() {
+                workspace_paths
+                    .get(&workspace_id)
+                    .cloned()
+                    .unwrap_or_default()
             } else {
-                project_path
+                workspace_path
             };
             if resolved_path.is_empty() {
                 if let Ok(current_dir) = env::current_dir() {
@@ -416,11 +435,11 @@ impl AgentTermApp {
         roots
     }
 
-    fn repo_root_for_path(&mut self, project_path: &str) -> Option<PathBuf> {
-        if project_path.is_empty() {
+    fn repo_root_for_path(&mut self, workspace_path: &str) -> Option<PathBuf> {
+        if workspace_path.is_empty() {
             return None;
         }
-        let path = PathBuf::from(project_path);
+        let path = PathBuf::from(workspace_path);
         if let Some(root) = self.git_repo_cache.get(&path) {
             return root.clone();
         }
@@ -571,12 +590,12 @@ impl AgentTermApp {
         self.sessions.iter().find(|s| s.id == id)
     }
 
-    pub fn active_section(&self) -> Option<&SectionRecord> {
+    pub fn active_workspace(&self) -> Option<&WorkspaceRecord> {
         let session = self.active_session()?;
-        self.sections
+        self.workspaces
             .iter()
-            .find(|s| s.section.id == session.section_id)
-            .map(|s| &s.section)
+            .find(|s| s.workspace.id == session.workspace_id)
+            .map(|s| &s.workspace)
     }
 
     pub fn set_active_session_id(
@@ -701,18 +720,18 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (section_id, project_path) = self
-            .active_section()
+        let (workspace_id, workspace_path) = self
+            .active_workspace()
             .map(|s| (s.id.clone(), s.path.clone()))
-            .unwrap_or_else(|| (DEFAULT_SECTION_ID.to_string(), String::new()));
+            .unwrap_or_else(|| (DEFAULT_WORKSPACE_ID.to_string(), String::new()));
 
-        // Inject --mcp-config for Claude if project has managed MCP config
-        let final_args = self.maybe_inject_mcp_config(&tool, args, &project_path);
+        // Inject --mcp-config for Claude if workspace has managed MCP config
+        let final_args = self.maybe_inject_mcp_config(&tool, args, &workspace_path);
 
         let input = NewSessionInput {
             title,
-            project_path,
-            section_id,
+            workspace_path,
+            workspace_id,
             tool,
             command,
             args: if final_args.is_empty() {
@@ -726,7 +745,7 @@ impl AgentTermApp {
         match self.session_store.create_session(input) {
             Ok(record) => {
                 // Add to this window's layout
-                self.add_session_to_layout(&record.id, &record.section_id);
+                self.add_session_to_layout(&record.id, &record.workspace_id);
                 let _ = self
                     .session_store
                     .set_active_session(Some(record.id.clone()));
@@ -741,11 +760,11 @@ impl AgentTermApp {
         cx.notify();
     }
 
-    /// Create a new session in a specific section (project).
-    /// Similar to `create_session_from_tool` but allows specifying the target section.
-    pub fn create_session_in_section(
+    /// Create a new session in a specific workspace.
+    /// Similar to `create_session_from_tool` but allows specifying the target workspace.
+    pub fn create_session_in_workspace(
         &mut self,
-        section_id: String,
+        workspace_id: String,
         tool: SessionTool,
         title: String,
         command: String,
@@ -754,21 +773,21 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Look up the section to get its project path
-        let project_path = self
-            .sections
+        // Look up the workspace to get its workspace path
+        let workspace_path = self
+            .workspaces
             .iter()
-            .find(|s| s.section.id == section_id)
-            .map(|s| s.section.path.clone())
+            .find(|s| s.workspace.id == workspace_id)
+            .map(|s| s.workspace.path.clone())
             .unwrap_or_default();
 
-        // Inject --mcp-config for Claude if project has managed MCP config
-        let final_args = self.maybe_inject_mcp_config(&tool, args, &project_path);
+        // Inject --mcp-config for Claude if workspace has managed MCP config
+        let final_args = self.maybe_inject_mcp_config(&tool, args, &workspace_path);
 
         let input = NewSessionInput {
             title,
-            project_path,
-            section_id,
+            workspace_path,
+            workspace_id,
             tool,
             command,
             args: if final_args.is_empty() {
@@ -782,7 +801,7 @@ impl AgentTermApp {
         match self.session_store.create_session(input) {
             Ok(record) => {
                 // Add to this window's layout
-                self.add_session_to_layout(&record.id, &record.section_id);
+                self.add_session_to_layout(&record.id, &record.workspace_id);
                 let _ = self
                     .session_store
                     .set_active_session(Some(record.id.clone()));
@@ -801,10 +820,13 @@ impl AgentTermApp {
         &self,
         tool: &SessionTool,
         mut args: Vec<String>,
-        project_path: &str,
+        workspace_path: &str,
     ) -> Vec<String> {
         if matches!(tool, SessionTool::Claude) {
-            if let Some(config_path) = self.mcp_manager.get_project_mcp_config_path(project_path) {
+            if let Some(config_path) = self
+                .mcp_manager
+                .get_workspace_mcp_config_path(workspace_path)
+            {
                 args.push("--mcp-config".to_string());
                 args.push(config_path.to_string_lossy().to_string());
             }
@@ -912,10 +934,10 @@ impl AgentTermApp {
         } else {
             Some(session.args.clone())
         };
-        let working_directory = if session.project_path.is_empty() {
+        let working_directory = if session.workspace_path.is_empty() {
             env::current_dir().ok()
         } else {
-            Some(PathBuf::from(session.project_path.clone()))
+            Some(PathBuf::from(session.workspace_path.clone()))
         };
 
         let mut env_vars: HashMap<String, String> = env::vars().collect();

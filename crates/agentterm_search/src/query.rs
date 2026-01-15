@@ -14,8 +14,8 @@ pub struct SearchResult {
     pub source: MessageSource,
     /// Path to the source JSONL file.
     pub file_path: String,
-    /// Project name derived from directory.
-    pub project_name: String,
+    /// Workspace name derived from directory.
+    pub workspace_name: String,
     /// Message type: "user" or "assistant".
     pub message_type: String,
     /// ISO timestamp of the message.
@@ -182,7 +182,7 @@ impl SearchEngine {
         SearchResult {
             source: candidate.msg_ref.source,
             file_path: candidate.msg_ref.file_path,
-            project_name: candidate.msg_ref.project_name,
+            workspace_name: candidate.msg_ref.workspace_name,
             message_type: candidate.msg_ref.message_type,
             timestamp: candidate.msg_ref.timestamp,
             snippet,
@@ -285,7 +285,7 @@ mod tests {
     fn create_test_message(content: &str) -> IndexedMessage {
         IndexedMessage {
             file_path: "/test/path.jsonl".to_string(),
-            project_name: "test-project".to_string(),
+            workspace_name: "test-workspace".to_string(),
             message_type: "user".to_string(),
             timestamp: Some("2025-01-01T00:00:00Z".to_string()),
             content: content.to_string(),
@@ -320,8 +320,8 @@ mod tests {
     fn test_session_id_extraction() {
         let msg_ref = MessageRef {
             source: MessageSource::Claude,
-            file_path: "/Users/test/.claude/projects/my-project/abc123def.jsonl".to_string(),
-            project_name: "my-project".to_string(),
+            file_path: "/Users/test/.claude/projects/my-workspace/abc123def.jsonl".to_string(),
+            workspace_name: "my-workspace".to_string(),
             message_type: "user".to_string(),
             timestamp: None,
             uuid: None,

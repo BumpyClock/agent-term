@@ -1,6 +1,6 @@
 use super::config::{
     MCPServerConfig, McpJsonConfig, UserConfig, get_config_path, get_managed_global_mcp_path,
-    get_managed_project_mcp_path,
+    get_managed_workspace_mcp_path,
 };
 use super::error::{McpError, McpResult};
 use super::pool_manager;
@@ -21,10 +21,8 @@ use tokio::io::AsyncWriteExt;
 pub enum McpScope {
     /// Global scope (Agent Term managed MCP config)
     Global,
-    /// Project scope (project .mcp.json)
-    Project,
-    /// Local scope (project .mcp.json)
-    Local,
+    /// Workspace scope (workspace .mcp.json)
+    Workspace,
 }
 
 /// MCP Manager handles configuration and attachment of MCP servers
@@ -165,36 +163,31 @@ impl McpManager {
     }
 
     /// Get the MCP config file path for launching tools (if it exists)
-    /// Returns the path to the AgentTerm-managed project config if it exists
-    pub fn get_project_mcp_config_path(&self, project_path: &str) -> Option<PathBuf> {
-        if project_path.is_empty() {
+    /// Returns the path to the AgentTerm-managed workspace config if it exists
+    pub fn get_workspace_mcp_config_path(&self, workspace_path: &str) -> Option<PathBuf> {
+        if workspace_path.is_empty() {
             return None;
         }
-        let path = get_managed_project_mcp_path(project_path).ok()?;
+        let path = get_managed_workspace_mcp_path(workspace_path).ok()?;
         if path.exists() { Some(path) } else { None }
     }
 
     /// Get attached MCPs for a given scope
     ///
     /// # Arguments
-    /// * `scope` - Attachment scope (Global, Project, or Local)
-    /// * `project_path` - Project directory path (required for Project and Local scopes)
+    /// * `scope` - Attachment scope (Global or Workspace)
+    /// * `workspace_path` - Workspace directory path (required for Workspace scope)
     pub async fn get_attached_mcps(
         &self,
         scope: McpScope,
-        project_path: Option<&str>,
+        workspace_path: Option<&str>,
     ) -> McpResult<Vec<String>> {
         match scope {
             McpScope::Global => self.get_global_mcps().await,
-            McpScope::Project => {
-                let path = project_path
-                    .ok_or_else(|| McpError::InvalidInput("project_path required".to_string()))?;
-                self.get_local_mcps(path).await
-            }
-            McpScope::Local => {
-                let path = project_path
-                    .ok_or_else(|| McpError::InvalidInput("project_path required".to_string()))?;
-                self.get_local_mcps(path).await
+            McpScope::Workspace => {
+                let path = workspace_path
+                    .ok_or_else(|| McpError::InvalidInput("workspace_path required".to_string()))?;
+                self.get_workspace_mcps(path).await
             }
         }
     }
@@ -230,9 +223,9 @@ impl McpManager {
         Ok(names)
     }
 
-    /// Get local MCPs (AgentTerm-managed project config)
-    async fn get_local_mcps(&self, project_path: &str) -> McpResult<Vec<String>> {
-        let managed_path = get_managed_project_mcp_path(project_path)?;
+    /// Get workspace MCPs (AgentTerm-managed workspace config)
+    async fn get_workspace_mcps(&self, workspace_path: &str) -> McpResult<Vec<String>> {
+        let managed_path = get_managed_workspace_mcp_path(workspace_path)?;
         if managed_path.exists() {
             let contents = fs::read_to_string(&managed_path).await.map_err(|e| {
                 diagnostics::log(format!(
@@ -263,13 +256,13 @@ impl McpManager {
     /// Attach an MCP to a scope
     ///
     /// # Arguments
-    /// * `scope` - Attachment scope (Global, Project, or Local)
-    /// * `project_path` - Project directory path (required for Project and Local scopes)
+    /// * `scope` - Attachment scope (Global or Workspace)
+    /// * `workspace_path` - Workspace directory path (required for Workspace scope)
     /// * `mcp_name` - Name of MCP to attach
     pub async fn attach_mcp(
         &self,
         scope: McpScope,
-        project_path: Option<&str>,
+        workspace_path: Option<&str>,
         mcp_name: &str,
     ) -> McpResult<()> {
         // Verify MCP exists
@@ -277,17 +270,13 @@ impl McpManager {
 
         match scope {
             McpScope::Global => self.attach_mcp_global(mcp_name, &mcp_def).await,
-            McpScope::Project => {
-                let path = project_path.ok_or_else(|| {
-                    McpError::InvalidInput("project_path required for project scope".to_string())
+            McpScope::Workspace => {
+                let path = workspace_path.ok_or_else(|| {
+                    McpError::InvalidInput(
+                        "workspace_path required for workspace scope".to_string(),
+                    )
                 })?;
-                self.attach_mcp_local(path, mcp_name, &mcp_def).await
-            }
-            McpScope::Local => {
-                let path = project_path.ok_or_else(|| {
-                    McpError::InvalidInput("project_path required for local scope".to_string())
-                })?;
-                self.attach_mcp_local(path, mcp_name, &mcp_def).await
+                self.attach_mcp_workspace(path, mcp_name, &mcp_def).await
             }
         }
     }
@@ -317,14 +306,14 @@ impl McpManager {
         self.write_mcp_json(&config_path, &config).await
     }
 
-    /// Attach MCP to local scope (AgentTerm-managed project config)
-    async fn attach_mcp_local(
+    /// Attach MCP to workspace scope (AgentTerm-managed workspace config)
+    async fn attach_mcp_workspace(
         &self,
-        project_path: &str,
+        workspace_path: &str,
         mcp_name: &str,
         mcp_def: &super::config::MCPDef,
     ) -> McpResult<()> {
-        let mcp_json_path = get_managed_project_mcp_path(project_path)?;
+        let mcp_json_path = get_managed_workspace_mcp_path(workspace_path)?;
 
         // Read existing managed config or create new
         let mut config = if mcp_json_path.exists() {
@@ -352,28 +341,24 @@ impl McpManager {
     /// Detach an MCP from a scope
     ///
     /// # Arguments
-    /// * `scope` - Attachment scope (Global, Project, or Local)
-    /// * `project_path` - Project directory path (required for Project and Local scopes)
+    /// * `scope` - Attachment scope (Global or Workspace)
+    /// * `workspace_path` - Workspace directory path (required for Workspace scope)
     /// * `mcp_name` - Name of MCP to detach
     pub async fn detach_mcp(
         &self,
         scope: McpScope,
-        project_path: Option<&str>,
+        workspace_path: Option<&str>,
         mcp_name: &str,
     ) -> McpResult<()> {
         match scope {
             McpScope::Global => self.detach_mcp_global(mcp_name).await,
-            McpScope::Project => {
-                let path = project_path.ok_or_else(|| {
-                    McpError::InvalidInput("project_path required for project scope".to_string())
+            McpScope::Workspace => {
+                let path = workspace_path.ok_or_else(|| {
+                    McpError::InvalidInput(
+                        "workspace_path required for workspace scope".to_string(),
+                    )
                 })?;
-                self.detach_mcp_local(path, mcp_name).await
-            }
-            McpScope::Local => {
-                let path = project_path.ok_or_else(|| {
-                    McpError::InvalidInput("project_path required for local scope".to_string())
-                })?;
-                self.detach_mcp_local(path, mcp_name).await
+                self.detach_mcp_workspace(path, mcp_name).await
             }
         }
     }
@@ -394,9 +379,9 @@ impl McpManager {
         self.write_mcp_json(&config_path, &config).await
     }
 
-    /// Detach MCP from local scope (AgentTerm-managed project config)
-    async fn detach_mcp_local(&self, project_path: &str, mcp_name: &str) -> McpResult<()> {
-        let mcp_json_path = get_managed_project_mcp_path(project_path)?;
+    /// Detach MCP from workspace scope (AgentTerm-managed workspace config)
+    async fn detach_mcp_workspace(&self, workspace_path: &str, mcp_name: &str) -> McpResult<()> {
+        let mcp_json_path = get_managed_workspace_mcp_path(workspace_path)?;
 
         if !mcp_json_path.exists() {
             return Ok(()); // Nothing to detach
@@ -537,13 +522,13 @@ impl McpManager {
     /// Set multiple MCPs at once for a scope (replaces existing)
     ///
     /// # Arguments
-    /// * `scope` - Attachment scope (Global, Project, or Local)
-    /// * `project_path` - Project directory path (required for Project and Local scopes)
+    /// * `scope` - Attachment scope (Global or Workspace)
+    /// * `workspace_path` - Workspace directory path (required for Workspace scope)
     /// * `mcp_names` - Names of MCPs to attach
     pub async fn set_mcps(
         &self,
         scope: McpScope,
-        project_path: Option<&str>,
+        workspace_path: Option<&str>,
         mcp_names: &[String],
     ) -> McpResult<()> {
         // Verify all MCPs exist
@@ -563,17 +548,13 @@ impl McpManager {
 
         match scope {
             McpScope::Global => self.set_mcps_global(&mcp_defs).await,
-            McpScope::Project => {
-                let path = project_path.ok_or_else(|| {
-                    McpError::InvalidInput("project_path required for project scope".to_string())
+            McpScope::Workspace => {
+                let path = workspace_path.ok_or_else(|| {
+                    McpError::InvalidInput(
+                        "workspace_path required for workspace scope".to_string(),
+                    )
                 })?;
-                self.set_mcps_local(path, &mcp_defs).await
-            }
-            McpScope::Local => {
-                let path = project_path.ok_or_else(|| {
-                    McpError::InvalidInput("project_path required for local scope".to_string())
-                })?;
-                self.set_mcps_local(path, &mcp_defs).await
+                self.set_mcps_workspace(path, &mcp_defs).await
             }
         }
     }
@@ -592,13 +573,13 @@ impl McpManager {
         self.write_mcp_json(&config_path, &config).await
     }
 
-    /// Set local MCPs (AgentTerm-managed project config)
-    async fn set_mcps_local(
+    /// Set workspace MCPs (AgentTerm-managed workspace config)
+    async fn set_mcps_workspace(
         &self,
-        project_path: &str,
+        workspace_path: &str,
         mcp_defs: &HashMap<String, super::config::MCPDef>,
     ) -> McpResult<()> {
-        let mcp_json_path = get_managed_project_mcp_path(project_path)?;
+        let mcp_json_path = get_managed_workspace_mcp_path(workspace_path)?;
 
         // Create new config
         let mut config = McpJsonConfig::default();
@@ -645,7 +626,7 @@ impl McpManager {
 # ============================================================================
 # MCP Server Definitions
 # ============================================================================
-# Define available MCP servers here. These can be attached/detached per-project
+# Define available MCP servers here. These can be attached/detached per-workspace
 # using the MCP Manager.
 #
 # Supports two transport types:
@@ -672,7 +653,7 @@ impl McpManager {
 # Example: Filesystem MCP with restricted paths
 # [mcps.filesystem]
 # command = "npx"
-# args = ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/projects"]
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/workspaces"]
 # description = "Read/write local files"
 
 # Example: Sequential Thinking MCP
@@ -732,8 +713,7 @@ mod tests {
     #[test]
     fn test_mcp_scope_display() {
         assert_eq!(format!("{:?}", McpScope::Global), "Global");
-        assert_eq!(format!("{:?}", McpScope::Project), "Project");
-        assert_eq!(format!("{:?}", McpScope::Local), "Local");
+        assert_eq!(format!("{:?}", McpScope::Workspace), "Workspace");
     }
 
     #[test]
