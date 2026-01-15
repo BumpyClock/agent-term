@@ -240,7 +240,7 @@ mod tests {
             .closed_tab_stack
             .push(crate::model::ClosedTabSnapshot {
                 session_id: "test-session".to_string(),
-                section_id: "default".to_string(),
+                workspace_id: "default".to_string(),
                 window_id: Some("window-1".to_string()),
                 order: 0,
                 closed_at: "2025-01-01T00:00:00Z".to_string(),
@@ -263,7 +263,7 @@ mod tests {
                 .closed_tab_stack
                 .push(crate::model::ClosedTabSnapshot {
                     session_id: format!("session-{}", i),
-                    section_id: "default".to_string(),
+                    workspace_id: "default".to_string(),
                     window_id: None,
                     order: i,
                     closed_at: "2025-01-01T00:00:00Z".to_string(),

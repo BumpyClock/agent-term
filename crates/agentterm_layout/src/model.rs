@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Complete layout snapshot persisted to disk.
 ///
 /// Contains the last active session layout, closed session for restore,
-/// closed tab stack, and saved workspaces.
+/// and closed tab stack.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayoutSnapshot {
@@ -18,8 +18,6 @@ pub struct LayoutSnapshot {
     pub last_closed_session: Option<LayoutSessionSnapshot>,
     #[serde(default)]
     pub closed_tab_stack: Vec<ClosedTabSnapshot>,
-    #[serde(default)]
-    pub saved_workspaces: Vec<SavedWorkspaceSnapshot>,
 }
 
 fn default_schema_version() -> u32 {
@@ -33,7 +31,6 @@ impl Default for LayoutSnapshot {
             last_session: None,
             last_closed_session: None,
             closed_tab_stack: Vec::new(),
-            saved_workspaces: Vec::new(),
         }
     }
 }
@@ -51,7 +48,7 @@ pub struct LayoutSessionSnapshot {
 
 /// Snapshot of a single window's layout.
 ///
-/// Contains tab ordering, active tab, and section (project) ordering.
+/// Contains tab ordering, active tab, and workspace ordering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowSnapshot {
@@ -59,11 +56,11 @@ pub struct WindowSnapshot {
     pub order: u32,
     pub active_session_id: Option<String>,
     #[serde(default)]
-    pub section_order: Vec<String>,
+    pub workspace_order: Vec<String>,
     #[serde(default)]
     pub tabs: Vec<TabSnapshot>,
     #[serde(default)]
-    pub collapsed_sections: Vec<String>,
+    pub collapsed_workspaces: Vec<String>,
 }
 
 impl WindowSnapshot {
@@ -73,9 +70,9 @@ impl WindowSnapshot {
             id,
             order,
             active_session_id: None,
-            section_order: Vec::new(),
+            workspace_order: Vec::new(),
             tabs: Vec::new(),
-            collapsed_sections: Vec::new(),
+            collapsed_workspaces: Vec::new(),
         }
     }
 
@@ -85,11 +82,11 @@ impl WindowSnapshot {
     }
 
     /// Adds a tab at the end of the tab list.
-    pub fn append_tab(&mut self, session_id: String, section_id: String) {
+    pub fn append_tab(&mut self, session_id: String, workspace_id: String) {
         let order = self.max_tab_order().saturating_add(1);
         self.tabs.push(TabSnapshot {
             session_id,
-            section_id,
+            workspace_id,
             order,
         });
     }
@@ -103,12 +100,12 @@ impl WindowSnapshot {
         }
     }
 
-    /// Returns tabs belonging to a specific section, sorted by order.
-    pub fn tabs_in_section(&self, section_id: &str) -> Vec<&TabSnapshot> {
+    /// Returns tabs belonging to a specific workspace, sorted by order.
+    pub fn tabs_in_workspace(&self, workspace_id: &str) -> Vec<&TabSnapshot> {
         let mut tabs: Vec<_> = self
             .tabs
             .iter()
-            .filter(|t| t.section_id == section_id)
+            .filter(|t| t.workspace_id == workspace_id)
             .collect();
         tabs.sort_by_key(|t| t.order);
         tabs
@@ -125,7 +122,7 @@ impl WindowSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct TabSnapshot {
     pub session_id: String,
-    pub section_id: String,
+    pub workspace_id: String,
     pub order: u32,
 }
 
@@ -134,18 +131,8 @@ pub struct TabSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ClosedTabSnapshot {
     pub session_id: String,
-    pub section_id: String,
+    pub workspace_id: String,
     pub window_id: Option<String>,
     pub order: u32,
     pub closed_at: String,
-}
-
-/// A saved workspace layout for explicit user saves.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SavedWorkspaceSnapshot {
-    pub id: String,
-    pub name: String,
-    pub created_at: String,
-    pub session: LayoutSessionSnapshot,
 }

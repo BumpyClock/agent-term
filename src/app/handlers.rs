@@ -13,11 +13,12 @@ use super::{
     LayoutManager, MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool, create_new_window,
     create_new_window_with_session, create_window_from_layout,
 };
-use agentterm_session::DEFAULT_SECTION_ID;
+use agentterm_session::DEFAULT_WORKSPACE_ID;
 use gpui_component::input::{Input as GpuiInput, InputState as GpuiInputState};
 
 use crate::dialogs::{
-    AddProjectDialog, McpManagerDialog, ProjectEditorDialog, SessionEditorDialog, TabPickerDialog,
+    AddWorkspaceDialog, McpManagerDialog, SessionEditorDialog, TabPickerDialog,
+    WorkspaceEditorDialog,
 };
 use crate::settings_dialog::SettingsDialog;
 use crate::ui::{ActiveTheme, Button, ButtonVariants, WindowExt, v_flex};
@@ -62,7 +63,7 @@ impl AgentTermApp {
         // Create the provider with current app state
         let provider = Arc::new(AgentTermProvider::new(
             self.sessions.clone(),
-            self.layout_store.clone(),
+            self.workspaces.clone(),
         ));
 
         // Open the palette using the new gpui-component CommandPalette
@@ -114,64 +115,18 @@ impl AgentTermApp {
                         cx.notify();
                     }
                     CommandPalettePayload::Workspace { id } => {
-                        let Some(workspace) = self.layout_store.get_workspace(id) else {
-                            return;
-                        };
-                        self.layout_store.set_active_workspace(Some(id.to_string()));
-
-                        let layout_manager = LayoutManager::global();
-                        let mut windows = workspace.session.windows;
-                        windows.sort_by_key(|window| window.order);
-
-                        let mut next_order = self
-                            .layout_store
-                            .current_session()
-                            .windows
-                            .iter()
-                            .map(|window| window.order)
-                            .max()
-                            .unwrap_or(0)
-                            .saturating_add(1);
-
-                        let mut new_window_ids = Vec::new();
-                        for window_snapshot in windows {
-                            let mut new_window = agentterm_layout::new_window_snapshot(next_order);
-                            new_window.active_session_id =
-                                window_snapshot.active_session_id.clone();
-                            new_window.section_order = window_snapshot.section_order.clone();
-                            new_window.tabs = window_snapshot.tabs.clone();
-                            new_window.collapsed_sections =
-                                window_snapshot.collapsed_sections.clone();
-
-                            next_order = next_order.saturating_add(1);
-                            let new_id = new_window.id.clone();
-                            self.layout_store.add_window(new_window);
-                            new_window_ids.push(new_id);
-                        }
-
-                        layout_manager.set_next_order(next_order);
-                        let mut failed_window_ids = Vec::new();
-                        for window_id in new_window_ids {
-                            if create_window_from_layout(window_id.clone(), cx).is_none() {
-                                eprintln!("Failed to create window from layout: {}", window_id);
-                                self.layout_store.remove_window(&window_id);
-                                failed_window_ids.push(window_id);
-                            }
-                        }
-                        if !failed_window_ids.is_empty() {
-                            eprintln!(
-                                "Failed to create {} window(s) from layout",
-                                failed_window_ids.len()
-                            );
+                        if let Some(session) = self.ordered_sessions_for_workspace(id).first() {
+                            self.active_session_id = Some(session.id.clone());
+                            cx.notify();
                         }
                     }
                     CommandPalettePayload::ClaudeConversation {
                         session_id,
-                        project,
+                        workspace,
                         ..
                     } => {
                         // Resume the past Claude conversation with claude --resume
-                        let title = format!("Resume: {}", project);
+                        let title = format!("Resume: {}", workspace);
                         let command = "claude".to_string();
                         let args = vec!["--resume".to_string(), session_id.clone()];
 
@@ -187,11 +142,11 @@ impl AgentTermApp {
                     }
                     CommandPalettePayload::CodexConversation {
                         session_id,
-                        project,
+                        workspace,
                         ..
                     } => {
                         // Resume the past Codex conversation with codex --resume
-                        let title = format!("Resume: {}", project);
+                        let title = format!("Resume: {}", workspace);
                         let command = "codex".to_string();
                         let args = vec!["--resume".to_string(), session_id.clone()];
 
@@ -304,14 +259,14 @@ impl AgentTermApp {
         );
     }
 
-    fn recent_project_paths(&self) -> Vec<String> {
+    fn recent_workspace_paths(&self) -> Vec<String> {
         let mut paths = Vec::new();
         let mut seen = HashSet::new();
-        for section in &self.sections {
-            if section.is_default {
+        for workspace in &self.workspaces {
+            if workspace.is_default {
                 continue;
             }
-            let path = section.section.path.trim();
+            let path = workspace.workspace.path.trim();
             if path.is_empty() {
                 continue;
             }
@@ -322,17 +277,17 @@ impl AgentTermApp {
         paths
     }
 
-    // Add project dialog
-    pub fn open_add_project_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    // Add workspace dialog
+    pub fn open_add_workspace_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.entity().clone();
-        let recent_paths = self.recent_project_paths();
+        let recent_paths = self.recent_workspace_paths();
 
-        let name_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Project name"));
-        let path_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Project path"));
+        let name_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Workspace name"));
+        let path_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Workspace path"));
         let name_focus = name_input.read(cx).focus_handle(cx);
 
         let dialog_entity = cx.new(|_cx| {
-            AddProjectDialog::new(
+            AddWorkspaceDialog::new(
                 view.clone(),
                 name_input.clone(),
                 path_input.clone(),
@@ -346,7 +301,7 @@ impl AgentTermApp {
 
         window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
-                .title("Add Project")
+                .title("Add Workspace")
                 .w(px(400.))
                 .child(dialog_entity.clone())
                 .footer({
@@ -374,45 +329,45 @@ impl AgentTermApp {
         name_focus.focus(window, cx);
     }
 
-    // Project editor dialog
-    pub fn open_project_editor(
+    // Workspace editor dialog
+    pub fn open_workspace_editor(
         &mut self,
-        section_id: String,
+        workspace_id: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(section) = self
-            .sections
+        let Some(workspace) = self
+            .workspaces
             .iter()
-            .find(|s| s.section.id == section_id)
-            .map(|s| s.section.clone())
+            .find(|s| s.workspace.id == workspace_id)
+            .map(|s| s.workspace.clone())
         else {
             return;
         };
 
         let view = cx.entity().clone();
-        let recent_paths = self.recent_project_paths();
+        let recent_paths = self.recent_workspace_paths();
 
         let name_input = cx.new(|cx| {
             GpuiInputState::new(window, cx)
-                .placeholder("Project name")
-                .default_value(section.name.clone())
+                .placeholder("Workspace name")
+                .default_value(workspace.name.clone())
         });
         let path_input = cx.new(|cx| {
             GpuiInputState::new(window, cx)
-                .placeholder("Project path")
-                .default_value(section.path.clone())
+                .placeholder("Workspace path")
+                .default_value(workspace.path.clone())
         });
 
         let name_focus = name_input.read(cx).focus_handle(cx);
 
         let dialog_entity = cx.new(|_cx| {
-            ProjectEditorDialog::new(
+            WorkspaceEditorDialog::new(
                 view.clone(),
-                section_id.clone(),
+                workspace_id.clone(),
                 name_input.clone(),
                 path_input.clone(),
-                section.icon.clone(),
+                workspace.icon.clone(),
                 recent_paths.clone(),
             )
         });
@@ -423,7 +378,7 @@ impl AgentTermApp {
 
         window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
-                .title("Edit Project")
+                .title("Edit Workspace")
                 .w(px(400.))
                 .child(dialog_entity.clone())
                 .footer({
@@ -533,16 +488,16 @@ impl AgentTermApp {
     }
 
     // Session ordering methods
-    pub fn move_session_to_section(
+    pub fn move_session_to_workspace(
         &mut self,
         session_id: String,
-        section_id: String,
+        workspace_id: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let _ = self
             .session_store
-            .move_session(&session_id, section_id.clone());
+            .move_session(&session_id, workspace_id.clone());
         self.layout_store
             .update_window(&self.layout_window_id, |layout| {
                 if let Some(tab) = layout
@@ -550,10 +505,10 @@ impl AgentTermApp {
                     .iter_mut()
                     .find(|tab| tab.session_id == session_id)
                 {
-                    tab.section_id = section_id.clone();
+                    tab.workspace_id = workspace_id.clone();
                 }
-                if !layout.section_order.contains(&section_id) {
-                    layout.section_order.push(section_id.clone());
+                if !layout.workspace_order.contains(&workspace_id) {
+                    layout.workspace_order.push(workspace_id.clone());
                 }
             });
         self.close_session_menu(cx);
@@ -565,7 +520,7 @@ impl AgentTermApp {
         let Some(session) = self.sessions.iter().find(|s| s.id == session_id).cloned() else {
             return;
         };
-        let section_id = session.section_id.clone();
+        let workspace_id = session.workspace_id.clone();
         let Some(window_layout) = self.window_layout() else {
             return;
         };
@@ -573,7 +528,7 @@ impl AgentTermApp {
         let mut ordered: Vec<String> = window_layout
             .tabs
             .iter()
-            .filter(|tab| tab.section_id == section_id)
+            .filter(|tab| tab.workspace_id == workspace_id)
             .map(|tab| tab.session_id.clone())
             .collect();
 
@@ -617,16 +572,17 @@ impl AgentTermApp {
             .active_session()
             .map(|s| s.title.clone())
             .unwrap_or_default();
-        let project_path = self.active_session().and_then(|s| {
-            if s.project_path.is_empty() {
+        let workspace_path = self.active_session().and_then(|s| {
+            if s.workspace_path.is_empty() {
                 None
             } else {
-                Some(s.project_path.clone())
+                Some(s.workspace_path.clone())
             }
         });
 
         let dialog_entity = cx.new(|_cx| {
-            let mut dialog = McpManagerDialog::new(tokio, mcp_manager, session_title, project_path);
+            let mut dialog =
+                McpManagerDialog::new(tokio, mcp_manager, session_title, workspace_path);
             dialog.load_data();
             dialog
         });
@@ -823,57 +779,57 @@ impl AgentTermApp {
         self.restart_session(action.0.clone(), window, cx);
     }
 
-    pub fn handle_edit_section(
+    pub fn handle_edit_workspace(
         &mut self,
-        action: &EditSection,
+        action: &EditWorkspace,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_project_editor(action.0.clone(), window, cx);
+        self.open_workspace_editor(action.0.clone(), window, cx);
     }
 
-    pub fn handle_remove_section(
+    pub fn handle_remove_workspace(
         &mut self,
-        action: &RemoveSection,
+        action: &RemoveWorkspace,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let section_id = action.0.clone();
+        let workspace_id = action.0.clone();
 
-        // Prevent removing the default section
-        if section_id == agentterm_session::DEFAULT_SECTION_ID {
+        // Prevent removing the default workspace
+        if workspace_id == agentterm_session::DEFAULT_WORKSPACE_ID {
             return;
         }
 
-        // Find the section
-        let Some(section) = self
-            .sections
+        // Find the workspace
+        let Some(workspace) = self
+            .workspaces
             .iter()
-            .find(|s| s.section.id == section_id)
-            .map(|s| s.section.clone())
+            .find(|s| s.workspace.id == workspace_id)
+            .map(|s| s.workspace.clone())
         else {
             return;
         };
 
-        // Count sessions in this section
+        // Count sessions in this workspace
         let session_count = self
             .sessions
             .iter()
-            .filter(|s| s.section_id == section_id)
+            .filter(|s| s.workspace_id == workspace_id)
             .count();
 
         // Get session titles for display (max 5)
         let session_titles: Vec<String> = self
             .sessions
             .iter()
-            .filter(|s| s.section_id == section_id)
+            .filter(|s| s.workspace_id == workspace_id)
             .take(5)
             .map(|s| s.title.clone())
             .collect();
 
         let view = cx.entity().clone();
-        let section_id_for_delete = section_id.clone();
-        let section_name = section.name.clone();
+        let workspace_id_for_delete = workspace_id.clone();
+        let workspace_name = workspace.name.clone();
 
         window.open_dialog(cx, move |dialog, _window, cx| {
             let mut content = v_flex().gap(px(12.));
@@ -881,7 +837,7 @@ impl AgentTermApp {
             // Confirmation message
             content = content.child(div().text_sm().child(format!(
                 "Are you sure you want to remove \"{}\"?",
-                section_name
+                workspace_name
             )));
 
             // Session info warning
@@ -908,13 +864,15 @@ impl AgentTermApp {
                                         .text_sm()
                                         .font_weight(gpui::FontWeight::MEDIUM)
                                         .text_color(cx.theme().warning)
-                                        .child(format!("This project has {}", tabs_text)),
+                                        .child(format!("This workspace has {}", tabs_text)),
                                 )
                                 .child(
                                     div()
                                         .text_sm()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child("These tabs will be moved to the Default section."),
+                                        .child(
+                                            "These tabs will be moved to the Default workspace.",
+                                        ),
                                 ),
                         ),
                 );
@@ -943,12 +901,12 @@ impl AgentTermApp {
             }
 
             dialog
-                .title("Remove Project")
+                .title("Remove Workspace")
                 .w(px(400.))
                 .child(content)
                 .footer({
                     let view = view.clone();
-                    let section_id = section_id_for_delete.clone();
+                    let workspace_id = workspace_id_for_delete.clone();
                     move |_ok, cancel, window, cx| {
                         vec![
                             cancel(window, cx),
@@ -957,11 +915,12 @@ impl AgentTermApp {
                                 .label("Remove")
                                 .on_click({
                                     let view = view.clone();
-                                    let section_id = section_id.clone();
+                                    let workspace_id = workspace_id.clone();
                                     move |_, window, cx| {
                                         window.close_dialog(cx);
                                         view.update(cx, |app, cx| {
-                                            let _ = app.session_store.delete_section(&section_id);
+                                            let _ =
+                                                app.session_store.delete_workspace(&workspace_id);
                                             app.reload_from_store(cx);
                                             app.ensure_active_terminal(window, cx);
                                         });
@@ -1013,10 +972,10 @@ impl AgentTermApp {
         self.open_session_in_new_window(action.0.clone(), window, cx);
     }
 
-    /// Handles the MoveSectionToWindow action.
-    pub fn handle_move_section_to_window(
+    /// Handles the MoveWorkspaceToWindow action.
+    pub fn handle_move_workspace_to_window(
         &mut self,
-        action: &MoveSectionToWindow,
+        action: &MoveWorkspaceToWindow,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1033,12 +992,38 @@ impl AgentTermApp {
             return;
         };
 
-        self.move_section_to_window(action.section_id.clone(), target_window, window, cx);
+        self.move_workspace_to_window(action.workspace_id.clone(), target_window, window, cx);
     }
 
-    pub fn move_section_to_window(
+    /// Handles the MoveWorkspaceToNewWindow action.
+    pub fn handle_move_workspace_to_new_window(
         &mut self,
-        section_id: String,
+        action: &MoveWorkspaceToNewWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(window_layout) = self.window_layout() else {
+            return;
+        };
+
+        if !window_layout
+            .tabs
+            .iter()
+            .any(|tab| tab.workspace_id == action.0)
+        {
+            return;
+        }
+
+        let Some(target_window) = create_new_window(cx) else {
+            return;
+        };
+
+        self.move_workspace_to_window(action.0.clone(), target_window, window, cx);
+    }
+
+    pub fn move_workspace_to_window(
+        &mut self,
+        workspace_id: String,
         target_window: AnyWindowHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1050,7 +1035,7 @@ impl AgentTermApp {
         let moved_tabs: Vec<String> = window_layout
             .tabs
             .iter()
-            .filter(|tab| tab.section_id == section_id)
+            .filter(|tab| tab.workspace_id == workspace_id)
             .map(|tab| tab.session_id.clone())
             .collect();
 
@@ -1064,8 +1049,8 @@ impl AgentTermApp {
 
         self.layout_store
             .update_window(&self.layout_window_id, |layout| {
-                layout.tabs.retain(|tab| tab.section_id != section_id);
-                layout.section_order.retain(|id| id != &section_id);
+                layout.tabs.retain(|tab| tab.workspace_id != workspace_id);
+                layout.workspace_order.retain(|id| id != &workspace_id);
                 if let Some(active_id) = layout.active_session_id.clone() {
                     if moved_tabs.contains(&active_id) {
                         layout.active_session_id =
@@ -1085,20 +1070,20 @@ impl AgentTermApp {
             }
         }
 
-        let section_id_for_target = section_id.clone();
+        let workspace_id_for_target = workspace_id.clone();
         let _ = cx.update_window(target_window, move |_root, window, cx| {
             if let Some(weak_app) = WindowRegistry::global().get_app(&target_window) {
                 if let Some(app) = weak_app.upgrade() {
                     app.update(cx, |app, cx| {
                         app.layout_store
                             .update_window(&app.layout_window_id, |layout| {
-                                if !layout.section_order.contains(&section_id_for_target) {
-                                    layout.section_order.push(section_id_for_target.clone());
+                                if !layout.workspace_order.contains(&workspace_id_for_target) {
+                                    layout.workspace_order.push(workspace_id_for_target.clone());
                                 }
                                 for session_id in &moved_tabs {
                                     layout.append_tab(
                                         session_id.clone(),
-                                        section_id_for_target.clone(),
+                                        workspace_id_for_target.clone(),
                                     );
                                 }
                                 layout.active_session_id = moved_tabs.first().cloned();
@@ -1128,12 +1113,12 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let section_id = self
+        let workspace_id = self
             .sessions
             .iter()
             .find(|s| s.id == session_id)
-            .map(|s| s.section_id.clone())
-            .unwrap_or_else(|| DEFAULT_SECTION_ID.to_string());
+            .map(|s| s.workspace_id.clone())
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
 
         self.terminal_views.remove(&session_id);
         self.layout_store
@@ -1155,19 +1140,19 @@ impl AgentTermApp {
         }
 
         let session_id_for_target = session_id.clone();
-        let section_id_for_target = section_id.clone();
+        let workspace_id_for_target = workspace_id.clone();
         let _ = cx.update_window(target_window, move |_root, window, cx| {
             if let Some(weak_app) = WindowRegistry::global().get_app(&target_window) {
                 if let Some(app) = weak_app.upgrade() {
                     app.update(cx, |app, cx| {
                         app.layout_store
                             .update_window(&app.layout_window_id, |layout| {
-                                if !layout.section_order.contains(&section_id_for_target) {
-                                    layout.section_order.push(section_id_for_target.clone());
+                                if !layout.workspace_order.contains(&workspace_id_for_target) {
+                                    layout.workspace_order.push(workspace_id_for_target.clone());
                                 }
                                 layout.append_tab(
                                     session_id_for_target.clone(),
-                                    section_id_for_target.clone(),
+                                    workspace_id_for_target.clone(),
                                 );
                                 layout.active_session_id = Some(session_id_for_target.clone());
                             });
@@ -1195,12 +1180,12 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let section_id = self
+        let workspace_id = self
             .sessions
             .iter()
             .find(|s| s.id == session_id)
-            .map(|s| s.section_id.clone())
-            .unwrap_or_else(|| DEFAULT_SECTION_ID.to_string());
+            .map(|s| s.workspace_id.clone())
+            .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
 
         self.terminal_views.remove(&session_id);
         self.layout_store
@@ -1212,7 +1197,7 @@ impl AgentTermApp {
                 }
             });
 
-        let _ = create_new_window_with_session(session_id.clone(), section_id, cx);
+        let _ = create_new_window_with_session(session_id.clone(), workspace_id, cx);
 
         if self.active_session_id.as_deref() == Some(&session_id) {
             self.active_session_id = self
@@ -1275,10 +1260,10 @@ impl AgentTermApp {
         if target_layout_id == self.layout_window_id {
             self.layout_store
                 .update_window(&self.layout_window_id, |layout| {
-                    if !layout.section_order.contains(&tab.section_id) {
-                        layout.section_order.push(tab.section_id.clone());
+                    if !layout.workspace_order.contains(&tab.workspace_id) {
+                        layout.workspace_order.push(tab.workspace_id.clone());
                     }
-                    layout.append_tab(tab.session_id.clone(), tab.section_id.clone());
+                    layout.append_tab(tab.session_id.clone(), tab.workspace_id.clone());
                     layout.active_session_id = Some(tab.session_id.clone());
                 });
             let _ = self
@@ -1300,10 +1285,10 @@ impl AgentTermApp {
                     app.update(cx, |app, cx| {
                         app.layout_store
                             .update_window(&app.layout_window_id, |layout| {
-                                if !layout.section_order.contains(&tab.section_id) {
-                                    layout.section_order.push(tab.section_id.clone());
+                                if !layout.workspace_order.contains(&tab.workspace_id) {
+                                    layout.workspace_order.push(tab.workspace_id.clone());
                                 }
-                                layout.append_tab(tab.session_id.clone(), tab.section_id.clone());
+                                layout.append_tab(tab.session_id.clone(), tab.workspace_id.clone());
                                 layout.active_session_id = Some(tab.session_id.clone());
                             });
                         let _ = app
@@ -1318,69 +1303,5 @@ impl AgentTermApp {
                 }
             }
         });
-    }
-
-    // Workspace management handlers
-    pub fn save_workspace(
-        &mut self,
-        _: &SaveWorkspace,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let layout_store = self.layout_store.clone();
-
-        let name_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Workspace name"));
-        let name_focus = name_input.read(cx).focus_handle(cx);
-
-        window.open_dialog(cx, move |dialog, _window, _cx| {
-            let name_input_for_content = name_input.clone();
-            let name_input_for_footer = name_input.clone();
-            let layout_store_for_save = layout_store.clone();
-
-            dialog
-                .title("Save Workspace")
-                .w(px(400.))
-                .child(
-                    v_flex()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(gpui::black().opacity(0.6))
-                                .child("Enter a name for this workspace:"),
-                        )
-                        .child(GpuiInput::new(&name_input_for_content).cleanable(true)),
-                )
-                .footer(move |_ok, cancel, window, cx| {
-                    let name_input = name_input_for_footer.clone();
-                    let layout_store = layout_store_for_save.clone();
-                    vec![
-                        cancel(window, cx),
-                        Button::new("save")
-                            .primary()
-                            .label("Save")
-                            .on_click(move |_, window, cx| {
-                                let name = name_input.read(cx).text().to_string();
-                                if name.trim().is_empty() {
-                                    return;
-                                }
-                                let current_session = layout_store.current_session();
-                                match layout_store.save_workspace(name, current_session) {
-                                    Ok(workspace) => {
-                                        layout_store
-                                            .set_active_workspace(Some(workspace.id.clone()));
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Failed to save workspace: {}", e);
-                                    }
-                                }
-                                window.close_dialog(cx);
-                            })
-                            .into_any_element(),
-                    ]
-                })
-        });
-
-        name_focus.focus(window, cx);
     }
 }

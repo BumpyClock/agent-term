@@ -1,15 +1,15 @@
 //! UI helper functions and types.
 
-use agentterm_session::SectionRecord;
+use agentterm_session::WorkspaceRecord;
 use gpui::Entity;
 use gpui_component::input::{Input as GpuiInput, InputState as GpuiInputState};
 
 use crate::icons::IconDescriptor;
 
-/// Wrapper for SectionRecord with additional display metadata.
+/// Wrapper for WorkspaceRecord with additional display metadata.
 #[derive(Clone)]
-pub struct SectionItem {
-    pub section: SectionRecord,
+pub struct WorkspaceItem {
+    pub workspace: WorkspaceRecord,
     pub is_default: bool,
 }
 

@@ -1,7 +1,7 @@
 //! Global Search module for indexing and searching conversation logs.
 //!
 //! Provides in-memory indexing of conversation logs from:
-//! - `~/.claude/projects/*/` (Claude CLI)
+//! - `~/.claude/projects/*/` (Claude CLI workspaces)
 //! - `~/.codex/sessions/` (Codex CLI)
 //! and fuzzy search with snippet previews.
 
@@ -22,7 +22,7 @@ use query::SearchEngine;
 pub struct SearchConfig {
     /// Number of days to look back when indexing (default: 90).
     pub recent_days: u32,
-    /// Root directory for Claude logs (default: ~/.claude/projects).
+    /// Root directory for Claude workspace logs (default: ~/.claude/projects).
     pub claude_log_root: Option<String>,
     /// Root directory for Codex logs (default: ~/.codex/sessions).
     pub codex_log_root: Option<String>,

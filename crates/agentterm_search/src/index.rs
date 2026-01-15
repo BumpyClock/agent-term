@@ -1,6 +1,6 @@
 //! JSONL log indexing logic.
 //!
-//! Scans `~/.claude/projects/*/` and `~/.codex/sessions/` for conversation logs,
+//! Scans `~/.claude/projects/*/` (workspace logs) and `~/.codex/sessions/` for conversation logs,
 //! parses them to extract messages, and stores indexed content in memory.
 //! Supports incremental indexing by tracking file modification times.
 
@@ -18,7 +18,7 @@ const INDEX_METADATA_SCHEMA_VERSION: u32 = 2; // Bumped for MessageSource additi
 /// Source of the indexed message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MessageSource {
-    /// Claude CLI conversation from ~/.claude/projects/
+    /// Claude CLI conversation from ~/.claude/projects/ (workspaces)
     Claude,
     /// Codex CLI conversation from ~/.codex/sessions/
     Codex,
@@ -32,8 +32,8 @@ pub struct MessageRef {
     pub source: MessageSource,
     /// Path to the source JSONL file.
     pub file_path: String,
-    /// Project name derived from directory.
-    pub project_name: String,
+    /// Workspace name derived from directory.
+    pub workspace_name: String,
     /// Message type: "user" or "assistant".
     pub message_type: String,
     /// ISO timestamp of the message.
@@ -51,8 +51,8 @@ pub struct MessageRef {
 pub struct IndexedMessage {
     /// Path to the source JSONL file.
     pub file_path: String,
-    /// Project name derived from directory.
-    pub project_name: String,
+    /// Workspace name derived from directory.
+    pub workspace_name: String,
     /// Message type: "user" or "assistant".
     pub message_type: String,
     /// ISO timestamp of the message.
@@ -407,11 +407,11 @@ impl SearchIndex {
         let parse_results: Vec<(String, u64, Vec<ParsedMessage>, bool)> = pool.install(|| {
             all_files
                 .par_iter()
-                .map(|(file_path, project_name, mtime, source)| {
+                .map(|(file_path, workspace_name, mtime, source)| {
                     let path_str = file_path.to_string_lossy().to_string();
                     let result = match source {
-                        MessageSource::Claude => parse_claude_jsonl_file(file_path, project_name),
-                        MessageSource::Codex => parse_codex_file(file_path, project_name),
+                        MessageSource::Claude => parse_claude_jsonl_file(file_path, workspace_name),
+                        MessageSource::Codex => parse_codex_file(file_path, workspace_name),
                     };
                     match result {
                         Ok(msgs) => (path_str, *mtime, msgs, true),
@@ -524,8 +524,8 @@ fn get_file_mtime(path: &Path) -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-/// Scan Claude logs directory (~/.claude/projects/*) for JSONL files.
-/// Returns (path, project_name, mtime, source) tuples.
+/// Scan Claude logs directory (~/.claude/projects/*) for workspace JSONL files.
+/// Returns (path, workspace_name, mtime, source) tuples.
 fn scan_claude_directory(root: &Path, cutoff: u64) -> Vec<(PathBuf, String, u64, MessageSource)> {
     let entries = match fs::read_dir(root) {
         Ok(e) => e,
@@ -535,17 +535,17 @@ fn scan_claude_directory(root: &Path, cutoff: u64) -> Vec<(PathBuf, String, u64,
     entries
         .flatten()
         .filter_map(|entry| {
-            let project_path = entry.path();
-            if !project_path.is_dir() {
+            let workspace_path = entry.path();
+            if !workspace_path.is_dir() {
                 return None;
             }
-            let project_name = project_path
+            let workspace_name = workspace_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
                 .to_string();
 
-            let files: Vec<_> = fs::read_dir(&project_path)
+            let files: Vec<_> = fs::read_dir(&workspace_path)
                 .ok()?
                 .flatten()
                 .filter_map(|file_entry| {
@@ -559,7 +559,7 @@ fn scan_claude_directory(root: &Path, cutoff: u64) -> Vec<(PathBuf, String, u64,
                     }
                     Some((
                         file_path,
-                        project_name.clone(),
+                        workspace_name.clone(),
                         mtime,
                         MessageSource::Claude,
                     ))
@@ -573,7 +573,7 @@ fn scan_claude_directory(root: &Path, cutoff: u64) -> Vec<(PathBuf, String, u64,
 
 /// Scan Codex logs directory (~/.codex/sessions/) for JSONL and JSON files.
 /// Handles both old format (rollout-*.json) and new format (YYYY/MM/DD/rollout-*.jsonl).
-/// Returns (path, project_name, mtime, source) tuples.
+/// Returns (path, workspace_name, mtime, source) tuples.
 fn scan_codex_directory(root: &Path, cutoff: u64) -> Vec<(PathBuf, String, u64, MessageSource)> {
     let mut files = Vec::new();
 
@@ -584,9 +584,9 @@ fn scan_codex_directory(root: &Path, cutoff: u64) -> Vec<(PathBuf, String, u64, 
             if path.is_file() && is_codex_session_file(&path) {
                 if let Some(mtime) = get_file_mtime(&path) {
                     if mtime >= cutoff {
-                        // Extract project name from filename or use "codex"
-                        let project = extract_codex_project_from_path(&path);
-                        files.push((path, project, mtime, MessageSource::Codex));
+                        // Extract workspace name from filename or use "codex"
+                        let workspace = extract_codex_workspace_from_path(&path);
+                        files.push((path, workspace, mtime, MessageSource::Codex));
                     }
                 }
             } else if path.is_dir() {
@@ -611,8 +611,8 @@ fn scan_codex_date_directory(
             if path.is_file() && is_codex_session_file(&path) {
                 if let Some(mtime) = get_file_mtime(&path) {
                     if mtime >= cutoff {
-                        let project = extract_codex_project_from_path(&path);
-                        files.push((path, project, mtime, MessageSource::Codex));
+                        let workspace = extract_codex_workspace_from_path(&path);
+                        files.push((path, workspace, mtime, MessageSource::Codex));
                     }
                 }
             } else if path.is_dir() {
@@ -637,9 +637,9 @@ fn is_codex_session_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Extract project name from Codex file path.
+/// Extract workspace name from Codex file path.
 /// Uses the cwd from session metadata if available, otherwise derives from filename.
-fn extract_codex_project_from_path(path: &Path) -> String {
+fn extract_codex_workspace_from_path(path: &Path) -> String {
     // Try to extract from filename: rollout-YYYY-MM-DD-<UUID>.json
     // or rollout-YYYY-MM-DDTHH:MM:SS-<ULID>.jsonl
     path.file_stem()
@@ -694,7 +694,10 @@ struct ParsedMessage {
 
 /// Parse a Claude JSONL file and extract messages with file offsets.
 /// Returns both MessageRef (for storage) and content (for inverted index building).
-fn parse_claude_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<ParsedMessage>, String> {
+fn parse_claude_jsonl_file(
+    path: &Path,
+    workspace_name: &str,
+) -> Result<Vec<ParsedMessage>, String> {
     let file = File::open(path).map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
 
     let mut reader = BufReader::new(file);
@@ -742,7 +745,7 @@ fn parse_claude_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<Parsed
             msg_ref: MessageRef {
                 source: MessageSource::Claude,
                 file_path: file_path.clone(),
-                project_name: project_name.to_string(),
+                workspace_name: workspace_name.to_string(),
                 message_type,
                 timestamp: entry.timestamp,
                 uuid: entry.uuid,
@@ -767,19 +770,19 @@ struct CodexJsonlEntry {
 
 /// Parse a Codex session file (JSONL or JSON format).
 /// Handles both old JSON format and new JSONL format.
-fn parse_codex_file(path: &Path, project_name: &str) -> Result<Vec<ParsedMessage>, String> {
+fn parse_codex_file(path: &Path, workspace_name: &str) -> Result<Vec<ParsedMessage>, String> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     match ext {
-        "jsonl" => parse_codex_jsonl_file(path, project_name),
-        "json" => parse_codex_json_file(path, project_name),
+        "jsonl" => parse_codex_jsonl_file(path, workspace_name),
+        "json" => parse_codex_json_file(path, workspace_name),
         _ => Err(format!("Unsupported Codex file format: {}", ext)),
     }
 }
 
 /// Parse Codex JSONL file (new format from Nov 2025+).
 /// Format: Each line is {"timestamp": "...", "type": "...", "payload": {...}}
-fn parse_codex_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<ParsedMessage>, String> {
+fn parse_codex_jsonl_file(path: &Path, workspace_name: &str) -> Result<Vec<ParsedMessage>, String> {
     let file = File::open(path).map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
     let mut reader = BufReader::new(file);
     let file_path = path.to_string_lossy().to_string();
@@ -787,7 +790,7 @@ fn parse_codex_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<ParsedM
     let mut offset: u64 = 0;
     let mut line = String::new();
     let mut session_id: Option<String> = None;
-    let mut actual_project_name = project_name.to_string();
+    let mut actual_workspace_name = workspace_name.to_string();
 
     loop {
         line.clear();
@@ -814,16 +817,16 @@ fn parse_codex_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<ParsedM
 
         match entry.entry_type.as_str() {
             "session_meta" => {
-                // Extract session ID and project name from session_meta
+                // Extract session ID and workspace name from session_meta
                 if let Some(id) = entry.payload.get("id").and_then(|v| v.as_str()) {
                     session_id = Some(id.to_string());
                 }
                 if let Some(cwd) = entry.payload.get("cwd").and_then(|v| v.as_str()) {
-                    // Extract project name from cwd (last component)
-                    actual_project_name = Path::new(cwd)
+                    // Extract workspace name from cwd (last component)
+                    actual_workspace_name = Path::new(cwd)
                         .file_name()
                         .and_then(|n| n.to_str())
-                        .unwrap_or(project_name)
+                        .unwrap_or(workspace_name)
                         .to_string();
                 }
             }
@@ -848,7 +851,7 @@ fn parse_codex_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<ParsedM
                     msg_ref: MessageRef {
                         source: MessageSource::Codex,
                         file_path: file_path.clone(),
-                        project_name: actual_project_name.clone(),
+                        workspace_name: actual_workspace_name.clone(),
                         message_type: role.to_string(),
                         timestamp: entry.timestamp.clone(),
                         uuid: session_id.clone(),
@@ -866,7 +869,7 @@ fn parse_codex_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<ParsedM
                             msg_ref: MessageRef {
                                 source: MessageSource::Codex,
                                 file_path: file_path.clone(),
-                                project_name: actual_project_name.clone(),
+                                workspace_name: actual_workspace_name.clone(),
                                 message_type: "user".to_string(),
                                 timestamp: entry.timestamp.clone(),
                                 uuid: session_id.clone(),
@@ -887,7 +890,7 @@ fn parse_codex_jsonl_file(path: &Path, project_name: &str) -> Result<Vec<ParsedM
 
 /// Parse Codex JSON file (old format from April 2025).
 /// Format: Single JSON object with session info and items array.
-fn parse_codex_json_file(path: &Path, project_name: &str) -> Result<Vec<ParsedMessage>, String> {
+fn parse_codex_json_file(path: &Path, workspace_name: &str) -> Result<Vec<ParsedMessage>, String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
@@ -904,14 +907,14 @@ fn parse_codex_json_file(path: &Path, project_name: &str) -> Result<Vec<ParsedMe
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // Extract project name from session.cwd if available
-    let actual_project_name = json
+    // Extract workspace name from session.cwd if available
+    let actual_workspace_name = json
         .get("session")
         .and_then(|s| s.get("cwd"))
         .and_then(|v| v.as_str())
         .and_then(|cwd| Path::new(cwd).file_name())
         .and_then(|n| n.to_str())
-        .unwrap_or(project_name)
+        .unwrap_or(workspace_name)
         .to_string();
 
     // Parse items array
@@ -940,7 +943,7 @@ fn parse_codex_json_file(path: &Path, project_name: &str) -> Result<Vec<ParsedMe
                 msg_ref: MessageRef {
                     source: MessageSource::Codex,
                     file_path: file_path.clone(),
-                    project_name: actual_project_name.clone(),
+                    workspace_name: actual_workspace_name.clone(),
                     message_type: role.to_string(),
                     timestamp,
                     uuid: session_id.clone(),
@@ -1029,12 +1032,12 @@ mod tests {
         let content = r#"{"type":"user","message":{"role":"user","content":"Hello world"},"timestamp":"2025-01-01T00:00:00Z","uuid":"abc123"}"#;
         let path = create_test_jsonl(temp.path(), "test.jsonl", content);
 
-        let messages = parse_claude_jsonl_file(&path, "test-project").unwrap();
+        let messages = parse_claude_jsonl_file(&path, "test-workspace").unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].msg_ref.message_type, "user");
         assert_eq!(messages[0].msg_ref.source, MessageSource::Claude);
         assert_eq!(messages[0].content, "Hello world");
-        assert_eq!(messages[0].msg_ref.project_name, "test-project");
+        assert_eq!(messages[0].msg_ref.workspace_name, "test-workspace");
     }
 
     #[test]
@@ -1043,7 +1046,7 @@ mod tests {
         let content = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Part 1"},{"type":"text","text":"Part 2"}]},"timestamp":"2025-01-01T00:00:00Z"}"#;
         let path = create_test_jsonl(temp.path(), "test.jsonl", content);
 
-        let messages = parse_claude_jsonl_file(&path, "test-project").unwrap();
+        let messages = parse_claude_jsonl_file(&path, "test-workspace").unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].msg_ref.message_type, "assistant");
         assert_eq!(messages[0].content, "Part 1\nPart 2");
@@ -1057,11 +1060,11 @@ mod tests {
         fs::create_dir(&claude_dir).unwrap();
         fs::create_dir(&codex_dir).unwrap();
 
-        // Create a Claude project directory with a JSONL file
-        let project_dir = claude_dir.join("test-project");
-        fs::create_dir(&project_dir).unwrap();
+        // Create a Claude workspace directory with a JSONL file
+        let workspace_dir = claude_dir.join("test-workspace");
+        fs::create_dir(&workspace_dir).unwrap();
         let content = r#"{"type":"user","message":{"role":"user","content":"Test message"},"timestamp":"2025-01-01T00:00:00Z"}"#;
-        create_test_jsonl(&project_dir, "conv.jsonl", content);
+        create_test_jsonl(&workspace_dir, "conv.jsonl", content);
 
         let mut index = SearchIndex::new();
         index

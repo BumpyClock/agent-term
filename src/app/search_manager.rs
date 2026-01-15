@@ -1,6 +1,6 @@
 //! Global search manager for command palette search.
 //!
-//! Provides a singleton SearchManager that indexes Claude conversation logs
+//! Provides a singleton SearchManager that indexes Claude workspace logs
 //! from ~/.claude/projects/ for quick search in the command palette.
 
 use agentterm_search::SearchManager;

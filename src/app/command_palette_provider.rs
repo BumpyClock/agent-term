@@ -3,9 +3,6 @@
 //! Provides sessions, workspaces, actions, and search history items
 //! to the gpui-component CommandPalette.
 
-use std::sync::Arc;
-
-use agentterm_layout::LayoutStore;
 use agentterm_search::MessageSource;
 use agentterm_session::SessionRecord;
 use gpui::{App, Task};
@@ -13,6 +10,7 @@ use gpui_component::IconName;
 use gpui_component::command_palette::{CommandPaletteItem, CommandPaletteProvider};
 
 use super::search_manager;
+use crate::ui::WorkspaceItem;
 
 /// Payload for command palette items to distinguish selection types.
 #[derive(Clone, Debug)]
@@ -26,12 +24,12 @@ pub enum CommandPalettePayload {
     ClaudeConversation {
         session_id: String,
         file_path: String,
-        project: String,
+        workspace: String,
     },
     CodexConversation {
         session_id: String,
         file_path: String,
-        project: String,
+        workspace: String,
     },
     Action {
         action_id: String,
@@ -41,14 +39,14 @@ pub enum CommandPalettePayload {
 /// Provider for AgentTerm command palette items.
 pub struct AgentTermProvider {
     sessions: Vec<SessionRecord>,
-    layout_store: Arc<LayoutStore>,
+    workspaces: Vec<WorkspaceItem>,
 }
 
 impl AgentTermProvider {
-    pub fn new(sessions: Vec<SessionRecord>, layout_store: Arc<LayoutStore>) -> Self {
+    pub fn new(sessions: Vec<SessionRecord>, workspaces: Vec<WorkspaceItem>) -> Self {
         Self {
             sessions,
-            layout_store,
+            workspaces,
         }
     }
 }
@@ -108,15 +106,29 @@ impl CommandPaletteProvider for AgentTermProvider {
             );
         }
 
-        // Add saved workspaces
-        for workspace in self.layout_store.list_workspaces() {
+        // Add workspaces
+        for workspace in &self.workspaces {
+            let subtitle = if workspace.workspace.path.is_empty() {
+                if workspace.is_default {
+                    "Default workspace".to_string()
+                } else {
+                    "No path".to_string()
+                }
+            } else {
+                workspace.workspace.path.clone()
+            };
+            let icon = if workspace.is_default {
+                IconName::SquareTerminal
+            } else {
+                IconName::Folder
+            };
             items.push(
-                CommandPaletteItem::new(&workspace.id, &workspace.name)
+                CommandPaletteItem::new(&workspace.workspace.id, &workspace.workspace.name)
                     .category("Workspaces")
-                    .subtitle(&workspace.created_at)
-                    .icon(IconName::Folder)
+                    .subtitle(subtitle)
+                    .icon(icon)
                     .payload(CommandPalettePayload::Workspace {
-                        id: workspace.id.clone(),
+                        id: workspace.workspace.id.clone(),
                     }),
             );
         }
@@ -146,7 +158,7 @@ impl CommandPaletteProvider for AgentTermProvider {
                 let item = match result.source {
                     MessageSource::Claude => CommandPaletteItem::new(
                         format!("claude_{}", session_id),
-                        &result.project_name,
+                        &result.workspace_name,
                     )
                     .category("Claude History")
                     .subtitle(&result.snippet)
@@ -154,11 +166,11 @@ impl CommandPaletteProvider for AgentTermProvider {
                     .payload(CommandPalettePayload::ClaudeConversation {
                         session_id,
                         file_path: result.file_path,
-                        project: result.project_name,
+                        workspace: result.workspace_name,
                     }),
                     MessageSource::Codex => CommandPaletteItem::new(
                         format!("codex_{}", session_id),
-                        &result.project_name,
+                        &result.workspace_name,
                     )
                     .category("Codex History")
                     .subtitle(&result.snippet)
@@ -166,7 +178,7 @@ impl CommandPaletteProvider for AgentTermProvider {
                     .payload(CommandPalettePayload::CodexConversation {
                         session_id,
                         file_path: result.file_path,
-                        project: result.project_name,
+                        workspace: result.workspace_name,
                     }),
                 };
                 items.push(item);

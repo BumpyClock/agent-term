@@ -1,6 +1,6 @@
 //! Sidebar rendering and interaction methods.
 
-use agentterm_session::{DEFAULT_SECTION_ID, SessionRecord, SessionTool};
+use agentterm_session::{DEFAULT_WORKSPACE_ID, SessionRecord, SessionTool};
 use agentterm_tools::ShellType;
 use gpui::{
     AnyWindowHandle, ClickEvent, Context, Corner, Entity, IntoElement, MouseMoveEvent,
@@ -15,7 +15,7 @@ use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem,
-    SectionItem,
+    WorkspaceItem,
 };
 
 use super::actions::*;
@@ -98,8 +98,8 @@ impl AgentTermApp {
             .flex_col()
             .child(div().h(top_offset).flex_shrink_0())
             .child(self.render_sidebar_header(cx))
-            .child(self.render_add_project(cx))
-            .child(self.render_sections_list(cx))
+            .child(self.render_add_workspace(cx))
+            .child(self.render_workspaces_list(cx))
     }
 
     pub fn render_sidebar_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -156,45 +156,46 @@ impl AgentTermApp {
             )
     }
 
-    pub fn render_add_project(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_add_workspace(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div().px(px(16.0)).py(px(12.0)).child(
             div()
-                .id("sidebar-add-project")
+                .id("sidebar-add-workspace")
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
                 .cursor_pointer()
                 .hover(|s| s.text_color(cx.theme().foreground))
                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.open_add_project_dialog(window, cx);
+                    this.open_add_workspace_dialog(window, cx);
                 }))
-                .child("+ Add Project"),
+                .child("+ Add Workspace"),
         )
     }
 
-    pub fn render_sections_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn render_workspaces_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut list = div()
-            .id("sidebar-sections-scroll")
+            .id("sidebar-workspaces-scroll")
             .flex_1()
             .overflow_y_scroll()
             .px(px(8.0));
-        for section in self.ordered_sections() {
-            list = list.child(self.render_section(&section, cx));
+        for workspace in self.ordered_workspaces() {
+            list = list.child(self.render_workspace(&workspace, cx));
         }
         list
     }
 
-    pub fn render_section(
+    pub fn render_workspace(
         &self,
-        section: &SectionItem,
+        workspace: &WorkspaceItem,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let sessions: Vec<&SessionRecord> = self.ordered_sessions_for_section(&section.section.id);
+        let sessions: Vec<&SessionRecord> =
+            self.ordered_sessions_for_workspace(&workspace.workspace.id);
 
-        let section_id = section.section.id.clone();
-        let is_collapsed = self.is_section_collapsed(&section_id);
-        let section_icon = section.section.icon.clone();
-        let is_default = section.is_default;
-        let group_id = format!("section-group-{}", section.section.id);
+        let workspace_id = workspace.workspace.id.clone();
+        let is_collapsed = self.is_workspace_collapsed(&workspace_id);
+        let workspace_icon = workspace.workspace.icon.clone();
+        let is_default = workspace.is_default;
+        let group_id = format!("workspace-group-{}", workspace.workspace.id);
 
         // Collect theme colors before building the add button
         let hover_bg = cx.theme().list_hover;
@@ -206,10 +207,10 @@ impl AgentTermApp {
         let shells = self.cached_shells.clone();
         let tools = self.cached_tools.clone();
         let pinned_ids = self.cached_pinned_shell_ids.clone();
-        let section_id_for_menu = section_id.clone();
+        let workspace_id_for_menu = workspace_id.clone();
 
-        let section_header = div()
-            .id(format!("section-header-{}", section.section.id))
+        let workspace_header = div()
+            .id(format!("workspace-header-{}", workspace.workspace.id))
             .group(group_id.clone())
             .px(px(8.0))
             .py(px(6.0))
@@ -220,9 +221,9 @@ impl AgentTermApp {
             .cursor_pointer()
             .hover(move |s| s.bg(hover_bg))
             .on_click(cx.listener({
-                let section_id = section.section.id.clone();
+                let workspace_id = workspace.workspace.id.clone();
                 move |this, _, _, cx| {
-                    this.toggle_section_collapsed(section_id.clone(), cx);
+                    this.toggle_workspace_collapsed(workspace_id.clone(), cx);
                     cx.notify();
                 }
             }))
@@ -239,7 +240,7 @@ impl AgentTermApp {
                 if is_default {
                     Icon::new(IconName::Terminal)
                 } else {
-                    section_icon
+                    workspace_icon
                         .as_ref()
                         .map(|s| icon_from_string(s))
                         .unwrap_or_else(|| Icon::new(IconName::Folder))
@@ -253,14 +254,14 @@ impl AgentTermApp {
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(if is_default { muted_fg } else { foreground })
                     .flex_1()
-                    .child(section.section.name.clone()),
+                    .child(workspace.workspace.name.clone()),
             )
             .child(
                 div()
                     .invisible()
                     .group_hover(group_id.clone(), |this| this.visible())
                     .child(
-                        Button::new(format!("section-add-{}", section_id))
+                        Button::new(format!("workspace-add-{}", workspace_id))
                             .label("+")
                             .ghost()
                             .compact()
@@ -269,7 +270,7 @@ impl AgentTermApp {
                                 move |menu, _window, _cx| {
                                     Self::build_add_menu(
                                         menu,
-                                        section_id_for_menu.clone(),
+                                        workspace_id_for_menu.clone(),
                                         view.clone(),
                                         shells.clone(),
                                         tools.clone(),
@@ -280,7 +281,7 @@ impl AgentTermApp {
                     ),
             )
             .context_menu({
-                let section_id = section_id.clone();
+                let workspace_id = workspace_id.clone();
                 let is_default = is_default;
                 move |menu, window, cx| {
                     if is_default {
@@ -289,23 +290,30 @@ impl AgentTermApp {
                     let current_handle: AnyWindowHandle = window.window_handle().into();
                     let other_windows = WindowRegistry::global().list_other_windows(current_handle);
 
-                    let mut menu =
-                        menu.menu("Edit Project...", Box::new(EditSection(section_id.clone())));
+                    let mut menu = menu.menu(
+                        "Edit Workspace...",
+                        Box::new(EditWorkspace(workspace_id.clone())),
+                    );
+
+                    menu = menu.menu(
+                        "Move Workspace to New Window",
+                        Box::new(MoveWorkspaceToNewWindow(workspace_id.clone())),
+                    );
 
                     if !other_windows.is_empty() {
-                        menu = menu.submenu("Move Project to Window", window, cx, {
-                            let section_id = section_id.clone();
+                        menu = menu.submenu("Move Workspace to Window", window, cx, {
+                            let workspace_id = workspace_id.clone();
                             let other_windows = other_windows.clone();
                             move |submenu, _window, _cx| {
                                 let mut submenu = submenu;
                                 for (_handle, info) in &other_windows {
-                                    let section_id = section_id.clone();
+                                    let workspace_id = workspace_id.clone();
                                     let window_id = info.number as u64;
                                     let title = info.title.clone();
                                     submenu = submenu.menu(
                                         &title,
-                                        Box::new(MoveSectionToWindow {
-                                            section_id,
+                                        Box::new(MoveWorkspaceToWindow {
+                                            workspace_id,
                                             target_window_id: window_id,
                                         }),
                                     );
@@ -315,17 +323,14 @@ impl AgentTermApp {
                         });
                     }
 
-                    menu.separator()
-                        .menu(
-                            "Remove Project",
-                            Box::new(RemoveSection(section_id.clone())),
-                        )
-                        .separator()
-                        .menu("Save Workspace...", Box::new(SaveWorkspace))
+                    menu.separator().menu(
+                        "Remove Workspace",
+                        Box::new(RemoveWorkspace(workspace_id.clone())),
+                    )
                 }
             });
 
-        let mut container = div().py(px(4.0)).child(section_header);
+        let mut container = div().py(px(4.0)).child(workspace_header);
 
         if is_collapsed {
             return container;
@@ -350,10 +355,10 @@ impl AgentTermApp {
         container
     }
 
-    /// Build the popup menu items for adding a new tab to a section
+    /// Build the popup menu items for adding a new tab to a workspace
     fn build_add_menu(
         menu: PopupMenu,
-        section_id: String,
+        workspace_id: String,
         view: Entity<Self>,
         shells: Vec<agentterm_tools::ShellInfo>,
         tools: Vec<agentterm_tools::ToolInfo>,
@@ -387,7 +392,7 @@ impl AgentTermApp {
         if !pinned_shells.is_empty() {
             menu = menu.label("Pinned");
             for shell in pinned_shells {
-                let section_id = section_id.clone();
+                let workspace_id = workspace_id.clone();
                 let view = view.clone();
                 let shell_clone = shell.clone();
                 menu = menu.item(PopupMenuItem::new(shell.name.clone()).on_click(
@@ -398,8 +403,8 @@ impl AgentTermApp {
                             Some(shell_clone.icon.clone())
                         };
                         view.update(cx, |app, cx| {
-                            app.create_session_in_section(
-                                section_id.clone(),
+                            app.create_session_in_workspace(
+                                workspace_id.clone(),
                                 SessionTool::Shell,
                                 shell_clone.name.clone(),
                                 shell_clone.command.clone(),
@@ -415,11 +420,11 @@ impl AgentTermApp {
             menu = menu.separator();
         }
 
-        // Add shells section
+        // Add shells workspace
         if !native_shells.is_empty() {
             menu = menu.label("Shells");
             for shell in native_shells {
-                let section_id = section_id.clone();
+                let workspace_id = workspace_id.clone();
                 let view = view.clone();
                 let shell_clone = shell.clone();
                 menu = menu.item(PopupMenuItem::new(shell.name.clone()).on_click(
@@ -430,8 +435,8 @@ impl AgentTermApp {
                             Some(shell_clone.icon.clone())
                         };
                         view.update(cx, |app, cx| {
-                            app.create_session_in_section(
-                                section_id.clone(),
+                            app.create_session_in_workspace(
+                                workspace_id.clone(),
                                 SessionTool::Shell,
                                 shell_clone.name.clone(),
                                 shell_clone.command.clone(),
@@ -447,7 +452,7 @@ impl AgentTermApp {
             menu = menu.separator();
         }
 
-        // Add tools section
+        // Add tools workspace
         let has_builtin_tools = !builtin_tools.is_empty();
         let has_custom_tools = !custom_tools.is_empty();
 
@@ -455,7 +460,7 @@ impl AgentTermApp {
             menu = menu.label("Tools");
 
             for tool in builtin_tools {
-                let section_id = section_id.clone();
+                let workspace_id = workspace_id.clone();
                 let view = view.clone();
                 let tool_clone = tool.clone();
                 menu = menu.item(PopupMenuItem::new(tool.name.clone()).on_click(
@@ -473,8 +478,8 @@ impl AgentTermApp {
                             Some(tool_clone.icon.clone())
                         };
                         view.update(cx, |app, cx| {
-                            app.create_session_in_section(
-                                section_id.clone(),
+                            app.create_session_in_workspace(
+                                workspace_id.clone(),
                                 session_tool,
                                 tool_clone.name.clone(),
                                 tool_clone.command.clone(),
@@ -493,7 +498,7 @@ impl AgentTermApp {
             }
 
             for tool in custom_tools {
-                let section_id = section_id.clone();
+                let workspace_id = workspace_id.clone();
                 let view = view.clone();
                 let tool_clone = tool.clone();
                 menu = menu.item(PopupMenuItem::new(tool.name.clone()).on_click(
@@ -505,8 +510,8 @@ impl AgentTermApp {
                             Some(tool_clone.icon.clone())
                         };
                         view.update(cx, |app, cx| {
-                            app.create_session_in_section(
-                                section_id.clone(),
+                            app.create_session_in_workspace(
+                                workspace_id.clone(),
                                 session_tool,
                                 tool_clone.name.clone(),
                                 tool_clone.command.clone(),
@@ -592,12 +597,12 @@ impl AgentTermApp {
                     .child(
                         div()
                             .text_color(cx.theme().success)
-                            .child(counts.additions.to_string()),
+                            .child(format!("+{}", counts.additions)),
                     )
                     .child(
                         div()
                             .text_color(cx.theme().danger)
-                            .child(counts.deletions.to_string()),
+                            .child(format!("-{}", counts.deletions)),
                     ),
             );
         }
@@ -666,42 +671,45 @@ impl AgentTermApp {
         })
     }
 
-    // Section management methods
-    pub fn toggle_section_collapsed(&mut self, section_id: String, cx: &mut Context<Self>) {
-        if section_id == DEFAULT_SECTION_ID {
+    // Workspace management methods
+    pub fn toggle_workspace_collapsed(&mut self, workspace_id: String, cx: &mut Context<Self>) {
+        if workspace_id == DEFAULT_WORKSPACE_ID {
             return;
         }
-        let next = !self.is_section_collapsed(&section_id);
+        let next = !self.is_workspace_collapsed(&workspace_id);
         self.layout_store
             .update_window(&self.layout_window_id, |window| {
                 if next {
-                    if !window.collapsed_sections.contains(&section_id) {
-                        window.collapsed_sections.push(section_id.clone());
+                    if !window.collapsed_workspaces.contains(&workspace_id) {
+                        window.collapsed_workspaces.push(workspace_id.clone());
                     }
                 } else {
-                    window.collapsed_sections.retain(|id| id != &section_id);
+                    window.collapsed_workspaces.retain(|id| id != &workspace_id);
                 }
             });
         cx.notify();
     }
 
-    pub fn move_section(&mut self, section_id: String, delta: isize, cx: &mut Context<Self>) {
+    pub fn move_workspace(&mut self, workspace_id: String, delta: isize, cx: &mut Context<Self>) {
         let Some(window) = self.window_layout() else {
             return;
         };
 
-        let mut ordered_ids = if window.section_order.is_empty() {
-            self.sections.iter().map(|s| s.section.id.clone()).collect()
+        let mut ordered_ids = if window.workspace_order.is_empty() {
+            self.workspaces
+                .iter()
+                .map(|s| s.workspace.id.clone())
+                .collect()
         } else {
-            window.section_order
+            window.workspace_order
         };
 
         let mut moveable: Vec<String> = ordered_ids
             .iter()
-            .filter(|id| *id != DEFAULT_SECTION_ID)
+            .filter(|id| *id != DEFAULT_WORKSPACE_ID)
             .cloned()
             .collect();
-        let idx = moveable.iter().position(|id| id == &section_id);
+        let idx = moveable.iter().position(|id| id == &workspace_id);
         let Some(idx) = idx else {
             return;
         };
@@ -712,12 +720,12 @@ impl AgentTermApp {
         let item = moveable.remove(idx);
         moveable.insert(new_idx as usize, item);
 
-        ordered_ids.retain(|id| id == DEFAULT_SECTION_ID);
+        ordered_ids.retain(|id| id == DEFAULT_WORKSPACE_ID);
         ordered_ids.extend(moveable);
 
         self.layout_store
             .update_window(&self.layout_window_id, |window| {
-                window.section_order = ordered_ids;
+                window.workspace_order = ordered_ids;
             });
         cx.notify();
     }
