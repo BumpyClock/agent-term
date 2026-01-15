@@ -136,7 +136,7 @@ impl ProjectEditorDialog {
     fn browse_for_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current_value = self.path_input.read(cx).value().to_string();
         let start_dir = resolve_picker_start_path(&current_value);
-        let window_handle = window.window_handle();
+        let window_handle = self.view.read(cx).window_handle;
 
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let mut cx = cx.clone();
@@ -418,7 +418,7 @@ impl AddProjectDialog {
     fn browse_for_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current_value = self.path_input.read(cx).value().to_string();
         let start_dir = resolve_picker_start_path(&current_value);
-        let window_handle = window.window_handle();
+        let window_handle = self.view.read(cx).window_handle;
 
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let mut cx = cx.clone();
