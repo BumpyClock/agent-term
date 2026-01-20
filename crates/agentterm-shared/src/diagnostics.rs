@@ -1,27 +1,39 @@
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    OnceLock,
+};
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 const DIAG_ENV: &str = "AGENT_TERM_DIAG";
 
-static DIAG_ENABLED: OnceLock<bool> = OnceLock::new();
+static DIAG_ENABLED: AtomicBool = AtomicBool::new(false);
+static DIAG_ENABLED_INIT: OnceLock<()> = OnceLock::new();
 
 /// Explicitly set diagnostics enabled state. Call early in main().
 /// If not called, falls back to checking AGENT_TERM_DIAG env var.
 pub fn set_enabled(enabled: bool) {
-    let _ = DIAG_ENABLED.set(enabled);
+    DIAG_ENABLED.store(enabled, Ordering::Relaxed);
+    let _ = DIAG_ENABLED_INIT.set(());
 }
 
 fn diagnostics_enabled() -> bool {
-    *DIAG_ENABLED.get_or_init(|| {
-        std::env::var(DIAG_ENV)
-            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-            .unwrap_or(false)
-    })
+    if DIAG_ENABLED_INIT.get().is_some() {
+        return DIAG_ENABLED.load(Ordering::Relaxed);
+    }
+
+    let env_enabled = std::env::var(DIAG_ENV)
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+    if env_enabled {
+        DIAG_ENABLED.store(true, Ordering::Relaxed);
+    }
+    let _ = DIAG_ENABLED_INIT.set(());
+    env_enabled
 }
 
 fn diagnostics_path() -> Option<PathBuf> {

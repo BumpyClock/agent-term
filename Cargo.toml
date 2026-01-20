@@ -20,6 +20,8 @@ license = "MIT"
 [workspace.dependencies]
 dirs = "6.0.0"
 time = { version = "0.3.44", features = ["formatting"] }
+fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
+shell-words = "1"
 gpui = { git = "https://github.com/BumpyClock/zed", package = "gpui", rev = "149e1724574f4e27eeeadcc62e1e15e7afeddc25" }
 gpui-macros = "0.2.2"
 gpui-component-macros = { path = "vendor/gpui-component/crates/macros" }
@@ -105,6 +107,8 @@ toml.workspace = true
 unicode-segmentation = "1.12.0"
 uuid.workspace = true
 rfd.workspace = true
+fix-path-env.workspace = true
+shell-words.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

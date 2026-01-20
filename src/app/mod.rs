@@ -37,6 +37,11 @@ use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
 pub fn run() {
+    let _ = fix_path_env::fix();
+
+    let settings = crate::settings::AppSettings::load();
+    agentterm_mcp::diagnostics::set_enabled(settings.write_diagnostics_logs);
+
     // Enable diagnostics early, before any other initialization
     // First check config file for debug flag
     if let Ok(config_path) = agentterm_mcp::config::get_config_path() {

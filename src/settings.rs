@@ -53,6 +53,10 @@ pub struct AppSettings {
     // Tools
     pub default_shell_id: Option<String>,
     pub custom_tools: Vec<CustomTool>,
+
+    // Diagnostics
+    #[serde(default)]
+    pub write_diagnostics_logs: bool,
 }
 
 fn default_blur_enabled() -> bool {
@@ -85,6 +89,9 @@ impl Default for AppSettings {
             // Tools
             default_shell_id: None,
             custom_tools: Vec::new(),
+
+            // Diagnostics
+            write_diagnostics_logs: false,
         }
     }
 }
