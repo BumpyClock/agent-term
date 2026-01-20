@@ -1,5 +1,5 @@
 # ABOUTME: PowerShell packaging script for Agent Term, focused on Windows installers and build targets.
-# ABOUTME: Builds x64/x86/arm64 binaries and produces MSI installers via cargo-wix.
+# ABOUTME: Builds x64/x86/arm64 binaries and produces MSI installers via WiX Toolset v6.
 
 [CmdletBinding()]
 param(
@@ -60,14 +60,11 @@ function Assert-Tool([string]$Exe, [string]$InstallHint) {
 }
 
 function Assert-WixToolset {
-	# cargo-wix shells out to WiX Toolset (v3) executables: candle.exe and light.exe.
-	$hasCandle = $null -ne (Get-Command "candle" -ErrorAction SilentlyContinue)
-	$hasLight  = $null -ne (Get-Command "light"  -ErrorAction SilentlyContinue)
-
-	if (-not ($hasCandle -and $hasLight)) {
-		Write-Error "WiX Toolset executables (candle/light) not found on PATH."
-		Write-Error "Install WiX Toolset v3 (commonly via: choco install wixtoolset) and reopen your terminal."
-		throw "WiX Toolset validation failed"
+	# WiX Toolset v6 uses a unified .NET tool command: wix
+	if ($null -eq (Get-Command "wix" -ErrorAction SilentlyContinue)) {
+		Write-Error "WiX Toolset v6 command-line tool not found."
+		Write-Error "Install with: dotnet tool install --global wix"
+		throw "WiX Toolset v6 validation failed"
 	}
 }
 
@@ -115,40 +112,52 @@ function Package-WindowsMsi([string]$RustTarget) {
 	Write-Info "Packaging for Windows (.msi)..."
 
 	Assert-Tool -Exe "cargo" -InstallHint "Install Rust and Cargo from https://rustup.rs/"
-	Assert-Tool -Exe "cargo-wix" -InstallHint "Install with: cargo install cargo-wix"
 	Assert-WixToolset
 
-	if (-not (Test-Path -LiteralPath "wix")) {
-		Write-Info "Initializing WiX configuration (creates ./wix)..."
-		& cargo wix init | Out-Host
-		$exitCode = $LASTEXITCODE
-		if ($exitCode -ne 0) {
-			Write-Info "cargo wix init failed"
-			Write-Error "cargo wix init failed with exit code $exitCode"
-			exit $exitCode
-		}
-	}
+	# Change to project root where .wxs files are located
+	Push-Location -Path (Join-Path $PSScriptRoot "..")
 
-	if (-not [string]::IsNullOrWhiteSpace($RustTarget)) {
-		Ensure-RustTarget -RustTarget $RustTarget
-		& cargo wix --nocapture --target $RustTarget | Out-Host
-		$exitCode = $LASTEXITCODE
-		if ($exitCode -ne 0) {
-			Write-Info "cargo wix failed (target: $RustTarget)"
-			Write-Error "cargo wix --nocapture --target $RustTarget failed with exit code $exitCode"
-			exit $exitCode
+	try {
+		$wixSourceFile = "wix\src\product.wxs"
+		$projectRoot = Get-Location
+		
+		if (-not (Test-Path $wixSourceFile)) {
+			Write-Error "WiX source file not found: $wixSourceFile"
+			exit 1
 		}
-		Write-Info "Windows .msi installer created in: target\$RustTarget\wix\"
+
+		# Ensure output directory exists
+		$bundleDir = "target\bundle"
+		if (-not (Test-Path $bundleDir)) {
+			New-Item -ItemType Directory -Path $bundleDir -Force | Out-Null
+		}
+
+		if (-not [string]::IsNullOrWhiteSpace($RustTarget)) {
+			Ensure-RustTarget -RustTarget $RustTarget
+			Write-Info "Building with WiX v6 for target: $RustTarget"
+			& wix build -arch "x64" -b "SourceDir=$projectRoot" -o "$bundleDir\agentterm-$RustTarget.msi" "$wixSourceFile" | Out-Host
+			$exitCode = $LASTEXITCODE
+			if ($exitCode -ne 0) {
+				Write-Info "wix build failed (target: $RustTarget)"
+				Write-Error "wix build failed for target $RustTarget with exit code $exitCode"
+				exit $exitCode
+			}
+			Write-Info "Windows .msi installer created: $bundleDir\agentterm-$RustTarget.msi"
+		}
+		else {
+			Write-Info "Building with WiX v6 for default target"
+			& wix build -arch "x64" -b "SourceDir=$projectRoot" -o "$bundleDir\agentterm.msi" "$wixSourceFile" | Out-Host
+			$exitCode = $LASTEXITCODE
+			if ($exitCode -ne 0) {
+				Write-Info "wix build failed (target: default)"
+				Write-Error "wix build failed with exit code $exitCode"
+				exit $exitCode
+			}
+			Write-Info "Windows .msi installer created: $bundleDir\agentterm.msi"
+		}
 	}
-	else {
-		& cargo wix --nocapture | Out-Host
-		$exitCode = $LASTEXITCODE
-		if ($exitCode -ne 0) {
-			Write-Info "cargo wix failed (target: default)"
-			Write-Error "cargo wix --nocapture failed with exit code $exitCode"
-			exit $exitCode
-		}
-		Write-Info "Windows .msi installer created in: target\wix\"
+	finally {
+		Pop-Location
 	}
 }
 
@@ -166,24 +175,23 @@ function Show-Help {
 	Write-Host "  build-x64         Build release binary for x64"
 	Write-Host "  build-x86         Build release binary for x86"
 	Write-Host "  build-arm64       Build release binary for arm64"
-	Write-Host "  install-tools     Install cargo-wix (and print WiX guidance)"
+	Write-Host "  install-tools     Install WiX Toolset v6 .NET tool"
 	Write-Host "  help              Show this help"
 	Write-Host ""
 	Write-Host "Notes:"
 	Write-Host "  - Version detected from Cargo.toml: $VERSION"
-	Write-Host "  - WiX Toolset v3 is required on PATH for MSI creation (candle.exe/light.exe)."
+	Write-Host "  - WiX Toolset v6 is required for MSI creation (installed as .NET tool)."
 }
 
 function Install-Tools {
 	Write-Info "Installing packaging tools..."
 
-	Assert-Tool -Exe "cargo" -InstallHint "Install Rust and Cargo from https://rustup.rs/"
+	Assert-Tool -Exe "dotnet" -InstallHint "Install .NET SDK from https://dotnet.microsoft.com/download"
 
-	& cargo install cargo-wix | Out-Host
+	& dotnet tool install --global wix | Out-Host
 
-	Write-Info "Installed cargo-wix."
-	Write-Warn "You still need WiX Toolset (candle/light) available on PATH for MSI builds."
-	Write-Warn "Common install: choco install wixtoolset"
+	Write-Info "Installed WiX Toolset v6 .NET tool."
+	Write-Info "You can now run 'wix build' commands."
 }
 
 # Main entry point
