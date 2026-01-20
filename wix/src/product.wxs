@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Agent Term"
+    Manufacturer="Agent Term Contributors"
+    Version="0.1.0"
+    UpgradeCode="12345678-1234-1234-1234-123456789012">
+    
+    <StandardDirectory Id="ProgramFilesFolder">
+      <Directory Id="INSTALLFOLDER" Name="Agent Term">
+        <Component Id="MainExecutable" Guid="*">
+          <File Id="AgentTermExe" Source="!(bindpath.SourceDir)target\release\agentterm.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    
+    <Feature Id="MainFeature" Title="Main Application" Level="1">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+    
+  </Package>
+</Wix>
