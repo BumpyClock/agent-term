@@ -40,6 +40,7 @@ dependencies = [
  "agentterm_tools",
  "anyhow",
  "dirs 6.0.0",
+ "fix-path-env",
  "git2",
  "gpui",
  "gpui-component",
@@ -53,6 +54,7 @@ dependencies = [
  "rust-embed",
  "schemars",
  "serde",
+ "shell-words",
  "smallvec",
  "smol",
  "tokio",
@@ -138,6 +140,7 @@ version = "0.1.0"
 dependencies = [
  "agentterm_mcp",
  "serde",
+ "shell-words",
  "users",
 ]
 
@@ -195,7 +198,7 @@ dependencies = [
  "serde",
  "signal-hook",
  "unicode-width",
- "vte",
+ "vte 0.15.0",
  "windows-sys 0.59.0",
 ]
 
@@ -1973,6 +1976,16 @@ name = "find-msvc-tools"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "645cbb3a84e60b7531617d5ae4e57f7e27308f6445f5abf653209ea76dec8dff"
+
+[[package]]
+name = "fix-path-env"
+version = "0.0.0"
+source = "git+https://github.com/tauri-apps/fix-path-env-rs#c4c45d503ea115a839aae718d02f79e7c7f0f673"
+dependencies = [
+ "home",
+ "strip-ansi-escapes",
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "flate2"
@@ -5451,6 +5464,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell-words"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5693,6 +5712,15 @@ dependencies = [
  "phf_shared",
  "proc-macro2",
  "quote",
+]
+
+[[package]]
+name = "strip-ansi-escapes"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a8f8038e7e7969abb3f1b7c2a811225e9296da208539e0f79c5251d6cac0025"
+dependencies = [
+ "vte 0.14.1",
 ]
 
 [[package]]
@@ -6998,6 +7026,15 @@ checksum = "fb067e4cbd1ff067d1df46c9194b5de0e98efd2810bbc95c5d5e5f25a3231150"
 dependencies = [
  "cc",
  "libc",
+]
+
+[[package]]
+name = "vte"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "231fdcd7ef3037e8330d8e17e61011a2c244126acc0a982f4040ac3f9f0bc077"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

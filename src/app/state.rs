@@ -12,7 +12,7 @@ use agentterm_session::{
     DEFAULT_WORKSPACE_ID, NewSessionInput, SessionRecord, SessionStore, SessionTool,
     WorkspaceRecord,
 };
-use agentterm_tools::{ShellInfo, ToolInfo};
+use agentterm_tools::{ShellInfo, ToolInfo, get_resolved_shell_with_args, quote_shell_command};
 use git2::{DiffOptions, Repository};
 use gpui::{
     AnyWindowHandle, App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity,
@@ -902,6 +902,72 @@ impl AgentTermApp {
         }
     }
 
+    fn resolve_shell_command(
+        &self,
+        session: &SessionRecord,
+    ) -> (Option<String>, Option<Vec<String>>) {
+        if matches!(session.tool, SessionTool::Shell) {
+            let shell_args = if session.args.is_empty() {
+                None
+            } else {
+                Some(session.args.clone())
+            };
+            return (Some(session.command.clone()), shell_args);
+        }
+
+        let resolved_shell = get_resolved_shell_with_args(
+            self.settings.default_shell_id.as_deref(),
+        )
+        .unwrap_or_else(|| ShellInfo {
+            id: "default".to_string(),
+            name: "Shell".to_string(),
+            command: agentterm_tools::detect_default_shell(),
+            args: Vec::new(),
+            icon: String::new(),
+            shell_type: agentterm_tools::ShellType::Native,
+            is_default: true,
+        });
+
+        let full_command = quote_shell_command(&session.command, &session.args);
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut args = resolved_shell.args.clone();
+            args.push("-c".to_string());
+            args.push(full_command);
+            return (Some(resolved_shell.command), Some(args));
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let shell_lower = resolved_shell.command.to_lowercase();
+            if shell_lower.contains("pwsh") || shell_lower.contains("powershell") {
+                let mut args = vec!["-NoLogo".to_string(), "-Command".to_string()];
+                args.push(format!("& {}", full_command));
+                return (Some(resolved_shell.command), Some(args));
+            }
+
+            if matches!(resolved_shell.shell_type, agentterm_tools::ShellType::Wsl) {
+                let mut args = resolved_shell.args.clone();
+                args.push("--".to_string());
+                args.push(full_command);
+                return (Some(resolved_shell.command), Some(args));
+            }
+
+            if shell_lower.contains("cmd") {
+                let mut args = resolved_shell.args.clone();
+                args.push("/c".to_string());
+                args.push(full_command);
+                return (Some(resolved_shell.command), Some(args));
+            }
+
+            let mut args = resolved_shell.args.clone();
+            args.push("-c".to_string());
+            args.push(full_command);
+            return (Some(resolved_shell.command), Some(args));
+        }
+    }
+
     pub fn ensure_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.active_session().cloned() else {
             return;
@@ -928,17 +994,21 @@ impl AgentTermApp {
             return;
         }
 
-        let shell = Some(session.command.clone());
-        let shell_args = if session.args.is_empty() {
-            None
-        } else {
-            Some(session.args.clone())
-        };
+        let (shell, shell_args) = self.resolve_shell_command(&session);
         let working_directory = if session.workspace_path.is_empty() {
-            env::current_dir().ok()
+            dirs::home_dir().or_else(|| env::current_dir().ok())
         } else {
             Some(PathBuf::from(session.workspace_path.clone()))
         };
+        if let Some(ref working_directory) = working_directory {
+            agentterm_mcp::diagnostics::log(format!(
+                "terminal_start session_id={} tool={:?} cwd={} shell={:?}",
+                session.id,
+                session.tool,
+                working_directory.display(),
+                shell
+            ));
+        }
 
         let mut env_vars: HashMap<String, String> = env::vars().collect();
         env_vars.insert("TERM".to_string(), "xterm-256color".to_string());

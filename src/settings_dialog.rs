@@ -430,6 +430,32 @@ impl SettingsDialog {
                     cx,
                 ),
             )
+            .child(
+                div()
+                    .mt(px(16.))
+                    .text_lg()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().foreground)
+                    .child("Diagnostics"),
+            )
+            .child(
+                self.render_setting_row(
+                    "Write diagnostics logs",
+                    "Save logs to ~/.agent-term/logs/diagnostics.log",
+                    Switch::new("write-diagnostics-logs")
+                        .checked(self.settings.write_diagnostics_logs)
+                        .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                            this.settings.write_diagnostics_logs = *checked;
+                            agentterm_mcp::diagnostics::set_enabled(*checked);
+                            if *checked {
+                                agentterm_mcp::diagnostics::log("diagnostics_logging_enabled");
+                            }
+                            this.notify_change(window, cx);
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 

@@ -74,6 +74,92 @@ pub async fn get_resolved_shell(manager: &McpManager) -> McpResult<String> {
     Ok(detect_default_shell())
 }
 
+pub fn select_shell_for_id(
+    shells: &[ShellInfo],
+    default_shell_id: Option<&str>,
+) -> Option<ShellInfo> {
+    default_shell_id
+        .and_then(|id| shells.iter().find(|shell| shell.id == id))
+        .or_else(|| shells.iter().find(|shell| shell.is_default))
+        .or_else(|| shells.first())
+        .cloned()
+}
+
+pub fn get_resolved_shell_with_args(default_shell_id: Option<&str>) -> Option<ShellInfo> {
+    let shells = available_shells();
+    select_shell_for_id(&shells, default_shell_id)
+}
+
+pub fn quote_shell_command(program: &str, args: &[String]) -> String {
+    let quoted_program = shell_words::quote(program).into_owned();
+    if args.is_empty() {
+        quoted_program
+    } else {
+        let quoted_args: Vec<String> = args
+            .iter()
+            .map(|arg| shell_words::quote(arg).into_owned())
+            .collect();
+        format!("{} {}", quoted_program, quoted_args.join(" "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ShellInfo, ShellType, quote_shell_command, select_shell_for_id};
+
+    #[test]
+    fn get_resolved_shell_with_args_prefers_matching_id() {
+        let unique_token = uuid::Uuid::new_v4().to_string();
+        let shell_id = format!("shell-{}", unique_token);
+
+        let shells = vec![
+            ShellInfo {
+                id: format!("fallback-{}", uuid::Uuid::new_v4()),
+                name: "Fallback".to_string(),
+                command: "/bin/sh".to_string(),
+                args: vec!["-l".to_string()],
+                icon: String::new(),
+                shell_type: ShellType::Native,
+                is_default: true,
+            },
+            ShellInfo {
+                id: shell_id.clone(),
+                name: "Preferred".to_string(),
+                command: "/usr/bin/zsh".to_string(),
+                args: vec!["-l".to_string(), "-i".to_string()],
+                icon: String::new(),
+                shell_type: ShellType::Native,
+                is_default: false,
+            },
+        ];
+
+        let resolved = select_shell_for_id(&shells, Some(&shell_id));
+
+        assert!(resolved.is_some(), "Shell selection cannot be missing");
+        let resolved = resolved.unwrap();
+        assert!(
+            resolved.id == shell_id,
+            "Shell selection cannot ignore explicit id"
+        );
+    }
+
+    #[test]
+    fn quote_shell_command_escapes_arguments() {
+        let program = "tool";
+        let args = vec!["weird value".to_string(), "テスト".to_string()];
+        let result = quote_shell_command(program, &args);
+
+        assert!(
+            result.contains("\"weird value\"") || result.contains("'weird value'"),
+            "Command cannot omit quoted args"
+        );
+        assert!(
+            result.contains("\"テスト\"") || result.contains("'テスト'"),
+            "Command cannot omit unicode args"
+        );
+    }
+}
+
 fn builtin_tools() -> Vec<ToolInfo> {
     vec![
         ToolInfo {
