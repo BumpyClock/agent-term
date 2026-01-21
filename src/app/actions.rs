@@ -68,6 +68,6 @@ pub struct MoveWorkspaceToNewWindow(pub String);
 
 // Command palette actions
 
-/// Toggle the command palette (Cmd+K).
+/// Toggle the command palette (Alt+K).
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema, gpui::Action)]
 pub struct ToggleCommandPalette;

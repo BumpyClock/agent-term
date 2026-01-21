@@ -127,6 +127,19 @@ impl AgentTermApp {
                     .items_center()
                     .gap(px(4.0))
                     .child(
+                        Button::new("sidebar-search")
+                            .child(
+                                Icon::new(IconName::Search)
+                                    .size(IconSize::Small)
+                                    .color(cx.theme().muted_foreground),
+                            )
+                            .ghost()
+                            .compact()
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.toggle_command_palette(&ToggleCommandPalette, window, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("sidebar-settings")
                             .child(
                                 Icon::new(IconName::Settings)
