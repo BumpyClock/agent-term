@@ -189,9 +189,9 @@ impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Calculate base surface alpha based on transparency setting
         // Higher transparency = lower alpha (more blur shows through)
-        // At transparency=0: full tint (SURFACE_ROOT_ALPHA)
-        // At transparency=1: no tint (fully transparent, blur shows through)
-        let base_alpha = SURFACE_ROOT_ALPHA * (1.0 - self.settings.window_transparency);
+        // At transparency=0: fully opaque (alpha=1.0)
+        // At transparency=1: semi-transparent (alpha=SURFACE_ROOT_ALPHA, blur shows through)
+        let base_alpha = 1.0 - (1.0 - SURFACE_ROOT_ALPHA) * self.settings.window_transparency;
         let mode = if cx.theme().is_dark() {
             gpui_component::theme::ThemeMode::Dark
         } else {
