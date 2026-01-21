@@ -2,6 +2,22 @@ use agentterm_mcp::{McpManager, McpResult};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Creates a Command that runs hidden (no window) on Windows.
+/// On other platforms, returns a normal Command.
+#[cfg(target_os = "windows")]
+fn hidden_command(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut cmd = std::process::Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hidden_command(program: &str) -> std::process::Command {
+    std::process::Command::new(program)
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolInfo {
@@ -237,7 +253,7 @@ pub fn detect_default_shell() -> String {
 
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = std::process::Command::new("where").arg("pwsh.exe").output() {
+        if let Ok(output) = hidden_command("where").arg("pwsh.exe").output() {
             if output.status.success() {
                 if let Some(path) = String::from_utf8_lossy(&output.stdout).lines().next() {
                     if !path.trim().is_empty() {
@@ -247,10 +263,7 @@ pub fn detect_default_shell() -> String {
             }
         }
 
-        if let Ok(output) = std::process::Command::new("where")
-            .arg("powershell.exe")
-            .output()
-        {
+        if let Ok(output) = hidden_command("where").arg("powershell.exe").output() {
             if output.status.success() {
                 if let Some(path) = String::from_utf8_lossy(&output.stdout).lines().next() {
                     if !path.trim().is_empty() {
@@ -396,10 +409,7 @@ fn detect_windows_shells() -> Vec<ShellInfo> {
 
 #[cfg(target_os = "windows")]
 fn detect_powershell_7() -> Option<ShellInfo> {
-    let output = std::process::Command::new("where")
-        .arg("pwsh.exe")
-        .output()
-        .ok()?;
+    let output = hidden_command("where").arg("pwsh.exe").output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -428,10 +438,7 @@ fn detect_powershell_7() -> Option<ShellInfo> {
 
 #[cfg(target_os = "windows")]
 fn detect_windows_powershell() -> Option<ShellInfo> {
-    let output = std::process::Command::new("where")
-        .arg("powershell.exe")
-        .output()
-        .ok()?;
+    let output = hidden_command("where").arg("powershell.exe").output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -481,10 +488,7 @@ fn detect_git_bash() -> Option<ShellInfo> {
         }
     }
 
-    let output = std::process::Command::new("where")
-        .arg("bash.exe")
-        .output()
-        .ok()?;
+    let output = hidden_command("where").arg("bash.exe").output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -512,10 +516,7 @@ fn detect_git_bash() -> Option<ShellInfo> {
 fn detect_wsl_distros() -> Vec<ShellInfo> {
     let mut distros = Vec::new();
 
-    let output = match std::process::Command::new("wsl")
-        .args(["--list", "--quiet"])
-        .output()
-    {
+    let output = match hidden_command("wsl").args(["--list", "--quiet"]).output() {
         Ok(out) => out,
         Err(_) => return distros,
     };

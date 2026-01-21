@@ -1,3 +1,6 @@
+// Prevents console window from appearing with GUI app in release builds
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod assets;
 mod dialogs;
