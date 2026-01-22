@@ -242,12 +242,6 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        log::info!(
-            "terminal_scroll_event: delta={:?} touch_phase={:?} shift={}",
-            event.delta,
-            event.touch_phase,
-            event.shift
-        );
         self.terminal.update(cx, |terminal, _| {
             terminal.scroll_wheel(event, 1.0);
         });
