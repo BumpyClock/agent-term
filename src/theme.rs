@@ -120,20 +120,6 @@ pub fn apply_terminal_scheme(settings: &AppSettings, mode: ThemeMode) {
     set_terminal_palette(palette);
 }
 
-fn resolve_theme_mode(settings: &AppSettings, window: Option<&Window>, cx: &App) -> ThemeMode {
-    match settings.theme {
-        Theme::Light => ThemeMode::Light,
-        Theme::Dark => ThemeMode::Dark,
-        Theme::System => match window
-            .map(|window| window.appearance())
-            .unwrap_or_else(|| cx.window_appearance())
-        {
-            WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
-            WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
-        },
-    }
-}
-
 #[derive(Clone, Copy)]
 struct AppPalette {
     background: &'static str,
@@ -143,7 +129,6 @@ struct AppPalette {
     secondary_foreground: &'static str,
     muted: &'static str,
     muted_foreground: &'static str,
-    accent: &'static str,
     accent_foreground: &'static str,
     danger: &'static str,
     border: &'static str,
@@ -161,43 +146,10 @@ struct AppPalette {
     chart_3: &'static str,
     chart_4: &'static str,
     chart_5: &'static str,
-
-    // === SURFACE TOKENS ===
-    surface_base: &'static str,
-    surface_subtle: &'static str,
-    surface_raised: &'static str,
-    surface_elevated: &'static str,
-    surface_sunken: &'static str,
-
-    // === BORDER TOKENS ===
-    border_subtle: &'static str,
-    border_default: &'static str,
-    border_strong: &'static str,
-
-    // === STATE TOKENS ===
-    state_hover: &'static str,
-    state_active: &'static str,
-    state_selected: &'static str,
-    state_disabled: &'static str,
-    state_focus: &'static str,
-
-    // === OVERLAY TOKENS ===
-    overlay_scrim: &'static str,
-    overlay_popover: &'static str,
-    overlay_tooltip: &'static str,
-}
-
-struct AppElevation {
-    xs: &'static str,
-    sm: &'static str,
-    md: &'static str,
-    lg: &'static str,
-    xl: &'static str,
 }
 
 fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     let palette = palette_for_mode(mode);
-    let elevation = elevation_for_mode(mode);
     let mut colors = ThemeConfigColors::default();
 
     colors.background = Some(palette.background.into());
@@ -229,39 +181,6 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.chart_4 = Some(palette.chart_4.into());
     colors.chart_5 = Some(palette.chart_5.into());
 
-    // Surface tokens
-    colors.surface_base = Some(palette.surface_base.into());
-    colors.surface_base_foreground = Some(palette.foreground.into());
-    colors.surface_subtle = Some(palette.surface_subtle.into());
-    colors.surface_subtle_foreground = Some(palette.foreground.into());
-    colors.surface_raised = Some(palette.surface_raised.into());
-    colors.surface_raised_foreground = Some(palette.popover_foreground.into());
-    colors.surface_elevated = Some(palette.surface_elevated.into());
-    colors.surface_elevated_foreground = Some(palette.popover_foreground.into());
-    colors.surface_sunken = Some(palette.surface_sunken.into());
-    colors.surface_sunken_foreground = Some(palette.foreground.into());
-
-    // Border tokens
-    colors.border_subtle = Some(palette.border_subtle.into());
-    colors.border_default = Some(palette.border_default.into());
-    colors.border_strong = Some(palette.border_strong.into());
-
-    // State tokens
-    colors.state_hover = Some(palette.state_hover.into());
-    colors.state_active = Some(palette.state_active.into());
-    let accent_selected =
-        rgba_hex_with_alpha(accent.hex, 0.16).unwrap_or_else(|| palette.state_selected.to_string());
-    let accent_focus =
-        rgba_hex_with_alpha(accent.hex, 0.24).unwrap_or_else(|| palette.state_focus.to_string());
-    colors.state_selected = Some(accent_selected.into());
-    colors.state_disabled = Some(palette.state_disabled.into());
-    colors.state_focus = Some(accent_focus.into());
-
-    // Overlay tokens
-    colors.overlay_scrim = Some(palette.overlay_scrim.into());
-    colors.overlay_popover = Some(palette.overlay_popover.into());
-    colors.overlay_tooltip = Some(palette.overlay_tooltip.into());
-
     ThemeConfig {
         is_default: true,
         name: match mode {
@@ -269,32 +188,8 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
             ThemeMode::Dark => "AgentTerm Dark".into(),
         },
         mode,
-        elevation_xs: Some(elevation.xs.into()),
-        elevation_sm: Some(elevation.sm.into()),
-        elevation_md: Some(elevation.md.into()),
-        elevation_lg: Some(elevation.lg.into()),
-        elevation_xl: Some(elevation.xl.into()),
         colors,
         ..ThemeConfig::default()
-    }
-}
-
-fn elevation_for_mode(mode: ThemeMode) -> AppElevation {
-    match mode {
-        ThemeMode::Light => AppElevation {
-            xs: " 0 1px 2px rgba(0,0,0,0.04)",
-            sm: " 0 2px 4px rgba(0,0,0,0.04)",
-            md: " 0 4px 6px rgba(0, 0, 0, 0.08)",
-            lg: " 0 8px 16px rgba(0, 0, 0, 0.14)",
-            xl: " 0 2px 21px rgba(0, 0, 0, 0.15), 0 32px 64px rgba(0, 0, 0, 0.19)",
-        },
-        ThemeMode::Dark => AppElevation {
-            xs: " 0 1px 2px rgba(0, 0, 0, 0.04)",
-            sm: " 0 2px 4px rgba(0, 0, 0, 0.13)",
-            md: " 0 4px 6px rgba(0, 0, 0, 0.13)",
-            lg: " 0 8px 16px rgba(0, 0, 0, 0.26)",
-            xl: " 0 32px 64px rgba(0, 0, 0, 0.37)",
-        },
     }
 }
 
@@ -308,7 +203,6 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             secondary_foreground: "#202127",
             muted: "#e6e8eb",
             muted_foreground: "#616369",
-            accent: "#edeef2",
             accent_foreground: "#202127",
             danger: "#cc272e",
             border: "#d5d7de",
@@ -326,26 +220,6 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             chart_3: "#104e64",
             chart_4: "#ffb900",
             chart_5: "#fe9a00",
-            // Surface tokens
-            surface_base: "#F7F6F3",
-            surface_subtle: "#FBFAF8",
-            surface_raised: "#FFFFFF",
-            surface_elevated: "#FFFFFF",
-            surface_sunken: "#F3F1EE",
-            // Border tokens
-            border_subtle: "#E9E5DF",
-            border_default: "#DED7CF",
-            border_strong: "#CBBFB4",
-            // State tokens
-            state_hover: "rgba(28, 26, 23, 0.04)",
-            state_active: "rgba(28, 26, 23, 0.08)",
-            state_selected: "rgba(59, 130, 246, 0.16)",
-            state_disabled: "rgba(28, 26, 23, 0.24)",
-            state_focus: "rgba(59, 130, 246, 0.24)",
-            // Overlay tokens
-            overlay_scrim: "rgba(28, 26, 23, 0.28)",
-            overlay_popover: "rgba(255, 255, 255, 0.72)",
-            overlay_tooltip: "rgba(28, 26, 23, 0.90)",
         },
         ThemeMode::Dark => AppPalette {
             background: "#111111",
@@ -355,7 +229,6 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             secondary_foreground: "#cdcdcd",
             muted: "#232323",
             muted_foreground: "#797979",
-            accent: "#282828",
             accent_foreground: "#cdcdcd",
             danger: "#ff6468",
             border: "#2d2d2d",
@@ -373,26 +246,6 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             chart_3: "#fe9900",
             chart_4: "#ad46ff",
             chart_5: "#ff2058",
-            // Surface tokens
-            surface_base: "#171615",
-            surface_subtle: "#1D1C1B",
-            surface_raised: "#232120",
-            surface_elevated: "#282625",
-            surface_sunken: "#121110",
-            // Border tokens
-            border_subtle: "#2C2A29",
-            border_default: "#343130",
-            border_strong: "#4A4643",
-            // State tokens
-            state_hover: "rgba(245, 242, 238, 0.04)",
-            state_active: "rgba(245, 242, 238, 0.08)",
-            state_selected: "rgba(96, 165, 250, 0.20)",
-            state_disabled: "rgba(245, 242, 238, 0.24)",
-            state_focus: "rgba(96, 165, 250, 0.24)",
-            // Overlay tokens
-            overlay_scrim: "rgba(0, 0, 0, 0.48)",
-            overlay_popover: "rgba(18, 17, 16, 0.72)",
-            overlay_tooltip: "rgba(0, 0, 0, 0.85)",
         },
     }
 }
@@ -409,13 +262,4 @@ fn parse_hex_color(color: &str) -> gpui::Hsla {
         a: 1.0,
     });
     rgba.into()
-}
-
-fn rgba_hex_with_alpha(color: &str, alpha: f32) -> Option<String> {
-    let rgba = gpui::Rgba::try_from(color).ok()?;
-    let r = (rgba.r * 255.0).round() as u8;
-    let g = (rgba.g * 255.0).round() as u8;
-    let b = (rgba.b * 255.0).round() as u8;
-    let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Some(format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a))
 }
