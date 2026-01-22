@@ -294,8 +294,6 @@ impl AgentTermApp {
                     ),
             )
             .context_menu({
-                let workspace_id = workspace_id;
-                let is_default = is_default;
                 move |menu, window, cx| {
                     if is_default {
                         return menu;
@@ -316,7 +314,6 @@ impl AgentTermApp {
                     if !other_windows.is_empty() {
                         menu = menu.submenu("Move Workspace to Window", window, cx, {
                             let workspace_id = workspace_id.clone();
-                            let other_windows = other_windows;
                             move |submenu, _window, _cx| {
                                 let mut submenu = submenu;
                                 for (_handle, info) in &other_windows {
@@ -638,7 +635,6 @@ impl AgentTermApp {
             }
         }))
         .context_menu({
-            let session_id = session_id;
             move |menu, window, cx| {
                 let current_handle: AnyWindowHandle = window.window_handle();
                 let other_windows = WindowRegistry::global().list_other_windows(current_handle);
@@ -654,7 +650,6 @@ impl AgentTermApp {
                 if !other_windows.is_empty() {
                     menu = menu.submenu("Move to Window", window, cx, {
                         let session_id = session_id.clone();
-                        let other_windows = other_windows;
                         move |submenu, _window, _cx| {
                             let mut submenu = submenu;
                             for (_handle, info) in &other_windows {
@@ -699,46 +694,6 @@ impl AgentTermApp {
                 } else {
                     window.collapsed_workspaces.retain(|id| id != &workspace_id);
                 }
-            });
-        cx.notify();
-    }
-
-    pub fn move_workspace(&mut self, workspace_id: String, delta: isize, cx: &mut Context<Self>) {
-        let Some(window) = self.window_layout() else {
-            return;
-        };
-
-        let mut ordered_ids = if window.workspace_order.is_empty() {
-            self.workspaces
-                .iter()
-                .map(|s| s.workspace.id.clone())
-                .collect()
-        } else {
-            window.workspace_order
-        };
-
-        let mut moveable: Vec<String> = ordered_ids
-            .iter()
-            .filter(|id| *id != DEFAULT_WORKSPACE_ID)
-            .cloned()
-            .collect();
-        let idx = moveable.iter().position(|id| id == &workspace_id);
-        let Some(idx) = idx else {
-            return;
-        };
-        let new_idx = (idx as isize + delta).clamp(0, moveable.len().saturating_sub(1) as isize);
-        if new_idx as usize == idx {
-            return;
-        }
-        let item = moveable.remove(idx);
-        moveable.insert(new_idx as usize, item);
-
-        ordered_ids.retain(|id| id == DEFAULT_WORKSPACE_ID);
-        ordered_ids.extend(moveable);
-
-        self.layout_store
-            .update_window(&self.layout_window_id, |window| {
-                window.workspace_order = ordered_ids;
             });
         cx.notify();
     }

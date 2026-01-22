@@ -360,7 +360,6 @@ fn create_new_window_internal(
             title: Some(title),
             appears_transparent: true,
             traffic_light_position: Some(gpui::point(px(16.0), px(16.0))),
-            ..Default::default()
         }),
         window_background: background_appearance,
         window_decorations: if cfg!(not(target_os = "macos")) {

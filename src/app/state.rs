@@ -49,8 +49,6 @@ struct GitRepoWatcher {
 pub struct AgentTermApp {
     pub(crate) focus_handle: FocusHandle,
 
-    /// Weak reference to self for callbacks and external access.
-    pub(crate) weak_self: WeakEntity<Self>,
     /// Handle to this app's window for cross-window operations.
     pub(crate) window_handle: AnyWindowHandle,
 
@@ -72,9 +70,6 @@ pub struct AgentTermApp {
 
     // Terminal views are window-specific; terminals live in global TerminalPool
     pub(crate) terminal_views: HashMap<String, Entity<TerminalView>>,
-
-    pub(crate) session_menu_open: bool,
-    pub(crate) session_menu_session_id: Option<String>,
 
     pub(crate) settings: AppSettings,
 
@@ -101,16 +96,6 @@ pub struct AgentTermApp {
 }
 
 impl AgentTermApp {
-    /// Creates a new AgentTermApp with all sessions visible (for first window on app launch).
-    /// This is the primary window constructor that uses the shared LayoutManager.
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let layout_manager = LayoutManager::global();
-        let layout_store = layout_manager.store().clone();
-        let layout_window_id = layout_manager.create_window();
-
-        Self::new_with_layout(window, cx, layout_store, layout_window_id)
-    }
-
     /// Creates a new AgentTermApp with a specific layout window ID and shared layout store.
     ///
     /// - `layout_store` - Shared layout store (created by first window, passed to subsequent windows)
@@ -128,7 +113,7 @@ impl AgentTermApp {
         let window_handle: AnyWindowHandle = window.window_handle();
 
         LayoutManager::global().register_handle(layout_window_id.clone(), window_handle);
-        WindowRegistry::global().register(window_handle, weak_self.clone());
+        WindowRegistry::global().register(window_handle, weak_self);
 
         let tokio = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -149,7 +134,6 @@ impl AgentTermApp {
 
         let mut this = Self {
             focus_handle,
-            weak_self,
             window_handle,
             session_store,
             mcp_manager,
@@ -163,8 +147,6 @@ impl AgentTermApp {
             sessions: Vec::new(),
             active_session_id: None,
             terminal_views: HashMap::new(),
-            session_menu_open: false,
-            session_menu_session_id: None,
             settings: AppSettings::load(),
             cached_shells: Vec::new(),
             cached_tools: Vec::new(),

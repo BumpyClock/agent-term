@@ -290,8 +290,8 @@ impl IconDescriptor {
 /// - Any other string -> Fallback to File icon
 pub fn icon_from_string(icon_str: &str) -> Icon {
     // Handle lucide: prefix
-    if icon_str.starts_with("lucide:") {
-        return Icon::lucide(&icon_str[7..]);
+    if let Some(stripped) = icon_str.strip_prefix("lucide:") {
+        return Icon::lucide(stripped);
     }
 
     // Handle path format: /tool-icons/filename.svg or tool-icons/filename.svg

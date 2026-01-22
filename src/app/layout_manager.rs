@@ -85,17 +85,6 @@ impl LayoutManager {
         let mut inner = self.inner.lock();
         inner.next_order = next_order;
     }
-
-    /// Lists all layout window IDs except the given one.
-    pub fn list_other_windows(&self, exclude: &str) -> Vec<String> {
-        let inner = self.inner.lock();
-        inner
-            .window_handles
-            .keys()
-            .filter(|id| *id != exclude)
-            .cloned()
-            .collect()
-    }
 }
 
 impl Default for LayoutManager {

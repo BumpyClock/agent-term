@@ -161,7 +161,6 @@ impl TabPickerDialog {
             .cursor_pointer()
             .hover(move |s| s.bg(hover_bg))
             .on_click(cx.listener({
-                let tool = tool;
                 move |this, _: &ClickEvent, window, cx| {
                     this.select_tool(tool.clone(), window, cx);
                 }
@@ -221,7 +220,6 @@ impl TabPickerDialog {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener({
-                            let shell = shell;
                             move |this, _: &MouseDownEvent, window, cx| {
                                 this.select_shell(shell.clone(), window, cx);
                             }

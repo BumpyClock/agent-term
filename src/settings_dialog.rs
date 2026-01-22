@@ -180,18 +180,17 @@ impl SettingsDialog {
             &font_size_input,
             window,
             |this, input, event: &NumberInputEvent, window, cx| {
-                if let NumberInputEvent::Step(action) = event {
-                    input.update(cx, |input, cx| {
-                        let value = input.value().parse::<f32>().unwrap_or(14.0);
-                        let new_value = match action {
-                            StepAction::Increment => (value + 1.0).min(32.0),
-                            StepAction::Decrement => (value - 1.0).max(8.0),
-                        };
-                        this.settings.font_size = new_value;
-                        input.set_value(new_value.to_string(), window, cx);
-                    });
-                    this.notify_change(window, cx);
-                }
+                let NumberInputEvent::Step(action) = event;
+                input.update(cx, |input, cx| {
+                    let value = input.value().parse::<f32>().unwrap_or(14.0);
+                    let new_value = match action {
+                        StepAction::Increment => (value + 1.0).min(32.0),
+                        StepAction::Decrement => (value - 1.0).max(8.0),
+                    };
+                    this.settings.font_size = new_value;
+                    input.set_value(new_value.to_string(), window, cx);
+                });
+                this.notify_change(window, cx);
             },
         )
         .detach();
@@ -215,18 +214,17 @@ impl SettingsDialog {
             &line_height_input,
             window,
             |this, input, event: &NumberInputEvent, window, cx| {
-                if let NumberInputEvent::Step(action) = event {
-                    input.update(cx, |input, cx| {
-                        let value = input.value().parse::<f32>().unwrap_or(1.4);
-                        let new_value = match action {
-                            StepAction::Increment => (value + 0.1).min(2.5),
-                            StepAction::Decrement => (value - 0.1).max(1.0),
-                        };
-                        this.settings.line_height = new_value;
-                        input.set_value(format!("{:.1}", new_value), window, cx);
-                    });
-                    this.notify_change(window, cx);
-                }
+                let NumberInputEvent::Step(action) = event;
+                input.update(cx, |input, cx| {
+                    let value = input.value().parse::<f32>().unwrap_or(1.4);
+                    let new_value = match action {
+                        StepAction::Increment => (value + 0.1).min(2.5),
+                        StepAction::Decrement => (value - 0.1).max(1.0),
+                    };
+                    this.settings.line_height = new_value;
+                    input.set_value(format!("{:.1}", new_value), window, cx);
+                });
+                this.notify_change(window, cx);
             },
         )
         .detach();
@@ -250,18 +248,17 @@ impl SettingsDialog {
             &letter_spacing_input,
             window,
             |this, input, event: &NumberInputEvent, window, cx| {
-                if let NumberInputEvent::Step(action) = event {
-                    input.update(cx, |input, cx| {
-                        let value = input.value().parse::<f32>().unwrap_or(0.0);
-                        let new_value = match action {
-                            StepAction::Increment => (value + 0.5).min(10.0),
-                            StepAction::Decrement => (value - 0.5).max(-2.0),
-                        };
-                        this.settings.letter_spacing = new_value;
-                        input.set_value(format!("{:.1}", new_value), window, cx);
-                    });
-                    this.notify_change(window, cx);
-                }
+                let NumberInputEvent::Step(action) = event;
+                input.update(cx, |input, cx| {
+                    let value = input.value().parse::<f32>().unwrap_or(0.0);
+                    let new_value = match action {
+                        StepAction::Increment => (value + 0.5).min(10.0),
+                        StepAction::Decrement => (value - 0.5).max(-2.0),
+                    };
+                    this.settings.letter_spacing = new_value;
+                    input.set_value(format!("{:.1}", new_value), window, cx);
+                });
+                this.notify_change(window, cx);
             },
         )
         .detach();

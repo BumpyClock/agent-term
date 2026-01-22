@@ -223,15 +223,13 @@ impl AgentTermApp {
         if let Some(target_layout_id) = target_layout_id {
             if let Some(target_session_id) = target_session_id {
                 if let Some(target_handle) = LayoutManager::global().get_handle(&target_layout_id) {
-                    let session_id_for_target = target_session_id.clone();
                     let _ = cx.update_window(target_handle, move |_root, window, cx| {
                         window.activate_window();
                         let target_handle = window.window_handle();
                         if let Some(weak_app) = WindowRegistry::global().get_app(&target_handle) {
                             if let Some(app) = weak_app.upgrade() {
-                                let session_id = session_id_for_target.clone();
                                 app.update(cx, |app, cx| {
-                                    app.set_active_session_id(session_id, window, cx);
+                                    app.set_active_session_id(target_session_id, window, cx);
                                 });
                             }
                         }
@@ -496,19 +494,6 @@ impl AgentTermApp {
         name_focus.focus(window, cx);
     }
 
-    // Session menu handlers
-    pub fn open_session_menu(&mut self, session_id: String, cx: &mut Context<Self>) {
-        self.session_menu_open = true;
-        self.session_menu_session_id = Some(session_id);
-        cx.notify();
-    }
-
-    pub fn close_session_menu(&mut self, cx: &mut Context<Self>) {
-        self.session_menu_open = false;
-        self.session_menu_session_id = None;
-        cx.notify();
-    }
-
     // Session rename dialog
     pub fn open_session_rename(
         &mut self,
@@ -519,7 +504,6 @@ impl AgentTermApp {
         let Some(session) = self.sessions.iter().find(|s| s.id == session_id).cloned() else {
             return;
         };
-        self.session_menu_open = false;
 
         let view = cx.entity();
 
@@ -577,75 +561,6 @@ impl AgentTermApp {
         cx.notify();
     }
 
-    // Session ordering methods
-    pub fn move_session_to_workspace(
-        &mut self,
-        session_id: String,
-        workspace_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let _ = self
-            .session_store
-            .move_session(&session_id, workspace_id.clone());
-        self.layout_store
-            .update_window(&self.layout_window_id, |layout| {
-                if let Some(tab) = layout
-                    .tabs
-                    .iter_mut()
-                    .find(|tab| tab.session_id == session_id)
-                {
-                    tab.workspace_id = workspace_id.clone();
-                }
-                if !layout.workspace_order.contains(&workspace_id) {
-                    layout.workspace_order.push(workspace_id.clone());
-                }
-            });
-        self.close_session_menu(cx);
-        self.reload_from_store(cx);
-        self.ensure_active_terminal(window, cx);
-    }
-
-    pub fn move_session_order(&mut self, session_id: String, delta: isize, cx: &mut Context<Self>) {
-        let Some(session) = self.sessions.iter().find(|s| s.id == session_id).cloned() else {
-            return;
-        };
-        let workspace_id = session.workspace_id;
-        let Some(window_layout) = self.window_layout() else {
-            return;
-        };
-
-        let mut ordered: Vec<String> = window_layout
-            .tabs
-            .iter()
-            .filter(|tab| tab.workspace_id == workspace_id)
-            .map(|tab| tab.session_id.clone())
-            .collect();
-
-        let idx = ordered.iter().position(|id| id == &session_id);
-        let Some(idx) = idx else {
-            return;
-        };
-        let new_idx = (idx as isize + delta).clamp(0, ordered.len().saturating_sub(1) as isize);
-        if new_idx as usize == idx {
-            return;
-        }
-
-        let item = ordered.remove(idx);
-        ordered.insert(new_idx as usize, item);
-
-        self.layout_store
-            .update_window(&self.layout_window_id, |layout| {
-                for (index, id) in ordered.iter().enumerate() {
-                    if let Some(tab) = layout.tabs.iter_mut().find(|tab| tab.session_id == *id) {
-                        tab.order = index as u32;
-                    }
-                }
-            });
-
-        self.reload_from_store(cx);
-    }
-
     // MCP Manager dialog
     pub fn open_mcp_manager(
         &mut self,
@@ -653,8 +568,6 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.session_menu_open = false;
-
         let tokio = self.tokio.clone();
         let mcp_manager = self.mcp_manager.clone();
 
@@ -690,8 +603,6 @@ impl AgentTermApp {
 
     // New shell tab dialog
     pub fn new_shell_tab(&mut self, _: &NewShellTab, window: &mut Window, cx: &mut Context<Self>) {
-        self.session_menu_open = false;
-
         let view = cx.entity();
         let tokio = self.tokio.clone();
         let mcp_manager = self.mcp_manager.clone();
