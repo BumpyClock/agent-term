@@ -59,6 +59,6 @@
 
 **What we tried:** Instrumented scroll handling in `gpui_term::terminal` to log mode flags and branch selection.
 
-**Outcome:** The terminal was in `ALTERNATE_SCROLL` without `ALT_SCREEN`, so the scroll wheel fell back to scrollback and showed empty history. Fixed by honoring `ALTERNATE_SCROLL` regardless of `ALT_SCREEN`.
+**Outcome:** `ALTERNATE_SCROLL` is enabled by default, so using it without `ALT_SCREEN` made the scroll wheel send arrow keys in normal terminals. Reverted to only apply alternate scroll when `ALT_SCREEN` is active. The blank screen during scrollback was due to rendering grid line coordinates directly; scrolled-back lines have negative line indices and were being painted outside the viewport. Fix by offsetting grid lines by `display_offset` for rendering.
 
-**Next time:** If a TUI sets `ALTERNATE_SCROLL` outside alt screen, route scroll to the app instead of scrollback.
+**Next time:** Treat `ALTERNATE_SCROLL` as meaningful only when `ALT_SCREEN` is set; it defaults to on otherwise. When rendering scrollback, always convert grid line coordinates into viewport coordinates using `display_offset`.

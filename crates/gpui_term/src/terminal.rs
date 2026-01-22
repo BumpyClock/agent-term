@@ -628,6 +628,7 @@ impl Terminal {
             cell: ic.cell.clone(),
         }));
 
+
         let selection_text = if content.selection.is_some() {
             term.selection_to_string()
         } else {
@@ -1021,30 +1022,11 @@ impl Terminal {
 
     /// Handles scroll wheel events.
     pub fn scroll_wheel(&mut self, e: &ScrollWheelEvent, scroll_multiplier: f32) {
-        let mode = self.last_content.mode;
         let mouse_mode = self.mouse_mode(e.shift);
-        let history_size = self.term.lock().history_size();
-        log::info!(
-            "terminal_scroll_wheel: delta={:?} touch_phase={:?} shift={} mode={:?} mouse_mode={} alt_screen={} alt_scroll={} display_offset={} history_size={} scrolled_top={} scrolled_bottom={}",
-            e.delta,
-            e.touch_phase,
-            e.shift,
-            mode,
-            mouse_mode,
-            mode.contains(TermMode::ALT_SCREEN),
-            mode.contains(TermMode::ALTERNATE_SCROLL),
-            self.last_content.display_offset,
-            history_size,
-            self.last_content.scrolled_to_top,
-            self.last_content.scrolled_to_bottom
-        );
         let scroll_multiplier = if mouse_mode { 1. } else { scroll_multiplier };
 
-        let scroll_lines = self.determine_scroll_lines(e, scroll_multiplier);
-        log::info!("terminal_scroll_lines: {:?}", scroll_lines);
-        if let Some(scroll_lines) = scroll_lines {
+        if let Some(scroll_lines) = self.determine_scroll_lines(e, scroll_multiplier) {
             if mouse_mode {
-                log::info!("terminal_scroll_branch=mouse_report lines={}", scroll_lines);
                 let point = grid_point(
                     e.position - self.last_content.terminal_bounds.bounds.origin,
                     self.last_content.terminal_bounds,
@@ -1057,18 +1039,17 @@ impl Terminal {
                         self.write_to_pty(scroll);
                     }
                 }
-            } else if self.last_content.mode.contains(TermMode::ALTERNATE_SCROLL) && !e.shift {
-                log::info!("terminal_scroll_branch=alt_scroll lines={}", scroll_lines);
+            } else if self
+                .last_content
+                .mode
+                .contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL)
+                && !e.shift
+            {
                 self.write_to_pty(alt_scroll(scroll_lines));
             } else if scroll_lines != 0 {
-                log::info!("terminal_scroll_branch=scrollback lines={}", scroll_lines);
                 self.events
                     .push_back(InternalEvent::Scroll(AlacScroll::Delta(scroll_lines)));
-            } else {
-                log::info!("terminal_scroll_branch=none lines=0");
             }
-        } else {
-            log::info!("terminal_scroll_branch=none lines=None");
         }
     }
 
@@ -1205,16 +1186,7 @@ impl Terminal {
                 cx.emit(Event::Wakeup);
             }
             InternalEvent::Scroll(scroll) => {
-                let before_offset = term.grid().display_offset();
                 term.scroll_display(*scroll);
-                let after_offset = term.grid().display_offset();
-                log::info!(
-                    "terminal_scroll_display: scroll={:?} display_offset {:?} -> {:?} history_size={}",
-                    scroll,
-                    before_offset,
-                    after_offset,
-                    term.history_size()
-                );
             }
             InternalEvent::ScrollToAlacPoint(point) => {
                 term.scroll_to_point(*point);

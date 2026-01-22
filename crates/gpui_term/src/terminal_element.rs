@@ -25,20 +25,20 @@ use std::mem;
 use alacritty_terminal::{
     index::Point as AlacPoint,
     selection::SelectionRange,
-    term::{TermMode, cell::Flags},
+    term::{cell::Flags, TermMode},
     vte::ansi::{Color as AnsiColor, CursorShape as AlacCursorShape, NamedColor},
 };
 use gpui::{
-    AbsoluteLength, App, Bounds, ContentMask, Element, ElementId, Entity, FocusHandle, Font,
-    FontStyle, FontWeight, GlobalElementId, Hitbox, Hsla, InputHandler, IntoElement, LayoutId,
-    Pixels, Point, Rgba, ShapedLine, StrikethroughStyle, TextRun, UTF16Selection, UnderlineStyle,
-    Window, fill, point, px, size,
+    fill, point, px, size, AbsoluteLength, App, Bounds, ContentMask, Element, ElementId, Entity,
+    FocusHandle, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, Hsla, InputHandler,
+    IntoElement, LayoutId, Pixels, Point, Rgba, ShapedLine, StrikethroughStyle, TextRun,
+    UTF16Selection, UnderlineStyle, Window,
 };
 use itertools::Itertools;
 
 use crate::{
-    DetectedUrl, IndexedCell, Terminal, TerminalBounds, TerminalContent,
-    terminal_palette::terminal_palette,
+    terminal_palette::terminal_palette, DetectedUrl, IndexedCell, Terminal, TerminalBounds,
+    TerminalContent,
 };
 
 /// Layout state computed during prepaint, used for painting.
@@ -447,9 +447,11 @@ impl TerminalElement {
         let mut background_regions: Vec<BackgroundRegion> = Vec::with_capacity(estimated_regions);
         let mut current_batch: Option<BatchedTextRun> = None;
 
+        let display_offset_i32 = i32::try_from(display_offset).unwrap_or(i32::MAX);
         let linegroups = grid.into_iter().chunk_by(|i| i.point.line);
         for (_line_index, (actual_line, line)) in linegroups.into_iter().enumerate() {
-            let alac_line = actual_line.0;
+            let grid_line = actual_line.0;
+            let display_line = grid_line.saturating_add(display_offset_i32);
 
             if let Some(batch) = current_batch.take() {
                 batched_runs.push(batch);
@@ -469,8 +471,7 @@ impl TerminalElement {
                 // grid-absolute coordinates, so we need to convert.
                 let is_selected = selection.is_some_and(|sel| {
                     // Convert viewport line to grid line by subtracting display_offset
-                    let grid_line =
-                        alacritty_terminal::index::Line(cell.point.line.0 - display_offset as i32);
+                    let grid_line = alacritty_terminal::index::Line(cell.point.line.0);
                     let grid_point = alacritty_terminal::index::Point::new(
                         grid_line,
                         alacritty_terminal::index::Column(cell.point.column.0),
@@ -499,16 +500,20 @@ impl TerminalElement {
 
                     if let Some(last_region) = background_regions.last_mut() {
                         if last_region.color == color
-                            && last_region.start_line == alac_line
-                            && last_region.end_line == alac_line
+                            && last_region.start_line == display_line
+                            && last_region.end_line == display_line
                             && last_region.end_col + 1 == col
                         {
                             last_region.end_col = col;
                         } else {
-                            background_regions.push(BackgroundRegion::new(alac_line, col, color));
+                            background_regions.push(BackgroundRegion::new(
+                                display_line,
+                                col,
+                                color,
+                            ));
                         }
                     } else {
-                        background_regions.push(BackgroundRegion::new(alac_line, col, color));
+                        background_regions.push(BackgroundRegion::new(display_line, col, color));
                     }
                 }
 
@@ -527,9 +532,9 @@ impl TerminalElement {
                     // Check for OSC 8 hyperlinks OR regex-detected URLs
                     let col = cell.point.column.0;
                     let has_hyperlink = cell.hyperlink().is_some()
-                        || detected_urls.iter().any(|u| u.contains(alac_line, col));
+                        || detected_urls.iter().any(|u| u.contains(grid_line, col));
                     let cell_style = Self::cell_style(&cell, fg, text_style, has_hyperlink);
-                    let cell_point = AlacPoint::new(alac_line, cell.point.column.0 as i32);
+                    let cell_point = AlacPoint::new(display_line, cell.point.column.0 as i32);
                     let zero_width_chars = cell.zerowidth();
 
                     if let Some(ref mut batch) = current_batch {
