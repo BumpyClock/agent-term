@@ -14,6 +14,7 @@ fn hidden_command(program: &str) -> std::process::Command {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 fn hidden_command(program: &str) -> std::process::Command {
     std::process::Command::new(program)
 }

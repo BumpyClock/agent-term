@@ -23,12 +23,10 @@ pub enum CommandPalettePayload {
     },
     ClaudeConversation {
         session_id: String,
-        file_path: String,
         workspace: String,
     },
     CodexConversation {
         session_id: String,
-        file_path: String,
         workspace: String,
     },
     Action {
@@ -164,7 +162,6 @@ impl CommandPaletteProvider for AgentTermProvider {
                     .icon(IconName::Bot)
                     .payload(CommandPalettePayload::ClaudeConversation {
                         session_id,
-                        file_path: result.file_path,
                         workspace: result.workspace_name,
                     }),
                     MessageSource::Codex => CommandPaletteItem::new(
@@ -176,7 +173,6 @@ impl CommandPaletteProvider for AgentTermProvider {
                     .icon(IconName::File)
                     .payload(CommandPalettePayload::CodexConversation {
                         session_id,
-                        file_path: result.file_path,
                         workspace: result.workspace_name,
                     }),
                 };

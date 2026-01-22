@@ -23,8 +23,8 @@ pub fn icon_descriptor_to_string(icon: &IconDescriptor) -> String {
 
 /// Convert a string to IconDescriptor.
 pub fn icon_descriptor_from_string(s: &str) -> IconDescriptor {
-    if s.starts_with("lucide:") {
-        IconDescriptor::lucide(&s[7..])
+    if let Some(stripped) = s.strip_prefix("lucide:") {
+        IconDescriptor::lucide(stripped)
     } else {
         IconDescriptor::tool(s)
     }

@@ -133,7 +133,7 @@ impl WorkspaceEditorDialog {
         cx.notify();
     }
 
-    fn browse_for_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn browse_for_path(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let current_value = self.path_input.read(cx).value().to_string();
         let start_dir = resolve_picker_start_path(&current_value);
         let window_handle = self.view.read(cx).window_handle;
@@ -415,7 +415,7 @@ impl AddWorkspaceDialog {
         cx.notify();
     }
 
-    fn browse_for_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn browse_for_path(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let current_value = self.path_input.read(cx).value().to_string();
         let start_dir = resolve_picker_start_path(&current_value);
         let window_handle = self.view.read(cx).window_handle;

@@ -223,8 +223,7 @@ impl SearchEngine {
 
         let snippet_end = content
             .char_indices()
-            .skip_while(|(i, _)| *i < snippet_end)
-            .next()
+            .find(|(i, _)| *i >= snippet_end)
             .map(|(i, _)| i)
             .unwrap_or(content.len());
 
@@ -282,6 +281,7 @@ mod tests {
     use super::*;
     use crate::index::IndexedMessage;
 
+    #[allow(dead_code)]
     fn create_test_message(content: &str) -> IndexedMessage {
         IndexedMessage {
             file_path: "/test/path.jsonl".to_string(),
