@@ -32,3 +32,23 @@
 **Next time:**
 - When choosing global shortcuts, check for conflicts with context-specific bindings (e.g., Terminal context).
 - `alt-k` is a safe choice for global actions that shouldn't conflict with common terminal shortcuts.
+
+## 2026-01-22: Command Palette Shortcut Not Opening
+
+**Context:** Changing the command palette shortcut to Cmd/Ctrl+P by editing the gpui-component defaults.
+
+**What we tried:** Updated `vendor/gpui-component/crates/ui/src/command_palette/types.rs` default shortcut.
+
+**Outcome:** The palette still did not open because the app overrides the shortcut and does not handle the `command_palette::Open` action; invalid shortcut strings (like `cmd/ctrl+p`) are skipped by the parser.
+
+**Next time:** Bind `ToggleCommandPalette` in the app (or handle `command_palette::Open`) and use platform-specific shortcut strings (`cmd-p` or `ctrl-p`).
+
+## 2026-01-22: Command Palette Workspace Restore No-Op
+
+**Context:** Selecting a workspace from the command palette did nothing, even though users expected the workspace tabs to restore or switch.
+
+**What we tried:** Traced the selection handler and found it only set `active_session_id` without `set_active_session_id`, and it only looked at tabs already visible in the current window.
+
+**Outcome:** Added a workspace selection helper that switches to an existing window containing the workspace (preferred), otherwise restores the workspace tabs in the current window and activates the first tab.
+
+**Next time:** Ensure command palette selections use `set_active_session_id` and consider cross-window layout state before restoring.
