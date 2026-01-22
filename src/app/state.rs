@@ -242,7 +242,8 @@ impl AgentTermApp {
                 if !window.workspace_order.contains(&workspace_id) {
                     window.workspace_order.push(workspace_id.clone());
                 }
-                window.append_tab(session_id, workspace_id);
+                window.append_tab(session_id.clone(), workspace_id);
+                window.active_session_id = Some(session_id);
             });
     }
 
