@@ -759,7 +759,7 @@ fn word_range(text: &str, offset: usize) -> Option<Range<usize>> {
     if offset == text.len() {
         offset = text
             .grapheme_indices(true)
-            .last()
+            .next_back()
             .map(|(i, _)| i)
             .unwrap_or(0);
     } else if !text.is_char_boundary(offset) {

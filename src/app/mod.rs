@@ -248,7 +248,7 @@ impl Render for AgentTermApp {
             .main(main_content)
             .overlay_children(overlay_children)
             .on_mouse_move({
-                let entity = cx.entity().clone();
+                let entity = cx.entity();
                 move |event, window, cx| {
                     entity.update(cx, |this, cx| {
                         this.update_sidebar_resize(event, window, cx);
@@ -256,7 +256,7 @@ impl Render for AgentTermApp {
                 }
             })
             .on_mouse_up({
-                let entity = cx.entity().clone();
+                let entity = cx.entity();
                 move |event, window, cx| {
                     entity.update(cx, |this, cx| {
                         this.stop_sidebar_resize(event, window, cx);
@@ -372,7 +372,7 @@ fn create_new_window_internal(
     let layout_store = layout_manager.store().clone();
     let layout_window_id = layout_window_id.unwrap_or_else(|| layout_manager.create_window());
 
-    if let Some((session_id, workspace_id)) = session_info.clone() {
+    if let Some((session_id, workspace_id)) = session_info {
         layout_store.update_window(&layout_window_id, |layout| {
             if !layout.workspace_order.contains(&workspace_id) {
                 layout.workspace_order.push(workspace_id.clone());

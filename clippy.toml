@@ -1,0 +1,8 @@
+allow-private-module-inception = true
+avoid-breaking-exported-api = false
+
+disallowed-methods = [
+    { path = "std::process::Command::spawn", reason = "Use smol::process::Command::spawn to avoid blocking" },
+    { path = "std::process::Command::output", reason = "Use smol::process::Command::output to avoid blocking" },
+    { path = "std::process::Command::status", reason = "Use smol::process::Command::status to avoid blocking" },
+]

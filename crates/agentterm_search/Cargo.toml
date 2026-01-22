@@ -6,6 +6,9 @@ publish.workspace = true
 license.workspace = true
 description = "Search indexing for Claude JSONL conversation logs"
 
+[lints]
+workspace = true
+
 [dependencies]
 dirs.workspace = true
 parking_lot.workspace = true

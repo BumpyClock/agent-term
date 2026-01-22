@@ -210,8 +210,8 @@ impl WorkspaceEditorDialog {
 impl Render for WorkspaceEditorDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_icon = self.current_icon.clone();
-        let entity = cx.entity().clone();
-        let icon_entity = entity.clone();
+        let entity = cx.entity();
+        let icon_entity = entity;
         let mode = if cx.theme().is_dark() {
             ThemeMode::Dark
         } else {
@@ -499,8 +499,8 @@ impl AddWorkspaceDialog {
 impl Render for AddWorkspaceDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_icon = self.current_icon.clone();
-        let entity = cx.entity().clone();
-        let icon_entity = entity.clone();
+        let entity = cx.entity();
+        let icon_entity = entity;
         let mode = if cx.theme().is_dark() {
             ThemeMode::Dark
         } else {

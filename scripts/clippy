@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# If no package specified, run on the whole workspace
+if [[ ! " $* " == *" -p "* && ! " $* " == *" --package "* ]]; then
+    set -- "$@" --workspace
+fi
+
+set -x
+# Note: Lint levels are configured in workspace Cargo.toml [workspace.lints.clippy]
+# Crates inherit these via [lints] workspace = true
+"${CARGO:-cargo}" clippy "$@" --release --all-targets

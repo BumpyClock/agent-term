@@ -152,15 +152,20 @@ impl TerminalView {
                 cx.notify();
             }
             Event::OpenHyperlink(url) => {
-                // Open the hyperlink using the system's default handler
+                // Open the hyperlink using the system's default handler.
+                // Using std::process::Command is acceptable here as it's a fire-and-forget
+                // operation that doesn't block meaningfully.
+                #[allow(clippy::disallowed_methods)]
                 #[cfg(target_os = "macos")]
                 {
                     let _ = std::process::Command::new("open").arg(url).spawn();
                 }
+                #[allow(clippy::disallowed_methods)]
                 #[cfg(target_os = "linux")]
                 {
                     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
                 }
+                #[allow(clippy::disallowed_methods)]
                 #[cfg(target_os = "windows")]
                 {
                     use std::os::windows::process::CommandExt;

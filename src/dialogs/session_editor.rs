@@ -84,7 +84,7 @@ impl SessionEditorDialog {
 impl Render for SessionEditorDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_icon = self.current_icon.clone();
-        let entity = cx.entity().clone();
+        let entity = cx.entity();
 
         v_flex()
             .gap(px(16.))

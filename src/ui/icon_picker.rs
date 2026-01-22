@@ -232,7 +232,7 @@ fn render_icon_button(
     palette: IconPickerPalette,
 ) -> impl IntoElement {
     let is_selected = current_value.as_ref() == Some(&descriptor);
-    let descriptor_clone = descriptor.clone();
+    let descriptor_clone = descriptor;
 
     div()
         .id(id.into())

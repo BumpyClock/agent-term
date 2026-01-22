@@ -161,7 +161,7 @@ impl TabPickerDialog {
             .cursor_pointer()
             .hover(move |s| s.bg(hover_bg))
             .on_click(cx.listener({
-                let tool = tool.clone();
+                let tool = tool;
                 move |this, _: &ClickEvent, window, cx| {
                     this.select_tool(tool.clone(), window, cx);
                 }
@@ -221,7 +221,7 @@ impl TabPickerDialog {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener({
-                            let shell = shell.clone();
+                            let shell = shell;
                             move |this, _: &MouseDownEvent, window, cx| {
                                 this.select_shell(shell.clone(), window, cx);
                             }
@@ -277,40 +277,30 @@ impl Render for TabPickerDialog {
 
         let mut pinned_shells: Vec<ShellInfo> = self
             .shells
-            .iter()
-            .cloned()
-            .filter(|s| pinned_set.contains(s.id.as_str()))
+            .iter().filter(|&s| pinned_set.contains(s.id.as_str())).cloned()
             .collect();
         pinned_shells.sort_by(|a, b| a.name.cmp(&b.name));
 
         let mut native_shells: Vec<ShellInfo> = self
             .shells
-            .iter()
-            .cloned()
-            .filter(|s| s.shell_type == ShellType::Native && !pinned_set.contains(s.id.as_str()))
+            .iter().filter(|&s| s.shell_type == ShellType::Native && !pinned_set.contains(s.id.as_str())).cloned()
             .collect();
         native_shells.sort_by(|a, b| a.name.cmp(&b.name));
 
         let mut wsl_shells: Vec<ShellInfo> = self
             .shells
-            .iter()
-            .cloned()
-            .filter(|s| s.shell_type == ShellType::Wsl && !pinned_set.contains(s.id.as_str()))
+            .iter().filter(|&s| s.shell_type == ShellType::Wsl && !pinned_set.contains(s.id.as_str())).cloned()
             .collect();
         wsl_shells.sort_by(|a, b| a.name.cmp(&b.name));
 
         let builtin_tools: Vec<ToolInfo> = self
             .tools
-            .iter()
-            .cloned()
-            .filter(|t| t.is_builtin)
+            .iter().filter(|&t| t.is_builtin).cloned()
             .collect();
 
         let custom_tools: Vec<ToolInfo> = self
             .tools
-            .iter()
-            .cloned()
-            .filter(|t| !t.is_builtin)
+            .iter().filter(|&t| !t.is_builtin).cloned()
             .collect();
 
         let mut body = v_flex().gap(px(6.0));

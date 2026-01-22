@@ -125,7 +125,7 @@ impl AgentTermApp {
         focus_handle.focus(window, cx);
 
         let weak_self = cx.entity().downgrade();
-        let window_handle: AnyWindowHandle = window.window_handle().into();
+        let window_handle: AnyWindowHandle = window.window_handle();
 
         LayoutManager::global().register_handle(layout_window_id.clone(), window_handle);
         WindowRegistry::global().register(window_handle, weak_self.clone());
@@ -492,7 +492,7 @@ impl AgentTermApp {
         }
 
         let window_handle = self.window_handle;
-        let repo_root_for_task = repo_root.clone();
+        let repo_root_for_task = repo_root;
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let mut cx = cx.clone();
             async move {
@@ -527,7 +527,7 @@ impl AgentTermApp {
     fn queue_git_status_refresh(&mut self, repo_root: PathBuf, cx: &mut Context<Self>) {
         let window_handle = self.window_handle;
         let repo_root_for_task = repo_root.clone();
-        let repo_root_for_update = repo_root.clone();
+        let repo_root_for_update = repo_root;
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let mut cx = cx.clone();
             async move {
@@ -680,7 +680,7 @@ impl AgentTermApp {
 
         let next_active_id = self
             .window_layout()
-            .and_then(|layout| layout.active_session_id.clone())
+            .and_then(|layout| layout.active_session_id)
             .or_else(|| {
                 self.sessions
                     .iter()
@@ -748,7 +748,7 @@ impl AgentTermApp {
                 self.add_session_to_layout(&record.id, &record.workspace_id);
                 let _ = self
                     .session_store
-                    .set_active_session(Some(record.id.clone()));
+                    .set_active_session(Some(record.id));
                 self.reload_from_store(cx);
                 self.ensure_active_terminal(window, cx);
             }
@@ -804,7 +804,7 @@ impl AgentTermApp {
                 self.add_session_to_layout(&record.id, &record.workspace_id);
                 let _ = self
                     .session_store
-                    .set_active_session(Some(record.id.clone()));
+                    .set_active_session(Some(record.id));
                 self.reload_from_store(cx);
                 self.ensure_active_terminal(window, cx);
             }
@@ -894,7 +894,7 @@ impl AgentTermApp {
                 SessionTool::Shell,
                 shell.name.clone(),
                 shell.command.clone(),
-                shell.args.clone(),
+                shell.args,
                 icon,
                 window,
                 cx,
@@ -1025,7 +1025,7 @@ impl AgentTermApp {
             cx,
         );
 
-        let session_id = session.id.clone();
+        let session_id = session.id;
         let window_handle = window.window_handle();
         cx.spawn(move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let mut cx = cx.clone();
