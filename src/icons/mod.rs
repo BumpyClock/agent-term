@@ -296,7 +296,7 @@ pub fn icon_from_string(icon_str: &str) -> Icon {
 
     // Handle path format: /tool-icons/filename.svg or tool-icons/filename.svg
     if icon_str.contains("tool-icons/") {
-        if let Some(filename) = icon_str.split('/').last() {
+        if let Some(filename) = icon_str.split('/').next_back() {
             // Find tool icon by filename
             if let Some(info) = TOOL_ICONS.iter().find(|t| t.filename == filename) {
                 return Icon::tool(info.id);

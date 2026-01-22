@@ -389,7 +389,7 @@ impl TerminalBuilder {
             let (events_tx, events_rx) = unbounded();
 
             let term = Term::new(
-                config.clone(),
+                config,
                 &TerminalBounds::default(),
                 ZedListener(events_tx.clone()),
             );
@@ -835,7 +835,7 @@ impl Terminal {
         {
             let term = self.term.lock();
             let grid_line = alacritty_terminal::index::Line(point.line.0);
-            let grid_col = alacritty_terminal::index::Column(point.column.0 as usize);
+            let grid_col = alacritty_terminal::index::Column(point.column.0);
             let grid_point = alacritty_terminal::index::Point::new(grid_line, grid_col);
 
             if grid_line.0 >= 0 && grid_col.0 < term.columns() {
@@ -848,7 +848,7 @@ impl Terminal {
 
         // Then, check for regex-detected URLs
         let line = point.line.0;
-        let col = point.column.0 as usize;
+        let col = point.column.0;
         for detected_url in &self.last_content.detected_urls {
             if detected_url.contains(line, col) {
                 return Some(detected_url.url.clone());

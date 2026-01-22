@@ -28,7 +28,7 @@ impl AgentTermApp {
         _window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let entity = cx.entity().clone();
+        let entity = cx.entity();
         let entity_for_end = entity.clone();
 
         SidebarShell::left(px(self.sidebar_width))
@@ -216,7 +216,7 @@ impl AgentTermApp {
         let foreground = cx.theme().foreground;
 
         // Clone data needed for the add button dropdown
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let shells = self.cached_shells.clone();
         let tools = self.cached_tools.clone();
         let pinned_ids = self.cached_pinned_shell_ids.clone();
@@ -272,7 +272,7 @@ impl AgentTermApp {
             .child(
                 div()
                     .invisible()
-                    .group_hover(group_id.clone(), |this| this.visible())
+                    .group_hover(group_id, |this| this.visible())
                     .child(
                         Button::new(format!("workspace-add-{}", workspace_id))
                             .label("+")
@@ -294,13 +294,13 @@ impl AgentTermApp {
                     ),
             )
             .context_menu({
-                let workspace_id = workspace_id.clone();
+                let workspace_id = workspace_id;
                 let is_default = is_default;
                 move |menu, window, cx| {
                     if is_default {
                         return menu;
                     }
-                    let current_handle: AnyWindowHandle = window.window_handle().into();
+                    let current_handle: AnyWindowHandle = window.window_handle();
                     let other_windows = WindowRegistry::global().list_other_windows(current_handle);
 
                     let mut menu = menu.menu(
@@ -316,7 +316,7 @@ impl AgentTermApp {
                     if !other_windows.is_empty() {
                         menu = menu.submenu("Move Workspace to Window", window, cx, {
                             let workspace_id = workspace_id.clone();
-                            let other_windows = other_windows.clone();
+                            let other_windows = other_windows;
                             move |submenu, _window, _cx| {
                                 let mut submenu = submenu;
                                 for (_handle, info) in &other_windows {
@@ -597,7 +597,7 @@ impl AgentTermApp {
                     })
                     .truncate()
                     .flex_1()
-                    .child(title.clone()),
+                    .child(title),
             );
 
         if let Some(counts) = git_counts {
@@ -638,9 +638,9 @@ impl AgentTermApp {
             }
         }))
         .context_menu({
-            let session_id = session_id.clone();
+            let session_id = session_id;
             move |menu, window, cx| {
-                let current_handle: AnyWindowHandle = window.window_handle().into();
+                let current_handle: AnyWindowHandle = window.window_handle();
                 let other_windows = WindowRegistry::global().list_other_windows(current_handle);
 
                 let mut menu = menu
@@ -654,7 +654,7 @@ impl AgentTermApp {
                 if !other_windows.is_empty() {
                     menu = menu.submenu("Move to Window", window, cx, {
                         let session_id = session_id.clone();
-                        let other_windows = other_windows.clone();
+                        let other_windows = other_windows;
                         move |submenu, _window, _cx| {
                             let mut submenu = submenu;
                             for (_handle, info) in &other_windows {

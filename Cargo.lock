@@ -142,6 +142,7 @@ dependencies = [
  "serde",
  "shell-words",
  "users",
+ "uuid",
 ]
 
 [[package]]

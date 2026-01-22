@@ -167,7 +167,7 @@ impl SessionStore {
         validate_path(&input.workspace_path)?;
         let id = Uuid::new_v4().to_string();
         let record = SessionRecord {
-            id: id.clone(),
+            id,
             title: input.title,
             workspace_path: input.workspace_path,
             workspace_id: input.workspace_id,

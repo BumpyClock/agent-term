@@ -14,7 +14,7 @@ use super::{
     create_new_window_with_session, create_window_from_layout,
 };
 use agentterm_session::DEFAULT_WORKSPACE_ID;
-use gpui_component::input::{Input as GpuiInput, InputState as GpuiInputState};
+use gpui_component::input::InputState as GpuiInputState;
 
 use crate::dialogs::{
     AddWorkspaceDialog, McpManagerDialog, SessionEditorDialog, TabPickerDialog,
@@ -279,7 +279,7 @@ impl AgentTermApp {
 
     // Add workspace dialog
     pub fn open_add_workspace_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let recent_paths = self.recent_workspace_paths();
 
         let name_input = cx.new(|cx| GpuiInputState::new(window, cx).placeholder("Workspace name"));
@@ -345,7 +345,7 @@ impl AgentTermApp {
             return;
         };
 
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let recent_paths = self.recent_workspace_paths();
 
         let name_input = cx.new(|cx| {
@@ -431,7 +431,7 @@ impl AgentTermApp {
         };
         self.session_menu_open = false;
 
-        let view = cx.entity().clone();
+        let view = cx.entity();
 
         // Create inputs with current values
         let name_input = cx.new(|cx| {
@@ -520,7 +520,7 @@ impl AgentTermApp {
         let Some(session) = self.sessions.iter().find(|s| s.id == session_id).cloned() else {
             return;
         };
-        let workspace_id = session.workspace_id.clone();
+        let workspace_id = session.workspace_id;
         let Some(window_layout) = self.window_layout() else {
             return;
         };
@@ -602,7 +602,7 @@ impl AgentTermApp {
     pub fn new_shell_tab(&mut self, _: &NewShellTab, window: &mut Window, cx: &mut Context<Self>) {
         self.session_menu_open = false;
 
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let tokio = self.tokio.clone();
         let mcp_manager = self.mcp_manager.clone();
 
@@ -647,8 +647,8 @@ impl AgentTermApp {
         // Check if the session has a running child process
         if self.session_has_running_process(&session_id, cx) {
             // Show confirmation dialog
-            let view = cx.entity().clone();
-            let session_id_for_close = session_id.clone();
+            let view = cx.entity();
+            let session_id_for_close = session_id;
 
             window.open_dialog(cx, move |dialog, _window, _cx| {
                 dialog
@@ -827,9 +827,9 @@ impl AgentTermApp {
             .map(|s| s.title.clone())
             .collect();
 
-        let view = cx.entity().clone();
-        let workspace_id_for_delete = workspace_id.clone();
-        let workspace_name = workspace.name.clone();
+        let view = cx.entity();
+        let workspace_id_for_delete = workspace_id;
+        let workspace_name = workspace.name;
 
         window.open_dialog(cx, move |dialog, _window, cx| {
             let mut content = v_flex().gap(px(12.));
@@ -1070,7 +1070,7 @@ impl AgentTermApp {
             }
         }
 
-        let workspace_id_for_target = workspace_id.clone();
+        let workspace_id_for_target = workspace_id;
         let _ = cx.update_window(target_window, move |_root, window, cx| {
             if let Some(weak_app) = WindowRegistry::global().get_app(&target_window) {
                 if let Some(app) = weak_app.upgrade() {
@@ -1140,7 +1140,7 @@ impl AgentTermApp {
         }
 
         let session_id_for_target = session_id.clone();
-        let workspace_id_for_target = workspace_id.clone();
+        let workspace_id_for_target = workspace_id;
         let _ = cx.update_window(target_window, move |_root, window, cx| {
             if let Some(weak_app) = WindowRegistry::global().get_app(&target_window) {
                 if let Some(app) = weak_app.upgrade() {

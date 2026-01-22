@@ -7,6 +7,9 @@ edition = "2021"
 name = "agentterm-mcp-proxy"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 agentterm-shared = { path = "../agentterm-shared" }
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "time"] }

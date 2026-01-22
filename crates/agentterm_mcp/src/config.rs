@@ -7,6 +7,7 @@ use super::error::{McpError, McpResult};
 
 /// User configuration loaded from ~/.agent-term/config.toml
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct UserConfig {
     /// Enable debug/diagnostic logging
     #[serde(default)]
@@ -49,22 +50,6 @@ pub struct UserConfig {
     pub updates: UpdateSettings,
 }
 
-impl Default for UserConfig {
-    fn default() -> Self {
-        Self {
-            debug: false,
-            default_tool: String::new(),
-            tools: HashMap::new(),
-            shell: ShellSettings::default(),
-            mcps: HashMap::new(),
-            claude: ClaudeSettings::default(),
-            logs: LogSettings::default(),
-            global_search: GlobalSearchSettings::default(),
-            mcp_pool: MCPPoolSettings::default(),
-            updates: UpdateSettings::default(),
-        }
-    }
-}
 
 /// Custom tool definition
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -107,6 +92,7 @@ fn default_tool_enabled() -> bool {
 
 /// Shell-specific settings
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct ShellSettings {
     /// Override default shell path (empty = auto-detect)
     #[serde(default)]
@@ -121,18 +107,10 @@ pub struct ShellSettings {
     pub pinned_shells: Vec<String>,
 }
 
-impl Default for ShellSettings {
-    fn default() -> Self {
-        Self {
-            default_shell: String::new(),
-            default_shell_args: Vec::new(),
-            pinned_shells: Vec::new(),
-        }
-    }
-}
 
 /// MCP server definition
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct MCPDef {
     /// Command to run (for stdio MCPs)
     #[serde(default)]
@@ -159,18 +137,6 @@ pub struct MCPDef {
     pub transport: String,
 }
 
-impl Default for MCPDef {
-    fn default() -> Self {
-        Self {
-            command: String::new(),
-            args: Vec::new(),
-            env: HashMap::new(),
-            description: String::new(),
-            url: String::new(),
-            transport: String::new(),
-        }
-    }
-}
 
 /// Claude Code integration settings
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -429,6 +395,7 @@ fn default_notify_in_cli() -> bool {
 
 /// MCP server configuration for Claude's .mcp.json format
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct MCPServerConfig {
     /// Transport type
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
@@ -451,33 +418,16 @@ pub struct MCPServerConfig {
     pub url: String,
 }
 
-impl Default for MCPServerConfig {
-    fn default() -> Self {
-        Self {
-            server_type: None,
-            command: String::new(),
-            args: Vec::new(),
-            env: HashMap::new(),
-            url: String::new(),
-        }
-    }
-}
 
 /// .mcp.json file structure
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct McpJsonConfig {
     /// MCP servers configuration
     #[serde(rename = "mcpServers", default)]
     pub mcp_servers: HashMap<String, MCPServerConfig>,
 }
 
-impl Default for McpJsonConfig {
-    fn default() -> Self {
-        Self {
-            mcp_servers: HashMap::new(),
-        }
-    }
-}
 
 /// Get the path to the agent-term config directory
 /// Checks AGENT_TERM_HOME env var first for testing, then defaults to ~/.agent-term

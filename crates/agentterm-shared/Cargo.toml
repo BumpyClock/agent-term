@@ -3,6 +3,9 @@ name = "agentterm-shared"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 dirs = { workspace = true }
 time = { workspace = true }
