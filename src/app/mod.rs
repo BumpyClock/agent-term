@@ -32,7 +32,6 @@ use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
 use crate::ui::ActiveTheme as _;
-use constants::SURFACE_ROOT_ALPHA;
 use menus::{app_menus, configure_macos_titlebar};
 
 /// Main entry point for the application.
@@ -189,9 +188,9 @@ impl Render for AgentTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Calculate base surface alpha based on transparency setting
         // Higher transparency = lower alpha (more blur shows through)
-        // At transparency=0: fully opaque (alpha=1.0)
-        // At transparency=1: semi-transparent (alpha=SURFACE_ROOT_ALPHA, blur shows through)
-        let base_alpha = 1.0 - (1.0 - SURFACE_ROOT_ALPHA) * self.settings.window_transparency;
+        // At transparency=0%: fully opaque (alpha=1.0)
+        // At transparency=100%: fully transparent (alpha=0.0, blur shows through)
+        let base_alpha = 1.0 - self.settings.window_transparency;
         let mode = if cx.theme().is_dark() {
             gpui_component::theme::ThemeMode::Dark
         } else {
