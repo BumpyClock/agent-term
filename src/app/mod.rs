@@ -39,7 +39,8 @@ pub fn run() {
     let _ = fix_path_env::fix();
 
     let settings = crate::settings::AppSettings::load();
-    agentterm_mcp::diagnostics::set_enabled(settings.write_diagnostics_logs);
+    let mut diagnostics_enabled = settings.write_diagnostics_logs;
+    let mut config_debug_enabled = false;
 
     // Enable diagnostics early, before any other initialization
     // First check config file for debug flag
@@ -47,18 +48,30 @@ pub fn run() {
         if let Ok(contents) = std::fs::read_to_string(&config_path) {
             if let Ok(config) = toml::from_str::<agentterm_mcp::config::UserConfig>(&contents) {
                 if config.debug {
-                    agentterm_mcp::diagnostics::set_enabled(true);
-                    agentterm_mcp::diagnostics::log("debug_mode_enabled via config");
+                    diagnostics_enabled = true;
+                    config_debug_enabled = true;
                 }
             }
         }
     }
     // Also check env var as fallback
-    if std::env::var("AGENT_TERM_DIAG")
+    let env_diagnostics_enabled = std::env::var("AGENT_TERM_DIAG")
         .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
-    {
-        agentterm_mcp::diagnostics::set_enabled(true);
+        .unwrap_or(false);
+    if env_diagnostics_enabled {
+        diagnostics_enabled = true;
+    }
+
+    agentterm_mcp::diagnostics::set_enabled(diagnostics_enabled);
+    if config_debug_enabled {
+        agentterm_mcp::diagnostics::log("debug_mode_enabled via config");
+    }
+
+    if diagnostics_enabled || std::env::var("RUST_LOG").is_ok() {
+        let _ = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("info"),
+        )
+        .try_init();
     }
 
     let app = Application::new().with_assets(crate::assets::Assets);

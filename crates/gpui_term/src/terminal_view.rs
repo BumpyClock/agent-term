@@ -21,9 +21,9 @@
 //! ```
 
 use gpui::{
-    App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
-    ScrollWheelEvent, Styled, Window, actions, div,
+    actions, div, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Render, ScrollWheelEvent, Styled, Window,
 };
 
 use crate::{Event, Terminal, TerminalElement};
@@ -242,6 +242,12 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        log::info!(
+            "terminal_scroll_event: delta={:?} touch_phase={:?} shift={}",
+            event.delta,
+            event.touch_phase,
+            event.shift
+        );
         self.terminal.update(cx, |terminal, _| {
             terminal.scroll_wheel(event, 1.0);
         });
