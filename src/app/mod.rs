@@ -87,7 +87,7 @@ pub fn run() {
                 width: 600.0,
                 max_height: 500.0,
                 results_section_title: Some("Session History".into()),
-                shortcut: Some("alt-k".into()),
+                shortcut: None,
                 status_provider: Some(std::sync::Arc::new(|_| {
                     if search_manager::search_indexing_in_progress() {
                         Some("Indexing search history...".into())
@@ -119,6 +119,10 @@ pub fn run() {
             KeyBinding::new("cmd-shift-t", ReopenClosed, None),
             KeyBinding::new("ctrl-shift-t", ReopenClosed, None),
             KeyBinding::new("cmd-,", OpenSettings, None),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-p", ToggleCommandPalette, None),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-p", ToggleCommandPalette, None),
             KeyBinding::new("cmd-w", CloseTab, Some("Terminal")),
             KeyBinding::new("ctrl-w", CloseTab, Some("Terminal")),
             KeyBinding::new("cmd-c", Copy, Some("Terminal")),

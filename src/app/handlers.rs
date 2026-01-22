@@ -4,14 +4,14 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use gpui::{
-    AnyWindowHandle, Bounds, Context, Focusable, IntoElement, ParentElement, Styled, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, size,
+    div, prelude::*, px, size, AnyWindowHandle, Bounds, Context, Focusable, IntoElement,
+    ParentElement, Styled, Window, WindowBounds, WindowOptions,
 };
 
 use super::window_registry::WindowRegistry;
 use super::{
-    LayoutManager, MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool, create_new_window,
-    create_new_window_with_session, create_window_from_layout,
+    create_new_window, create_new_window_with_session, create_window_from_layout, LayoutManager,
+    MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool,
 };
 use agentterm_session::DEFAULT_WORKSPACE_ID;
 use gpui_component::input::InputState as GpuiInputState;
@@ -21,7 +21,7 @@ use crate::dialogs::{
     WorkspaceEditorDialog,
 };
 use crate::settings_dialog::SettingsDialog;
-use crate::ui::{ActiveTheme, Button, ButtonVariants, WindowExt, v_flex};
+use crate::ui::{v_flex, ActiveTheme, Button, ButtonVariants, WindowExt};
 
 use super::actions::*;
 use super::command_palette_provider::{AgentTermProvider, CommandPalettePayload};
@@ -110,15 +110,10 @@ impl AgentTermApp {
             if let Some(payload) = payload.downcast_ref::<CommandPalettePayload>() {
                 match payload {
                     CommandPalettePayload::Session { id } => {
-                        // Switch to the selected session
-                        self.active_session_id = Some(id.clone());
-                        cx.notify();
+                        self.set_active_session_id(id.clone(), window, cx);
                     }
                     CommandPalettePayload::Workspace { id } => {
-                        if let Some(session) = self.ordered_sessions_for_workspace(id).first() {
-                            self.active_session_id = Some(session.id.clone());
-                            cx.notify();
-                        }
+                        self.activate_workspace_from_palette(id.clone(), window, cx);
                     }
                     CommandPalettePayload::ClaudeConversation {
                         session_id,
@@ -181,6 +176,101 @@ impl AgentTermApp {
                     }
                 }
             }
+        }
+    }
+
+    fn activate_workspace_from_palette(
+        &mut self,
+        workspace_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(window_layout) = self.window_layout() {
+            if let Some(tab) = window_layout.tabs_in_workspace(&workspace_id).first() {
+                self.set_active_session_id(tab.session_id.clone(), window, cx);
+                return;
+            }
+        }
+
+        let current_window_id = self.layout_window_id.clone();
+        let mut target_layout_id = None;
+        let mut target_session_id = None;
+
+        for window_snapshot in self.layout_store.current_session().windows {
+            if window_snapshot.id == current_window_id {
+                continue;
+            }
+
+            let tabs = window_snapshot.tabs_in_workspace(&workspace_id);
+            if tabs.is_empty() {
+                continue;
+            }
+
+            if let Some(active_session_id) = window_snapshot.active_session_id.as_ref() {
+                if tabs.iter().any(|tab| &tab.session_id == active_session_id) {
+                    target_layout_id = Some(window_snapshot.id.clone());
+                    target_session_id = Some(active_session_id.clone());
+                    break;
+                }
+            }
+
+            if target_layout_id.is_none() {
+                target_layout_id = Some(window_snapshot.id.clone());
+                target_session_id = tabs.first().map(|tab| tab.session_id.clone());
+            }
+        }
+
+        if let Some(target_layout_id) = target_layout_id {
+            if let Some(target_session_id) = target_session_id {
+                if let Some(target_handle) = LayoutManager::global().get_handle(&target_layout_id) {
+                    let session_id_for_target = target_session_id.clone();
+                    let _ = cx.update_window(target_handle, move |_root, window, cx| {
+                        window.activate_window();
+                        let target_handle = window.window_handle();
+                        if let Some(weak_app) = WindowRegistry::global().get_app(&target_handle) {
+                            if let Some(app) = weak_app.upgrade() {
+                                let session_id = session_id_for_target.clone();
+                                app.update(cx, |app, cx| {
+                                    app.set_active_session_id(session_id, window, cx);
+                                });
+                            }
+                        }
+                    });
+                    return;
+                }
+            }
+        }
+
+        let mut sessions: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|session| session.workspace_id == workspace_id)
+            .collect();
+        if sessions.is_empty() {
+            agentterm_session::diagnostics::log(format!(
+                "command_palette_workspace_restore_empty workspace_id={}",
+                workspace_id
+            ));
+            return;
+        }
+
+        sessions.sort_by_key(|session| session.tab_order.unwrap_or(u32::MAX));
+
+        self.layout_store
+            .update_window(&self.layout_window_id, |layout| {
+                if !layout.workspace_order.contains(&workspace_id) {
+                    layout.workspace_order.push(workspace_id.clone());
+                }
+                for session in &sessions {
+                    layout.append_tab(session.id.clone(), workspace_id.clone());
+                }
+                if let Some(first) = sessions.first() {
+                    layout.active_session_id = Some(first.id.clone());
+                }
+            });
+
+        if let Some(first) = sessions.first() {
+            self.set_active_session_id(first.id.clone(), window, cx);
         }
     }
 
