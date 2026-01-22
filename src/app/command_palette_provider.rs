@@ -6,8 +6,8 @@
 use agentterm_search::MessageSource;
 use agentterm_session::SessionRecord;
 use gpui::{App, Task};
-use gpui_component::IconName;
 use gpui_component::command_palette::{CommandPaletteItem, CommandPaletteProvider};
+use gpui_component::IconName;
 
 use super::search_manager;
 use crate::ui::WorkspaceItem;
@@ -93,19 +93,6 @@ impl CommandPaletteProvider for AgentTermProvider {
                 }),
         );
 
-        // Add current sessions
-        for session in &self.sessions {
-            items.push(
-                CommandPaletteItem::new(&session.id, &session.title)
-                    .category("Sessions")
-                    .subtitle(format!("{:?}", session.tool))
-                    .icon(IconName::SquareTerminal)
-                    .payload(CommandPalettePayload::Session {
-                        id: session.id.clone(),
-                    }),
-            );
-        }
-
         // Add workspaces
         for workspace in &self.workspaces {
             let subtitle = if workspace.workspace.path.is_empty() {
@@ -143,12 +130,24 @@ impl CommandPaletteProvider for AgentTermProvider {
             return Task::ready(items);
         };
 
-        if query.is_empty() {
+        if query.len() < 2 {
             return Task::ready(items);
         }
 
         if search_manager::search_indexing_in_progress() {
             return Task::ready(items);
+        }
+
+        for session in &self.sessions {
+            items.push(
+                CommandPaletteItem::new(&session.id, &session.title)
+                    .category("Sessions")
+                    .subtitle(format!("{:?}", session.tool))
+                    .icon(IconName::SquareTerminal)
+                    .payload(CommandPalettePayload::Session {
+                        id: session.id.clone(),
+                    }),
+            );
         }
 
         let search_results = search_manager.search(query, 10);
