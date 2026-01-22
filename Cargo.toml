@@ -34,6 +34,7 @@ rayon = "1.10"
 thiserror = "2.0"
 anyhow = "1.0"
 log = "0.4"
+env_logger = "0.11"
 itertools = "0.14"
 smallvec = { version = "1.15", features = ["const_new"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
@@ -95,6 +96,7 @@ agentterm_session = { path = "crates/agentterm_session" }
 agentterm_tools = { path = "crates/agentterm_tools" }
 anyhow.workspace = true
 dirs.workspace = true
+env_logger.workspace = true
 gpui.workspace = true
 gpui_term = { path = "crates/gpui_term" }
 gpui-component = { path = "vendor/gpui-component/crates/ui" }

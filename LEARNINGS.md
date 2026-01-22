@@ -52,3 +52,13 @@
 **Outcome:** Added a workspace selection helper that switches to an existing window containing the workspace (preferred), otherwise restores the workspace tabs in the current window and activates the first tab.
 
 **Next time:** Ensure command palette selections use `set_active_session_id` and consider cross-window layout state before restoring.
+
+## 2026-01-22: TUI Scroll Shows Blank Screen
+
+**Context:** Scrolling in Claude Code (TUI) showed a blank screen instead of in-app scrolling.
+
+**What we tried:** Instrumented scroll handling in `gpui_term::terminal` to log mode flags and branch selection.
+
+**Outcome:** The terminal was in `ALTERNATE_SCROLL` without `ALT_SCREEN`, so the scroll wheel fell back to scrollback and showed empty history. Fixed by honoring `ALTERNATE_SCROLL` regardless of `ALT_SCREEN`.
+
+**Next time:** If a TUI sets `ALTERNATE_SCROLL` outside alt screen, route scroll to the app instead of scrollback.
