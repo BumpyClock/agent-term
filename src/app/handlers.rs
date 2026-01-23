@@ -28,6 +28,8 @@ use super::command_palette_provider::{AgentTermProvider, CommandPalettePayload};
 use super::search_manager;
 use super::state::AgentTermApp;
 use gpui_component::command_palette::{CommandPalette, CommandPaletteEvent};
+// TODO: Import UpdateState when update_state() helper is added
+// use crate::updater::UpdateState;
 
 impl AgentTermApp {
     // Window action handlers
@@ -1305,4 +1307,61 @@ impl AgentTermApp {
             }
         });
     }
+
+    // Update action handlers
+
+    /// Handle the CheckForUpdates action.
+    pub fn handle_check_for_updates(
+        &mut self,
+        _: &CheckForUpdates,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_manager.update(cx, |manager, cx| {
+            manager.check_for_updates(cx);
+        });
+
+        // Update last check time in settings
+        self.settings.update_last_check_time();
+        let _ = self.settings.save();
+    }
+
+    /// Handle the DownloadUpdate action.
+    pub fn handle_download_update(
+        &mut self,
+        _: &DownloadUpdate,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_manager.update(cx, |manager, cx| {
+            manager.download_update(cx);
+        });
+    }
+
+    /// Handle the InstallUpdate action.
+    pub fn handle_install_update(
+        &mut self,
+        _: &InstallUpdate,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_manager.update(cx, |manager, cx| {
+            manager.apply_update(cx);
+        });
+    }
+
+    /// Handle the DismissUpdateNotification action.
+    pub fn handle_dismiss_update_notification(
+        &mut self,
+        _: &DismissUpdateNotification,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_manager.update(cx, |manager, cx| {
+            manager.dismiss(cx);
+        });
+    }
+
+    // TODO: Add update_state() helper when needed for parent components:
+    // pub fn update_state(&self, cx: &Context<Self>) -> UpdateState
 }

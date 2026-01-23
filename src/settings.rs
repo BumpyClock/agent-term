@@ -25,9 +25,13 @@ pub struct CustomTool {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppSettings {
-    // General
+    // General - Updates
     pub check_for_updates: bool,
     pub auto_update: bool,
+    #[serde(default)]
+    pub last_update_check: Option<u64>,
+    #[serde(default = "default_update_check_interval_hours")]
+    pub update_check_interval_hours: u32,
 
     // Appearance
     pub theme: Theme,
@@ -60,6 +64,10 @@ fn default_blur_enabled() -> bool {
     true
 }
 
+fn default_update_check_interval_hours() -> u32 {
+    24
+}
+
 fn default_warm_search_index() -> bool {
     true
 }
@@ -67,9 +75,11 @@ fn default_warm_search_index() -> bool {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            // General
+            // General - Updates
             check_for_updates: true,
             auto_update: false,
+            last_update_check: None,
+            update_check_interval_hours: 24,
 
             // Appearance
             theme: Theme::System,
@@ -97,6 +107,33 @@ impl AppSettings {
     /// Get the settings file path
     fn settings_path() -> Option<PathBuf> {
         dirs::config_dir().map(|p| p.join("agentterm").join("settings.toml"))
+    }
+
+    /// Updates the last update check timestamp to now.
+    pub fn update_last_check_time(&mut self) {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
+            self.last_update_check = Some(duration.as_secs());
+        }
+    }
+
+    /// Returns true if enough time has passed since the last update check.
+    pub fn should_check_for_updates(&self) -> bool {
+        if !self.check_for_updates {
+            return false;
+        }
+
+        let Some(last_check) = self.last_update_check else {
+            return true;
+        };
+
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+            return true;
+        };
+
+        let interval_secs = u64::from(self.update_check_interval_hours) * 3600;
+        now.as_secs().saturating_sub(last_check) >= interval_secs
     }
 
     /// Load settings from file, or return defaults if file doesn't exist
