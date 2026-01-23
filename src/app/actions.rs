@@ -22,6 +22,11 @@ actions!(
         Hide,
         HideOthers,
         ShowAll,
+        // Update actions
+        CheckForUpdates,
+        DownloadUpdate,
+        InstallUpdate,
+        DismissUpdateNotification,
     ]
 );
 

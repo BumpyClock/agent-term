@@ -21,6 +21,23 @@ use crate::ui::{
 use super::actions::*;
 use super::constants::*;
 use super::state::AgentTermApp;
+use crate::updater::{UpdateManager, UpdateState};
+
+#[derive(Clone, Copy)]
+enum CheckForUpdatesAction {
+    Check,
+    Download,
+    Install,
+    Retry,
+}
+
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
+    }
+}
 
 impl AgentTermApp {
     pub fn render_sidebar_shell(
@@ -100,6 +117,157 @@ impl AgentTermApp {
             .child(self.render_sidebar_header(cx))
             .child(self.render_add_workspace(cx))
             .child(self.render_workspaces_list(cx))
+            .child(self.render_sidebar_footer(cx))
+    }
+
+    pub fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let update_state = self.update_manager.read(cx).state().clone();
+        let border_color = cx.theme().border.alpha(BORDER_SOFT_ALPHA);
+        let muted_fg = cx.theme().muted_foreground;
+        let foreground = cx.theme().foreground;
+        let accent = cx.theme().accent;
+        let success = cx.theme().success;
+        let danger = cx.theme().danger;
+
+        let current_version = UpdateManager::current_version();
+        let version_text = format!("v{}", current_version);
+
+        let (icon_element, status_text, is_clickable, click_action) = match &update_state {
+            UpdateState::Idle => (
+                Icon::new(IconName::RefreshCw)
+                    .size(IconSize::Small)
+                    .color(muted_fg)
+                    .into_any_element(),
+                version_text,
+                true,
+                Some(CheckForUpdatesAction::Check),
+            ),
+            UpdateState::Checking => (
+                Icon::new(IconName::RefreshCw)
+                    .size(IconSize::Small)
+                    .color(accent)
+                    .into_any_element(),
+                "Checking...".to_string(),
+                false,
+                None,
+            ),
+            UpdateState::UpToDate => (
+                Icon::new(IconName::Check)
+                    .size(IconSize::Small)
+                    .color(success)
+                    .into_any_element(),
+                format!("{} · Up to date", version_text),
+                false,
+                None,
+            ),
+            UpdateState::Available(info) => (
+                Icon::new(IconName::Download)
+                    .size(IconSize::Small)
+                    .color(accent)
+                    .into_any_element(),
+                format!("v{} available", info.version),
+                true,
+                Some(CheckForUpdatesAction::Download),
+            ),
+            UpdateState::Downloading { progress, .. } => (
+                Icon::new(IconName::RefreshCw)
+                    .size(IconSize::Small)
+                    .color(accent)
+                    .into_any_element(),
+                format!("Downloading... {:.0}%", progress * 100.0),
+                false,
+                None,
+            ),
+            UpdateState::ReadyToInstall(_) => (
+                Icon::new(IconName::RefreshCw)
+                    .size(IconSize::Small)
+                    .color(success)
+                    .into_any_element(),
+                "Restart to update".to_string(),
+                true,
+                Some(CheckForUpdatesAction::Install),
+            ),
+            UpdateState::Installing(_) => (
+                Icon::new(IconName::RefreshCw)
+                    .size(IconSize::Small)
+                    .color(accent)
+                    .into_any_element(),
+                "Installing...".to_string(),
+                false,
+                None,
+            ),
+            UpdateState::Error(msg) => (
+                Icon::new(IconName::X)
+                    .size(IconSize::Small)
+                    .color(danger)
+                    .into_any_element(),
+                format!("Error: {}", truncate_string(msg, 20)),
+                true,
+                Some(CheckForUpdatesAction::Retry),
+            ),
+        };
+
+        let progress_bar = if let UpdateState::Downloading { progress, .. } = &update_state {
+            let progress_width = px(progress * 200.0);
+            Some(
+                div()
+                    .absolute()
+                    .left_0()
+                    .bottom_0()
+                    .h(px(2.0))
+                    .w(progress_width)
+                    .bg(accent),
+            )
+        } else {
+            None
+        };
+
+        let footer = div()
+            .id("sidebar-footer")
+            .relative()
+            .h(px(40.0))
+            .flex_shrink_0()
+            .border_t_1()
+            .border_color(border_color)
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .text_sm()
+            .child(icon_element)
+            .child(
+                div()
+                    .flex_1()
+                    .truncate()
+                    .text_color(foreground)
+                    .child(status_text),
+            );
+
+        let footer = if is_clickable {
+            let hover_bg = cx.theme().list_hover;
+            footer
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover_bg))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    if let Some(action) = &click_action {
+                        match action {
+                            CheckForUpdatesAction::Check | CheckForUpdatesAction::Retry => {
+                                this.handle_check_for_updates(&CheckForUpdates, window, cx);
+                            }
+                            CheckForUpdatesAction::Download => {
+                                this.handle_download_update(&DownloadUpdate, window, cx);
+                            }
+                            CheckForUpdatesAction::Install => {
+                                this.handle_install_update(&InstallUpdate, window, cx);
+                            }
+                        }
+                    }
+                }))
+        } else {
+            footer
+        };
+
+        footer.children(progress_bar)
     }
 
     pub fn render_sidebar_header(&self, cx: &mut Context<Self>) -> impl IntoElement {

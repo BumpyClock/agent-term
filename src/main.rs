@@ -12,6 +12,7 @@ mod terminal_schemes;
 mod text_input;
 mod theme;
 mod ui;
+mod updater;
 
 fn main() {
     app::run();

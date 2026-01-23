@@ -14,6 +14,8 @@ pub fn app_menus() -> Vec<Menu> {
             items: vec![
                 MenuItem::action("About Agent Term", About),
                 MenuItem::separator(),
+                MenuItem::action("Check for Updates...", CheckForUpdates),
+                MenuItem::separator(),
                 MenuItem::action("Settings...", OpenSettings),
                 MenuItem::separator(),
                 #[cfg(target_os = "macos")]

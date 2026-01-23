@@ -377,6 +377,10 @@ impl SettingsDialog {
                     "Automatically check for new versions",
                     Switch::new("check-updates")
                         .checked(self.settings.check_for_updates)
+                        .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                            this.settings.check_for_updates = *checked;
+                            this.notify_change(window, cx);
+                        }))
                         .into_any_element(),
                     cx,
                 ),
@@ -387,6 +391,10 @@ impl SettingsDialog {
                     "Automatically install updates when available",
                     Switch::new("auto-update")
                         .checked(self.settings.auto_update)
+                        .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                            this.settings.auto_update = *checked;
+                            this.notify_change(window, cx);
+                        }))
                         .into_any_element(),
                     cx,
                 ),
@@ -403,7 +411,7 @@ impl SettingsDialog {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("AgentTerm v0.1.0"),
+                    .child(format!("AgentTerm v{}", env!("CARGO_PKG_VERSION"))),
             )
             .child(
                 div()

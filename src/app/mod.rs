@@ -304,6 +304,10 @@ impl Render for AgentTermApp {
             .on_action(cx.listener(Self::handle_move_workspace_to_new_window))
             .on_action(cx.listener(Self::reopen_closed))
             .on_action(cx.listener(Self::toggle_command_palette))
+            .on_action(cx.listener(Self::handle_check_for_updates))
+            .on_action(cx.listener(Self::handle_download_update))
+            .on_action(cx.listener(Self::handle_install_update))
+            .on_action(cx.listener(Self::handle_dismiss_update_notification))
             .child(window_shell)
     }
 }
@@ -414,6 +418,30 @@ fn create_new_window_internal(
 
     match result {
         Ok(window_handle) => {
+            // Schedule startup update check if enabled
+            if settings.should_check_for_updates() {
+                let window_handle_for_update = window_handle.into();
+                cx.spawn(move |cx: &mut gpui::AsyncApp| {
+                    let mut cx = cx.clone();
+                    async move {
+                        smol::Timer::after(std::time::Duration::from_secs(3)).await;
+                        let _ = cx.update_window(window_handle_for_update, |_root, _window, cx| {
+                            if let Some(weak_app) = WindowRegistry::global().get_app(&window_handle_for_update) {
+                                if let Some(app) = weak_app.upgrade() {
+                                    app.update(cx, |app, cx| {
+                                        app.update_manager.update(cx, |manager, cx| {
+                                            manager.check_for_updates(cx);
+                                        });
+                                        app.settings.update_last_check_time();
+                                        let _ = app.settings.save();
+                                    });
+                                }
+                            }
+                        });
+                    }
+                })
+                .detach();
+            }
             cx.activate(true);
             Some(window_handle.into())
         }

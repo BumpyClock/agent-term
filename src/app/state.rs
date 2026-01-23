@@ -29,6 +29,7 @@ use super::window_registry::WindowRegistry;
 use crate::settings::AppSettings;
 use crate::theme;
 use crate::ui::WorkspaceItem;
+use crate::updater::UpdateManager;
 
 use gpui_component::command_palette::CommandPaletteState;
 
@@ -93,6 +94,9 @@ pub struct AgentTermApp {
 
     /// Command palette state entity when open.
     pub(crate) command_palette: Option<Entity<CommandPaletteState>>,
+
+    /// Update manager for auto-update functionality.
+    pub(crate) update_manager: Entity<UpdateManager>,
 }
 
 impl AgentTermApp {
@@ -132,6 +136,9 @@ impl AgentTermApp {
             agentterm_mcp::diagnostics::log(format!("pool_startup_init_failed error={}", e));
         }
 
+        // Initialize update manager
+        let update_manager = cx.new(|cx| UpdateManager::new(cx));
+
         let mut this = Self {
             focus_handle,
             window_handle,
@@ -158,6 +165,7 @@ impl AgentTermApp {
             layout_store,
             layout_window_id,
             command_palette: None,
+            update_manager,
         };
 
         this.reload_from_store(cx);
