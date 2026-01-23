@@ -563,7 +563,7 @@ impl SettingsDialog {
             .child(
                 self.render_setting_row(
                     "Background Blur",
-                    "Enable macOS vibrancy effect",
+                    "Enable background blur effects. Requires OS support.",
                     Switch::new("blur-enabled")
                         .checked(self.settings.blur_enabled)
                         .on_click(cx.listener(|this, checked: &bool, window, cx| {
