@@ -8,12 +8,15 @@ use gpui::{
     prelude::*, px,
 };
 
+use crate::dialogs::ToolEditorDialog;
 use crate::fonts::{FontOption, find_font_index, font_presets};
-use crate::settings::{AppSettings, Theme};
+use crate::icons::{Icon, IconName, IconSize, icon_from_string};
+use crate::settings::{AppSettings, CustomTool, Theme};
 use crate::terminal_schemes;
 use crate::theme::{accent_colors, resolve_accent_color, surface_background};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
+    WindowExt,
 };
 use gpui_component::IndexPath;
 use gpui_component::button::ButtonCustomVariant;
@@ -586,6 +589,28 @@ impl SettingsDialog {
     }
 
     fn render_tools_tab(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let tools = self.settings.custom_tools.clone();
+        let muted_fg = cx.theme().muted_foreground;
+        let border_color = cx.theme().border;
+
+        let tools_list = if tools.is_empty() {
+            div()
+                .p(px(16.))
+                .text_sm()
+                .text_color(muted_fg)
+                .child("No custom tools configured.")
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .children(tools.iter().enumerate().map(|(idx, tool)| {
+                    self.render_tool_row(tool.clone(), idx, cx)
+                }))
+                .into_any_element()
+        };
+
         div()
             .flex()
             .flex_col()
@@ -611,21 +636,186 @@ impl SettingsDialog {
             .child(
                 div()
                     .mt(px(16.))
-                    .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(cx.theme().foreground)
-                    .child("Custom Tools"),
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().foreground)
+                            .child("Custom Tools"),
+                    )
+                    .child(
+                        Button::new("add-tool")
+                            .label("Add Tool")
+                            .ghost()
+                            .compact()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_tool_editor(None, window, cx);
+                            })),
+                    ),
             )
             .child(
                 div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "{} custom tools configured",
-                        self.settings.custom_tools.len()
-                    )),
+                    .mt(px(8.))
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(border_color)
+                    .child(tools_list),
             )
             .into_any_element()
+    }
+
+    fn render_tool_row(
+        &self,
+        tool: CustomTool,
+        idx: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tool_id = tool.id.clone();
+        let tool_id_for_delete = tool.id.clone();
+        let tool_for_edit = tool.clone();
+        let muted_fg = cx.theme().muted_foreground;
+        let border_color = cx.theme().border;
+
+        let icon_element = if let Some(icon_str) = &tool.icon {
+            icon_from_string(icon_str)
+                .size(IconSize::Small)
+                .color(cx.theme().foreground)
+                .into_any_element()
+        } else {
+            Icon::new(IconName::Terminal)
+                .size(IconSize::Small)
+                .color(muted_fg)
+                .into_any_element()
+        };
+
+        div()
+            .px(px(12.))
+            .py(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(12.))
+            .when(idx > 0, |el| el.border_t_1().border_color(border_color))
+            .child(icon_element)
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .child(tool.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted_fg)
+                            .truncate()
+                            .child(tool.command.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(
+                        Button::new(format!("edit-tool-{}", tool_id))
+                            .ghost()
+                            .compact()
+                            .child(Icon::new(IconName::Edit).size(IconSize::Small).color(muted_fg))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_tool_editor(Some(tool_for_edit.clone()), window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new(format!("delete-tool-{}", tool_id_for_delete))
+                            .ghost()
+                            .compact()
+                            .child(
+                                Icon::new(IconName::Trash)
+                                    .size(IconSize::Small)
+                                    .color(cx.theme().danger),
+                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.delete_tool(&tool_id_for_delete, window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn open_tool_editor(
+        &mut self,
+        tool: Option<CustomTool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let this_entity = cx.entity().clone();
+        let is_edit = tool.is_some();
+        let title = if is_edit { "Edit Tool" } else { "Add Tool" };
+
+        let dialog_entity = cx.new(|cx| {
+            ToolEditorDialog::new(tool.as_ref(), window, cx).on_save(
+                move |saved_tool, window, cx| {
+                    this_entity.update(cx, |this, cx| {
+                        this.save_tool(saved_tool, window, cx);
+                    });
+                },
+            )
+        });
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title(title)
+                .w(px(400.))
+                .close_button(true)
+                .child(dialog_entity.clone())
+                .footer({
+                    let dialog_entity = dialog_entity.clone();
+                    move |_ok, cancel, window, cx| {
+                        vec![
+                            cancel(window, cx),
+                            Button::new("save-tool")
+                                .label("Save")
+                                .primary()
+                                .on_click({
+                                    let dialog = dialog_entity.clone();
+                                    move |_event, window, cx| {
+                                        dialog.update(cx, |d, cx| {
+                                            d.save(window, cx);
+                                        });
+                                    }
+                                })
+                                .into_any_element(),
+                        ]
+                    }
+                })
+        });
+    }
+
+    fn save_tool(&mut self, tool: CustomTool, window: &mut Window, cx: &mut App) {
+        if let Some(existing) = self
+            .settings
+            .custom_tools
+            .iter_mut()
+            .find(|t| t.id == tool.id)
+        {
+            *existing = tool;
+        } else {
+            self.settings.custom_tools.push(tool);
+        }
+        self.notify_change(window, cx);
+    }
+
+    fn delete_tool(&mut self, tool_id: &str, window: &mut Window, cx: &mut App) {
+        self.settings.custom_tools.retain(|t| t.id != tool_id);
+        self.notify_change(window, cx);
     }
 
     fn render_theme_selector(&self, cx: &mut Context<Self>) -> AnyElement {

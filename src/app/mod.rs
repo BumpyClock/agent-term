@@ -163,9 +163,19 @@ pub fn run() {
             cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
         }
 
-        // About action (TODO: show about dialog)
-        cx.on_action(|_: &About, _cx| {
-            // For now, just a no-op. Could show an about dialog later.
+        // About action - dispatches to the active window
+        cx.on_action(|_: &About, cx| {
+            if let Some(window) = cx.windows().first() {
+                let _ = cx.update_window(*window, |_root, window, cx| {
+                    if let Some(weak_app) = WindowRegistry::global().get_app(&window.window_handle()) {
+                        if let Some(app) = weak_app.upgrade() {
+                            app.update(cx, |app, cx| {
+                                app.open_about_dialog(window, cx);
+                            });
+                        }
+                    }
+                });
+            }
         });
 
         // NewWindow action - creates a new window

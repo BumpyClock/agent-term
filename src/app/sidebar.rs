@@ -1,10 +1,11 @@
 //! Sidebar rendering and interaction methods.
 
-use agentterm_session::{DEFAULT_WORKSPACE_ID, SessionRecord, SessionTool};
+use agentterm_session::{DEFAULT_WORKSPACE_ID, SessionRecord, SessionStatus, SessionTool};
 use agentterm_tools::ShellType;
 use gpui::{
-    AnyWindowHandle, ClickEvent, Context, Corner, Entity, IntoElement, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Styled, Window, div, prelude::*, px,
+    AnyWindowHandle, ClickEvent, Context, Corner, Entity, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window, div, prelude::*,
+    px,
 };
 
 use super::window_registry::WindowRegistry;
@@ -20,7 +21,7 @@ use crate::ui::{
 
 use super::actions::*;
 use super::constants::*;
-use super::state::AgentTermApp;
+use super::state::{AgentTermApp, DraggingSession, DropTarget};
 use crate::updater::{UpdateManager, UpdateState};
 
 #[derive(Clone, Copy)]
@@ -132,7 +133,8 @@ impl AgentTermApp {
         let current_version = UpdateManager::current_version();
         let version_text = format!("v{}", current_version);
 
-        let (icon_element, status_text, is_clickable, click_action) = match &update_state {
+        let (icon_element, status_text, is_clickable, click_action, has_notes) = match &update_state
+        {
             UpdateState::Idle => (
                 Icon::new(IconName::RefreshCw)
                     .size(IconSize::Small)
@@ -141,6 +143,7 @@ impl AgentTermApp {
                 version_text,
                 true,
                 Some(CheckForUpdatesAction::Check),
+                false,
             ),
             UpdateState::Checking => (
                 Icon::new(IconName::RefreshCw)
@@ -150,6 +153,7 @@ impl AgentTermApp {
                 "Checking...".to_string(),
                 false,
                 None,
+                false,
             ),
             UpdateState::UpToDate => (
                 Icon::new(IconName::Check)
@@ -159,6 +163,7 @@ impl AgentTermApp {
                 format!("{} · Up to date", version_text),
                 false,
                 None,
+                false,
             ),
             UpdateState::Available(info) => (
                 Icon::new(IconName::Download)
@@ -168,6 +173,7 @@ impl AgentTermApp {
                 format!("v{} available", info.version),
                 true,
                 Some(CheckForUpdatesAction::Download),
+                true,
             ),
             UpdateState::Downloading { progress, .. } => (
                 Icon::new(IconName::RefreshCw)
@@ -177,6 +183,7 @@ impl AgentTermApp {
                 format!("Downloading... {:.0}%", progress * 100.0),
                 false,
                 None,
+                true,
             ),
             UpdateState::ReadyToInstall(_) => (
                 Icon::new(IconName::RefreshCw)
@@ -186,6 +193,7 @@ impl AgentTermApp {
                 "Restart to update".to_string(),
                 true,
                 Some(CheckForUpdatesAction::Install),
+                true,
             ),
             UpdateState::Installing(_) => (
                 Icon::new(IconName::RefreshCw)
@@ -195,6 +203,7 @@ impl AgentTermApp {
                 "Installing...".to_string(),
                 false,
                 None,
+                true,
             ),
             UpdateState::Error(msg) => (
                 Icon::new(IconName::X)
@@ -204,6 +213,7 @@ impl AgentTermApp {
                 format!("Error: {}", truncate_string(msg, 20)),
                 true,
                 Some(CheckForUpdatesAction::Retry),
+                false,
             ),
         };
 
@@ -217,6 +227,23 @@ impl AgentTermApp {
                     .h(px(2.0))
                     .w(progress_width)
                     .bg(accent),
+            )
+        } else {
+            None
+        };
+
+        let notes_button = if has_notes {
+            Some(
+                div()
+                    .id("view-release-notes")
+                    .text_xs()
+                    .text_color(accent)
+                    .cursor_pointer()
+                    .hover(|s| s.underline())
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.open_release_notes(window, cx);
+                    }))
+                    .child("Notes"),
             )
         } else {
             None
@@ -241,7 +268,8 @@ impl AgentTermApp {
                     .truncate()
                     .text_color(foreground)
                     .child(status_text),
-            );
+            )
+            .children(notes_button);
 
         let footer = if is_clickable {
             let hover_bg = cx.theme().list_hover;
@@ -707,7 +735,6 @@ impl AgentTermApp {
         menu
     }
 
-    // TODO: Add an accessibility toggle to show +/- symbols in git status badges.
     pub fn render_session_row(
         &self,
         session: &SessionRecord,
@@ -723,11 +750,30 @@ impl AgentTermApp {
             session.title.clone()
         };
         let session_id = session.id.clone();
+        let session_workspace_id = session.workspace_id.clone();
         let session_icon = session.icon.clone();
         let active_bg = cx.theme().accent;
         let active_fg = cx.theme().accent_foreground;
         let hover_bg = cx.theme().list_active;
+        let accent_color = cx.theme().accent;
         let git_counts = self.git_diff_counts_for_session(&session.id);
+
+        let status_color = match session.status {
+            SessionStatus::Running => cx.theme().success,
+            SessionStatus::Idle => cx.theme().muted_foreground,
+            SessionStatus::Error => cx.theme().danger,
+            SessionStatus::Starting => cx.theme().info,
+            SessionStatus::Waiting => cx.theme().warning,
+        };
+
+        let is_drop_target_before = matches!(
+            &self.drop_target,
+            Some(DropTarget::BeforeSession { session_id: id, .. }) if id == &session.id
+        );
+        let is_drop_target_after = matches!(
+            &self.drop_target,
+            Some(DropTarget::AfterSession { session_id: id, .. }) if id == &session.id
+        );
 
         let mut row = div()
             .id(format!("session-row-{}", session.id))
@@ -740,6 +786,78 @@ impl AgentTermApp {
             .cursor_pointer()
             .when(is_active, move |s| s.bg(active_bg).text_color(active_fg))
             .hover(move |s| s.bg(hover_bg))
+            .when(is_drop_target_before, |el| {
+                el.border_t_2().border_color(accent_color)
+            })
+            .when(is_drop_target_after, |el| {
+                el.border_b_2().border_color(accent_color)
+            })
+            .on_mouse_down(MouseButton::Left, {
+                let session_id = session.id.clone();
+                let workspace_id = session_workspace_id.clone();
+                cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
+                    eprintln!("[mouse_down] session_id={}", session_id);
+                    this.dragging_session = Some(DraggingSession {
+                        session_id: session_id.clone(),
+                        workspace_id: workspace_id.clone(),
+                    });
+                    cx.notify();
+                })
+            })
+            .on_mouse_move({
+                let session_id = session.id.clone();
+                let workspace_id = session_workspace_id.clone();
+                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                    if let Some(ref dragging) = this.dragging_session {
+                        // Don't set drop target on the row being dragged
+                        if dragging.session_id != session_id {
+                            eprintln!("[mouse_move] dragging={}, over={}", dragging.session_id, session_id);
+                            this.drop_target = Some(DropTarget::AfterSession {
+                                session_id: session_id.clone(),
+                                workspace_id: workspace_id.clone(),
+                            });
+                            cx.notify();
+                        }
+                    }
+                })
+            })
+            .on_mouse_up(MouseButton::Left, {
+                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
+                    eprintln!("[mouse_up] dragging={:?}, drop_target={:?}",
+                        this.dragging_session.as_ref().map(|d| &d.session_id),
+                        this.drop_target.as_ref());
+                    if let (Some(dragging), Some(target)) =
+                        (this.dragging_session.take(), this.drop_target.take())
+                    {
+                        eprintln!("[mouse_up] calling complete_drag_drop");
+                        this.complete_drag_drop(dragging, target, cx);
+                    }
+                    cx.notify();
+                })
+            })
+            .on_mouse_up_out(MouseButton::Left, {
+                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
+                    eprintln!("[mouse_up_out] dragging={:?}, drop_target={:?}",
+                        this.dragging_session.as_ref().map(|d| &d.session_id),
+                        this.drop_target.as_ref());
+                    // If we have both dragging and drop_target, complete the drop
+                    // (mouse_up_out fires before mouse_up when releasing over a different row)
+                    if let (Some(dragging), Some(target)) =
+                        (this.dragging_session.take(), this.drop_target.take())
+                    {
+                        eprintln!("[mouse_up_out] calling complete_drag_drop");
+                        this.complete_drag_drop(dragging, target, cx);
+                    }
+                    cx.notify();
+                })
+            })
+            .child(
+                div()
+                    .w(px(6.0))
+                    .h(px(6.0))
+                    .rounded_full()
+                    .bg(status_color),
+            )
             .child(
                 session_icon
                     .as_ref()

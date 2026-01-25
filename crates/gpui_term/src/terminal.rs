@@ -129,8 +129,8 @@ pub enum Event {
     BlinkChanged(bool),
     /// Selection has changed
     SelectionsChanged,
-    /// Terminal process exited
-    CloseTerminal,
+    /// Terminal process exited with an optional exit code
+    CloseTerminal(Option<i32>),
     /// A hyperlink was clicked and should be opened
     OpenHyperlink(String),
 }
@@ -1123,8 +1123,11 @@ impl Terminal {
             AlacTermEvent::Bell => {
                 cx.emit(Event::Bell);
             }
-            AlacTermEvent::Exit | AlacTermEvent::ChildExit(_) => {
-                cx.emit(Event::CloseTerminal);
+            AlacTermEvent::Exit => {
+                cx.emit(Event::CloseTerminal(None));
+            }
+            AlacTermEvent::ChildExit(exit_code) => {
+                cx.emit(Event::CloseTerminal(Some(exit_code)));
             }
             AlacTermEvent::Wakeup => {
                 cx.emit(Event::Wakeup);
