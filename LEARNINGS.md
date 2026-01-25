@@ -130,3 +130,20 @@
 - Don't try to calculate "which half of an element" using absolute coordinates
 - For drag-and-drop, simply use the fact that each element's handler knows its own identity
 - If precise element-relative hit testing is needed, use GPUI's bounds APIs or store element bounds in state
+
+## 2026-01-25: Sidebar Drag Preview Rendering
+
+**Context:** Adding a drag ghost and inline drop preview for sidebar session reordering.
+
+**What we tried:**
+- Track drag state at the window-level mouse move hook instead of per-row handlers
+- Cache sidebar and row bounds using `ElementExt::on_prepaint`
+- Render a floating ghost row using absolute positioning and cached bounds
+- Insert an inline placeholder row at the computed drop target
+
+**Outcome:** Smooth drag feedback with both a cursor-following ghost and a static inline preview. Drop target selection uses cached bounds and is resilient to hover gaps.
+
+**Next time:**
+- Use window-level mouse events for fluid drag tracking
+- Store bounds via `on_prepaint` for accurate hit testing
+- Keep drag previews non-interactive and render them as the last child for layering
