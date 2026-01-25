@@ -17,8 +17,8 @@ use agentterm_session::DEFAULT_WORKSPACE_ID;
 use gpui_component::input::InputState as GpuiInputState;
 
 use crate::dialogs::{
-    AddWorkspaceDialog, McpManagerDialog, SessionEditorDialog, TabPickerDialog,
-    WorkspaceEditorDialog,
+    AboutDialog, AddWorkspaceDialog, McpManagerDialog, ReleaseNotesDialog, SessionEditorDialog,
+    TabPickerDialog, WorkspaceEditorDialog,
 };
 use crate::settings_dialog::SettingsDialog;
 use crate::ui::{v_flex, ActiveTheme, Button, ButtonVariants, WindowExt};
@@ -1364,4 +1364,46 @@ impl AgentTermApp {
 
     // TODO: Add update_state() helper when needed for parent components:
     // pub fn update_state(&self, cx: &Context<Self>) -> UpdateState
+
+    /// Opens the About dialog.
+    pub fn open_about_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|_cx| AboutDialog::new());
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title("About Agent Term")
+                .w(px(350.))
+                .close_button(true)
+                .child(dialog_entity.clone())
+        });
+
+        cx.notify();
+    }
+
+    /// Opens the release notes dialog.
+    pub fn open_release_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::updater::UpdateState;
+
+        let update_state = self.update_manager.read(cx).state().clone();
+
+        let (version, notes) = match &update_state {
+            UpdateState::Available(info)
+            | UpdateState::Downloading { info, .. }
+            | UpdateState::ReadyToInstall(info)
+            | UpdateState::Installing(info) => (info.version.to_string(), info.notes.clone()),
+            _ => return,
+        };
+
+        let dialog_entity = cx.new(|_cx| ReleaseNotesDialog::new(version, notes));
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title("Release Notes")
+                .w(px(450.))
+                .close_button(true)
+                .child(dialog_entity.clone())
+        });
+
+        cx.notify();
+    }
 }

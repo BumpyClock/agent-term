@@ -148,7 +148,7 @@ impl TerminalView {
             Event::TitleChanged => cx.notify(),
             Event::BlinkChanged(_) => cx.notify(),
             Event::SelectionsChanged => cx.notify(),
-            Event::CloseTerminal => {
+            Event::CloseTerminal(_exit_code) => {
                 cx.notify();
             }
             Event::OpenHyperlink(url) => {

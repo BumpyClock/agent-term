@@ -62,3 +62,71 @@
 **Outcome:** `ALTERNATE_SCROLL` is enabled by default, so using it without `ALT_SCREEN` made the scroll wheel send arrow keys in normal terminals. Reverted to only apply alternate scroll when `ALT_SCREEN` is active. The blank screen during scrollback was due to rendering grid line coordinates directly; scrolled-back lines have negative line indices and were being painted outside the viewport. Fix by offsetting grid lines by `display_offset` for rendering.
 
 **Next time:** Treat `ALTERNATE_SCROLL` as meaningful only when `ALT_SCREEN` is set; it defaults to on otherwise. When rendering scrollback, always convert grid line coordinates into viewport coordinates using `display_offset`.
+
+## 2026-01-23: GPUI Dialog Footer API
+
+**Context:** Implementing dialogs with custom footer buttons in GPUI.
+
+**What we tried:** Used dialog `.footer(|footer, _window, _cx| ...)` closure with 3 args.
+
+**Outcome:** The dialog footer API takes 4 arguments: `|_ok, cancel, window, cx|` and returns a `Vec<AnyElement>`. The `cancel` parameter is a function that creates the Cancel button.
+
+**Next time:** Dialog footer callbacks take `(_ok, cancel, window, cx)` and return `Vec<impl IntoElement>`.
+
+## 2026-01-23: Custom Tools in MCP vs Settings
+
+**Context:** Implementing custom tool management UI.
+
+**What we tried:** Custom tools are stored in both `AppSettings.custom_tools` and MCP config (`UserConfig.tools`).
+
+**Outcome:** The settings.custom_tools field exists for persistence, while MCP config has its own ToolDef structure. For the UI, working with settings.custom_tools is simpler. The two stores should stay in sync.
+
+**Next time:** When managing custom tools, decide which is the source of truth and ensure both stores are kept in sync. AppSettings is simpler for UI binding.
+
+## 2026-01-23: Session Status Tracking Architecture
+
+**Context:** Adding visual status indicators for terminal sessions.
+
+**What we tried:** The plan called for subscribing to terminal events and updating SessionStatus.
+
+**Outcome:** SessionStatus enum already exists (Running, Waiting, Idle, Error, Starting). Status dots can display based on session.status. Full event-driven updates require subscribing to Terminal events and updating the session store - this needs careful integration with async terminal spawning.
+
+**Next time:** Status tracking requires:
+1. Initial status = Starting when session created
+2. Subscribe to Terminal events (Wakeup -> Running, CloseTerminal -> Idle/Error)
+3. Update session status in store, call cx.notify()
+
+## 2026-01-23: GPUI Drag and Drop Implementation
+
+**Context:** Implementing drag-and-drop reordering for session tabs in sidebar.
+
+**What we tried:** GPUI has no built-in drag handlers like React's @dnd-kit, so implemented manual drag state tracking.
+
+**Outcome:** Implemented using:
+- `DraggingSession` struct and `DropTarget` enum for state tracking
+- Mouse event handlers: `on_mouse_down`, `on_mouse_move`, `on_mouse_up`, `on_mouse_up_out`
+- Visual feedback via conditional border styling when hovering over drop targets
+- Uses `cx.listener()` pattern for all event handlers that update state
+- `on_mouse_up_out` is critical - handles case when mouse is released outside the row to cancel drag
+
+**Next time:**
+- For drag-and-drop in GPUI, use manual state tracking with DraggingX struct and DropTarget enum
+- Always include `on_mouse_up_out` handler to cancel stuck drags
+- Use `.when()` for conditional styling based on drop target state
+- Session store has `move_session()` and `reorder_sessions_in_workspace()` methods for persistence
+
+## 2026-01-23: GPUI Mouse Event Position Bug
+
+**Context:** Drag and drop reordering wasn't working - drop targets were never correctly identified.
+
+**What we tried:** Originally used `event.position.y` in `on_mouse_move` and compared against a fixed offset (12px) to determine if cursor was in top/bottom half of row.
+
+**Outcome:** `event.position` in GPUI mouse events returns window-absolute coordinates, not element-relative coordinates. Comparing absolute Y against a fixed 12px offset fails for any row not at the top of the window.
+
+**Fix:** Simplified logic to just use the fact that each row's handler knows which row it's attached to. When hovering over a row (and dragging), that row becomes the drop target - no position math needed.
+
+**Next time:**
+- GPUI `MouseMoveEvent.position` is window-absolute, not element-relative
+- Don't try to calculate "which half of an element" using absolute coordinates
+- For drag-and-drop, simply use the fact that each element's handler knows its own identity
+- If precise element-relative hit testing is needed, use GPUI's bounds APIs or store element bounds in state
