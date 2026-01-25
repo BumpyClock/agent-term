@@ -1,19 +1,19 @@
 //! Sidebar rendering and interaction methods.
 
-use agentterm_session::{DEFAULT_WORKSPACE_ID, SessionRecord, SessionStatus, SessionTool};
+use agentterm_session::{SessionRecord, SessionStatus, SessionTool, DEFAULT_WORKSPACE_ID};
 use agentterm_tools::ShellType;
 use gpui::{
-    AnyWindowHandle, ClickEvent, Context, Corner, Entity, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Styled, Window, div, prelude::*,
-    px,
+    div, point, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Corner, Div,
+    Entity, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Styled, Window,
 };
 
 use super::window_registry::WindowRegistry;
-use gpui_component::{SidebarShell, TITLE_BAR_HEIGHT};
+use gpui_component::{ElementExt, SidebarShell, TITLE_BAR_HEIGHT};
 
 use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 
-use crate::icons::{Icon, IconName, IconSize, icon_from_string};
+use crate::icons::{icon_from_string, Icon, IconName, IconSize};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem,
     WorkspaceItem,
@@ -77,16 +77,23 @@ impl AgentTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.resizing_sidebar {
-            return;
+        let mut should_notify = false;
+        if self.resizing_sidebar {
+            let delta_x = event.position.x - self.resize_start_x;
+            let new_width = (self.resize_start_width + delta_x / px(1.0))
+                .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+
+            self.sidebar_width = new_width;
+            should_notify = true;
         }
 
-        let delta_x = event.position.x - self.resize_start_x;
-        let new_width = (self.resize_start_width + delta_x / px(1.0))
-            .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+        if self.update_drag_state(event) {
+            should_notify = true;
+        }
 
-        self.sidebar_width = new_width;
-        cx.notify();
+        if should_notify {
+            cx.notify();
+        }
     }
 
     /// Handler for mouse up events to stop sidebar resize.
@@ -95,9 +102,104 @@ impl AgentTermApp {
         &mut self,
         _event: &MouseUpEvent,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         self.resizing_sidebar = false;
+        let mut should_notify = false;
+
+        if let Some(dragging) = self.dragging_session.take() {
+            let drop_target = self.drop_target.take();
+            if dragging.has_moved {
+                if let Some(target) = drop_target {
+                    self.complete_drag_drop(dragging, target, cx);
+                    return;
+                }
+            }
+            should_notify = true;
+        } else if self.drop_target.take().is_some() {
+            should_notify = true;
+        }
+
+        if should_notify {
+            cx.notify();
+        }
+    }
+
+    fn update_drag_state(&mut self, event: &MouseMoveEvent) -> bool {
+        let (dragging_session_id, has_moved, position_changed, moved_changed) = {
+            let Some(dragging) = self.dragging_session.as_mut() else {
+                return false;
+            };
+
+            let previous_position = dragging.mouse_position;
+            let previous_has_moved = dragging.has_moved;
+            let drag_position = event.position;
+            dragging.mouse_position = drag_position;
+
+            let delta_x = (drag_position.x - dragging.start_position.x).abs();
+            let delta_y = (drag_position.y - dragging.start_position.y).abs();
+            let drag_threshold = px(3.0);
+            if !dragging.has_moved && (delta_x > drag_threshold || delta_y > drag_threshold) {
+                dragging.has_moved = true;
+            }
+
+            let position_changed = dragging.has_moved && drag_position != previous_position;
+            let moved_changed = dragging.has_moved != previous_has_moved;
+            (
+                dragging.session_id.clone(),
+                dragging.has_moved,
+                position_changed,
+                moved_changed,
+            )
+        };
+
+        let mut should_notify = position_changed || moved_changed;
+        let new_drop_target = if has_moved {
+            let mut target = None;
+            for (session_id, bounds) in &self.session_row_bounds {
+                if session_id == &dragging_session_id {
+                    continue;
+                }
+                let Some(session) = self
+                    .sessions
+                    .iter()
+                    .find(|session| &session.id == session_id)
+                else {
+                    continue;
+                };
+                if self.is_workspace_collapsed(&session.workspace_id) {
+                    continue;
+                }
+                if !self.is_session_visible(&session.id) {
+                    continue;
+                }
+                if bounds.contains(&event.position) {
+                    let midpoint = bounds.origin.y + bounds.size.height / 2.0;
+                    if event.position.y < midpoint {
+                        target = Some(DropTarget::BeforeSession {
+                            session_id: session.id.clone(),
+                            workspace_id: session.workspace_id.clone(),
+                        });
+                    } else {
+                        target = Some(DropTarget::AfterSession {
+                            session_id: session.id.clone(),
+                            workspace_id: session.workspace_id.clone(),
+                        });
+                    }
+                    break;
+                }
+            }
+            target
+        } else {
+            None
+        };
+
+        if self.drop_target != new_drop_target {
+            self.drop_target = new_drop_target;
+            should_notify = true;
+        }
+
+        should_notify
     }
 
     pub fn render_sidebar_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -109,16 +211,25 @@ impl AgentTermApp {
         } else {
             top_offset_for_title_bar
         };
+        let view = cx.entity();
+        let drag_preview = self.render_drag_preview(cx);
         div()
             .id("sidebar-content")
             .size_full()
             .flex()
             .flex_col()
+            .relative()
+            .on_prepaint(move |bounds, _, cx| {
+                view.update(cx, |this, _| {
+                    this.sidebar_bounds = Some(bounds);
+                });
+            })
             .child(div().h(top_offset).flex_shrink_0())
             .child(self.render_sidebar_header(cx))
             .child(self.render_add_workspace(cx))
             .child(self.render_workspaces_list(cx))
             .child(self.render_sidebar_footer(cx))
+            .when_some(drag_preview, |this, preview| this.child(preview))
     }
 
     pub fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -401,10 +512,17 @@ impl AgentTermApp {
             self.ordered_sessions_for_workspace(&workspace.workspace.id);
 
         let workspace_id = workspace.workspace.id.clone();
+        let workspace_id_for_context = workspace_id.clone();
         let is_collapsed = self.is_workspace_collapsed(&workspace_id);
         let workspace_icon = workspace.workspace.icon.clone();
         let is_default = workspace.is_default;
         let group_id = format!("workspace-group-{}", workspace.workspace.id);
+        let dragging_session = self
+            .dragging_session
+            .as_ref()
+            .filter(|dragging| dragging.has_moved)
+            .and_then(|dragging| self.sessions.iter().find(|s| s.id == dragging.session_id));
+        let drop_target = self.drop_target.as_ref();
 
         // Collect theme colors before building the add button
         let hover_bg = cx.theme().list_hover;
@@ -499,17 +617,17 @@ impl AgentTermApp {
 
                     let mut menu = menu.menu(
                         "Edit Workspace...",
-                        Box::new(EditWorkspace(workspace_id.clone())),
+                        Box::new(EditWorkspace(workspace_id_for_context.clone())),
                     );
 
                     menu = menu.menu(
                         "Move Workspace to New Window",
-                        Box::new(MoveWorkspaceToNewWindow(workspace_id.clone())),
+                        Box::new(MoveWorkspaceToNewWindow(workspace_id_for_context.clone())),
                     );
 
                     if !other_windows.is_empty() {
                         menu = menu.submenu("Move Workspace to Window", window, cx, {
-                            let workspace_id = workspace_id.clone();
+                            let workspace_id = workspace_id_for_context.clone();
                             move |submenu, _window, _cx| {
                                 let mut submenu = submenu;
                                 for (_handle, info) in &other_windows {
@@ -531,7 +649,7 @@ impl AgentTermApp {
 
                     menu.separator().menu(
                         "Remove Workspace",
-                        Box::new(RemoveWorkspace(workspace_id.clone())),
+                        Box::new(RemoveWorkspace(workspace_id_for_context.clone())),
                     )
                 }
             });
@@ -555,7 +673,29 @@ impl AgentTermApp {
         }
 
         for session in sessions {
+            let insert_before = matches!(
+                drop_target,
+                Some(DropTarget::BeforeSession { session_id, workspace_id: target_workspace_id })
+                    if session_id == &session.id && target_workspace_id == &workspace_id
+            );
+            if insert_before {
+                if let Some(dragging_session) = dragging_session {
+                    container = container.child(self.render_drop_placeholder(dragging_session, cx));
+                }
+            }
+
             container = container.child(self.render_session_row(session, cx));
+
+            let insert_after = matches!(
+                drop_target,
+                Some(DropTarget::AfterSession { session_id, workspace_id: target_workspace_id })
+                    if session_id == &session.id && target_workspace_id == &workspace_id
+            );
+            if insert_after {
+                if let Some(dragging_session) = dragging_session {
+                    container = container.child(self.render_drop_placeholder(dragging_session, cx));
+                }
+            }
         }
 
         container
@@ -735,29 +875,20 @@ impl AgentTermApp {
         menu
     }
 
-    pub fn render_session_row(
+    fn build_session_row_content(
         &self,
         session: &SessionRecord,
+        is_active: bool,
+        include_close_button: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let is_active = self
-            .active_session_id
-            .as_deref()
-            .is_some_and(|id| id == session.id);
+    ) -> Div {
         let title = if session.title.is_empty() {
             "Terminal".to_string()
         } else {
             session.title.clone()
         };
-        let session_id = session.id.clone();
-        let session_workspace_id = session.workspace_id.clone();
         let session_icon = session.icon.clone();
-        let active_bg = cx.theme().accent;
-        let active_fg = cx.theme().accent_foreground;
-        let hover_bg = cx.theme().list_active;
-        let accent_color = cx.theme().accent;
         let git_counts = self.git_diff_counts_for_session(&session.id);
-
         let status_color = match session.status {
             SessionStatus::Running => cx.theme().success,
             SessionStatus::Idle => cx.theme().muted_foreground,
@@ -766,98 +897,14 @@ impl AgentTermApp {
             SessionStatus::Waiting => cx.theme().warning,
         };
 
-        let is_drop_target_before = matches!(
-            &self.drop_target,
-            Some(DropTarget::BeforeSession { session_id: id, .. }) if id == &session.id
-        );
-        let is_drop_target_after = matches!(
-            &self.drop_target,
-            Some(DropTarget::AfterSession { session_id: id, .. }) if id == &session.id
-        );
-
         let mut row = div()
-            .id(format!("session-row-{}", session.id))
             .px(px(8.0))
             .py(px(4.0))
             .flex()
             .items_center()
             .gap(px(6.0))
             .rounded(px(6.0))
-            .cursor_pointer()
-            .when(is_active, move |s| s.bg(active_bg).text_color(active_fg))
-            .hover(move |s| s.bg(hover_bg))
-            .when(is_drop_target_before, |el| {
-                el.border_t_2().border_color(accent_color)
-            })
-            .when(is_drop_target_after, |el| {
-                el.border_b_2().border_color(accent_color)
-            })
-            .on_mouse_down(MouseButton::Left, {
-                let session_id = session.id.clone();
-                let workspace_id = session_workspace_id.clone();
-                cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
-                    eprintln!("[mouse_down] session_id={}", session_id);
-                    this.dragging_session = Some(DraggingSession {
-                        session_id: session_id.clone(),
-                        workspace_id: workspace_id.clone(),
-                    });
-                    cx.notify();
-                })
-            })
-            .on_mouse_move({
-                let session_id = session.id.clone();
-                let workspace_id = session_workspace_id.clone();
-                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
-                    if let Some(ref dragging) = this.dragging_session {
-                        // Don't set drop target on the row being dragged
-                        if dragging.session_id != session_id {
-                            eprintln!("[mouse_move] dragging={}, over={}", dragging.session_id, session_id);
-                            this.drop_target = Some(DropTarget::AfterSession {
-                                session_id: session_id.clone(),
-                                workspace_id: workspace_id.clone(),
-                            });
-                            cx.notify();
-                        }
-                    }
-                })
-            })
-            .on_mouse_up(MouseButton::Left, {
-                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
-                    eprintln!("[mouse_up] dragging={:?}, drop_target={:?}",
-                        this.dragging_session.as_ref().map(|d| &d.session_id),
-                        this.drop_target.as_ref());
-                    if let (Some(dragging), Some(target)) =
-                        (this.dragging_session.take(), this.drop_target.take())
-                    {
-                        eprintln!("[mouse_up] calling complete_drag_drop");
-                        this.complete_drag_drop(dragging, target, cx);
-                    }
-                    cx.notify();
-                })
-            })
-            .on_mouse_up_out(MouseButton::Left, {
-                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
-                    eprintln!("[mouse_up_out] dragging={:?}, drop_target={:?}",
-                        this.dragging_session.as_ref().map(|d| &d.session_id),
-                        this.drop_target.as_ref());
-                    // If we have both dragging and drop_target, complete the drop
-                    // (mouse_up_out fires before mouse_up when releasing over a different row)
-                    if let (Some(dragging), Some(target)) =
-                        (this.dragging_session.take(), this.drop_target.take())
-                    {
-                        eprintln!("[mouse_up_out] calling complete_drag_drop");
-                        this.complete_drag_drop(dragging, target, cx);
-                    }
-                    cx.notify();
-                })
-            })
-            .child(
-                div()
-                    .w(px(6.0))
-                    .h(px(6.0))
-                    .rounded_full()
-                    .bg(status_color),
-            )
+            .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(status_color))
             .child(
                 session_icon
                     .as_ref()
@@ -903,66 +950,166 @@ impl AgentTermApp {
             );
         }
 
-        row.child({
-            let id = session.id.clone();
-            Button::new(format!("session-close-{}", session.id))
-                .label("×")
-                .ghost()
-                .compact()
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    cx.stop_propagation();
-                    this.close_session(id.clone(), window, cx);
-                }))
-        })
-        .on_click(cx.listener({
-            let id = session_id.clone();
-            move |this, _: &ClickEvent, window, cx| {
-                this.set_active_session_id(id.clone(), window, cx);
-            }
-        }))
-        .context_menu({
-            move |menu, window, cx| {
-                let current_handle: AnyWindowHandle = window.window_handle();
-                let other_windows = WindowRegistry::global().list_other_windows(current_handle);
+        if include_close_button {
+            row = row.child({
+                let id = session.id.clone();
+                Button::new(format!("session-close-{}", session.id))
+                    .label("×")
+                    .ghost()
+                    .compact()
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        cx.stop_propagation();
+                        this.close_session(id.clone(), window, cx);
+                    }))
+            });
+        }
 
-                let mut menu = menu
-                    .menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
-                    .menu(
-                        "Restart",
-                        Box::new(RestartSessionAction(session_id.clone())),
-                    )
-                    .separator();
+        row
+    }
 
-                if !other_windows.is_empty() {
-                    menu = menu.submenu("Move to Window", window, cx, {
-                        let session_id = session_id.clone();
-                        move |submenu, _window, _cx| {
-                            let mut submenu = submenu;
-                            for (_handle, info) in &other_windows {
-                                let session_id = session_id.clone();
-                                let window_id = info.number as u64;
-                                let title = info.title.clone();
-                                submenu = submenu.menu(
-                                    &title,
-                                    Box::new(MoveSessionToWindow {
-                                        session_id,
-                                        target_window_id: window_id,
-                                    }),
-                                );
-                            }
-                            submenu
-                        }
+    fn render_drop_placeholder(&self, session: &SessionRecord, cx: &mut Context<Self>) -> Div {
+        let accent = cx.theme().accent;
+        self.build_session_row_content(session, false, false, cx)
+            .bg(accent.alpha(0.12))
+            .border_1()
+            .border_color(accent)
+            .opacity(0.7)
+    }
+
+    fn render_drag_preview(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dragging = self.dragging_session.as_ref()?;
+        if !dragging.has_moved {
+            return None;
+        }
+        let sidebar_bounds = self.sidebar_bounds?;
+        let session = self
+            .sessions
+            .iter()
+            .find(|session| session.id == dragging.session_id)?;
+        let row_bounds = self.session_row_bounds.get(&session.id)?;
+        let position = dragging.mouse_position - dragging.drag_offset - sidebar_bounds.origin;
+        let accent = cx.theme().accent;
+        let preview = self
+            .build_session_row_content(session, false, false, cx)
+            .bg(cx.theme().list_active)
+            .border_1()
+            .border_color(accent.alpha(0.4))
+            .shadow_md()
+            .opacity(0.9)
+            .absolute()
+            .left(position.x)
+            .top(position.y)
+            .w(row_bounds.size.width)
+            .h(row_bounds.size.height);
+
+        Some(preview.into_any_element())
+    }
+
+    pub fn render_session_row(
+        &self,
+        session: &SessionRecord,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let is_active = self
+            .active_session_id
+            .as_deref()
+            .is_some_and(|id| id == session.id);
+        let session_id = session.id.clone();
+        let session_id_for_bounds = session_id.clone();
+        let session_workspace_id = session.workspace_id.clone();
+        let active_bg = cx.theme().accent;
+        let active_fg = cx.theme().accent_foreground;
+        let hover_bg = cx.theme().list_active;
+        let is_dragging_row = self
+            .dragging_session
+            .as_ref()
+            .is_some_and(|dragging| dragging.session_id == session.id && dragging.has_moved);
+        let view = cx.entity();
+        let row = self
+            .build_session_row_content(session, is_active, true, cx)
+            .id(format!("session-row-{}", session.id))
+            .cursor_pointer()
+            .when(is_active, move |s| s.bg(active_bg).text_color(active_fg))
+            .hover(move |s| s.bg(hover_bg))
+            .when(is_dragging_row, |row| row.opacity(0.35))
+            .on_mouse_down(MouseButton::Left, {
+                let session_id = session.id.clone();
+                let workspace_id = session_workspace_id.clone();
+                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    let drag_offset = this
+                        .session_row_bounds
+                        .get(&session_id)
+                        .map(|bounds| event.position - bounds.origin)
+                        .unwrap_or_else(|| point(px(0.0), px(0.0)));
+                    this.dragging_session = Some(DraggingSession {
+                        session_id: session_id.clone(),
+                        workspace_id: workspace_id.clone(),
+                        start_position: event.position,
+                        mouse_position: event.position,
+                        drag_offset,
+                        has_moved: false,
                     });
+                    this.drop_target = None;
+                    cx.notify();
+                })
+            })
+            .on_prepaint(move |bounds, _, cx| {
+                view.update(cx, |this, _| {
+                    this.session_row_bounds
+                        .insert(session_id_for_bounds.clone(), bounds);
+                });
+            })
+            .on_click(cx.listener({
+                let id = session_id.clone();
+                move |this, _: &ClickEvent, window, cx| {
+                    this.set_active_session_id(id.clone(), window, cx);
                 }
+            }))
+            .context_menu({
+                move |menu, window, cx| {
+                    let current_handle: AnyWindowHandle = window.window_handle();
+                    let other_windows = WindowRegistry::global().list_other_windows(current_handle);
 
-                menu.menu(
-                    "Open in New Window",
-                    Box::new(OpenSessionInNewWindow(session_id.clone())),
-                )
-                .separator()
-                .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
-            }
-        })
+                    let mut menu = menu
+                        .menu("Edit Tab...", Box::new(RenameSession(session_id.clone())))
+                        .menu(
+                            "Restart",
+                            Box::new(RestartSessionAction(session_id.clone())),
+                        )
+                        .separator();
+
+                    if !other_windows.is_empty() {
+                        menu = menu.submenu("Move to Window", window, cx, {
+                            let session_id = session_id.clone();
+                            move |submenu, _window, _cx| {
+                                let mut submenu = submenu;
+                                for (_handle, info) in &other_windows {
+                                    let session_id = session_id.clone();
+                                    let window_id = info.number as u64;
+                                    let title = info.title.clone();
+                                    submenu = submenu.menu(
+                                        &title,
+                                        Box::new(MoveSessionToWindow {
+                                            session_id,
+                                            target_window_id: window_id,
+                                        }),
+                                    );
+                                }
+                                submenu
+                            }
+                        });
+                    }
+
+                    menu.menu(
+                        "Open in New Window",
+                        Box::new(OpenSessionInNewWindow(session_id.clone())),
+                    )
+                    .separator()
+                    .menu("Close", Box::new(CloseSessionAction(session_id.clone())))
+                }
+            });
+
+        row
     }
 
     // Workspace management methods

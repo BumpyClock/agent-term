@@ -15,8 +15,8 @@ use agentterm_session::{
 use agentterm_tools::{ShellInfo, ToolInfo, get_resolved_shell_with_args, quote_shell_command};
 use git2::{DiffOptions, Repository};
 use gpui::{
-    AnyWindowHandle, App, AsyncApp, Context, Entity, FocusHandle, Focusable, Pixels, WeakEntity,
-    Window, prelude::*,
+    AnyWindowHandle, App, AsyncApp, Bounds, Context, Entity, FocusHandle, Focusable, Pixels, Point,
+    WeakEntity, Window, prelude::*,
 };
 use gpui_term::{TerminalBuilder, TerminalView};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
@@ -41,6 +41,10 @@ const GIT_STATUS_DEBOUNCE: Duration = Duration::from_millis(500);
 pub(crate) struct DraggingSession {
     pub session_id: String,
     pub workspace_id: String,
+    pub start_position: Point<Pixels>,
+    pub mouse_position: Point<Pixels>,
+    pub drag_offset: Point<Pixels>,
+    pub has_moved: bool,
 }
 
 /// Target location for a drop operation.
@@ -91,6 +95,8 @@ pub struct AgentTermApp {
     /// Drag state for session reordering
     pub(crate) dragging_session: Option<DraggingSession>,
     pub(crate) drop_target: Option<DropTarget>,
+    pub(crate) session_row_bounds: HashMap<String, Bounds<Pixels>>,
+    pub(crate) sidebar_bounds: Option<Bounds<Pixels>>,
 
     // Terminal views are window-specific; terminals live in global TerminalPool
     pub(crate) terminal_views: HashMap<String, Entity<TerminalView>>,
@@ -178,6 +184,8 @@ impl AgentTermApp {
             active_session_id: None,
             dragging_session: None,
             drop_target: None,
+            session_row_bounds: HashMap::new(),
+            sidebar_bounds: None,
             terminal_views: HashMap::new(),
             settings: AppSettings::load(),
             cached_shells: Vec::new(),
