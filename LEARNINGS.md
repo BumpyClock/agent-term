@@ -147,3 +147,16 @@
 - Use window-level mouse events for fluid drag tracking
 - Store bounds via `on_prepaint` for accurate hit testing
 - Keep drag previews non-interactive and render them as the last child for layering
+
+## 2026-01-25: Drag Preview Oscillation
+
+**Context:** Inline placeholder caused the drop target to oscillate while dragging.
+
+**What we tried:**
+- Freeze row bounds + workspace order at drag start (snapshot)
+- Compute drop target from snapshot midpoints instead of live bounds
+
+**Outcome:** Placeholder stays stable even when it reflows the list.
+
+**Next time:**
+- Prefer snapshot-based hit testing when placeholders affect layout
