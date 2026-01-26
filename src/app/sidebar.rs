@@ -1,11 +1,13 @@
 //! Sidebar rendering and interaction methods.
 
+use std::collections::HashMap;
+
 use agentterm_session::{SessionRecord, SessionStatus, SessionTool, DEFAULT_WORKSPACE_ID};
 use agentterm_tools::ShellType;
 use gpui::{
     div, point, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Corner, Div,
     Entity, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Styled, Window,
+    Pixels, Point, Styled, Window,
 };
 
 use super::window_registry::WindowRegistry;
@@ -21,7 +23,7 @@ use crate::ui::{
 
 use super::actions::*;
 use super::constants::*;
-use super::state::{AgentTermApp, DraggingSession, DropTarget};
+use super::state::{AgentTermApp, DragSnapshot, DraggingSession, DropTarget};
 use crate::updater::{UpdateManager, UpdateState};
 
 #[derive(Clone, Copy)]
@@ -111,12 +113,15 @@ impl AgentTermApp {
             let drop_target = self.drop_target.take();
             if dragging.has_moved {
                 if let Some(target) = drop_target {
+                    self.drag_snapshot = None;
                     self.complete_drag_drop(dragging, target, cx);
                     return;
                 }
             }
+            self.drag_snapshot = None;
             should_notify = true;
         } else if self.drop_target.take().is_some() {
+            self.drag_snapshot = None;
             should_notify = true;
         }
 
@@ -155,41 +160,15 @@ impl AgentTermApp {
 
         let mut should_notify = position_changed || moved_changed;
         let new_drop_target = if has_moved {
-            let mut target = None;
-            for (session_id, bounds) in &self.session_row_bounds {
-                if session_id == &dragging_session_id {
-                    continue;
-                }
-                let Some(session) = self
-                    .sessions
-                    .iter()
-                    .find(|session| &session.id == session_id)
-                else {
-                    continue;
-                };
-                if self.is_workspace_collapsed(&session.workspace_id) {
-                    continue;
-                }
-                if !self.is_session_visible(&session.id) {
-                    continue;
-                }
-                if bounds.contains(&event.position) {
-                    let midpoint = bounds.origin.y + bounds.size.height / 2.0;
-                    if event.position.y < midpoint {
-                        target = Some(DropTarget::BeforeSession {
-                            session_id: session.id.clone(),
-                            workspace_id: session.workspace_id.clone(),
-                        });
-                    } else {
-                        target = Some(DropTarget::AfterSession {
-                            session_id: session.id.clone(),
-                            workspace_id: session.workspace_id.clone(),
-                        });
-                    }
-                    break;
-                }
+            let needs_snapshot = self
+                .drag_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.session_row_bounds.is_empty())
+                .unwrap_or(true);
+            if needs_snapshot {
+                self.drag_snapshot = Some(self.build_drag_snapshot());
             }
-            target
+            self.drop_target_from_snapshot(event.position, &dragging_session_id)
         } else {
             None
         };
@@ -200,6 +179,79 @@ impl AgentTermApp {
         }
 
         should_notify
+    }
+
+    fn build_drag_snapshot(&self) -> DragSnapshot {
+        let workspace_order: Vec<String> = self
+            .ordered_workspaces()
+            .into_iter()
+            .map(|workspace| workspace.workspace.id)
+            .collect();
+        let mut workspace_session_order = HashMap::new();
+
+        for workspace_id in &workspace_order {
+            let sessions = self.ordered_sessions_for_workspace(workspace_id);
+            let session_ids: Vec<String> =
+                sessions.iter().map(|session| session.id.clone()).collect();
+            if !session_ids.is_empty() {
+                workspace_session_order.insert(workspace_id.clone(), session_ids);
+            }
+        }
+
+        DragSnapshot {
+            sidebar_bounds: self.sidebar_bounds,
+            session_row_bounds: self.session_row_bounds.clone(),
+            workspace_order,
+            workspace_session_order,
+        }
+    }
+
+    fn drop_target_from_snapshot(
+        &self,
+        cursor_position: Point<Pixels>,
+        dragging_session_id: &str,
+    ) -> Option<DropTarget> {
+        let snapshot = self.drag_snapshot.as_ref()?;
+        let sidebar_bounds = snapshot.sidebar_bounds.or(self.sidebar_bounds)?;
+        if !sidebar_bounds.contains(&cursor_position) {
+            return None;
+        }
+
+        let mut last_candidate: Option<(String, String)> = None;
+        for workspace_id in &snapshot.workspace_order {
+            if self.is_workspace_collapsed(workspace_id) {
+                continue;
+            }
+            let Some(session_ids) = snapshot.workspace_session_order.get(workspace_id) else {
+                continue;
+            };
+
+            for session_id in session_ids {
+                if session_id == dragging_session_id {
+                    continue;
+                }
+                let Some(bounds) = snapshot
+                    .session_row_bounds
+                    .get(session_id)
+                    .or_else(|| self.session_row_bounds.get(session_id))
+                else {
+                    continue;
+                };
+                let midpoint = bounds.origin.y + bounds.size.height / 2.0;
+                if cursor_position.y < midpoint {
+                    return Some(DropTarget::BeforeSession {
+                        session_id: session_id.clone(),
+                        workspace_id: workspace_id.clone(),
+                    });
+                }
+                last_candidate = Some((session_id.clone(), workspace_id.clone()));
+            }
+        }
+
+        last_candidate.map(|(session_id, workspace_id)| DropTarget::AfterSession {
+            session_id,
+            workspace_id,
+        })
     }
 
     pub fn render_sidebar_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -981,12 +1033,20 @@ impl AgentTermApp {
         if !dragging.has_moved {
             return None;
         }
-        let sidebar_bounds = self.sidebar_bounds?;
+        let sidebar_bounds = self
+            .drag_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.sidebar_bounds)
+            .or(self.sidebar_bounds)?;
         let session = self
             .sessions
             .iter()
             .find(|session| session.id == dragging.session_id)?;
-        let row_bounds = self.session_row_bounds.get(&session.id)?;
+        let row_bounds = self
+            .drag_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.session_row_bounds.get(&session.id))
+            .or_else(|| self.session_row_bounds.get(&session.id))?;
         let position = dragging.mouse_position - dragging.drag_offset - sidebar_bounds.origin;
         let accent = cx.theme().accent;
         let preview = self
@@ -1050,6 +1110,7 @@ impl AgentTermApp {
                         has_moved: false,
                     });
                     this.drop_target = None;
+                    this.drag_snapshot = Some(this.build_drag_snapshot());
                     cx.notify();
                 })
             })

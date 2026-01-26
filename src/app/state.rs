@@ -47,6 +47,14 @@ pub(crate) struct DraggingSession {
     pub has_moved: bool,
 }
 
+#[derive(Clone)]
+pub(crate) struct DragSnapshot {
+    pub sidebar_bounds: Option<Bounds<Pixels>>,
+    pub session_row_bounds: HashMap<String, Bounds<Pixels>>,
+    pub workspace_order: Vec<String>,
+    pub workspace_session_order: HashMap<String, Vec<String>>,
+}
+
 /// Target location for a drop operation.
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -97,6 +105,7 @@ pub struct AgentTermApp {
     pub(crate) drop_target: Option<DropTarget>,
     pub(crate) session_row_bounds: HashMap<String, Bounds<Pixels>>,
     pub(crate) sidebar_bounds: Option<Bounds<Pixels>>,
+    pub(crate) drag_snapshot: Option<DragSnapshot>,
 
     // Terminal views are window-specific; terminals live in global TerminalPool
     pub(crate) terminal_views: HashMap<String, Entity<TerminalView>>,
@@ -186,6 +195,7 @@ impl AgentTermApp {
             drop_target: None,
             session_row_bounds: HashMap::new(),
             sidebar_bounds: None,
+            drag_snapshot: None,
             terminal_views: HashMap::new(),
             settings: AppSettings::load(),
             cached_shells: Vec::new(),
