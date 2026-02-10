@@ -47,6 +47,9 @@ pub struct AppSettings {
     /// Enable macOS vibrancy blur effect
     #[serde(default = "default_blur_enabled")]
     pub blur_enabled: bool,
+    /// Reduce non-essential UI motion/animation.
+    #[serde(default)]
+    pub reduce_motion: bool,
     /// Warm search index on startup (background thread)
     #[serde(default = "default_warm_search_index")]
     pub warm_search_index: bool,
@@ -91,6 +94,7 @@ impl Default for AppSettings {
             letter_spacing: 0.0,
             window_transparency: 0.0, // 0.0 = solid (no transparency)
             blur_enabled: true,
+            reduce_motion: false,
             warm_search_index: true,
 
             // Tools

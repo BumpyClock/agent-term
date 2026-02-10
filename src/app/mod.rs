@@ -268,6 +268,7 @@ impl Render for AgentTermApp {
         let window_shell = WindowShell::new()
             .layout_mode(WindowLayoutMode::FloatingPanels)
             .blur_enabled(blur_enabled)
+            .reduced_motion(self.settings.reduce_motion)
             .bg(base_bg)
             .when_some(background, |shell, bg| shell.background(bg))
             .when_some(sidebar_left, |shell, sidebar| shell.sidebar_left(sidebar))

@@ -585,6 +585,20 @@ impl SettingsDialog {
                     cx,
                 ),
             )
+            .child(
+                self.render_setting_row(
+                    "Reduce Motion",
+                    "Limit non-essential UI animations and transitions.",
+                    Switch::new("reduce-motion")
+                        .checked(self.settings.reduce_motion)
+                        .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                            this.settings.reduce_motion = *checked;
+                            this.notify_change(window, cx);
+                        }))
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 

@@ -160,3 +160,50 @@
 
 **Next time:**
 - Prefer snapshot-based hit testing when placeholders affect layout
+
+## 2026-02-10: Fluent Motion/Material Theme Domains + Reduced Motion Wiring
+
+**Context:** Polishing app interactions and shared components with Fluent-aligned design tokens and animation values.
+
+**What we tried:** Added first-class `ThemeMotion`, `ThemeElevation`, and `ThemeMaterial` domains in `gpui-component` plus schema/config support; migrated component animation constants to theme tokens; enforced reduced-motion hard paths; wired app-level `reduce_motion` setting and toggle.
+
+**Outcome:** Shared and app layers now use centralized motion/material/elevation token values. `WindowShell` reduced-motion preference propagates to components that read global reduced-motion context. Surface presets now derive default blur/opacity/shadow from theme tokens.
+
+**Next time:**
+- Extract cubic-bezier parser into a single shared helper to avoid per-component duplication.
+- Add targeted unit tests for easing-parse + reduced-motion animation bypass behavior.
+
+## 2026-02-10: GPUI Deep Paint Recursion Guardrails
+
+**Context:** Crash trace showed repeated `with_optional_element_state` / `Interactivity::paint` frames (deep recursive paint loop) after motion-token migration.
+
+**What we tried:** Removed reduced-motion `1ms` animation workaround; bypassed `with_animation` entirely for reduced-motion paths (dialog/sheet/notification/command palette). Also removed static element-id collisions (`dialog`, `notification`, `sheet`) by making IDs unique or removing non-essential IDs.
+
+**Outcome:** `cargo check` passes for both root app and vendored `gpui-component`; render tree now keeps safer reduced-motion behavior and avoids duplicate interactive element IDs.
+
+**Next time:**
+- In GPUI, prefer “no animation” for reduced-motion over near-zero duration animations.
+- Avoid static `.id(\"...\")` for components that can have multiple simultaneous instances.
+
+## 2026-02-10: gpui-component Icon Asset Compatibility
+
+**Context:** Opening Add Workspace dialog crashed during SVG paint with `asset not found: icons/close.svg`.
+
+**What we tried:** Compared icon paths referenced by vendored `gpui-component` (`crates/ui/src/icon.rs`) against app-embedded assets (`assets/icons`). Added missing icon files from `vendor/gpui-component/crates/assets/assets/icons`.
+
+**Outcome:** Missing runtime icon assets resolved for current gpui-component usage (`close.svg`, `dash.svg`, `inspector.svg`, `resize-corner.svg`, `sort-ascending.svg`, `sort-descending.svg`, `star-fill.svg`).
+
+**Next time:**
+- When upgrading/patching gpui-component, run an icon-path compatibility check between `icon.rs` and app embedded assets.
+
+## 2026-02-10: Add Workspace Crash - Easing Overshoot + Noise Asset Alias
+
+**Context:** Clicking Add Workspace triggered two runtime failures: GPUI animation panic (`delta should always be between 0 and 1`) and missing noise asset (`NoiseAsset_256.png`).
+
+**What we tried:** Replaced overshooting easing token `cubic-bezier(0.13, 1.62, 0, 0.92)` with non-overshooting `cubic-bezier(0.13, 1, 0, 0.92)` across app + gpui-component defaults; added asset loader fallback from bare filename to `noise/{name}` and regression test.
+
+**Outcome:** `cargo test -p agentterm loads_noise_asset_by_bare_filename` passes and `cargo check -p agentterm` passes; crash path guarded against both failure modes.
+
+**Next time:**
+- Keep GPUI easing Y control points within `[0, 1]` unless engine explicitly supports overshoot output.
+- Include filename alias/fallback when third-party component expects root asset paths but app embeds under subfolders.

@@ -1,7 +1,10 @@
 use std::rc::Rc;
 
 use gpui::{App, Window, WindowAppearance};
-use gpui_component::theme::{Theme as GpuiTheme, ThemeConfig, ThemeConfigColors, ThemeMode};
+use gpui_component::theme::{
+    Theme as GpuiTheme, ThemeConfig, ThemeConfigColors, ThemeElevationConfig, ThemeMaterialConfig,
+    ThemeMode, ThemeMotionConfig, ThemeShadowToken,
+};
 use gpui_term::set_terminal_palette;
 
 use crate::settings::{AppSettings, Theme};
@@ -124,7 +127,6 @@ pub fn apply_terminal_scheme(settings: &AppSettings, mode: ThemeMode) {
 struct AppPalette {
     background: &'static str,
     foreground: &'static str,
-    primary_foreground: &'static str,
     secondary: &'static str,
     secondary_foreground: &'static str,
     muted: &'static str,
@@ -137,7 +139,6 @@ struct AppPalette {
     popover_foreground: &'static str,
     sidebar: &'static str,
     sidebar_foreground: &'static str,
-    sidebar_primary_foreground: &'static str,
     sidebar_accent: &'static str,
     sidebar_accent_foreground: &'static str,
     sidebar_border: &'static str,
@@ -150,6 +151,7 @@ struct AppPalette {
 
 fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     let palette = palette_for_mode(mode);
+    let accent_foreground = accent_foreground_for_hex(accent.hex).unwrap_or(palette.accent_foreground);
     let mut colors = ThemeConfigColors::default();
 
     colors.background = Some(palette.background.into());
@@ -158,11 +160,11 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.muted = Some(palette.muted.into());
     colors.muted_foreground = Some(palette.muted_foreground.into());
     colors.primary = Some(accent.hex.into());
-    colors.primary_foreground = Some(palette.primary_foreground.into());
+    colors.primary_foreground = Some(accent_foreground.into());
     colors.secondary = Some(palette.secondary.into());
     colors.secondary_foreground = Some(palette.secondary_foreground.into());
     colors.accent = Some(accent.hex.into());
-    colors.accent_foreground = Some(palette.accent_foreground.into());
+    colors.accent_foreground = Some(accent_foreground.into());
     colors.danger = Some(palette.danger.into());
     colors.input = Some(palette.input.into());
     colors.ring = Some(accent.hex.into());
@@ -171,7 +173,7 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     colors.sidebar = Some(palette.sidebar.into());
     colors.sidebar_foreground = Some(palette.sidebar_foreground.into());
     colors.sidebar_primary = Some(accent.hex.into());
-    colors.sidebar_primary_foreground = Some(palette.sidebar_primary_foreground.into());
+    colors.sidebar_primary_foreground = Some(accent_foreground.into());
     colors.sidebar_accent = Some(palette.sidebar_accent.into());
     colors.sidebar_accent_foreground = Some(palette.sidebar_accent_foreground.into());
     colors.sidebar_border = Some(palette.sidebar_border.into());
@@ -188,33 +190,106 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
             ThemeMode::Dark => "AgentTerm Dark".into(),
         },
         mode,
+        motion: Some(build_motion_config()),
+        elevation: Some(build_elevation_config()),
+        material: Some(build_material_config(mode)),
         colors,
         ..ThemeConfig::default()
+    }
+}
+
+fn build_motion_config() -> ThemeMotionConfig {
+    ThemeMotionConfig {
+        fast_duration_ms: Some(187),
+        normal_duration_ms: Some(333),
+        slow_duration_ms: Some(500),
+        strong_invoke_duration_ms: Some(667),
+        soft_dismiss_duration_ms: Some(167),
+        fade_duration_ms: Some(83),
+        fast_invoke_easing: Some("cubic-bezier(0, 0, 0, 1)".into()),
+        strong_invoke_easing: Some("cubic-bezier(0.13, 1, 0, 0.92)".into()),
+        fast_dismiss_easing: Some("cubic-bezier(0, 0, 0, 1)".into()),
+        soft_dismiss_easing: Some("cubic-bezier(1, 0, 1, 1)".into()),
+        point_to_point_easing: Some("cubic-bezier(0.55, 0.55, 0, 1)".into()),
+        fade_easing: Some("linear".into()),
+    }
+}
+
+fn build_elevation_config() -> ThemeElevationConfig {
+    ThemeElevationConfig {
+        control_level: Some(2),
+        card_rest_level: Some(8),
+        tooltip_level: Some(16),
+        flyout_level: Some(32),
+        dialog_level: Some(128),
+        shell_level: Some(36),
+        inactive_window_level: Some(64),
+        active_window_level: Some(128),
+        surface_flyout_shadow: Some(ThemeShadowToken::Sm),
+        surface_panel_shadow: Some(ThemeShadowToken::Lg),
+        surface_card_shadow: Some(ThemeShadowToken::Sm),
+    }
+}
+
+fn build_material_config(_mode: ThemeMode) -> ThemeMaterialConfig {
+    ThemeMaterialConfig {
+        flyout_blur_radius: Some(60.0),
+        panel_blur_radius: Some(120.0),
+        flyout_light_opacity: Some(0.75),
+        flyout_dark_opacity: Some(0.85),
+        panel_light_opacity: Some(0.85),
+        panel_dark_opacity: Some(0.90),
+        card_light_opacity: Some(0.70),
+        card_dark_opacity: Some(0.05),
+        subtle_stroke_light_opacity: Some(0.5),
+        subtle_stroke_dark_opacity: Some(0.5),
+        smoke_light: Some("#0000004D".into()),
+        smoke_dark: Some("#0000004D".into()),
+        layer_light: Some("#FFFFFF80".into()),
+        layer_dark: Some("#3A3A3A4C".into()),
+        layer_alt_light: Some("#FFFFFFFF".into()),
+        layer_alt_dark: Some("#FFFFFF0D".into()),
+        mica_base_light: Some("#F3F3F3".into()),
+        mica_base_dark: Some("#202020".into()),
+        mica_base_alt_light: Some("#DADADA80".into()),
+        mica_base_alt_dark: Some("#0A0A0A00".into()),
+        acrylic_base_light: Some("#F3F3F3".into()),
+        acrylic_base_dark: Some("#202020".into()),
+        acrylic_default_light: Some("#FCFCFC".into()),
+        acrylic_default_dark: Some("#2C2C2C".into()),
+    }
+}
+
+fn accent_foreground_for_hex(color: &str) -> Option<&'static str> {
+    let rgba = gpui::Rgba::try_from(color).ok()?;
+    let luminance = (0.2126 * rgba.r) + (0.7152 * rgba.g) + (0.0722 * rgba.b);
+    if luminance > 0.62 {
+        Some("#000000")
+    } else {
+        Some("#FFFFFF")
     }
 }
 
 fn palette_for_mode(mode: ThemeMode) -> AppPalette {
     match mode {
         ThemeMode::Light => AppPalette {
-            background: "#f9fafb",
-            foreground: "#202127",
-            primary_foreground: "#0b0b0b",
-            secondary: "#edeef2",
-            secondary_foreground: "#202127",
-            muted: "#e6e8eb",
-            muted_foreground: "#616369",
-            accent_foreground: "#202127",
-            danger: "#cc272e",
-            border: "#d5d7de",
-            input: "#d5d7de",
-            popover: "#fffffff2",
-            popover_foreground: "#202127",
-            sidebar: "#f4f5f9",
-            sidebar_foreground: "#202127",
-            sidebar_primary_foreground: "#0b0b0b",
-            sidebar_accent: "#e6e8eb",
-            sidebar_accent_foreground: "#202127",
-            sidebar_border: "#d5d7de",
+            background: "#F3F3F3",
+            foreground: "#000000E4",
+            secondary: "#FFFFFF80",
+            secondary_foreground: "#000000E4",
+            muted: "#00000009",
+            muted_foreground: "#0000009E",
+            accent_foreground: "#FFFFFF",
+            danger: "#C42B1C",
+            border: "#00000029",
+            input: "#00000029",
+            popover: "#F9F9F9F2",
+            popover_foreground: "#000000E4",
+            sidebar: "#DADADA80",
+            sidebar_foreground: "#000000E4",
+            sidebar_accent: "#00000009",
+            sidebar_accent_foreground: "#000000E4",
+            sidebar_border: "#00000029",
             chart_1: "#f54900",
             chart_2: "#009689",
             chart_3: "#104e64",
@@ -222,25 +297,23 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
             chart_5: "#fe9a00",
         },
         ThemeMode::Dark => AppPalette {
-            background: "#111111",
-            foreground: "#cdcdcd",
-            primary_foreground: "#0b0b0b",
-            secondary: "#2d2d2d",
-            secondary_foreground: "#cdcdcd",
-            muted: "#232323",
-            muted_foreground: "#797979",
-            accent_foreground: "#cdcdcd",
+            background: "#202020",
+            foreground: "#FFFFFF",
+            secondary: "#FFFFFF0F",
+            secondary_foreground: "#FFFFFF",
+            muted: "#FFFFFF0F",
+            muted_foreground: "#FFFFFFC5",
+            accent_foreground: "#000000",
             danger: "#ff6468",
-            border: "#2d2d2d",
-            input: "#2d2d2d",
-            popover: "#111111f2",
-            popover_foreground: "#cdcdcd",
-            sidebar: "#19191952",
-            sidebar_foreground: "#cdcdcd",
-            sidebar_primary_foreground: "#0b0b0b",
-            sidebar_accent: "#282828",
-            sidebar_accent_foreground: "#cdcdcd",
-            sidebar_border: "#2d2d2d",
+            border: "#FFFFFF18",
+            input: "#FFFFFF18",
+            popover: "#2C2C2CF2",
+            popover_foreground: "#FFFFFF",
+            sidebar: "#3A3A3A73",
+            sidebar_foreground: "#FFFFFF",
+            sidebar_accent: "#FFFFFF0F",
+            sidebar_accent_foreground: "#FFFFFF",
+            sidebar_border: "#FFFFFF18",
             chart_1: "#1048e6",
             chart_2: "#00bc7c",
             chart_3: "#fe9900",
