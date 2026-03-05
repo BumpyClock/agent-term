@@ -2451,7 +2451,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.1"
-source = "git+https://github.com/BumpyClock/gpui-component?rev=afd0acb113a267bef0835b13237a1b3d9dd1eb45#afd0acb113a267bef0835b13237a1b3d9dd1eb45"
+source = "git+https://github.com/BumpyClock/gpui-component?rev=b35f8d06650543a744dceec6d472af5e7e725e30#b35f8d06650543a744dceec6d472af5e7e725e30"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2494,7 +2494,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-assets"
 version = "0.5.1"
-source = "git+https://github.com/BumpyClock/gpui-component?rev=afd0acb113a267bef0835b13237a1b3d9dd1eb45#afd0acb113a267bef0835b13237a1b3d9dd1eb45"
+source = "git+https://github.com/BumpyClock/gpui-component?rev=b35f8d06650543a744dceec6d472af5e7e725e30#b35f8d06650543a744dceec6d472af5e7e725e30"
 dependencies = [
  "anyhow",
  "gpui",
@@ -2504,7 +2504,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
-source = "git+https://github.com/BumpyClock/gpui-component?rev=afd0acb113a267bef0835b13237a1b3d9dd1eb45#afd0acb113a267bef0835b13237a1b3d9dd1eb45"
+source = "git+https://github.com/BumpyClock/gpui-component?rev=b35f8d06650543a744dceec6d472af5e7e725e30#b35f8d06650543a744dceec6d472af5e7e725e30"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4966,7 +4966,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 [[package]]
 name = "reqwest_client"
 version = "0.5.1"
-source = "git+https://github.com/BumpyClock/gpui-component?rev=afd0acb113a267bef0835b13237a1b3d9dd1eb45#afd0acb113a267bef0835b13237a1b3d9dd1eb45"
+source = "git+https://github.com/BumpyClock/gpui-component?rev=b35f8d06650543a744dceec6d472af5e7e725e30#b35f8d06650543a744dceec6d472af5e7e725e30"
 dependencies = [
  "anyhow",
  "bytes",
