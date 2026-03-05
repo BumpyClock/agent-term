@@ -24,9 +24,10 @@ pub use actions::*;
 pub use state::AgentTermApp;
 
 use gpui::{
-    AnyWindowHandle, App, Application, Context, InteractiveElement, KeyBinding, ParentElement,
-    Render, Styled, Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
+    AnyWindowHandle, App, Context, InteractiveElement, KeyBinding, ParentElement, Render, Styled,
+    Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
+use gpui_platform::application;
 use gpui_component::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
@@ -74,7 +75,7 @@ pub fn run() {
         .try_init();
     }
 
-    let app = Application::new().with_assets(crate::assets::Assets);
+    let app = application().with_assets(crate::assets::Assets);
 
     // Handle dock icon click when app has no visible windows (macOS)
     // Also handles similar scenarios on other platforms
@@ -89,6 +90,10 @@ pub fn run() {
     });
 
     app.run(|cx: &mut App| {
+        if let Err(error) = cx.text_system().add_fonts(crate::assets::embedded_font_data()) {
+            log::error!("failed to register bundled fonts: {error:#}");
+        }
+
         // Initialize gpui-component (theme, input bindings, dialogs, menus, etc.)
         gpui_component::init(cx);
 
