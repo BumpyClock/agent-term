@@ -1,14 +1,15 @@
-//! Lucide icon search modal.
+//! Lucide icon search dialog content.
 //!
-//! A full-screen modal for searching and selecting from all Lucide icons.
+//! A searchable chooser for selecting from all Lucide icons.
 
 use std::rc::Rc;
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::*, px,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ListSizingBehavior, MouseButton, ParentElement, Pixels, Render, SharedString,
+    Size as GpuiSize, Styled, Window, div, prelude::*, px,
 };
+use gpui_component::{VirtualListScrollHandle, v_virtual_list};
 use gpui_component::theme::ThemeMode;
 
 use crate::icons::{Icon, IconDescriptor, IconName, IconSize, search_lucide_icons};
@@ -16,12 +17,13 @@ use crate::text_input::TextInput;
 use crate::theme::surface_background;
 use crate::ui::ActiveTheme;
 
-/// Number of icons to show per page
-const ICONS_PER_PAGE: usize = 100;
+const GRID_GAP: f32 = 4.0;
+const ICON_BUTTON_SIZE: f32 = 40.0;
+/// Columns per row, sized for the 720px dialog (720 - ~48px chrome/padding).
+const GRID_COLUMNS: usize = 15;
 
 #[derive(Clone, Copy)]
 struct LucideSearchPalette {
-    overlay: gpui::Hsla,
     modal_bg: gpui::Hsla,
     modal_border: gpui::Hsla,
     header_bg: gpui::Hsla,
@@ -40,7 +42,6 @@ fn lucide_search_palette(cx: &App) -> LucideSearchPalette {
         ThemeMode::Light
     };
     LucideSearchPalette {
-        overlay: cx.theme().overlay,
         modal_bg: surface_background(mode),
         modal_border: cx.theme().border,
         header_bg: cx.theme().secondary,
@@ -76,7 +77,7 @@ fn lucide_search_palette(cx: &App) -> LucideSearchPalette {
 pub struct LucideSearchModal {
     focus_handle: FocusHandle,
     search_input: Entity<TextInput>,
-    visible_count: usize,
+    scroll_handle: VirtualListScrollHandle,
     current_value: Option<String>,
     on_select: Option<Rc<dyn Fn(IconDescriptor, &mut Window, &mut App)>>,
     on_close: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
@@ -89,7 +90,7 @@ impl LucideSearchModal {
         Self {
             focus_handle: cx.focus_handle(),
             search_input,
-            visible_count: ICONS_PER_PAGE,
+            scroll_handle: VirtualListScrollHandle::new(),
             current_value: None,
             on_select: None,
             on_close: None,
@@ -124,13 +125,6 @@ impl LucideSearchModal {
         }
     }
 
-    fn load_more(&mut self, query: &str) {
-        let filtered_count = search_lucide_icons(query).len();
-        if self.visible_count < filtered_count {
-            self.visible_count += ICONS_PER_PAGE;
-        }
-    }
-
     fn get_search_query(&self, cx: &App) -> String {
         self.search_input.read(cx).text()
     }
@@ -146,54 +140,20 @@ impl Render for LucideSearchModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let search_query = self.get_search_query(cx);
         let filtered_icons = search_lucide_icons(&search_query);
-        let visible_icons: Vec<_> = filtered_icons.iter().take(self.visible_count).collect();
-        let has_more = self.visible_count < filtered_icons.len();
-        let current_value = self.current_value.clone();
-        let remaining = filtered_icons.len().saturating_sub(self.visible_count);
         let total_count = filtered_icons.len();
         let palette = lucide_search_palette(cx);
 
         div()
-            .id("lucide-search-overlay")
-            .absolute()
-            .inset_0()
-            .bg(palette.overlay)
+            .id("lucide-search-modal")
+            .w_full()
+            .h(px(500.))
+            .bg(palette.modal_bg)
             .flex()
-            .items_center()
-            .justify_center()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    this.close(window, cx);
-                }),
-            )
-            .child(
-                div()
-                    .id("lucide-search-modal")
-                    .w(px(600.))
-                    .max_h(px(500.))
-                    .bg(palette.modal_bg)
-                    .border_1()
-                    .border_color(palette.modal_border)
-                    .rounded(px(8.))
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(self.render_header(cx, palette))
-                    .child(self.render_icon_grid(
-                        visible_icons.as_slice(),
-                        &current_value,
-                        has_more,
-                        remaining,
-                        &search_query,
-                        palette,
-                        cx,
-                    ))
-                    .child(self.render_footer(total_count, palette)),
-            )
+            .flex_col()
+            .overflow_hidden()
+            .child(self.render_header(cx, palette))
+            .child(self.render_icon_grid(filtered_icons, palette, cx))
+            .child(self.render_footer(total_count, palette))
     }
 }
 
@@ -208,13 +168,6 @@ impl LucideSearchModal {
             .flex()
             .items_center()
             .gap(px(12.))
-            .child(
-                div()
-                    .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(palette.text_primary)
-                    .child("Select Icon"),
-            )
             .child(div().flex_1().child(self.search_input.clone()))
             .child(
                 div()
@@ -242,100 +195,59 @@ impl LucideSearchModal {
 
     fn render_icon_grid(
         &self,
-        visible_icons: &[&&crate::icons::LucideIconMeta],
-        current_value: &Option<String>,
-        has_more: bool,
-        remaining: usize,
-        search_query: &str,
+        filtered_icons: Vec<&'static crate::icons::LucideIconMeta>,
         palette: LucideSearchPalette,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let query_for_load_more = search_query.to_string();
+        let total_icons = filtered_icons.len();
+        let row_count = (total_icons + GRID_COLUMNS - 1) / GRID_COLUMNS;
+
+        let row_sizes: Rc<Vec<GpuiSize<Pixels>>> = Rc::new(
+            (0..row_count)
+                .map(|_| GpuiSize {
+                    width: px(0.),
+                    height: px(ICON_BUTTON_SIZE),
+                })
+                .collect(),
+        );
 
         div()
             .id("icon-grid-container")
+            .w_full()
             .flex_1()
-            .overflow_y_scroll()
-            .px(px(16.))
-            .py(px(12.))
+            .min_h(px(0.))
+            .overflow_hidden()
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(4.))
-                    .children(visible_icons.iter().map(|icon| {
-                        let is_selected = current_value.as_ref() == Some(&icon.name);
-                        let name = icon.name.clone();
-                        let name_for_click = icon.name.clone();
+                v_virtual_list(
+                    cx.entity(),
+                    "lucide-search-grid",
+                    row_sizes,
+                    move |this, visible_range, _window, cx| {
+                        let entity = cx.entity();
+                        let current_value = this.current_value.clone();
 
-                        div()
-                            .id(SharedString::from(format!("lucide-{}", name)))
-                            .size(px(40.))
-                            .rounded(px(4.))
-                            .cursor_pointer()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .justify_center()
-                            .gap(px(2.))
-                            .bg(if is_selected {
-                                palette.icon_button_selected
-                            } else {
-                                palette.icon_button_bg
+                        visible_range
+                            .map(|row_ix| {
+                                let start = row_ix * GRID_COLUMNS;
+                                let end = (start + GRID_COLUMNS).min(filtered_icons.len());
+                                let current_value = current_value.clone();
+
+                                render_icon_row(
+                                    entity.clone(),
+                                    &filtered_icons[start..end],
+                                    current_value,
+                                    palette,
+                                )
                             })
-                            .hover(|s| {
-                                if !is_selected {
-                                    s.bg(palette.icon_button_hover)
-                                } else {
-                                    s
-                                }
-                            })
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.select_icon(&name_for_click, window, cx);
-                                }),
-                            )
-                            .child(Icon::lucide(&name).size(IconSize::Medium).color(
-                                if is_selected {
-                                    palette.selected_text
-                                } else {
-                                    palette.text_primary
-                                },
-                            ))
-                    })),
-            )
-            .when(has_more, |el| {
-                el.child(
-                    div()
-                        .id("load-more")
-                        .w_full()
-                        .py(px(12.))
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .px(px(16.))
-                                .py(px(8.))
-                                .rounded(px(4.))
-                                .cursor_pointer()
-                                .bg(palette.icon_button_bg)
-                                .text_color(palette.text_muted)
-                                .text_sm()
-                                .hover(|s| {
-                                    s.bg(palette.icon_button_hover)
-                                        .text_color(palette.text_primary)
-                                })
-                                .on_mouse_down(MouseButton::Left, {
-                                    cx.listener(move |this, _, _, cx| {
-                                        this.load_more(&query_for_load_more);
-                                        cx.notify();
-                                    })
-                                })
-                                .child(format!("Load more ({} remaining)", remaining)),
-                        ),
+                            .collect()
+                    },
                 )
-            })
+                .track_scroll(&self.scroll_handle)
+                .px(px(16.))
+                .py(px(12.))
+                .gap(px(GRID_GAP))
+                .with_sizing_behavior(ListSizingBehavior::Auto),
+            )
     }
 
     fn render_footer(&self, total_count: usize, palette: LucideSearchPalette) -> impl IntoElement {
@@ -348,4 +260,60 @@ impl LucideSearchModal {
             .text_color(palette.text_muted)
             .child(format!("{} icons available", total_count))
     }
+}
+
+fn render_icon_row(
+    entity: Entity<LucideSearchModal>,
+    row_icons: &[&'static crate::icons::LucideIconMeta],
+    current_value: Option<String>,
+    palette: LucideSearchPalette,
+) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(GRID_GAP))
+        .children(row_icons.iter().map(|icon| {
+            let name = &icon.name;
+            let is_selected = current_value.as_deref() == Some(name.as_str());
+            let name_for_click = name.clone();
+            let entity = entity.clone();
+
+            div()
+                .id(SharedString::from(format!("lucide-{}", name)))
+                .size(px(ICON_BUTTON_SIZE))
+                .rounded(px(4.))
+                .cursor_pointer()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(2.))
+                .bg(if is_selected {
+                    palette.icon_button_selected
+                } else {
+                    palette.icon_button_bg
+                })
+                .hover(|s| {
+                    if !is_selected {
+                        s.bg(palette.icon_button_hover)
+                    } else {
+                        s
+                    }
+                })
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.select_icon(&name_for_click, window, cx);
+                    });
+                })
+                .child(
+                    Icon::lucide(name)
+                        .size(IconSize::Medium)
+                        .color(if is_selected {
+                            palette.selected_text
+                        } else {
+                            palette.text_primary
+                        }),
+                )
+        }))
+        .into_any_element()
 }
