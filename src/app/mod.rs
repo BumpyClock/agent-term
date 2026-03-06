@@ -29,6 +29,7 @@ use gpui::{
 };
 use gpui_platform::application;
 use gpui_component::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
+use gpui_component_assets::{Assets as ComponentAssets, chain as chain_asset_sources};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
@@ -75,7 +76,7 @@ pub fn run() {
         .try_init();
     }
 
-    let app = application().with_assets(crate::assets::Assets);
+    let app = application().with_assets(chain_asset_sources(crate::assets::Assets, ComponentAssets));
 
     // Handle dock icon click when app has no visible windows (macOS)
     // Also handles similar scenarios on other platforms

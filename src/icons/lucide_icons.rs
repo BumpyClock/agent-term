@@ -52,7 +52,7 @@ fn to_display_name(name: &str) -> String {
 
 /// Search Lucide icons by query string.
 /// Returns icons whose name or display name contains the query.
-pub fn search_lucide_icons(query: &str) -> Vec<&LucideIconMeta> {
+pub fn search_lucide_icons(query: &str) -> Vec<&'static LucideIconMeta> {
     let query = query.to_lowercase();
     if query.is_empty() {
         return LUCIDE_ICONS.iter().collect();

@@ -51,10 +51,7 @@ impl AgentTermProvider {
 
 impl CommandPaletteProvider for AgentTermProvider {
     fn items(&self, _cx: &App) -> Vec<CommandPaletteItem> {
-        let mut items = Vec::new();
-
-        // Add static commands
-        items.push(
+        let mut items = vec![
             CommandPaletteItem::new("new_tab", "New Tab")
                 .category("Actions")
                 .icon(IconName::Plus)
@@ -62,8 +59,6 @@ impl CommandPaletteProvider for AgentTermProvider {
                 .payload(CommandPalettePayload::Action {
                     action_id: "new_tab".to_string(),
                 }),
-        );
-        items.push(
             CommandPaletteItem::new("new_window", "New Window")
                 .category("Actions")
                 .icon(IconName::ExternalLink)
@@ -71,8 +66,6 @@ impl CommandPaletteProvider for AgentTermProvider {
                 .payload(CommandPalettePayload::Action {
                     action_id: "new_window".to_string(),
                 }),
-        );
-        items.push(
             CommandPaletteItem::new("settings", "Settings")
                 .category("Actions")
                 .icon(IconName::Settings)
@@ -80,8 +73,6 @@ impl CommandPaletteProvider for AgentTermProvider {
                 .payload(CommandPalettePayload::Action {
                     action_id: "settings".to_string(),
                 }),
-        );
-        items.push(
             CommandPaletteItem::new("toggle_sidebar", "Toggle Sidebar")
                 .category("Actions")
                 .icon(IconName::Menu)
@@ -89,7 +80,7 @@ impl CommandPaletteProvider for AgentTermProvider {
                 .payload(CommandPalettePayload::Action {
                     action_id: "toggle_sidebar".to_string(),
                 }),
-        );
+        ];
 
         // Add workspaces
         for workspace in &self.workspaces {

@@ -442,7 +442,8 @@ impl UpdateManager {
 
     #[cfg(target_os = "macos")]
     fn launch_macos_updater(&self, dmg_path: &PathBuf) -> Result<(), String> {
-        use std::process::Command;
+        use smol::process::Command;
+        use std::os::unix::fs::PermissionsExt;
 
         // Create a helper script that will:
         // 1. Wait for this app to quit
@@ -474,9 +475,11 @@ open "/Applications/$APP_NAME"
         std::fs::write(&script_path, script)
             .map_err(|e| format!("Failed to write updater script: {}", e))?;
 
-        Command::new("chmod")
-            .args(["+x", script_path.to_str().unwrap_or_default()])
-            .output()
+        let mut permissions = std::fs::metadata(&script_path)
+            .map_err(|e| format!("Failed to read updater script metadata: {}", e))?
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script_path, permissions)
             .map_err(|e| format!("Failed to make script executable: {}", e))?;
 
         Command::new("bash")
@@ -490,7 +493,7 @@ open "/Applications/$APP_NAME"
 
     #[cfg(target_os = "windows")]
     fn launch_windows_updater(&self, msi_path: &PathBuf) -> Result<(), String> {
-        use std::process::Command;
+        use smol::process::Command;
 
         // Launch MSI installer with passive mode
         Command::new("msiexec")
@@ -511,7 +514,8 @@ open "/Applications/$APP_NAME"
 
         match extension.to_lowercase().as_str() {
             "appimage" => {
-                use std::process::Command;
+                use smol::process::Command;
+                use std::os::unix::fs::PermissionsExt;
 
                 // For AppImage, replace the current executable
                 let current_exe = std::env::current_exe()
@@ -520,9 +524,11 @@ open "/Applications/$APP_NAME"
                 std::fs::copy(file_path, &current_exe)
                     .map_err(|e| format!("Failed to replace executable: {}", e))?;
 
-                Command::new("chmod")
-                    .args(["+x", current_exe.to_str().unwrap_or_default()])
-                    .output()
+                let mut permissions = std::fs::metadata(&current_exe)
+                    .map_err(|e| format!("Failed to read executable metadata: {}", e))?
+                    .permissions();
+                permissions.set_mode(0o755);
+                std::fs::set_permissions(&current_exe, permissions)
                     .map_err(|e| format!("Failed to set executable permission: {}", e))?;
 
                 // Relaunch

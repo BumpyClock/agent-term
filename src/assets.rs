@@ -4,7 +4,6 @@
 
 use anyhow::anyhow;
 use gpui::{AssetSource, SharedString};
-use gpui_component_assets::Assets as ComponentAssets;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::path::Path;
@@ -38,32 +37,16 @@ impl AssetSource for Assets {
             return Ok(None);
         }
 
-        if let Some(file) = Self::get(path) {
-            return Ok(Some(file.data));
-        }
-
-        if !path.contains('/') {
-            let noise_path = format!("noise/{path}");
-            if let Some(file) = Self::get(&noise_path) {
-                return Ok(Some(file.data));
-            }
-        }
-
-        ComponentAssets
-            .load(path)?
-            .map(Some)
+        Self::get(path)
+            .map(|file| Some(file.data))
             .ok_or_else(|| anyhow!("asset not found: {path}"))
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        let mut asset_paths: Vec<SharedString> = Self::iter()
+        Ok(Self::iter()
             .filter(|p| p.starts_with(path))
             .map(|p| SharedString::from(p.to_string()))
-            .collect();
-        asset_paths.extend(ComponentAssets.list(path)?);
-        asset_paths.sort();
-        asset_paths.dedup();
-        Ok(asset_paths)
+            .collect())
     }
 }
 
@@ -71,31 +54,18 @@ impl AssetSource for Assets {
 mod tests {
     use super::Assets;
     use gpui::AssetSource;
+    use gpui_component_assets::{Assets as ComponentAssets, chain as chain_asset_sources};
 
     #[test]
-    fn loads_noise_asset_by_bare_filename() {
-        let assets = Assets;
-        let from_bare_name = assets
-            .load("NoiseAsset_256.png")
-            .expect("loading bare filename should succeed")
-            .expect("asset should exist");
-        let from_embedded_path = assets
-            .load("noise/NoiseAsset_256.png")
-            .expect("loading embedded path should succeed")
-            .expect("asset should exist");
-
-        assert_eq!(from_bare_name.as_ref(), from_embedded_path.as_ref());
-    }
-
-    #[test]
-    fn loads_gpui_component_surface_noise_asset() {
-        let assets = Assets;
+    fn app_assets_chain_falls_back_to_gpui_component_assets() {
+        let assets = chain_asset_sources(Assets, ComponentAssets);
         let from_surface_path = assets
             .load("surface/NoiseAsset_256.png")
             .expect("loading surface path should succeed")
             .expect("asset should exist");
 
         assert!(!from_surface_path.is_empty());
+        assert!(assets.load("NoiseAsset_256.png").is_err());
     }
 
     #[test]

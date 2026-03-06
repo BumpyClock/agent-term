@@ -10,6 +10,7 @@ mod lucide_search;
 // App-specific components
 pub use helpers::*;
 pub use icon_picker::*;
+pub use lucide_search::*;
 
 // Re-export gpui-component UI primitives
 pub use gpui_component::{

@@ -1094,7 +1094,7 @@ impl AgentTermApp {
             .when(is_dragging_row, |row| row.opacity(0.35))
             .on_mouse_down(MouseButton::Left, {
                 let session_id = session.id.clone();
-                let workspace_id = session_workspace_id.clone();
+                let workspace_id = session_workspace_id;
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                     let drag_offset = this
                         .session_row_bounds

@@ -704,6 +704,8 @@ impl SettingsDialog {
                 .color(muted_fg)
                 .into_any_element()
         };
+        let tool_name = tool.name;
+        let tool_command = tool.command;
 
         div()
             .px(px(12.))
@@ -723,14 +725,14 @@ impl SettingsDialog {
                         div()
                             .text_sm()
                             .text_color(cx.theme().foreground)
-                            .child(tool.name.clone()),
+                            .child(tool_name),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(muted_fg)
                             .truncate()
-                            .child(tool.command.clone()),
+                            .child(tool_command),
                     ),
             )
             .child(
@@ -770,7 +772,7 @@ impl SettingsDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let this_entity = cx.entity().clone();
+        let this_entity = cx.entity();
         let is_edit = tool.is_some();
         let title = if is_edit { "Edit Tool" } else { "Add Tool" };
 

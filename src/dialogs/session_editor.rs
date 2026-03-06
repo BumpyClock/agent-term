@@ -5,7 +5,7 @@ use gpui_component::input::InputState as GpuiInputState;
 
 use crate::icons::IconDescriptor;
 use crate::ui::{
-    ActiveTheme, IconPicker, WindowExt,
+    ActiveTheme, IconPicker, LucideSearchModal, WindowExt,
     helpers::{agentterm_input_field, icon_descriptor_from_string, icon_descriptor_to_string},
     v_flex,
 };
@@ -85,6 +85,14 @@ impl Render for SessionEditorDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_icon = self.current_icon.clone();
         let entity = cx.entity();
+        let entity_for_change = entity.clone();
+        let entity_for_search = entity;
+        let selected_lucide_icon = current_icon.as_deref().and_then(|icon| {
+            match icon_descriptor_from_string(icon) {
+                IconDescriptor::Lucide { id } => Some(id),
+                IconDescriptor::Tool { .. } => None,
+            }
+        });
 
         v_flex()
             .gap(px(16.))
@@ -108,9 +116,40 @@ impl Render for SessionEditorDialog {
                                     .map(|s| icon_descriptor_from_string(s)),
                             )
                             .on_change(move |icon, _window, cx| {
-                                entity.update(cx, |this, cx| {
+                                entity_for_change.update(cx, |this, cx| {
                                     this.set_icon(icon, cx);
                                 });
+                            })
+                            .on_open_search({
+                                let entity = entity_for_search;
+                                move |window, cx| {
+                                    let search_dialog = cx.new(|cx| {
+                                        let mut dialog = LucideSearchModal::new(cx);
+                                        dialog.set_current_value(selected_lucide_icon.clone());
+                                        dialog.set_on_select({
+                                            let entity = entity.clone();
+                                            move |icon, window, cx| {
+                                                entity.update(cx, |this, cx| {
+                                                    this.set_icon(Some(icon), cx);
+                                                });
+                                                window.close_dialog(cx);
+                                            }
+                                        });
+                                        dialog.set_on_close(|window, cx| {
+                                            window.close_dialog(cx);
+                                        });
+                                        dialog
+                                    });
+
+                                    window.open_dialog(cx, move |dialog, _window, _cx| {
+                                        dialog
+                                            .title("More Icons")
+                                            .w(px(720.))
+                                            .max_h(px(560.))
+                                            .close_button(true)
+                                            .child(search_dialog.clone())
+                                    });
+                                }
                             }),
                     ),
             )
