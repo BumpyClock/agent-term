@@ -564,10 +564,25 @@ open "/Applications/$APP_NAME"
 
 /// Verifies the Ed25519 signature of the downloaded data.
 fn verify_signature(data: &[u8], signature_base64: &str) -> Result<(), String> {
-    // Skip verification if public key is not set (all zeros)
+    // SECURITY: The embedded public key is still the all-zero placeholder, so
+    // downloaded updates cannot be authenticated. Hard-fail verification so an
+    // unverified binary can never be written or installed. A real key must be
+    // embedded before releases can ship signed updates.
     if PUBLIC_KEY_BYTES == [0u8; 32] {
-        agentterm_mcp::diagnostics::log("update_signature_verification_skipped (no public key set)");
-        return Ok(());
+        // LOCAL TESTING ONLY escape hatch, compiled out of release builds.
+        #[cfg(debug_assertions)]
+        if std::env::var("AGENTTERM_ALLOW_UNSIGNED_UPDATES").as_deref() == Ok("1") {
+            agentterm_mcp::diagnostics::log(
+                "update_signature_verification_bypassed (AGENTTERM_ALLOW_UNSIGNED_UPDATES=1, debug build, placeholder key)",
+            );
+            return Ok(());
+        }
+        agentterm_mcp::diagnostics::log(
+            "update_signature_verification_unavailable (placeholder public key)",
+        );
+        return Err(
+            "update signature verification unavailable: placeholder public key".to_string(),
+        );
     }
 
     let signature_bytes = base64::engine::general_purpose::STANDARD
@@ -583,4 +598,32 @@ fn verify_signature(data: &[u8], signature_base64: &str) -> Result<(), String> {
     verifying_key
         .verify(data, &signature)
         .map_err(|_| "Signature verification failed".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// While the embedded public key is the all-zero placeholder, signature
+    /// verification must hard-fail so an unverified update can never be written
+    /// or installed. Guards against regressing to the old "skip and pass" path.
+    #[test]
+    fn placeholder_key_blocks_installation() {
+        if PUBLIC_KEY_BYTES != [0u8; 32] {
+            // A real key has been embedded; this guard no longer applies.
+            return;
+        }
+        if std::env::var("AGENTTERM_ALLOW_UNSIGNED_UPDATES").as_deref() == Ok("1") {
+            // Local-testing escape hatch is active in this environment; the
+            // hard-block behavior under test is intentionally bypassed.
+            return;
+        }
+
+        let err = verify_signature(b"any update payload", "AAAA")
+            .expect_err("placeholder key must reject verification");
+        assert!(
+            err.contains("placeholder public key"),
+            "unexpected error message: {err}"
+        );
+    }
 }
