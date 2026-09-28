@@ -4,13 +4,13 @@
 
 use std::rc::Rc;
 
-use gpui::{
+use gpui_kit::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ListSizingBehavior, MouseButton, ParentElement, Pixels, Render, SharedString,
     Size as GpuiSize, Styled, Window, div, prelude::*, px,
 };
-use gpui_component::{VirtualListScrollHandle, v_virtual_list};
-use gpui_component::theme::ThemeMode;
+use gpui_kit::component::{VirtualListScrollHandle, v_virtual_list};
+use gpui_kit::component::theme::ThemeMode;
 
 use crate::icons::{Icon, IconDescriptor, IconName, IconSize, search_lucide_icons};
 use crate::text_input::TextInput;
@@ -24,15 +24,15 @@ const GRID_COLUMNS: usize = 15;
 
 #[derive(Clone, Copy)]
 struct LucideSearchPalette {
-    modal_bg: gpui::Hsla,
-    modal_border: gpui::Hsla,
-    header_bg: gpui::Hsla,
-    icon_button_bg: gpui::Hsla,
-    icon_button_hover: gpui::Hsla,
-    icon_button_selected: gpui::Hsla,
-    text_primary: gpui::Hsla,
-    text_muted: gpui::Hsla,
-    selected_text: gpui::Hsla,
+    modal_bg: gpui_kit::Hsla,
+    modal_border: gpui_kit::Hsla,
+    header_bg: gpui_kit::Hsla,
+    icon_button_bg: gpui_kit::Hsla,
+    icon_button_hover: gpui_kit::Hsla,
+    icon_button_selected: gpui_kit::Hsla,
+    text_primary: gpui_kit::Hsla,
+    text_muted: gpui_kit::Hsla,
+    selected_text: gpui_kit::Hsla,
 }
 
 fn lucide_search_palette(cx: &App) -> LucideSearchPalette {

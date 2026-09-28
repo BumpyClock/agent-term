@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use gpui::{
+use gpui_kit::{
     App, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, Window,
     div, prelude::*, px,
 };
@@ -54,15 +54,15 @@ pub struct IconPicker {
 
 #[derive(Clone, Copy)]
 struct IconPickerPalette {
-    section_title: gpui::Hsla,
-    icon_button_bg: gpui::Hsla,
-    icon_button_hover: gpui::Hsla,
-    icon_button_selected: gpui::Hsla,
-    default_button_bg: gpui::Hsla,
-    text_primary: gpui::Hsla,
-    text_muted: gpui::Hsla,
-    selected_text: gpui::Hsla,
-    icon_unselected: gpui::Hsla,
+    section_title: gpui_kit::Hsla,
+    icon_button_bg: gpui_kit::Hsla,
+    icon_button_hover: gpui_kit::Hsla,
+    icon_button_selected: gpui_kit::Hsla,
+    default_button_bg: gpui_kit::Hsla,
+    text_primary: gpui_kit::Hsla,
+    text_muted: gpui_kit::Hsla,
+    selected_text: gpui_kit::Hsla,
+    icon_unselected: gpui_kit::Hsla,
 }
 
 fn icon_picker_palette(cx: &App) -> IconPickerPalette {
@@ -133,7 +133,7 @@ fn render_section(title: &str, palette: IconPickerPalette) -> impl IntoElement {
     div()
         .text_xs()
         .text_color(palette.section_title)
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .font_weight(gpui_kit::FontWeight::MEDIUM)
         .child(title.to_string())
 }
 

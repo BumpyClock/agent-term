@@ -1,6 +1,6 @@
 //! Application menu bar configuration.
 
-use gpui::{Menu, MenuItem, Window};
+use gpui_kit::{Menu, MenuItem, Window};
 use gpui_term::{Clear, Copy, Paste, SelectAll};
 
 use super::actions::*;

@@ -42,7 +42,7 @@ use futures::{
     FutureExt, StreamExt,
     channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
 };
-use gpui::{
+use gpui_kit::{
     App, Bounds, ClipboardItem, Context, EventEmitter, Keystroke, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent, Size, Task, TouchPhase, Window,
     px,
@@ -1071,7 +1071,7 @@ impl Terminal {
                 self.scroll_px %= self.last_content.terminal_bounds.height();
                 Some(new_offset - old_offset)
             }
-            TouchPhase::Ended => None,
+            TouchPhase::Ended | TouchPhase::Cancelled => None,
         }
     }
 

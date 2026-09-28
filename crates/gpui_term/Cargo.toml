@@ -9,7 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-gpui.workspace = true
+gpui-kit.workspace = true
 alacritty_terminal.workspace = true
 futures.workspace = true
 smol.workspace = true

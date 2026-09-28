@@ -14,7 +14,7 @@ use agentterm_session::{
 };
 use agentterm_tools::{ShellInfo, ToolInfo, get_resolved_shell_with_args, quote_shell_command};
 use git2::{DiffOptions, Repository};
-use gpui::{
+use gpui_kit::{
     AnyWindowHandle, App, AsyncApp, Bounds, Context, Entity, FocusHandle, Focusable, Pixels, Point,
     WeakEntity, Window, prelude::*,
 };
@@ -31,7 +31,7 @@ use crate::theme;
 use crate::ui::WorkspaceItem;
 use crate::updater::UpdateManager;
 
-use gpui_component::command_palette::CommandPaletteState;
+use gpui_kit::component::command_palette::CommandPaletteState;
 
 const RECENTLY_CLOSED_TERMINAL_TTL: Duration = Duration::from_secs(120);
 const GIT_STATUS_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -186,7 +186,7 @@ impl AgentTermApp {
             sidebar_visible: true,
             sidebar_width: 250.0,
             resizing_sidebar: false,
-            resize_start_x: gpui::px(0.0),
+            resize_start_x: gpui_kit::px(0.0),
             resize_start_width: 0.0,
             workspaces: Vec::new(),
             sessions: Vec::new(),
@@ -1117,9 +1117,9 @@ impl AgentTermApp {
         // Update window background appearance if blur setting changed
         if settings.blur_enabled != self.settings.blur_enabled {
             let appearance = if settings.blur_enabled {
-                gpui::WindowBackgroundAppearance::Blurred
+                gpui_kit::WindowBackgroundAppearance::Blurred
             } else {
-                gpui::WindowBackgroundAppearance::Transparent
+                gpui_kit::WindowBackgroundAppearance::Transparent
             };
             window.set_background_appearance(appearance);
         }

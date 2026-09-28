@@ -1,7 +1,7 @@
 //! Session editor dialog for editing session properties: icon, name, command.
 
-use gpui::{Context, Entity, IntoElement, Render, Styled, Window, div, prelude::*, px};
-use gpui_component::input::InputState as GpuiInputState;
+use gpui_kit::{Context, Entity, IntoElement, Render, Styled, Window, div, prelude::*, px};
+use gpui_kit::component::input::InputState as GpuiInputState;
 
 use crate::icons::IconDescriptor;
 use crate::ui::{

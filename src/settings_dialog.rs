@@ -2,7 +2,7 @@
 //!
 //! Opens in its own window with 3 tabs: General, Appearance, and Tools.
 
-use gpui::{
+use gpui_kit::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Render, Rgba, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::*, px,
@@ -18,13 +18,13 @@ use crate::ui::{
     ActiveTheme, Button, ButtonVariants, Slider, SliderEvent, SliderState, Switch, Tab, TabBar,
     WindowExt,
 };
-use gpui_component::IndexPath;
-use gpui_component::button::ButtonCustomVariant;
-use gpui_component::input::{
+use gpui_kit::component::IndexPath;
+use gpui_kit::component::button::ButtonCustomVariant;
+use gpui_kit::component::input::{
     InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction,
 };
-use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
-use gpui_component::theme::ThemeMode;
+use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::theme::ThemeMode;
 
 /// A font item for the Select dropdown that wraps FontOption.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,7 +370,7 @@ impl SettingsDialog {
             .child(
                 div()
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Updates"),
             )
@@ -406,7 +406,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("About"),
             )
@@ -420,7 +420,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Search"),
             )
@@ -442,7 +442,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Diagnostics"),
             )
@@ -478,7 +478,7 @@ impl SettingsDialog {
             .child(
                 div()
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Theme"),
             )
@@ -487,7 +487,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Accent Color"),
             )
@@ -496,7 +496,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Terminal Colors"),
             )
@@ -506,7 +506,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Terminal Font"),
             )
@@ -516,7 +516,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Typography"),
             )
@@ -561,7 +561,7 @@ impl SettingsDialog {
                 div()
                     .mt(px(16.))
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Window"),
             )
@@ -632,7 +632,7 @@ impl SettingsDialog {
             .child(
                 div()
                     .text_lg()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child("Default Shell"),
             )
@@ -656,7 +656,7 @@ impl SettingsDialog {
                     .child(
                         div()
                             .text_lg()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .text_color(cx.theme().foreground)
                             .child("Custom Tools"),
                     )
@@ -1072,7 +1072,7 @@ impl SettingsDialog {
     }
 }
 
-fn parse_hex_color(color: &str) -> gpui::Hsla {
+fn parse_hex_color(color: &str) -> gpui_kit::Hsla {
     let rgba = Rgba::try_from(color).unwrap_or_else(|_| Rgba {
         r: 0.0,
         g: 0.0,

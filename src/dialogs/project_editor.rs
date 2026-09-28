@@ -3,12 +3,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use gpui::{
+use gpui_kit::{
     AsyncApp, ClickEvent, Context, Entity, IntoElement, Render, Styled, WeakEntity, Window, div,
     prelude::*, px,
 };
-use gpui_component::input::{InputEvent, InputState as GpuiInputState};
-use gpui_component::theme::ThemeMode;
+use gpui_kit::component::input::{InputEvent, InputState as GpuiInputState};
+use gpui_kit::component::theme::ThemeMode;
 use rfd::AsyncFileDialog;
 
 use crate::icons::IconDescriptor;

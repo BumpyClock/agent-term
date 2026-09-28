@@ -10,7 +10,7 @@ mod tool_icons;
 pub use lucide_icons::*;
 pub use tool_icons::*;
 
-use gpui::{App, Hsla, IntoElement, SharedString, Styled, Window, prelude::*, px, svg};
+use gpui_kit::{App, Hsla, IntoElement, SharedString, Styled, Window, prelude::*, px, svg};
 
 /// Common UI icons with type safety (subset of Lucide).
 /// These are the most frequently used icons with compile-time safety.
@@ -150,7 +150,7 @@ pub enum IconSize {
 
 impl IconSize {
     /// Returns the size in pixels.
-    pub fn px(&self) -> gpui::Pixels {
+    pub fn px(&self) -> gpui_kit::Pixels {
         match self {
             Self::XSmall => px(12.),
             Self::Small => px(14.),

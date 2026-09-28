@@ -3,7 +3,7 @@
 //! Uses rust-embed to bundle Lucide icons at compile time.
 
 use anyhow::anyhow;
-use gpui::{AssetSource, SharedString};
+use gpui_kit::{AssetSource, SharedString};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::path::Path;
@@ -53,8 +53,8 @@ impl AssetSource for Assets {
 #[cfg(test)]
 mod tests {
     use super::Assets;
-    use gpui::AssetSource;
-    use gpui_component_assets::{Assets as ComponentAssets, chain as chain_asset_sources};
+    use gpui_kit::AssetSource;
+    use gpui_kit::assets::{Assets as ComponentAssets, chain as chain_asset_sources};
 
     #[test]
     fn app_assets_chain_falls_back_to_gpui_component_assets() {

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use gpui::{
+use gpui_kit::{
     div, prelude::*, px, size, AnyWindowHandle, Bounds, Context, Focusable, IntoElement,
     ParentElement, Styled, Window, WindowBounds, WindowOptions,
 };
@@ -14,7 +14,7 @@ use super::{
     MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool,
 };
 use agentterm_session::DEFAULT_WORKSPACE_ID;
-use gpui_component::input::InputState as GpuiInputState;
+use gpui_kit::component::input::InputState as GpuiInputState;
 
 use crate::dialogs::{
     AboutDialog, AddWorkspaceDialog, McpManagerDialog, ReleaseNotesDialog, SessionEditorDialog,
@@ -27,7 +27,7 @@ use super::actions::*;
 use super::command_palette_provider::{AgentTermProvider, CommandPalettePayload};
 use super::search_manager;
 use super::state::AgentTermApp;
-use gpui_component::command_palette::{CommandPalette, CommandPaletteEvent};
+use gpui_kit::component::command_palette::{CommandPalette, CommandPaletteEvent};
 // TODO: Import UpdateState when update_state() helper is added
 // use crate::updater::UpdateState;
 
@@ -100,7 +100,7 @@ impl AgentTermApp {
     /// Handle selection from the command palette.
     fn handle_command_palette_select(
         &mut self,
-        item: &gpui_component::command_palette::CommandPaletteItem,
+        item: &gpui_kit::component::command_palette::CommandPaletteItem,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -294,13 +294,13 @@ impl AgentTermApp {
 
         let _ = cx.open_window(
             WindowOptions {
-                titlebar: Some(gpui::TitlebarOptions {
+                titlebar: Some(gpui_kit::TitlebarOptions {
                     title: Some("Settings".into()),
                     appears_transparent: false,
                     ..Default::default()
                 }),
                 window_bounds: Some(window_bounds),
-                kind: gpui::WindowKind::Normal,
+                kind: gpui_kit::WindowKind::Normal,
                 is_resizable: true,
                 is_movable: true,
                 focus: true,
@@ -344,7 +344,7 @@ impl AgentTermApp {
                         })
                 });
                 // Wrap in Root to provide theme context for gpui-component elements
-                cx.new(|cx| gpui_component::Root::new(dialog, settings_window, cx))
+                cx.new(|cx| gpui_kit::component::Root::new(dialog, settings_window, cx))
             },
         );
     }
@@ -865,7 +865,7 @@ impl AgentTermApp {
                                 .child(
                                     div()
                                         .text_sm()
-                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .font_weight(gpui_kit::FontWeight::MEDIUM)
                                         .text_color(cx.theme().warning)
                                         .child(format!("This workspace has {}", tabs_text)),
                                 )

@@ -13,7 +13,7 @@ pub use icon_picker::*;
 pub use lucide_search::*;
 
 // Re-export gpui-component UI primitives
-pub use gpui_component::{
+pub use gpui_kit::component::{
     // Theme and styling
     ActiveTheme,
     Sizable,

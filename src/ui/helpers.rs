@@ -1,8 +1,8 @@
 //! UI helper functions and types.
 
 use agentterm_session::WorkspaceRecord;
-use gpui::Entity;
-use gpui_component::input::{Input as GpuiInput, InputState as GpuiInputState};
+use gpui_kit::Entity;
+use gpui_kit::component::input::{Input as GpuiInput, InputState as GpuiInputState};
 
 use crate::icons::IconDescriptor;
 

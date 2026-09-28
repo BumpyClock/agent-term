@@ -1,7 +1,7 @@
 //! Terminal container rendering.
 
-use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
-use gpui_component::TITLE_BAR_HEIGHT;
+use gpui_kit::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui_kit::component::TITLE_BAR_HEIGHT;
 
 use crate::ui::ActiveTheme;
 
@@ -37,7 +37,7 @@ impl AgentTermApp {
             .left(px(content_left))
             .flex()
             .flex_col()
-            .bg(gpui::transparent_black())
+            .bg(gpui_kit::transparent_black())
             .when_some(active_view.as_ref(), |el, tv| {
                 el.child(
                     div()

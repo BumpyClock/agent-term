@@ -5,7 +5,7 @@
 //! independent of window lifetime. This enables browser-like tab behavior where
 //! sessions can be moved between windows without restarting the terminal process.
 
-use gpui::Entity;
+use gpui_kit::Entity;
 use gpui_term::Terminal;
 use parking_lot::Mutex;
 use std::collections::HashMap;

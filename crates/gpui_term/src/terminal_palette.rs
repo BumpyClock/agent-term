@@ -1,4 +1,4 @@
-use gpui::Hsla;
+use gpui_kit::Hsla;
 use std::sync::{LazyLock, RwLock};
 
 #[derive(Clone, Copy, Debug)]
@@ -149,7 +149,7 @@ fn dim_color(color: Hsla) -> Hsla {
 }
 
 fn hsla_from_rgb(r: u8, g: u8, b: u8) -> Hsla {
-    let rgba = gpui::Rgba {
+    let rgba = gpui_kit::Rgba {
         r: r as f32 / 255.0,
         g: g as f32 / 255.0,
         b: b as f32 / 255.0,

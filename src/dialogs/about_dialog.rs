@@ -1,6 +1,6 @@
 //! About dialog displaying application information.
 
-use gpui::{Context, IntoElement, Render, Styled, Window, div, prelude::*, px};
+use gpui_kit::{Context, IntoElement, Render, Styled, Window, div, prelude::*, px};
 
 use crate::icons::{Icon, IconName, IconSize};
 use crate::ui::ActiveTheme;
@@ -34,7 +34,7 @@ impl Render for AboutDialog {
             .child(
                 div()
                     .text_xl()
-                    .font_weight(gpui::FontWeight::BOLD)
+                    .font_weight(gpui_kit::FontWeight::BOLD)
                     .text_color(foreground)
                     .child("Agent Term"),
             )

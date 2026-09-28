@@ -1,6 +1,6 @@
 //! Release notes dialog displaying update notes.
 
-use gpui::{Context, IntoElement, Render, ScrollHandle, Styled, Window, div, prelude::*, px};
+use gpui_kit::{Context, IntoElement, Render, ScrollHandle, Styled, Window, div, prelude::*, px};
 
 use crate::ui::ActiveTheme;
 

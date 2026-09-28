@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
-use gpui::{App, Window, WindowAppearance};
-use gpui_component::theme::{
+use gpui_kit::{App, Window, WindowAppearance};
+use gpui_kit::component::theme::{
     Theme as GpuiTheme, ThemeConfig, ThemeConfigColors, ThemeElevationConfig, ThemeMaterialConfig,
     ThemeMode, ThemeMotionConfig, ThemeShadowToken,
 };
@@ -113,7 +113,7 @@ pub fn apply_theme_from_settings(
     }
 
     GpuiTheme::change(mode, window, cx);
-    GpuiTheme::global_mut(cx).colors.background = gpui::transparent_black();
+    GpuiTheme::global_mut(cx).colors.background = gpui_kit::transparent_black();
     mode
 }
 
@@ -267,7 +267,7 @@ fn build_material_config(_mode: ThemeMode) -> ThemeMaterialConfig {
 }
 
 fn accent_foreground_for_hex(color: &str) -> Option<&'static str> {
-    let rgba = gpui::Rgba::try_from(color).ok()?;
+    let rgba = gpui_kit::Rgba::try_from(color).ok()?;
     let luminance = (0.2126 * rgba.r) + (0.7152 * rgba.g) + (0.0722 * rgba.b);
     if luminance > 0.62 {
         Some("#000000")
@@ -329,12 +329,12 @@ fn palette_for_mode(mode: ThemeMode) -> AppPalette {
     }
 }
 
-pub fn surface_background(mode: ThemeMode) -> gpui::Hsla {
+pub fn surface_background(mode: ThemeMode) -> gpui_kit::Hsla {
     parse_hex_color(palette_for_mode(mode).background)
 }
 
-fn parse_hex_color(color: &str) -> gpui::Hsla {
-    let rgba = gpui::Rgba::try_from(color).unwrap_or(gpui::Rgba {
+fn parse_hex_color(color: &str) -> gpui_kit::Hsla {
+    let rgba = gpui_kit::Rgba::try_from(color).unwrap_or(gpui_kit::Rgba {
         r: 0.0,
         g: 0.0,
         b: 0.0,

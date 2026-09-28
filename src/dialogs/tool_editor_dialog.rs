@@ -1,7 +1,7 @@
 //! Tool editor dialog for adding/editing custom tools.
 
-use gpui::{Context, Entity, FocusHandle, IntoElement, Render, Styled, Window, div, prelude::*, px};
-use gpui_component::input::InputState as GpuiInputState;
+use gpui_kit::{Context, Entity, FocusHandle, IntoElement, Render, Styled, Window, div, prelude::*, px};
+use gpui_kit::component::input::InputState as GpuiInputState;
 
 use crate::icons::IconDescriptor;
 use crate::settings::CustomTool;
@@ -19,7 +19,7 @@ pub struct ToolEditorDialog {
     args_input: Entity<GpuiInputState>,
     description_input: Entity<GpuiInputState>,
     current_icon: Option<String>,
-    on_save: Option<Box<dyn Fn(CustomTool, &mut Window, &mut gpui::App) + 'static>>,
+    on_save: Option<Box<dyn Fn(CustomTool, &mut Window, &mut gpui_kit::App) + 'static>>,
     focus_handle: FocusHandle,
 }
 
@@ -77,7 +77,7 @@ impl ToolEditorDialog {
 
     pub fn on_save(
         mut self,
-        callback: impl Fn(CustomTool, &mut Window, &mut gpui::App) + 'static,
+        callback: impl Fn(CustomTool, &mut Window, &mut gpui_kit::App) + 'static,
     ) -> Self {
         self.on_save = Some(Box::new(callback));
         self

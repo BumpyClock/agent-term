@@ -1,5 +1,5 @@
-use gpui::{Hsla, Rgba};
-use gpui_component::theme::ThemeMode;
+use gpui_kit::{Hsla, Rgba};
+use gpui_kit::component::theme::ThemeMode;
 use gpui_term::TerminalPalette;
 
 #[derive(Clone, Copy)]

@@ -4,7 +4,7 @@
 //! and session restore across all windows.
 
 use agentterm_layout::{LayoutStore, new_window_snapshot};
-use gpui::AnyWindowHandle;
+use gpui_kit::AnyWindowHandle;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};

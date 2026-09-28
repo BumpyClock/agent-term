@@ -4,14 +4,14 @@ use std::collections::HashMap;
 
 use agentterm_session::{SessionRecord, SessionStatus, SessionTool, DEFAULT_WORKSPACE_ID};
 use agentterm_tools::ShellType;
-use gpui::{
+use gpui_kit::{
     div, point, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Corner, Div,
     Entity, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
     Pixels, Point, Styled, Window,
 };
 
 use super::window_registry::WindowRegistry;
-use gpui_component::{ElementExt, SidebarShell, TITLE_BAR_HEIGHT};
+use gpui_kit::component::{ElementExt, SidebarShell, TITLE_BAR_HEIGHT};
 
 use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 
@@ -476,7 +476,7 @@ impl AgentTermApp {
             .child(
                 div()
                     .text_sm()
-                    .font_weight(gpui::FontWeight::BOLD)
+                    .font_weight(gpui_kit::FontWeight::BOLD)
                     .text_color(cx.theme().foreground)
                     .child("AGENT TERM"),
             )
@@ -630,7 +630,7 @@ impl AgentTermApp {
             .child(
                 div()
                     .text_sm()
-                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
                     .text_color(if is_default { muted_fg } else { foreground })
                     .flex_1()
                     .child(workspace.workspace.name.clone()),

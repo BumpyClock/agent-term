@@ -28,7 +28,7 @@ use alacritty_terminal::{
     term::{cell::Flags, TermMode},
     vte::ansi::{Color as AnsiColor, CursorShape as AlacCursorShape, NamedColor},
 };
-use gpui::{
+use gpui_kit::{
     fill, point, px, size, AbsoluteLength, App, Bounds, ContentMask, Element, ElementId, Entity,
     FocusHandle, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, Hsla, InputHandler,
     IntoElement, LayoutId, Pixels, Point, Rgba, ShapedLine, StrikethroughStyle, TextRun,
@@ -155,7 +155,7 @@ impl BatchedTextRun {
             .paint(
                 pos,
                 dimensions.line_height,
-                gpui::TextAlign::Left,
+                gpui_kit::TextAlign::Left,
                 None,
                 window,
                 cx,
@@ -253,7 +253,7 @@ impl CursorLayout {
                     let _ = text.paint(
                         bounds.origin,
                         self.line_height,
-                        gpui::TextAlign::Left,
+                        gpui_kit::TextAlign::Left,
                         None,
                         window,
                         cx,
@@ -261,7 +261,7 @@ impl CursorLayout {
                 }
             }
             CursorShape::Hollow => {
-                window.paint_quad(gpui::outline(bounds, self.color, gpui::BorderStyle::Solid));
+                window.paint_quad(gpui_kit::outline(bounds, self.color, gpui_kit::BorderStyle::Solid));
             }
             CursorShape::Bar => {
                 let bar_bounds = Bounds::new(bounds.origin, size(px(2.0), bounds.size.height));
@@ -703,7 +703,7 @@ impl Default for TextStyle {
         TextStyle {
             font: Font {
                 family: "FiraCode Nerd Font".into(),
-                features: gpui::FontFeatures::default(),
+                features: gpui_kit::FontFeatures::default(),
                 fallbacks: None,
                 weight: FontWeight::NORMAL,
                 style: FontStyle::Normal,
@@ -733,7 +733,7 @@ impl TextStyle {
         TextStyle {
             font: Font {
                 family: font_family.to_string().into(),
-                features: gpui::FontFeatures::default(),
+                features: gpui_kit::FontFeatures::default(),
                 fallbacks: None,
                 weight: FontWeight::NORMAL,
                 style: FontStyle::Normal,
@@ -766,13 +766,13 @@ impl Element for TerminalElement {
     fn request_layout(
         &mut self,
         _global_id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
+        _inspector_id: Option<&gpui_kit::InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = gpui::Style::default();
-        style.size.width = gpui::Length::Definite(gpui::DefiniteLength::Fraction(1.0));
-        style.size.height = gpui::Length::Definite(gpui::DefiniteLength::Fraction(1.0));
+        let mut style = gpui_kit::Style::default();
+        style.size.width = gpui_kit::Length::Definite(gpui_kit::DefiniteLength::Fraction(1.0));
+        style.size.height = gpui_kit::Length::Definite(gpui_kit::DefiniteLength::Fraction(1.0));
         style.flex_grow = 1.0;
 
         let layout_id = window.request_layout(style, None, cx);
@@ -782,13 +782,13 @@ impl Element for TerminalElement {
     fn prepaint(
         &mut self,
         _global_id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
+        _inspector_id: Option<&gpui_kit::InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let hitbox = window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal);
+        let hitbox = window.insert_hitbox(bounds, gpui_kit::HitboxBehavior::Normal);
 
         let text_style = TextStyle::with_font(&self.font_family, self.font_size);
         let background_color = text_style.background;
@@ -888,7 +888,7 @@ impl Element for TerminalElement {
     fn paint(
         &mut self,
         _global_id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
+        _inspector_id: Option<&gpui_kit::InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         layout: &mut Self::PrepaintState,

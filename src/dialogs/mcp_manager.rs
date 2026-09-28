@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agentterm_mcp::{McpManager, McpScope, PoolStatusResponse, ServerStatus, get_pool_status};
-use gpui::{
+use gpui_kit::{
     ClickEvent, Context, IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
     prelude::*, px,
 };
-use gpui_component::Size as ComponentSize;
+use gpui_kit::component::Size as ComponentSize;
 
 use crate::ui::{ActiveTheme, Button, ButtonVariants, Sizable, Tab, TabBar, v_flex};
 
@@ -220,7 +220,7 @@ impl McpManagerDialog {
                     .py(px(10.0))
                     .bg(cx.theme().muted)
                     .text_sm()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
                     .child(title),
             );

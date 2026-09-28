@@ -5,7 +5,7 @@
 //! - Window numbering for titles (Agent Term, Agent Term - 2, etc.)
 //! - Cross-window communication for session transfer
 
-use gpui::{AnyWindowHandle, WeakEntity};
+use gpui_kit::{AnyWindowHandle, WeakEntity};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};

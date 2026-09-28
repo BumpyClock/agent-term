@@ -5,7 +5,7 @@ use std::sync::Arc;
 use agentterm_mcp::McpManager;
 use agentterm_session::SessionTool;
 use agentterm_tools::{ShellInfo, ShellType, ToolInfo};
-use gpui::{
+use gpui_kit::{
     ClickEvent, Context, Entity, IntoElement, MouseButton, MouseDownEvent, ParentElement, Render,
     SharedString, Styled, Window, div, prelude::*, px,
 };

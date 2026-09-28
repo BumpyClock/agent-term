@@ -13,8 +13,8 @@ use std::time::Duration;
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use futures::AsyncReadExt;
-use gpui::http_client::{http, HttpClient};
-use gpui::{AsyncApp, Context, EventEmitter, Task, WeakEntity};
+use gpui_kit::http_client::{http, HttpClient};
+use gpui_kit::{AsyncApp, Context, EventEmitter, Task, WeakEntity};
 use reqwest_client::ReqwestClient;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -210,7 +210,7 @@ impl UpdateManager {
         let request = http::Request::builder()
             .method(http::Method::GET)
             .uri(MANIFEST_URL)
-            .body(gpui::http_client::AsyncBody::empty())
+            .body(gpui_kit::http_client::AsyncBody::empty())
             .map_err(|e| format!("Failed to build request: {}", e))?;
 
         let mut response = client
@@ -362,7 +362,7 @@ impl UpdateManager {
         let request = http::Request::builder()
             .method(http::Method::GET)
             .uri(url)
-            .body(gpui::http_client::AsyncBody::empty())
+            .body(gpui_kit::http_client::AsyncBody::empty())
             .map_err(|e| format!("Failed to build download request: {}", e))?;
 
         let mut response = client

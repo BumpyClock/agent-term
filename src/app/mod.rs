@@ -23,13 +23,13 @@ pub use window_registry::WindowRegistry;
 pub use actions::*;
 pub use state::AgentTermApp;
 
-use gpui::{
+use gpui_kit::{
     AnyWindowHandle, App, Context, InteractiveElement, KeyBinding, ParentElement, Render, Styled,
     Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
-use gpui_platform::application;
-use gpui_component::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
-use gpui_component_assets::{Assets as ComponentAssets, chain as chain_asset_sources};
+use gpui_kit::application;
+use gpui_kit::component::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
+use gpui_kit::assets::{Assets as ComponentAssets, chain as chain_asset_sources};
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
@@ -96,12 +96,12 @@ pub fn run() {
         }
 
         // Initialize gpui-component (theme, input bindings, dialogs, menus, etc.)
-        gpui_component::init(cx);
+        gpui_kit::component::init(cx);
 
         // Initialize the new CommandPalette from gpui-component
-        gpui_component::command_palette::CommandPalette::init(
+        gpui_kit::component::command_palette::CommandPalette::init(
             cx,
-            gpui_component::command_palette::CommandPaletteConfig {
+            gpui_kit::component::command_palette::CommandPaletteConfig {
                 placeholder: "Search sessions, workspaces, actions...".into(),
                 width: 600.0,
                 max_height: 500.0,
@@ -225,9 +225,9 @@ impl Render for AgentTermApp {
         // At transparency=100%: fully transparent (alpha=0.0, blur shows through)
         let base_alpha = 1.0 - self.settings.window_transparency;
         let mode = if cx.theme().is_dark() {
-            gpui_component::theme::ThemeMode::Dark
+            gpui_kit::component::theme::ThemeMode::Dark
         } else {
-            gpui_component::theme::ThemeMode::Light
+            gpui_kit::component::theme::ThemeMode::Light
         };
         let base_bg = theme::surface_background(mode).alpha(base_alpha);
 
@@ -252,8 +252,8 @@ impl Render for AgentTermApp {
         };
 
         // Build overlay children (dialog and sheet layers) first to avoid borrow conflicts
-        let dialog_layer = gpui_component::Root::render_dialog_layer(window, cx);
-        let sheet_layer = gpui_component::Root::render_sheet_layer(window, cx);
+        let dialog_layer = gpui_kit::component::Root::render_dialog_layer(window, cx);
+        let sheet_layer = gpui_kit::component::Root::render_sheet_layer(window, cx);
         let overlay_children = div()
             .id("agentterm-overlays")
             .children(dialog_layer)
@@ -261,7 +261,7 @@ impl Render for AgentTermApp {
             .into_any_element();
 
         // Build sidebar (only if visible) - convert to AnyElement to release borrow
-        let sidebar_left: Option<gpui::AnyElement> = if sidebar_visible {
+        let sidebar_left: Option<gpui_kit::AnyElement> = if sidebar_visible {
             Some(self.render_sidebar_shell(window, cx).into_any_element())
         } else {
             None
@@ -390,14 +390,14 @@ fn create_new_window_internal(
     };
 
     let window_options = WindowOptions {
-        titlebar: Some(gpui::TitlebarOptions {
+        titlebar: Some(gpui_kit::TitlebarOptions {
             title: Some(title),
             appears_transparent: true,
-            traffic_light_position: Some(gpui::point(px(16.0), px(16.0))),
+            traffic_light_position: Some(gpui_kit::point(px(16.0), px(16.0))),
         }),
         window_background: background_appearance,
         window_decorations: if cfg!(not(target_os = "macos")) {
-            Some(gpui::WindowDecorations::Client)
+            Some(gpui_kit::WindowDecorations::Client)
         } else {
             None
         },
@@ -430,7 +430,7 @@ fn create_new_window_internal(
                 layout_window_id.clone(),
             )
         });
-        cx.new(|cx| gpui_component::Root::new(app, window, cx))
+        cx.new(|cx| gpui_kit::component::Root::new(app, window, cx))
     });
 
     match result {
@@ -438,7 +438,7 @@ fn create_new_window_internal(
             // Schedule startup update check if enabled
             if settings.should_check_for_updates() {
                 let window_handle_for_update = window_handle.into();
-                cx.spawn(move |cx: &mut gpui::AsyncApp| {
+                cx.spawn(move |cx: &mut gpui_kit::AsyncApp| {
                     let mut cx = cx.clone();
                     async move {
                         smol::Timer::after(std::time::Duration::from_secs(3)).await;

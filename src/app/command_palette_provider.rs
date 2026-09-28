@@ -5,9 +5,9 @@
 
 use agentterm_search::MessageSource;
 use agentterm_session::SessionRecord;
-use gpui::{App, Task};
-use gpui_component::command_palette::{CommandPaletteItem, CommandPaletteProvider};
-use gpui_component::IconName;
+use gpui_kit::{App, Task};
+use gpui_kit::component::command_palette::{CommandPaletteItem, CommandPaletteProvider};
+use gpui_kit::component::IconName;
 
 use super::search_manager;
 use crate::ui::WorkspaceItem;

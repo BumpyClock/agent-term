@@ -20,7 +20,7 @@
 //! let view = cx.new(|cx| TerminalView::new(terminal_entity, cx));
 //! ```
 
-use gpui::{
+use gpui_kit::{
     actions, div, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement,
     IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Render, ScrollWheelEvent, Styled, Window,
@@ -370,7 +370,7 @@ impl Render for TerminalView {
             .id("terminal-view")
             .size_full()
             // Transparent background to allow blur effect from parent window
-            .bg(gpui::transparent_black())
+            .bg(gpui_kit::transparent_black())
             .track_focus(&focus_handle)
             .key_context("Terminal")
             .on_key_down(cx.listener(Self::on_key_down))

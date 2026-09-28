@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 /// The mappings defined in this file where created from reading the alacritty source
 use alacritty_terminal::term::TermMode;
-use gpui::Keystroke;
+use gpui_kit::Keystroke;
 
 #[derive(Debug, PartialEq, Eq)]
 enum AlacModifiers {
@@ -262,7 +262,7 @@ fn modifier_code(keystroke: &Keystroke) -> u32 {
 
 #[cfg(test)]
 mod test {
-    use gpui::Modifiers;
+    use gpui_kit::Modifiers;
 
     use super::*;
 
