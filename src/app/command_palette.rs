@@ -22,6 +22,8 @@ use crate::ui::{ActiveTheme as _, WindowExt as _, WorkspaceItem};
 
 const PALETTE_MAX_HEIGHT: f32 = 500.0;
 const HISTORY_RESULT_LIMIT: usize = 10;
+// Search returns one hit per message, so fetch extra to still fill the limit after deduplicating sessions.
+const HISTORY_SEARCH_POOL: usize = HISTORY_RESULT_LIMIT * 5;
 const MINIMUM_HISTORY_QUERY_LENGTH: usize = 2;
 const MAX_RESULTS: usize = 50;
 const TITLE_SCORE_BOOST: i64 = 1000;
@@ -328,7 +330,7 @@ impl CommandPaletteView {
         let mut seen_claude_sessions = HashSet::new();
         let mut seen_codex_sessions = HashSet::new();
         search_manager
-            .search(&self.query, HISTORY_RESULT_LIMIT)
+            .search(&self.query, HISTORY_SEARCH_POOL)
             .into_iter()
             .filter_map(|result| {
                 let session_id = result.session_id?;
@@ -346,6 +348,7 @@ impl CommandPaletteView {
                     snippet: result.snippet,
                 })
             })
+            .take(HISTORY_RESULT_LIMIT)
             .collect()
     }
 

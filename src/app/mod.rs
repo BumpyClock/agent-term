@@ -156,19 +156,22 @@ pub fn run() {
 
         // About action - dispatches to the active window
         cx.on_action(|_: &About, cx| {
-            if let Some(window) = cx.windows().first() {
-                let _ = cx.update_window(*window, |_root, window, cx| {
-                    if let Some(weak_app) =
-                        WindowRegistry::global().get_app(&window.window_handle())
+            let Some(handle) = cx.windows().first().copied() else {
+                return;
+            };
+            cx.defer(move |cx| {
+                let result = cx.update_window(handle, |_root, window, cx| {
+                    if let Some(app) = WindowRegistry::global()
+                        .get_app(&window.window_handle())
+                        .and_then(|weak_app| weak_app.upgrade())
                     {
-                        if let Some(app) = weak_app.upgrade() {
-                            app.update(cx, |app, cx| {
-                                app.open_about_dialog(window, cx);
-                            });
-                        }
+                        app.update(cx, |app, cx| app.open_about_dialog(window, cx));
                     }
                 });
-            }
+                if let Err(error) = result {
+                    log::error!("opening about dialog failed: {error}");
+                }
+            });
         });
 
         // NewWindow action - creates a new window
@@ -208,7 +211,7 @@ pub fn run() {
 /// has focus never pass through the app view's `on_action` handlers. These app-level handlers
 /// catch them at the end of the bubble phase and forward to the active window's app.
 fn register_window_app_actions(cx: &mut App) {
-    fn forward<A: gpui_kit::Action>(
+    fn forward<A: gpui_kit::Action + Clone>(
         cx: &mut App,
         handler: fn(&mut AgentTermApp, &A, &mut Window, &mut Context<AgentTermApp>),
     ) {
@@ -216,22 +219,28 @@ fn register_window_app_actions(cx: &mut App) {
             let Some(handle) = cx.active_window() else {
                 return;
             };
-            let result = cx.update_window(handle, |_root, window, cx| {
-                let Some(app) = WindowRegistry::global()
-                    .get_app(&window.window_handle())
-                    .and_then(|weak_app| weak_app.upgrade())
-                else {
-                    return;
-                };
-                app.update(cx, |app, cx| handler(app, action, window, cx));
+            // Global listeners run while the dispatching window is checked out of the app,
+            // so updating it synchronously fails with "window not found".
+            let action = action.clone();
+            cx.defer(move |cx| {
+                let result = cx.update_window(handle, |_root, window, cx| {
+                    let Some(app) = WindowRegistry::global()
+                        .get_app(&window.window_handle())
+                        .and_then(|weak_app| weak_app.upgrade())
+                    else {
+                        return;
+                    };
+                    app.update(cx, |app, cx| handler(app, &action, window, cx));
+                });
+                if let Err(error) = result {
+                    log::error!("forwarding action to window app failed: {error}");
+                }
             });
-            if let Err(error) = result {
-                log::error!("forwarding action to window app failed: {error}");
-            }
         });
     }
 
     forward(cx, AgentTermApp::toggle_sidebar);
+    forward(cx, AgentTermApp::toggle_command_palette);
     forward(cx, AgentTermApp::open_mcp_manager);
     forward(cx, AgentTermApp::new_shell_tab);
     forward(cx, AgentTermApp::open_settings);
