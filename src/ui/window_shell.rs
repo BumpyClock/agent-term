@@ -1,12 +1,11 @@
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use gpui_kit::Refineable as _;
+use gpui_kit::component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, InteractiveElement, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, RenderOnce, StyleRefinement, Styled, Window, div, px,
-    transparent_black,
+    ParentElement, Pixels, RenderOnce, StyleRefinement, Styled, Window, div, px, transparent_black,
 };
 use smallvec::SmallVec;
 
@@ -17,16 +16,14 @@ const DEFAULT_INSET: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WindowLayoutMode {
-    /// Docked sidebar in a flex row below the title bar; main fills the rest.
-    #[default]
-    Standard,
     /// Sidebars float as inset panels over a full-window main area.
+    #[default]
     FloatingPanels,
 }
 
-/// Window layout primitive with a transparent title bar, background, content, and overlay slots.
+/// Window layout primitive with a transparent title bar, background, sidebar, and main slots.
 ///
-/// Z-order from bottom to top is background, content, overlay children, then title bar.
+/// Z-order from bottom to top is background, content, then title bar.
 #[derive(IntoElement)]
 pub struct WindowShell {
     layout_mode: WindowLayoutMode,
@@ -101,24 +98,10 @@ impl Styled for WindowShell {
 }
 
 impl RenderOnce for WindowShell {
-    fn render(mut self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let title_bar_background = cx.theme().transparent;
+    fn render(mut self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let title_bar = TitleBar::new().bg(transparent_black()).border_b_0();
 
         let content_layer = match self.layout_mode {
-            WindowLayoutMode::Standard => div()
-                .id("window-shell-standard-layout")
-                .absolute()
-                .top(TITLE_BAR_HEIGHT)
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .flex()
-                .flex_row()
-                .when_some(self.sidebar_left, |element, sidebar| element.child(sidebar))
-                .when_some(self.main, |element, main| {
-                    element.child(div().flex_1().size_full().child(main))
-                }),
             WindowLayoutMode::FloatingPanels => div()
                 .id("window-shell-floating-layout")
                 .absolute()
@@ -152,16 +135,6 @@ impl RenderOnce for WindowShell {
                     .child(background),
             )
         })
-        .child(
-            div()
-                .id("window-shell-titlebar-bg")
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .h(TITLE_BAR_HEIGHT)
-                .bg(title_bar_background),
-        )
         .child(content_layer)
         .child(
             div()
@@ -177,13 +150,6 @@ impl RenderOnce for WindowShell {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
-enum SidebarSide {
-    Left,
-    Right,
-}
-
 /// Resizable floating sidebar panel with a glass surface and a consumer-managed resize handle.
 ///
 /// The consumer tracks drag state and handles mouse moves at the window level, because
@@ -194,7 +160,6 @@ pub struct SidebarShell {
     resizer_width: Pixels,
     on_resize_start: Option<Rc<dyn Fn(Pixels, Pixels, &mut Window, &mut App)>>,
     on_resize_end: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
-    side: SidebarSide,
     inset: Pixels,
     blur_enabled: bool,
     children: SmallVec<[AnyElement; 1]>,
@@ -203,16 +168,11 @@ pub struct SidebarShell {
 
 impl SidebarShell {
     pub fn left(width: impl Into<Pixels>) -> Self {
-        Self::new(width, SidebarSide::Left)
-    }
-
-    fn new(width: impl Into<Pixels>, side: SidebarSide) -> Self {
         Self {
             width: width.into(),
             resizer_width: px(DEFAULT_RESIZER_WIDTH),
             on_resize_start: None,
             on_resize_end: None,
-            side,
             inset: px(DEFAULT_INSET),
             blur_enabled: true,
             children: SmallVec::new(),
@@ -264,7 +224,6 @@ impl RenderOnce for SidebarShell {
         let inset = self.inset;
         let sidebar_height = (window_height - (inset + inset)).max(px(0.0));
         let sidebar_width = self.width;
-        let is_left = self.side == SidebarSide::Left;
 
         let sidebar_surface = SurfacePreset::panel()
             .wrap_with_bounds(
@@ -282,11 +241,7 @@ impl RenderOnce for SidebarShell {
             .size_full();
 
         let resizer_half = self.resizer_width / 2.0;
-        let resizer_left = if is_left {
-            sidebar_width - resizer_half
-        } else {
-            -resizer_half
-        };
+        let resizer_left = sidebar_width - resizer_half;
 
         let on_resize_start = self.on_resize_start;
         let on_resize_end = self.on_resize_end;
@@ -297,13 +252,7 @@ impl RenderOnce for SidebarShell {
             .top(inset)
             .bottom(inset)
             .w(sidebar_width)
-            .map(|element| {
-                if is_left {
-                    element.left(inset)
-                } else {
-                    element.right(inset)
-                }
-            })
+            .left(inset)
             .child(
                 div()
                     .id("sidebar-shell-shadow-wrapper")

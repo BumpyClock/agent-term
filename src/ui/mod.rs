@@ -6,7 +6,6 @@
 pub mod helpers;
 mod icon_picker;
 mod lucide_search;
-mod material_theme;
 mod surface;
 mod window_shell;
 
@@ -14,7 +13,6 @@ mod window_shell;
 pub use helpers::*;
 pub use icon_picker::*;
 pub use lucide_search::*;
-pub use material_theme::*;
 pub use surface::*;
 pub use window_shell::*;
 
@@ -27,10 +25,10 @@ pub use gpui_kit::component::{
     WindowExt,
     // Button components
     button::{Button, ButtonVariants},
-    // Separator components
-    separator::Separator,
     // Menu components
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
+    // Separator components
+    separator::Separator,
     // Form controls
     slider::{Slider, SliderEvent, SliderState},
     switch::Switch,

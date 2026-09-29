@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agentterm_mcp::{McpManager, McpScope, PoolStatusResponse, ServerStatus, get_pool_status};
+use gpui_kit::component::Size as ComponentSize;
 use gpui_kit::{
     ClickEvent, Context, IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
     prelude::*, px,
 };
-use gpui_kit::component::Size as ComponentSize;
 
 use crate::ui::{ActiveTheme, Button, ButtonVariants, Sizable, Tab, TabBar, v_flex};
 

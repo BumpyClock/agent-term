@@ -1,12 +1,11 @@
 use std::rc::Rc;
 
-use gpui_kit::{App, Window, WindowAppearance};
 use gpui_kit::component::theme::{Theme as GpuiTheme, ThemeConfig, ThemeConfigColors, ThemeMode};
+use gpui_kit::{App, Window, WindowAppearance};
 use gpui_term::set_terminal_palette;
 
 use crate::settings::{AppSettings, Theme};
 use crate::terminal_schemes;
-use crate::ui::{MaterialTheme, ThemeElevation, ThemeMaterial, ThemeShadowToken};
 
 #[derive(Clone, Copy)]
 pub struct AccentColor {
@@ -112,8 +111,9 @@ pub fn apply_theme_from_settings(
         theme.dark_theme = Rc::new(dark_config);
     }
 
-    build_material_theme().set(cx);
     GpuiTheme::change(mode, window, cx);
+    // Only `colors` is made transparent. `tokens.background` stays opaque because 0.7.0 dialogs
+    // paint it; the window Root paints transparent through an explicit `.bg(...)` instead.
     GpuiTheme::global_mut(cx).colors.background = gpui_kit::transparent_black();
     mode
 }
@@ -152,7 +152,8 @@ struct AppPalette {
 
 fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
     let palette = palette_for_mode(mode);
-    let accent_foreground = accent_foreground_for_hex(accent.hex).unwrap_or(palette.accent_foreground);
+    let accent_foreground =
+        accent_foreground_for_hex(accent.hex).unwrap_or(palette.accent_foreground);
     let mut colors = ThemeConfigColors::default();
 
     colors.background = Some(palette.background.into());
@@ -193,26 +194,6 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
         mode,
         colors,
         ..ThemeConfig::default()
-    }
-}
-
-fn build_material_theme() -> MaterialTheme {
-    MaterialTheme {
-        elevation: ThemeElevation {
-            surface_flyout_shadow: ThemeShadowToken::Sm,
-            surface_panel_shadow: ThemeShadowToken::Lg,
-            surface_card_shadow: ThemeShadowToken::Sm,
-        },
-        material: ThemeMaterial {
-            flyout_light_opacity: 0.75,
-            flyout_dark_opacity: 0.85,
-            panel_light_opacity: 0.85,
-            panel_dark_opacity: 0.90,
-            card_light_opacity: 0.70,
-            card_dark_opacity: 0.05,
-            subtle_stroke_light_opacity: 0.5,
-            subtle_stroke_dark_opacity: 0.5,
-        },
     }
 }
 

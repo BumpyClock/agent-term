@@ -13,7 +13,7 @@ use std::time::Duration;
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use futures::AsyncReadExt;
-use gpui_kit::http_client::{http, HttpClient};
+use gpui_kit::http_client::{HttpClient, http};
 use gpui_kit::{AsyncApp, Context, EventEmitter, Task, WeakEntity};
 use reqwest_client::ReqwestClient;
 use semver::Version;
@@ -232,8 +232,8 @@ impl UpdateManager {
             .await
             .map_err(|e| format!("Failed to read manifest: {}", e))?;
 
-        let text = String::from_utf8(bytes)
-            .map_err(|e| format!("Invalid UTF-8 in manifest: {}", e))?;
+        let text =
+            String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 in manifest: {}", e))?;
 
         serde_json::from_str(&text).map_err(|e| format!("Failed to parse manifest: {}", e))
     }
@@ -271,7 +271,9 @@ impl UpdateManager {
                         }
                         None => {
                             self.set_state(
-                                UpdateState::Error("No update available for this platform".to_string()),
+                                UpdateState::Error(
+                                    "No update available for this platform".to_string(),
+                                ),
                                 cx,
                             );
                             cx.emit(UpdateEvent::CheckCompleted);
@@ -371,14 +373,13 @@ impl UpdateManager {
             .map_err(|e| format!("Download request failed: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Download failed with status: {}", response.status()));
+            return Err(format!(
+                "Download failed with status: {}",
+                response.status()
+            ));
         }
 
-        let filename = url
-            .split('/')
-            .next_back()
-            .unwrap_or("update")
-            .to_string();
+        let filename = url.split('/').next_back().unwrap_or("update").to_string();
 
         let temp_dir = std::env::temp_dir().join("agentterm-updates");
         std::fs::create_dir_all(&temp_dir)
@@ -412,7 +413,10 @@ impl UpdateManager {
         };
 
         let Some(file_path) = self.downloaded_file_path.clone() else {
-            self.set_state(UpdateState::Error("No downloaded file found".to_string()), cx);
+            self.set_state(
+                UpdateState::Error("No downloaded file found".to_string()),
+                cx,
+            );
             return;
         };
 
@@ -421,21 +425,30 @@ impl UpdateManager {
         #[cfg(target_os = "macos")]
         {
             if let Err(e) = self.launch_macos_updater(&file_path) {
-                self.set_state(UpdateState::Error(format!("Failed to launch updater: {}", e)), cx);
+                self.set_state(
+                    UpdateState::Error(format!("Failed to launch updater: {}", e)),
+                    cx,
+                );
             }
         }
 
         #[cfg(target_os = "windows")]
         {
             if let Err(e) = self.launch_windows_updater(&file_path) {
-                self.set_state(UpdateState::Error(format!("Failed to launch updater: {}", e)), cx);
+                self.set_state(
+                    UpdateState::Error(format!("Failed to launch updater: {}", e)),
+                    cx,
+                );
             }
         }
 
         #[cfg(target_os = "linux")]
         {
             if let Err(e) = self.launch_linux_updater(&file_path) {
-                self.set_state(UpdateState::Error(format!("Failed to launch updater: {}", e)), cx);
+                self.set_state(
+                    UpdateState::Error(format!("Failed to launch updater: {}", e)),
+                    cx,
+                );
             }
         }
     }
@@ -507,10 +520,7 @@ open "/Applications/$APP_NAME"
 
     #[cfg(target_os = "linux")]
     fn launch_linux_updater(&self, file_path: &PathBuf) -> Result<(), String> {
-        let extension = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let extension = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match extension.to_lowercase().as_str() {
             "appimage" => {

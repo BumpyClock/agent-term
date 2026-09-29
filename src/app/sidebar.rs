@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 
-use agentterm_session::{SessionRecord, SessionStatus, SessionTool, DEFAULT_WORKSPACE_ID};
+use agentterm_session::{DEFAULT_WORKSPACE_ID, SessionRecord, SessionStatus, SessionTool};
 use agentterm_tools::ShellType;
 use gpui_kit::{
-    div, point, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Anchor, Div,
-    Entity, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Pixels, Point, Styled, Window,
+    Anchor, AnyElement, AnyWindowHandle, ClickEvent, Context, Div, Entity, IntoElement,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
+    Styled, Window, div, point, prelude::*, px,
 };
 
 use super::window_registry::WindowRegistry;
@@ -17,7 +17,7 @@ use crate::ui::SidebarShell;
 
 use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 
-use crate::icons::{icon_from_string, Icon, IconName, IconSize};
+use crate::icons::{Icon, IconName, IconSize, icon_from_string};
 use crate::ui::{
     ActiveTheme, Button, ButtonVariants, ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem,
     WorkspaceItem,

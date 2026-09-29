@@ -1,7 +1,9 @@
 //! Tool editor dialog for adding/editing custom tools.
 
-use gpui_kit::{Context, Entity, FocusHandle, IntoElement, Render, Styled, Window, div, prelude::*, px};
 use gpui_kit::component::input::InputState as GpuiInputState;
+use gpui_kit::{
+    Context, Entity, FocusHandle, IntoElement, Render, Styled, Window, div, prelude::*, px,
+};
 
 use crate::icons::IconDescriptor;
 use crate::settings::CustomTool;
@@ -24,11 +26,7 @@ pub struct ToolEditorDialog {
 }
 
 impl ToolEditorDialog {
-    pub fn new(
-        tool: Option<&CustomTool>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(tool: Option<&CustomTool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (tool_id, name, command, args, description, icon) = if let Some(t) = tool {
             (
                 Some(t.id.clone()),
@@ -39,7 +37,14 @@ impl ToolEditorDialog {
                 t.icon.clone(),
             )
         } else {
-            (None, String::new(), String::new(), String::new(), String::new(), None)
+            (
+                None,
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+            )
         };
 
         let name_input = cx.new(|cx| {
@@ -125,9 +130,8 @@ impl ToolEditorDialog {
         let args: Vec<String> = if args_str.is_empty() {
             Vec::new()
         } else {
-            shell_words::split(&args_str).unwrap_or_else(|_| {
-                args_str.split_whitespace().map(String::from).collect()
-            })
+            shell_words::split(&args_str)
+                .unwrap_or_else(|_| args_str.split_whitespace().map(String::from).collect())
         };
 
         let tool_id = self
@@ -179,12 +183,7 @@ impl Render for ToolEditorDialog {
                     .flex()
                     .flex_col()
                     .gap(px(8.))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(muted_foreground)
-                            .child("Icon"),
-                    )
+                    .child(div().text_sm().text_color(muted_foreground).child("Icon"))
                     .child(
                         IconPicker::new("tool-icon-picker")
                             .value(
@@ -205,12 +204,7 @@ impl Render for ToolEditorDialog {
                     .flex()
                     .flex_col()
                     .gap(px(8.))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(muted_foreground)
-                            .child("Name"),
-                    )
+                    .child(div().text_sm().text_color(muted_foreground).child("Name"))
                     .child(agentterm_input_field(&self.name_input)),
             )
             // Command section

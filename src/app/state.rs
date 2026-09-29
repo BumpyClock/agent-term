@@ -60,9 +60,15 @@ pub(crate) struct DragSnapshot {
 #[allow(dead_code)]
 pub(crate) enum DropTarget {
     /// Drop before this session (insert above)
-    BeforeSession { session_id: String, workspace_id: String },
+    BeforeSession {
+        session_id: String,
+        workspace_id: String,
+    },
     /// Drop after this session (insert below)
-    AfterSession { session_id: String, workspace_id: String },
+    AfterSession {
+        session_id: String,
+        workspace_id: String,
+    },
     /// Drop into a different workspace (at the end)
     IntoWorkspace { workspace_id: String },
 }
@@ -780,9 +786,7 @@ impl AgentTermApp {
             Ok(record) => {
                 // Add to this window's layout
                 self.add_session_to_layout(&record.id, &record.workspace_id);
-                let _ = self
-                    .session_store
-                    .set_active_session(Some(record.id));
+                let _ = self.session_store.set_active_session(Some(record.id));
                 self.reload_from_store(cx);
                 self.ensure_active_terminal(window, cx);
             }
@@ -836,9 +840,7 @@ impl AgentTermApp {
             Ok(record) => {
                 // Add to this window's layout
                 self.add_session_to_layout(&record.id, &record.workspace_id);
-                let _ = self
-                    .session_store
-                    .set_active_session(Some(record.id));
+                let _ = self.session_store.set_active_session(Some(record.id));
                 self.reload_from_store(cx);
                 self.ensure_active_terminal(window, cx);
             }
@@ -1141,19 +1143,42 @@ impl AgentTermApp {
         cx: &mut Context<Self>,
     ) {
         let source_session_id = dragging.session_id.clone();
-        eprintln!("complete_drag_drop: source={}, target={:?}", source_session_id, target);
+        eprintln!(
+            "complete_drag_drop: source={}, target={:?}",
+            source_session_id, target
+        );
 
         match &target {
-            DropTarget::BeforeSession { session_id: target_id, workspace_id } |
-            DropTarget::AfterSession { session_id: target_id, workspace_id } => {
+            DropTarget::BeforeSession {
+                session_id: target_id,
+                workspace_id,
+            }
+            | DropTarget::AfterSession {
+                session_id: target_id,
+                workspace_id,
+            } => {
                 let before = matches!(target, DropTarget::BeforeSession { .. });
-                eprintln!("  dragging.workspace_id={}, target workspace_id={}", dragging.workspace_id, workspace_id);
+                eprintln!(
+                    "  dragging.workspace_id={}, target workspace_id={}",
+                    dragging.workspace_id, workspace_id
+                );
                 if dragging.workspace_id == *workspace_id {
                     eprintln!("  calling reorder_session_in_workspace");
-                    self.reorder_session_in_workspace(&source_session_id, target_id, workspace_id, before);
+                    self.reorder_session_in_workspace(
+                        &source_session_id,
+                        target_id,
+                        workspace_id,
+                        before,
+                    );
                 } else {
                     eprintln!("  calling move_session_to_workspace");
-                    self.move_session_to_workspace(&source_session_id, workspace_id, Some(target_id), before, cx);
+                    self.move_session_to_workspace(
+                        &source_session_id,
+                        workspace_id,
+                        Some(target_id),
+                        before,
+                        cx,
+                    );
                 }
             }
             DropTarget::IntoWorkspace { workspace_id } => {
@@ -1172,34 +1197,53 @@ impl AgentTermApp {
         _workspace_id: &str,
         before: bool,
     ) {
-        eprintln!("reorder_session_in_workspace: session={}, target={}, before={}", session_id, target_session_id, before);
+        eprintln!(
+            "reorder_session_in_workspace: session={}, target={}, before={}",
+            session_id, target_session_id, before
+        );
         if session_id == target_session_id {
             eprintln!("  skipping - same session");
             return;
         }
 
-        let updated = self.layout_store.update_window(&self.layout_window_id, |window| {
-            let tabs = &mut window.tabs;
-            eprintln!("  tabs before: {:?}", tabs.iter().map(|t| (&t.session_id, t.order)).collect::<Vec<_>>());
+        let updated = self
+            .layout_store
+            .update_window(&self.layout_window_id, |window| {
+                let tabs = &mut window.tabs;
+                eprintln!(
+                    "  tabs before: {:?}",
+                    tabs.iter()
+                        .map(|t| (&t.session_id, t.order))
+                        .collect::<Vec<_>>()
+                );
 
-            let source_idx = tabs.iter().position(|t| t.session_id == session_id);
-            let target_idx = tabs.iter().position(|t| t.session_id == target_session_id);
-            eprintln!("  source_idx={:?}, target_idx={:?}", source_idx, target_idx);
+                let source_idx = tabs.iter().position(|t| t.session_id == session_id);
+                let target_idx = tabs.iter().position(|t| t.session_id == target_session_id);
+                eprintln!("  source_idx={:?}, target_idx={:?}", source_idx, target_idx);
 
-            if let (Some(src), Some(tgt)) = (source_idx, target_idx) {
-                let tab = tabs.remove(src);
-                let insert_idx = if src < tgt {
-                    if before { tgt - 1 } else { tgt }
-                } else if before { tgt } else { tgt + 1 };
-                eprintln!("  insert_idx={}", insert_idx);
-                tabs.insert(insert_idx.min(tabs.len()), tab);
+                if let (Some(src), Some(tgt)) = (source_idx, target_idx) {
+                    let tab = tabs.remove(src);
+                    let insert_idx = if src < tgt {
+                        if before { tgt - 1 } else { tgt }
+                    } else if before {
+                        tgt
+                    } else {
+                        tgt + 1
+                    };
+                    eprintln!("  insert_idx={}", insert_idx);
+                    tabs.insert(insert_idx.min(tabs.len()), tab);
 
-                for (i, tab) in tabs.iter_mut().enumerate() {
-                    tab.order = i as u32;
+                    for (i, tab) in tabs.iter_mut().enumerate() {
+                        tab.order = i as u32;
+                    }
+                    eprintln!(
+                        "  tabs after: {:?}",
+                        tabs.iter()
+                            .map(|t| (&t.session_id, t.order))
+                            .collect::<Vec<_>>()
+                    );
                 }
-                eprintln!("  tabs after: {:?}", tabs.iter().map(|t| (&t.session_id, t.order)).collect::<Vec<_>>());
-            }
-        });
+            });
         eprintln!("  update_window returned: {}", updated);
     }
 
@@ -1212,32 +1256,39 @@ impl AgentTermApp {
         before: bool,
         cx: &mut Context<Self>,
     ) {
-        self.layout_store.update_window(&self.layout_window_id, |window| {
-            if let Some(tab) = window.tabs.iter_mut().find(|t| t.session_id == session_id) {
-                tab.workspace_id = target_workspace_id.to_string();
-            }
-
-            if let Some(target_id) = target_session_id {
-                let tabs = &mut window.tabs;
-                let source_idx = tabs.iter().position(|t| t.session_id == session_id);
-                let target_idx = tabs.iter().position(|t| t.session_id == target_id);
-
-                if let (Some(src), Some(tgt)) = (source_idx, target_idx) {
-                    let tab = tabs.remove(src);
-                    let insert_idx = if src < tgt {
-                        if before { tgt - 1 } else { tgt }
-                    } else if before { tgt } else { tgt + 1 };
-                    tabs.insert(insert_idx.min(tabs.len()), tab);
+        self.layout_store
+            .update_window(&self.layout_window_id, |window| {
+                if let Some(tab) = window.tabs.iter_mut().find(|t| t.session_id == session_id) {
+                    tab.workspace_id = target_workspace_id.to_string();
                 }
-            }
 
-            for (i, tab) in window.tabs.iter_mut().enumerate() {
-                tab.order = i as u32;
-            }
-        });
+                if let Some(target_id) = target_session_id {
+                    let tabs = &mut window.tabs;
+                    let source_idx = tabs.iter().position(|t| t.session_id == session_id);
+                    let target_idx = tabs.iter().position(|t| t.session_id == target_id);
+
+                    if let (Some(src), Some(tgt)) = (source_idx, target_idx) {
+                        let tab = tabs.remove(src);
+                        let insert_idx = if src < tgt {
+                            if before { tgt - 1 } else { tgt }
+                        } else if before {
+                            tgt
+                        } else {
+                            tgt + 1
+                        };
+                        tabs.insert(insert_idx.min(tabs.len()), tab);
+                    }
+                }
+
+                for (i, tab) in window.tabs.iter_mut().enumerate() {
+                    tab.order = i as u32;
+                }
+            });
 
         if self.sessions.iter().any(|s| s.id == session_id) {
-            let _ = self.session_store.move_session(session_id, target_workspace_id.to_string());
+            let _ = self
+                .session_store
+                .move_session(session_id, target_workspace_id.to_string());
         }
 
         self.reload_from_store(cx);

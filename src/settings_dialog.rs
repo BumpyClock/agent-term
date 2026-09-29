@@ -19,8 +19,8 @@ use crate::ui::{
     WindowExt,
 };
 use gpui_kit::component::IndexPath;
-use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::button::ButtonCustomVariant;
+use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::input::{
     InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction,
 };
@@ -620,9 +620,12 @@ impl SettingsDialog {
                 .flex()
                 .flex_col()
                 .gap(px(8.))
-                .children(tools.iter().enumerate().map(|(idx, tool)| {
-                    self.render_tool_row(tool.clone(), idx, cx)
-                }))
+                .children(
+                    tools
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, tool)| self.render_tool_row(tool.clone(), idx, cx)),
+                )
                 .into_any_element()
         };
 
@@ -682,12 +685,7 @@ impl SettingsDialog {
             .into_any_element()
     }
 
-    fn render_tool_row(
-        &self,
-        tool: CustomTool,
-        idx: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_tool_row(&self, tool: CustomTool, idx: usize, cx: &mut Context<Self>) -> AnyElement {
         let tool_id = tool.id.clone();
         let tool_id_for_delete = tool.id.clone();
         let tool_for_edit = tool.clone();
@@ -745,7 +743,11 @@ impl SettingsDialog {
                         Button::new(format!("edit-tool-{}", tool_id))
                             .ghost()
                             .compact()
-                            .child(Icon::new(IconName::Edit).size(IconSize::Small).color(muted_fg))
+                            .child(
+                                Icon::new(IconName::Edit)
+                                    .size(IconSize::Small)
+                                    .color(muted_fg),
+                            )
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.open_tool_editor(Some(tool_for_edit.clone()), window, cx);
                             })),
@@ -795,20 +797,17 @@ impl SettingsDialog {
                 .child(dialog_entity.clone())
                 .footer(
                     DialogFooter::new()
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
                         .child(
-                            Button::new("save-tool")
-                                .label("Save")
-                                .primary()
-                                .on_click({
-                                    let dialog = dialog_entity.clone();
-                                    move |_event, window, cx| {
-                                        dialog.update(cx, |d, cx| {
-                                            d.save(window, cx);
-                                        });
-                                    }
-                                }),
-                        ),
+                            DialogClose::new().trigger(|button| button.label("Cancel").outline()),
+                        )
+                        .child(Button::new("save-tool").label("Save").primary().on_click({
+                            let dialog = dialog_entity.clone();
+                            move |_event, window, cx| {
+                                dialog.update(cx, |d, cx| {
+                                    d.save(window, cx);
+                                });
+                            }
+                        })),
                 )
         });
     }
@@ -910,6 +909,7 @@ impl SettingsDialog {
                         .hover(fill)
                         .active(fill),
                 )
+                .border_1()
                 .border_color(stroke)
                 .rounded(px(999.0))
                 .compact()

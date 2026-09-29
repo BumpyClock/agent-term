@@ -25,20 +25,20 @@ use std::mem;
 use alacritty_terminal::{
     index::Point as AlacPoint,
     selection::SelectionRange,
-    term::{cell::Flags, TermMode},
+    term::{TermMode, cell::Flags},
     vte::ansi::{Color as AnsiColor, CursorShape as AlacCursorShape, NamedColor},
 };
 use gpui_kit::{
-    fill, point, px, size, AbsoluteLength, App, Bounds, ContentMask, Element, ElementId, Entity,
-    FocusHandle, Font, FontStyle, FontWeight, GlobalElementId, Hitbox, Hsla, InputHandler,
-    IntoElement, LayoutId, Pixels, Point, Rgba, ShapedLine, StrikethroughStyle, TextRun,
-    UTF16Selection, UnderlineStyle, Window,
+    AbsoluteLength, App, Bounds, ContentMask, Element, ElementId, Entity, FocusHandle, Font,
+    FontStyle, FontWeight, GlobalElementId, Hitbox, Hsla, InputHandler, IntoElement, LayoutId,
+    Pixels, Point, Rgba, ShapedLine, StrikethroughStyle, TextRun, UTF16Selection, UnderlineStyle,
+    Window, fill, point, px, size,
 };
 use itertools::Itertools;
 
 use crate::{
-    terminal_palette::terminal_palette, DetectedUrl, IndexedCell, Terminal, TerminalBounds,
-    TerminalContent,
+    DetectedUrl, IndexedCell, Terminal, TerminalBounds, TerminalContent,
+    terminal_palette::terminal_palette,
 };
 
 /// Layout state computed during prepaint, used for painting.
@@ -261,7 +261,11 @@ impl CursorLayout {
                 }
             }
             CursorShape::Hollow => {
-                window.paint_quad(gpui_kit::outline(bounds, self.color, gpui_kit::BorderStyle::Solid));
+                window.paint_quad(gpui_kit::outline(
+                    bounds,
+                    self.color,
+                    gpui_kit::BorderStyle::Solid,
+                ));
             }
             CursorShape::Bar => {
                 let bar_bounds = Bounds::new(bounds.origin, size(px(2.0), bounds.size.height));

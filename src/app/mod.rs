@@ -23,14 +23,14 @@ pub use window_registry::WindowRegistry;
 pub use actions::*;
 pub use state::AgentTermApp;
 
+use crate::assets::chain as chain_asset_sources;
+use crate::ui::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
+use gpui_kit::application;
+use gpui_kit::assets::Assets as ComponentAssets;
 use gpui_kit::{
     AnyWindowHandle, App, Context, InteractiveElement, KeyBinding, ParentElement, Render, Styled,
     Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
-use gpui_kit::application;
-use crate::ui::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
-use crate::assets::chain as chain_asset_sources;
-use gpui_kit::assets::Assets as ComponentAssets;
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
@@ -71,13 +71,12 @@ pub fn run() {
     }
 
     if diagnostics_enabled || std::env::var("RUST_LOG").is_ok() {
-        let _ = env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("info"),
-        )
-        .try_init();
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .try_init();
     }
 
-    let app = application().with_assets(chain_asset_sources(crate::assets::Assets, ComponentAssets));
+    let app =
+        application().with_assets(chain_asset_sources(crate::assets::Assets, ComponentAssets));
 
     // Handle dock icon click when app has no visible windows (macOS)
     // Also handles similar scenarios on other platforms
@@ -92,7 +91,10 @@ pub fn run() {
     });
 
     app.run(|cx: &mut App| {
-        if let Err(error) = cx.text_system().add_fonts(crate::assets::embedded_font_data()) {
+        if let Err(error) = cx
+            .text_system()
+            .add_fonts(crate::assets::embedded_font_data())
+        {
             log::error!("failed to register bundled fonts: {error:#}");
         }
 
@@ -150,11 +152,15 @@ pub fn run() {
             cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
         }
 
+        register_window_app_actions(cx);
+
         // About action - dispatches to the active window
         cx.on_action(|_: &About, cx| {
             if let Some(window) = cx.windows().first() {
                 let _ = cx.update_window(*window, |_root, window, cx| {
-                    if let Some(weak_app) = WindowRegistry::global().get_app(&window.window_handle()) {
+                    if let Some(weak_app) =
+                        WindowRegistry::global().get_app(&window.window_handle())
+                    {
                         if let Some(app) = weak_app.upgrade() {
                             app.update(cx, |app, cx| {
                                 app.open_about_dialog(window, cx);
@@ -196,6 +202,57 @@ pub fn run() {
 
         cx.activate(true);
     });
+}
+
+/// Dialog layers render beside the app view inside `Root`, so actions raised while a dialog
+/// has focus never pass through the app view's `on_action` handlers. These app-level handlers
+/// catch them at the end of the bubble phase and forward to the active window's app.
+fn register_window_app_actions(cx: &mut App) {
+    fn forward<A: gpui_kit::Action>(
+        cx: &mut App,
+        handler: fn(&mut AgentTermApp, &A, &mut Window, &mut Context<AgentTermApp>),
+    ) {
+        cx.on_action(move |action: &A, cx| {
+            let Some(handle) = cx.active_window() else {
+                return;
+            };
+            let result = cx.update_window(handle, |_root, window, cx| {
+                let Some(app) = WindowRegistry::global()
+                    .get_app(&window.window_handle())
+                    .and_then(|weak_app| weak_app.upgrade())
+                else {
+                    return;
+                };
+                app.update(cx, |app, cx| handler(app, action, window, cx));
+            });
+            if let Err(error) = result {
+                log::error!("forwarding action to window app failed: {error}");
+            }
+        });
+    }
+
+    forward(cx, AgentTermApp::toggle_sidebar);
+    forward(cx, AgentTermApp::open_mcp_manager);
+    forward(cx, AgentTermApp::new_shell_tab);
+    forward(cx, AgentTermApp::open_settings);
+    forward(cx, AgentTermApp::handle_rename_session);
+    forward(cx, AgentTermApp::handle_close_session);
+    forward(cx, AgentTermApp::handle_close_tab);
+    forward(cx, AgentTermApp::handle_restart_session);
+    forward(cx, AgentTermApp::handle_edit_workspace);
+    forward(cx, AgentTermApp::handle_remove_workspace);
+    forward(cx, AgentTermApp::minimize_window);
+    forward(cx, AgentTermApp::zoom_window);
+    forward(cx, AgentTermApp::handle_close_window);
+    forward(cx, AgentTermApp::handle_move_session_to_window);
+    forward(cx, AgentTermApp::handle_open_session_in_new_window);
+    forward(cx, AgentTermApp::handle_move_workspace_to_window);
+    forward(cx, AgentTermApp::handle_move_workspace_to_new_window);
+    forward(cx, AgentTermApp::reopen_closed);
+    forward(cx, AgentTermApp::handle_check_for_updates);
+    forward(cx, AgentTermApp::handle_download_update);
+    forward(cx, AgentTermApp::handle_install_update);
+    forward(cx, AgentTermApp::handle_dismiss_update_notification);
 }
 
 impl Render for AgentTermApp {
@@ -399,7 +456,9 @@ fn create_new_window_internal(
                 layout_window_id.clone(),
             )
         });
-        cx.new(|cx| gpui_kit::component::Root::new(app, window, cx))
+        cx.new(|cx| {
+            gpui_kit::component::Root::new(app, window, cx).bg(gpui_kit::transparent_black())
+        })
     });
 
     match result {
@@ -412,7 +471,9 @@ fn create_new_window_internal(
                     async move {
                         smol::Timer::after(std::time::Duration::from_secs(3)).await;
                         let _ = cx.update_window(window_handle_for_update, |_root, _window, cx| {
-                            if let Some(weak_app) = WindowRegistry::global().get_app(&window_handle_for_update) {
+                            if let Some(weak_app) =
+                                WindowRegistry::global().get_app(&window_handle_for_update)
+                            {
                                 if let Some(app) = weak_app.upgrade() {
                                     app.update(cx, |app, cx| {
                                         app.update_manager.update(cx, |manager, cx| {

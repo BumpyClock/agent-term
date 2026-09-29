@@ -4,13 +4,13 @@
 
 use std::rc::Rc;
 
+use gpui_kit::component::theme::ThemeMode;
+use gpui_kit::component::{VirtualListScrollHandle, v_virtual_list};
 use gpui_kit::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ListSizingBehavior, MouseButton, ParentElement, Pixels, Render, SharedString,
-    Size as GpuiSize, Styled, Window, div, prelude::*, px,
+    ListSizingBehavior, MouseButton, ParentElement, Pixels, Render, SharedString, Size as GpuiSize,
+    Styled, Window, div, prelude::*, px,
 };
-use gpui_kit::component::{VirtualListScrollHandle, v_virtual_list};
-use gpui_kit::component::theme::ThemeMode;
 
 use crate::icons::{Icon, IconDescriptor, IconName, IconSize, search_lucide_icons};
 use crate::text_input::TextInput;

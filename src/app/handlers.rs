@@ -3,14 +3,14 @@
 use std::collections::HashSet;
 
 use gpui_kit::{
-    div, prelude::*, px, size, AnyWindowHandle, Bounds, Context, Focusable, ParentElement, Styled,
-    Window, WindowBounds, WindowOptions,
+    AnyWindowHandle, Bounds, Context, Focusable, ParentElement, Styled, Window, WindowBounds,
+    WindowOptions, div, prelude::*, px, size,
 };
 
 use super::window_registry::WindowRegistry;
 use super::{
-    create_new_window, create_new_window_with_session, create_window_from_layout, LayoutManager,
-    MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool,
+    LayoutManager, MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool, create_new_window,
+    create_new_window_with_session, create_window_from_layout,
 };
 use agentterm_session::DEFAULT_WORKSPACE_ID;
 use gpui_kit::component::dialog::{DialogClose, DialogFooter};
@@ -21,7 +21,7 @@ use crate::dialogs::{
     TabPickerDialog, WorkspaceEditorDialog,
 };
 use crate::settings_dialog::SettingsDialog;
-use crate::ui::{v_flex, ActiveTheme, Button, ButtonVariants, WindowExt};
+use crate::ui::{ActiveTheme, Button, ButtonVariants, WindowExt, v_flex};
 
 use super::actions::*;
 use super::command_palette::{CommandPaletteEvent, CommandPalettePayload, CommandPaletteView};
@@ -99,6 +99,7 @@ impl AgentTermApp {
             }
         });
 
+        view.update(cx, |view, cx| view.focus(window, cx));
         self.command_palette = Some(view);
         cx.notify();
     }
@@ -117,77 +118,72 @@ impl AgentTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Close the palette first
         self.close_command_palette(window, cx);
 
-        {
-            {
-                match payload {
-                    CommandPalettePayload::Session { id } => {
-                        self.set_active_session_id(id.clone(), window, cx);
-                    }
-                    CommandPalettePayload::Workspace { id } => {
-                        self.activate_workspace_from_palette(id.clone(), window, cx);
-                    }
-                    CommandPalettePayload::ClaudeConversation {
-                        session_id,
-                        workspace,
-                        ..
-                    } => {
-                        // Resume the past Claude conversation with claude --resume
-                        let title = format!("Resume: {}", workspace);
-                        let command = "claude".to_string();
-                        let args = vec!["--resume".to_string(), session_id.clone()];
+        match payload {
+            CommandPalettePayload::Session { id } => {
+                self.set_active_session_id(id.clone(), window, cx);
+            }
+            CommandPalettePayload::Workspace { id } => {
+                self.activate_workspace_from_palette(id.clone(), window, cx);
+            }
+            CommandPalettePayload::ClaudeConversation {
+                session_id,
+                workspace,
+                ..
+            } => {
+                // Resume the past Claude conversation with claude --resume
+                let title = format!("Resume: {}", workspace);
+                let command = "claude".to_string();
+                let args = vec!["--resume".to_string(), session_id.clone()];
 
-                        self.create_session_from_tool(
-                            agentterm_session::SessionTool::Claude,
-                            title,
-                            command,
-                            args,
-                            None,
-                            window,
-                            cx,
-                        );
-                    }
-                    CommandPalettePayload::CodexConversation {
-                        session_id,
-                        workspace,
-                        ..
-                    } => {
-                        // Resume the past Codex conversation with codex --resume
-                        let title = format!("Resume: {}", workspace);
-                        let command = "codex".to_string();
-                        let args = vec!["--resume".to_string(), session_id.clone()];
+                self.create_session_from_tool(
+                    agentterm_session::SessionTool::Claude,
+                    title,
+                    command,
+                    args,
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            CommandPalettePayload::CodexConversation {
+                session_id,
+                workspace,
+                ..
+            } => {
+                // Resume the past Codex conversation with codex --resume
+                let title = format!("Resume: {}", workspace);
+                let command = "codex".to_string();
+                let args = vec!["--resume".to_string(), session_id.clone()];
 
-                        self.create_session_from_tool(
-                            agentterm_session::SessionTool::Codex,
-                            title,
-                            command,
-                            args,
-                            None,
-                            window,
-                            cx,
-                        );
+                self.create_session_from_tool(
+                    agentterm_session::SessionTool::Codex,
+                    title,
+                    command,
+                    args,
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            CommandPalettePayload::Action { action_id } => {
+                // Execute the action
+                match action_id.as_str() {
+                    "new_tab" => {
+                        self.create_default_shell_tab(window, cx);
                     }
-                    CommandPalettePayload::Action { action_id } => {
-                        // Execute the action
-                        match action_id.as_str() {
-                            "new_tab" => {
-                                self.create_default_shell_tab(window, cx);
-                            }
-                            "new_window" => {
-                                // New window is handled via the global NewWindow action
-                                window.dispatch_action(Box::new(NewWindow), cx);
-                            }
-                            "settings" => {
-                                self.open_settings(&OpenSettings, window, cx);
-                            }
-                            "toggle_sidebar" => {
-                                self.toggle_sidebar(&ToggleSidebar, window, cx);
-                            }
-                            _ => {}
-                        }
+                    "new_window" => {
+                        // New window is handled via the global NewWindow action
+                        window.dispatch_action(Box::new(NewWindow), cx);
                     }
+                    "settings" => {
+                        self.open_settings(&OpenSettings, window, cx);
+                    }
+                    "toggle_sidebar" => {
+                        self.toggle_sidebar(&ToggleSidebar, window, cx);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -356,7 +352,10 @@ impl AgentTermApp {
                         })
                 });
                 // Wrap in Root to provide theme context for gpui-component elements
-                cx.new(|cx| gpui_kit::component::Root::new(dialog, settings_window, cx))
+                cx.new(|cx| {
+                    gpui_kit::component::Root::new(dialog, settings_window, cx)
+                        .bg(gpui_kit::transparent_black())
+                })
             },
         );
     }

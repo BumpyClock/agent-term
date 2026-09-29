@@ -628,7 +628,6 @@ impl Terminal {
             cell: ic.cell.clone(),
         }));
 
-
         let selection_text = if content.selection.is_some() {
             term.selection_to_string()
         } else {

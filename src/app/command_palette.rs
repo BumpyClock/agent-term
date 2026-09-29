@@ -1,22 +1,24 @@
 //! Command palette for AgentTerm, built on the gpui-kit `Command` component.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use agentterm_search::MessageSource;
 use agentterm_session::SessionRecord;
 use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandState};
 use gpui_kit::component::kbd::Kbd;
-use gpui_kit::component::{Icon, IconName};
+use gpui_kit::component::{Icon, IconName, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    div, px, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
-    Keystroke, ParentElement as _, Render, SharedString, Styled as _, Window,
+    AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, Keystroke, ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use super::search_manager;
-use crate::ui::{ActiveTheme as _, WorkspaceItem};
-use gpui_kit::component::{h_flex, v_flex};
+use crate::app::actions::ToggleCommandPalette;
+use crate::ui::{ActiveTheme as _, WindowExt as _, WorkspaceItem};
 
 const PALETTE_MAX_HEIGHT: f32 = 500.0;
 const HISTORY_RESULT_LIMIT: usize = 10;
@@ -168,9 +170,7 @@ fn indices_to_byte_ranges(indices: &mut Vec<u32>, text: &str) -> Vec<(usize, usi
 
     ranges
         .into_iter()
-        .filter_map(|(start, end)| {
-            Some((*byte_offsets.get(start)?, *byte_offsets.get(end)?))
-        })
+        .filter_map(|(start, end)| Some((*byte_offsets.get(start)?, *byte_offsets.get(end)?)))
         .collect()
 }
 
@@ -237,40 +237,36 @@ impl RankedRow {
             title_ranges,
             ..
         } = self;
-        let item = CommandItem::new().label(label.clone()).child(move |_window, cx| {
-            let muted = cx.theme().muted_foreground;
-            let accent = cx.theme().accent;
-            h_flex()
-                .w_full()
-                .gap_2()
-                .items_center()
-                .child(Icon::new(icon.clone()).text_color(muted))
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .child(highlighted_label(label.clone(), &title_ranges, accent))
-                        .when_some(subtitle.clone(), |this, subtitle| {
-                            this.child(
-                                div()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child(subtitle),
-                            )
-                        }),
-                )
-                .child(div().text_xs().text_color(muted).child(category))
-                .when_some(
-                    shortcut.and_then(|shortcut| Keystroke::parse(shortcut).ok()),
-                    |this, keystroke| this.child(Kbd::new(keystroke)),
-                )
-        });
+        let item = CommandItem::new()
+            .label(label.clone())
+            .child(move |_window, cx| {
+                let muted = cx.theme().muted_foreground;
+                let accent = cx.theme().accent;
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .child(Icon::new(icon.clone()).text_color(muted))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(highlighted_label(label.clone(), &title_ranges, accent))
+                            .when_some(subtitle.clone(), |this, subtitle| {
+                                this.child(
+                                    div().truncate().text_xs().text_color(muted).child(subtitle),
+                                )
+                            }),
+                    )
+                    .child(div().text_xs().text_color(muted).child(category))
+                    .when_some(
+                        shortcut.and_then(|shortcut| Keystroke::parse(shortcut).ok()),
+                        |this, keystroke| this.child(Kbd::new(keystroke)),
+                    )
+            });
         (item, payload)
     }
 }
-
-use gpui_kit::prelude::FluentBuilder as _;
 
 struct HistoryEntry {
     source: MessageSource,
@@ -298,7 +294,6 @@ impl CommandPaletteView {
         cx: &mut Context<Self>,
     ) -> Self {
         let state = cx.new(|cx| CommandState::new(window, cx));
-        state.update(cx, |state, cx| state.focus(window, cx));
         Self {
             state,
             sessions,
@@ -306,6 +301,11 @@ impl CommandPaletteView {
             query: String::new(),
             history: Vec::new(),
         }
+    }
+
+    /// Call after the hosting dialog opens, because opening a dialog moves focus to the dialog.
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| state.focus(window, cx));
     }
 
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
@@ -325,13 +325,23 @@ impl CommandPaletteView {
         let Some(search_manager) = search_manager::try_global_search_manager() else {
             return Vec::new();
         };
+        let mut seen_claude_sessions = HashSet::new();
+        let mut seen_codex_sessions = HashSet::new();
         search_manager
             .search(&self.query, HISTORY_RESULT_LIMIT)
             .into_iter()
             .filter_map(|result| {
+                let session_id = result.session_id?;
+                let seen_sessions = match result.source {
+                    MessageSource::Claude => &mut seen_claude_sessions,
+                    MessageSource::Codex => &mut seen_codex_sessions,
+                };
+                if !seen_sessions.insert(session_id.clone()) {
+                    return None;
+                }
                 Some(HistoryEntry {
                     source: result.source,
-                    session_id: result.session_id?,
+                    session_id,
                     workspace: result.workspace_name,
                     snippet: result.snippet,
                 })
@@ -476,6 +486,10 @@ impl CommandPaletteView {
 
 impl Render for CommandPaletteView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toggle_listener = cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
+            window.close_dialog(cx);
+            this.dismiss(cx);
+        });
         let (commands, history) = self.ranked_sections();
         let commands_label = (!self.query.is_empty()).then_some("Commands");
         let groups = [
@@ -507,7 +521,7 @@ impl Render for CommandPaletteView {
         let view = cx.entity().downgrade();
         let indexing = !self.query.is_empty() && search_manager::search_indexing_in_progress();
 
-        command
+        let command = command
             .filterable(false)
             .bordered(false)
             .max_h(px(PALETTE_MAX_HEIGHT))
@@ -515,7 +529,9 @@ impl Render for CommandPaletteView {
             .on_query({
                 let view = view.clone();
                 move |query, _window, cx| {
-                    view.update(cx, |this, cx| this.set_query(query, cx)).ok();
+                    if let Err(error) = view.update(cx, |this, cx| this.set_query(query, cx)) {
+                        log::error!("command palette query update failed: {error}");
+                    }
                 }
             })
             .on_confirm(move |index_path, _window, cx| {
@@ -524,8 +540,11 @@ impl Render for CommandPaletteView {
                     .and_then(|group| group.get(index_path.row))
                     .cloned();
                 if let Some(payload) = payload {
-                    view.update(cx, |_, cx| cx.emit(CommandPaletteEvent::Selected(payload)))
-                        .ok();
+                    if let Err(error) =
+                        view.update(cx, |_, cx| cx.emit(CommandPaletteEvent::Selected(payload)))
+                    {
+                        log::error!("command palette selection failed: {error}");
+                    }
                 }
             })
             .when(indexing, |command| {
@@ -537,7 +556,9 @@ impl Render for CommandPaletteView {
                         .text_color(cx.theme().muted_foreground)
                         .child("Indexing search history...")
                 })
-            })
+            });
+
+        div().on_action(toggle_listener).child(command)
     }
 }
 
@@ -563,7 +584,10 @@ mod tests {
         let mut matcher = RowMatcher::new("tsb");
         let ranked = rank_rows(
             &mut matcher,
-            vec![row("Toggle Sidebar", None, "Actions"), row("New Tab", None, "Actions")],
+            vec![
+                row("Toggle Sidebar", None, "Actions"),
+                row("New Tab", None, "Actions"),
+            ],
             true,
         );
         assert_eq!(ranked.len(), 1);
@@ -583,7 +607,10 @@ mod tests {
             ],
             true,
         );
-        let labels: Vec<&str> = ranked.iter().map(|ranked| ranked.row.label.as_ref()).collect();
+        let labels: Vec<&str> = ranked
+            .iter()
+            .map(|ranked| ranked.row.label.as_ref())
+            .collect();
         assert_eq!(labels, ["Work", "Alpha"]);
     }
 

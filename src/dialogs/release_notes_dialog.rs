@@ -39,27 +39,24 @@ impl Render for ReleaseNotesDialog {
                     .child(format!("Version {}", self.version)),
             )
             .child(
-                div()
-                    .flex_1()
-                    .overflow_y_hidden()
-                    .child(
-                        div()
-                            .id("release-notes-scroll")
-                            .h_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll_handle)
-                            .p(px(12.))
-                            .rounded(px(6.))
-                            .border_1()
-                            .border_color(border_color)
-                            .bg(cx.theme().muted.opacity(0.3))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(foreground)
-                                    .child(self.notes.clone()),
-                            ),
-                    ),
+                div().flex_1().overflow_y_hidden().child(
+                    div()
+                        .id("release-notes-scroll")
+                        .h_full()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll_handle)
+                        .p(px(12.))
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(border_color)
+                        .bg(cx.theme().muted.opacity(0.3))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(foreground)
+                                .child(self.notes.clone()),
+                        ),
+                ),
             )
     }
 }

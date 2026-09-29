@@ -68,7 +68,10 @@ impl<P: AssetSource, F: AssetSource> AssetSource for AssetSourceChain<P, F> {
             Ok(None) => self.fallback.load(path),
             Err(primary_error) => match self.fallback.load(path) {
                 Ok(Some(asset)) => Ok(Some(asset)),
-                Ok(None) | Err(_) => Err(primary_error),
+                Ok(None) => Err(primary_error),
+                Err(fallback_error) => Err(primary_error.context(format!(
+                    "fallback asset source also failed for {path}: {fallback_error:#}"
+                ))),
             },
         }
     }
@@ -88,9 +91,9 @@ impl<P: AssetSource, F: AssetSource> AssetSource for AssetSourceChain<P, F> {
 #[cfg(test)]
 mod tests {
     use super::{Assets, chain as chain_asset_sources};
+    use gpui_kit::assets::Assets as ComponentAssets;
     use gpui_kit::{AssetSource, SharedString};
     use std::borrow::Cow;
-    use gpui_kit::assets::Assets as ComponentAssets;
 
     struct EmptyAssets;
 

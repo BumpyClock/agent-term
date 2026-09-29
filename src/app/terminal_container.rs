@@ -1,7 +1,7 @@
 //! Terminal container rendering.
 
-use gpui_kit::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
 use gpui_kit::component::TITLE_BAR_HEIGHT;
+use gpui_kit::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use crate::ui::ActiveTheme;
 

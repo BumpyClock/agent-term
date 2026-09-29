@@ -21,9 +21,9 @@
 //! ```
 
 use gpui_kit::{
-    actions, div, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Render, ScrollWheelEvent, Styled, Window,
+    App, ClipboardItem, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
+    ScrollWheelEvent, Styled, Window, actions, div,
 };
 
 use crate::{Event, Terminal, TerminalElement};

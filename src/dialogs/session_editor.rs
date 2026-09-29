@@ -1,7 +1,7 @@
 //! Session editor dialog for editing session properties: icon, name, command.
 
-use gpui_kit::{Context, Entity, IntoElement, Render, Styled, Window, div, prelude::*, px};
 use gpui_kit::component::input::InputState as GpuiInputState;
+use gpui_kit::{Context, Entity, IntoElement, Render, Styled, Window, div, prelude::*, px};
 
 use crate::icons::IconDescriptor;
 use crate::ui::{
@@ -87,12 +87,13 @@ impl Render for SessionEditorDialog {
         let entity = cx.entity();
         let entity_for_change = entity.clone();
         let entity_for_search = entity;
-        let selected_lucide_icon = current_icon.as_deref().and_then(|icon| {
-            match icon_descriptor_from_string(icon) {
-                IconDescriptor::Lucide { id } => Some(id),
-                IconDescriptor::Tool { .. } => None,
-            }
-        });
+        let selected_lucide_icon =
+            current_icon
+                .as_deref()
+                .and_then(|icon| match icon_descriptor_from_string(icon) {
+                    IconDescriptor::Lucide { id } => Some(id),
+                    IconDescriptor::Tool { .. } => None,
+                });
 
         v_flex()
             .gap(px(16.))

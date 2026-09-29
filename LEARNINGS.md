@@ -36,9 +36,8 @@
 - Avoid static `.id("...")` for components with multiple simultaneous instances
 
 ## Theming/Animation
-**Fluent tokens + reduced motion** (2026-02-10)
-- Centralize in `ThemeMotion`, `ThemeElevation`, `ThemeMaterial` domains
-- Wire app-level `reduce_motion` setting → `WindowShell` → component context
+**Reduced motion**
+- App-level `reduce_motion` setting is applied through `cx.set_reduce_motion` in `src/theme.rs`
 **Easing limits** (2026-02-10)
 - Keep GPUI easing Y control points within `[0, 1]` unless engine supports overshoot
 **Asset loading** (2026-02-10)
@@ -51,9 +50,3 @@
 **Session status** (2026-01-23)
 - `SessionStatus` enum: Running, Waiting, Idle, Error, Starting
 - Pattern: create=Starting → subscribe Terminal events (Wakeup→Running, CloseTerminal→Idle/Error) → update store + `cx.notify()`
-**gpui branch compatibility** (2026-02-10)
-- Latest `gpui-component` `main` required GPUI APIs not on `BumpyClock/zed` `main` (`spring`, `with_unbounded_easing`, `translate_x/y`)
-- Pin `gpui` to `BumpyClock/zed` `gpui-unbounded-easing` head when syncing to latest gpui-component
-**zed pin mismatch guard** (2026-02-10)
-- `cargo` fails with `revision ... not found` if pasted SHA differs from upstream by even 1-2 chars.
-- Verify via `git ls-remote https://github.com/BumpyClock/zed.git refs/heads/main` before pinning.
