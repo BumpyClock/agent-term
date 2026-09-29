@@ -18,6 +18,7 @@ pub struct SurfaceContext {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
 pub enum NoiseIntensity {
     None,
     #[default]
@@ -72,6 +73,7 @@ impl From<ThemeShadowToken> for ElevationToken {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
 pub enum SurfaceColorSource {
     #[default]
     Popover,
@@ -81,6 +83,7 @@ pub enum SurfaceColorSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
 pub enum SurfaceKind {
     #[default]
     Base,
@@ -114,6 +117,7 @@ impl SurfaceBackground {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
 pub enum StrokeColor {
     #[default]
     Subtle,
@@ -134,6 +138,7 @@ impl StrokeSpec {
         }
     }
 
+    #[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
     pub fn default_border() -> Self {
         Self {
             width: px(1.0),

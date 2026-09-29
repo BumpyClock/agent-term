@@ -28,6 +28,7 @@ pub fn app_menus() -> Vec<Menu> {
                 MenuItem::separator(),
                 MenuItem::action("Quit Agent Term", Quit),
             ],
+            disabled: false,
         },
         Menu {
             name: "Edit".into(),
@@ -36,6 +37,7 @@ pub fn app_menus() -> Vec<Menu> {
                 MenuItem::action("Paste", Paste),
                 MenuItem::action("Select All", SelectAll),
             ],
+            disabled: false,
         },
         Menu {
             name: "View".into(),
@@ -43,6 +45,7 @@ pub fn app_menus() -> Vec<Menu> {
                 MenuItem::action("Toggle Sidebar", ToggleSidebar),
                 MenuItem::action("MCP Manager", ToggleMcpManager),
             ],
+            disabled: false,
         },
         Menu {
             name: "Terminal".into(),
@@ -50,6 +53,7 @@ pub fn app_menus() -> Vec<Menu> {
                 MenuItem::action("New Tab", NewShellTab),
                 MenuItem::action("Clear", Clear),
             ],
+            disabled: false,
         },
         Menu {
             name: "Window".into(),
@@ -61,6 +65,7 @@ pub fn app_menus() -> Vec<Menu> {
                 MenuItem::action("Minimize", Minimize),
                 MenuItem::action("Zoom", Zoom),
             ],
+            disabled: false,
         },
     ]
 }

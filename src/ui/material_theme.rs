@@ -1,6 +1,7 @@
 use gpui_kit::{App, Global};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
 pub enum ThemeShadowToken {
     None,
     Xs,

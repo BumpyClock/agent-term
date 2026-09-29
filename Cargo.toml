@@ -108,6 +108,7 @@ anyhow.workspace = true
 dirs.workspace = true
 env_logger.workspace = true
 log.workspace = true
+nucleo-matcher = "0.3.1"
 gpui-kit = { workspace = true, features = ["component", "assets"] }
 gpui_term = { path = "crates/gpui_term" }
 reqwest_client.workspace = true

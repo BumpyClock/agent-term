@@ -200,7 +200,7 @@ impl LucideSearchModal {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let total_icons = filtered_icons.len();
-        let row_count = (total_icons + GRID_COLUMNS - 1) / GRID_COLUMNS;
+        let row_count = total_icons.div_ceil(GRID_COLUMNS);
 
         let row_sizes: Rc<Vec<GpuiSize<Pixels>>> = Rc::new(
             (0..row_count)

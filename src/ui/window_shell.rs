@@ -33,7 +33,6 @@ pub struct WindowShell {
     sidebar_left: Option<AnyElement>,
     main: Option<AnyElement>,
     background: Option<AnyElement>,
-    overlay_children: Option<AnyElement>,
     on_mouse_move: Option<Rc<dyn Fn(&MouseMoveEvent, &mut Window, &mut App)>>,
     on_mouse_up: Option<Rc<dyn Fn(&MouseUpEvent, &mut Window, &mut App)>>,
     style: StyleRefinement,
@@ -52,7 +51,6 @@ impl WindowShell {
             sidebar_left: None,
             main: None,
             background: None,
-            overlay_children: None,
             on_mouse_move: None,
             on_mouse_up: None,
             style: StyleRefinement::default(),
@@ -76,11 +74,6 @@ impl WindowShell {
 
     pub fn background(mut self, element: impl IntoElement) -> Self {
         self.background = Some(element.into_any_element());
-        self
-    }
-
-    pub fn overlay_children(mut self, element: impl IntoElement) -> Self {
-        self.overlay_children = Some(element.into_any_element());
         self
     }
 
@@ -170,15 +163,6 @@ impl RenderOnce for WindowShell {
                 .bg(title_bar_background),
         )
         .child(content_layer)
-        .when_some(self.overlay_children, |element, overlay| {
-            element.child(
-                div()
-                    .id("window-shell-overlay")
-                    .absolute()
-                    .inset_0()
-                    .child(overlay),
-            )
-        })
         .child(
             div()
                 .id("window-shell-titlebar")
@@ -194,6 +178,7 @@ impl RenderOnce for WindowShell {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "vendored token catalog keeps the full fork vocabulary")]
 enum SidebarSide {
     Left,
     Right,

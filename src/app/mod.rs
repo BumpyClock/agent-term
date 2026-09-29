@@ -232,15 +232,6 @@ impl Render for AgentTermApp {
             None
         };
 
-        // Build overlay children (dialog and sheet layers) first to avoid borrow conflicts
-        let dialog_layer = gpui_kit::component::Root::render_dialog_layer(window, cx);
-        let sheet_layer = gpui_kit::component::Root::render_sheet_layer(window, cx);
-        let overlay_children = div()
-            .id("agentterm-overlays")
-            .children(dialog_layer)
-            .children(sheet_layer)
-            .into_any_element();
-
         // Build sidebar (only if visible) - convert to AnyElement to release borrow
         let sidebar_left: Option<gpui_kit::AnyElement> = if sidebar_visible {
             Some(self.render_sidebar_shell(window, cx).into_any_element())
@@ -258,7 +249,6 @@ impl Render for AgentTermApp {
             .when_some(background, |shell, bg| shell.background(bg))
             .when_some(sidebar_left, |shell, sidebar| shell.sidebar_left(sidebar))
             .main(main_content)
-            .overlay_children(overlay_children)
             .on_mouse_move({
                 let entity = cx.entity();
                 move |event, window, cx| {

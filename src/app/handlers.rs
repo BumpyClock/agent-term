@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use gpui_kit::{
-    div, prelude::*, px, size, AnyWindowHandle, Bounds, Context, Focusable, IntoElement,
-    ParentElement, Styled, Window, WindowBounds, WindowOptions,
+    div, prelude::*, px, size, AnyWindowHandle, Bounds, Context, Focusable, ParentElement, Styled,
+    Window, WindowBounds, WindowOptions,
 };
 
 use super::window_registry::WindowRegistry;
@@ -13,6 +13,7 @@ use super::{
     MoveSessionToWindow, OpenSessionInNewWindow, TerminalPool,
 };
 use agentterm_session::DEFAULT_WORKSPACE_ID;
+use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::input::InputState as GpuiInputState;
 
 use crate::dialogs::{
@@ -407,23 +408,17 @@ impl AgentTermApp {
                 .child(dialog_entity.clone())
                 .footer({
                     let dialog_entity = dialog_entity.clone();
-                    move |_ok, cancel, window, cx| {
-                        vec![
-                            cancel(window, cx),
-                            Button::new("save")
-                                .primary()
-                                .label("Save")
-                                .on_click({
-                                    let dialog_entity = dialog_entity.clone();
-                                    move |_, window, cx| {
-                                        dialog_entity.update(cx, |dialog, cx| {
-                                            dialog.save(window, cx);
-                                        });
-                                    }
-                                })
-                                .into_any_element(),
-                        ]
-                    }
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new().trigger(|button| button.label("Cancel").outline()),
+                        )
+                        .child(Button::new("save").primary().label("Save").on_click({
+                            move |_, window, cx| {
+                                dialog_entity.update(cx, |dialog, cx| {
+                                    dialog.save(window, cx);
+                                });
+                            }
+                        }))
                 })
         });
 
@@ -484,23 +479,17 @@ impl AgentTermApp {
                 .child(dialog_entity.clone())
                 .footer({
                     let dialog_entity = dialog_entity.clone();
-                    move |_ok, cancel, window, cx| {
-                        vec![
-                            cancel(window, cx),
-                            Button::new("save")
-                                .primary()
-                                .label("Save")
-                                .on_click({
-                                    let dialog_entity = dialog_entity.clone();
-                                    move |_, window, cx| {
-                                        dialog_entity.update(cx, |dialog, cx| {
-                                            dialog.save(window, cx);
-                                        });
-                                    }
-                                })
-                                .into_any_element(),
-                        ]
-                    }
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new().trigger(|button| button.label("Cancel").outline()),
+                        )
+                        .child(Button::new("save").primary().label("Save").on_click({
+                            move |_, window, cx| {
+                                dialog_entity.update(cx, |dialog, cx| {
+                                    dialog.save(window, cx);
+                                });
+                            }
+                        }))
                 })
         });
 
@@ -550,23 +539,17 @@ impl AgentTermApp {
                 .child(dialog_entity.clone())
                 .footer({
                     let dialog_entity = dialog_entity.clone();
-                    move |_ok, cancel, window, cx| {
-                        vec![
-                            cancel(window, cx),
-                            Button::new("save")
-                                .primary()
-                                .label("Save")
-                                .on_click({
-                                    let dialog_entity = dialog_entity.clone();
-                                    move |_, window, cx| {
-                                        dialog_entity.update(cx, |dialog, cx| {
-                                            dialog.save(window, cx);
-                                        });
-                                    }
-                                })
-                                .into_any_element(),
-                        ]
-                    }
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new().trigger(|button| button.label("Cancel").outline()),
+                        )
+                        .child(Button::new("save").primary().label("Save").on_click({
+                            move |_, window, cx| {
+                                dialog_entity.update(cx, |dialog, cx| {
+                                    dialog.save(window, cx);
+                                });
+                            }
+                        }))
                 })
         });
 
@@ -674,25 +657,19 @@ impl AgentTermApp {
                     .footer({
                         let view = view.clone();
                         let session_id = session_id_for_close.clone();
-                        move |_ok, cancel, window, cx| {
-                            vec![
-                                cancel(window, cx),
-                                Button::new("close")
-                                    .danger()
-                                    .label("Close")
-                                    .on_click({
-                                        let view = view.clone();
-                                        let session_id = session_id.clone();
-                                        move |_, window, cx| {
-                                            window.close_dialog(cx);
-                                            view.update(cx, |app, cx| {
-                                                app.close_session(session_id.clone(), window, cx);
-                                            });
-                                        }
-                                    })
-                                    .into_any_element(),
-                            ]
-                        }
+                        DialogFooter::new()
+                            .child(
+                                DialogClose::new()
+                                    .trigger(|button| button.label("Cancel").outline()),
+                            )
+                            .child(Button::new("close").danger().label("Close").on_click({
+                                move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    view.update(cx, |app, cx| {
+                                        app.close_session(session_id.clone(), window, cx);
+                                    });
+                                }
+                            }))
                     })
             });
         } else {
@@ -744,19 +721,22 @@ impl AgentTermApp {
                             .text_sm()
                             .child(format!("{}. Close window anyway?", tabs_text)),
                     )
-                    .footer(move |_ok, cancel, window, cx| {
-                        vec![
-                            cancel(window, cx),
-                            Button::new("close")
-                                .danger()
-                                .label("Close Window")
-                                .on_click(move |_, window, cx| {
-                                    window.close_dialog(cx);
-                                    window.remove_window();
-                                })
-                                .into_any_element(),
-                        ]
-                    })
+                    .footer(
+                        DialogFooter::new()
+                            .child(
+                                DialogClose::new()
+                                    .trigger(|button| button.label("Cancel").outline()),
+                            )
+                            .child(
+                                Button::new("close")
+                                    .danger()
+                                    .label("Close Window")
+                                    .on_click(move |_, window, cx| {
+                                        window.close_dialog(cx);
+                                        window.remove_window();
+                                    }),
+                            ),
+                    )
             });
         } else {
             // No running processes, close immediately
@@ -921,28 +901,20 @@ impl AgentTermApp {
                 .footer({
                     let view = view.clone();
                     let workspace_id = workspace_id_for_delete.clone();
-                    move |_ok, cancel, window, cx| {
-                        vec![
-                            cancel(window, cx),
-                            Button::new("remove")
-                                .danger()
-                                .label("Remove")
-                                .on_click({
-                                    let view = view.clone();
-                                    let workspace_id = workspace_id.clone();
-                                    move |_, window, cx| {
-                                        window.close_dialog(cx);
-                                        view.update(cx, |app, cx| {
-                                            let _ =
-                                                app.session_store.delete_workspace(&workspace_id);
-                                            app.reload_from_store(cx);
-                                            app.ensure_active_terminal(window, cx);
-                                        });
-                                    }
-                                })
-                                .into_any_element(),
-                        ]
-                    }
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new().trigger(|button| button.label("Cancel").outline()),
+                        )
+                        .child(Button::new("remove").danger().label("Remove").on_click({
+                            move |_, window, cx| {
+                                window.close_dialog(cx);
+                                view.update(cx, |app, cx| {
+                                    let _ = app.session_store.delete_workspace(&workspace_id);
+                                    app.reload_from_store(cx);
+                                    app.ensure_active_terminal(window, cx);
+                                });
+                            }
+                        }))
                 })
         });
     }

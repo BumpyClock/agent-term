@@ -84,6 +84,8 @@ pub fn apply_theme_from_settings(
     window: Option<&mut Window>,
     cx: &mut App,
 ) -> ThemeMode {
+    cx.set_reduce_motion(settings.reduce_motion);
+
     let accent = resolve_accent_color(&settings.accent_color);
     let light_config = build_theme_config(ThemeMode::Light, accent);
     let dark_config = build_theme_config(ThemeMode::Dark, accent);

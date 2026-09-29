@@ -58,10 +58,9 @@ pub fn terminal_palette_for_scheme(id: &str, mode: ThemeMode) -> TerminalPalette
         .find(|scheme| scheme.id == id)
         .unwrap_or(&schemes()[0]);
 
-    let palette = if mode.is_dark() || scheme.light.is_none() {
-        scheme.dark
-    } else {
-        scheme.light.unwrap()
+    let palette = match scheme.light {
+        Some(light) if !mode.is_dark() => light,
+        _ => scheme.dark,
     };
 
     palette_spec_to_palette(palette)

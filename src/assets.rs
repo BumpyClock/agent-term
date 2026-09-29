@@ -88,19 +88,37 @@ impl<P: AssetSource, F: AssetSource> AssetSource for AssetSourceChain<P, F> {
 #[cfg(test)]
 mod tests {
     use super::{Assets, chain as chain_asset_sources};
-    use gpui_kit::AssetSource;
+    use gpui_kit::{AssetSource, SharedString};
+    use std::borrow::Cow;
     use gpui_kit::assets::Assets as ComponentAssets;
 
-    #[test]
-    fn app_assets_chain_falls_back_to_gpui_component_assets() {
-        let assets = chain_asset_sources(Assets, ComponentAssets);
-        let from_surface_path = assets
-            .load("surface/NoiseAsset_256.png")
-            .expect("loading surface path should succeed")
-            .expect("asset should exist");
+    struct EmptyAssets;
 
-        assert!(!from_surface_path.is_empty());
-        assert!(assets.load("NoiseAsset_256.png").is_err());
+    impl AssetSource for EmptyAssets {
+        fn load(&self, _path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
+            Ok(None)
+        }
+
+        fn list(&self, _path: &str) -> anyhow::Result<Vec<SharedString>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn app_assets_chain_falls_back_to_gpui_kit_assets() -> anyhow::Result<()> {
+        let assets = chain_asset_sources(EmptyAssets, ComponentAssets);
+        let icon = assets
+            .load("icons/arrow-down.svg")?
+            .ok_or_else(|| anyhow::anyhow!("fallback icon should exist"))?;
+        assert!(!icon.is_empty());
+
+        let chained = chain_asset_sources(Assets, ComponentAssets);
+        let noise = chained
+            .load("noise/NoiseAsset_256.png")?
+            .ok_or_else(|| anyhow::anyhow!("app noise asset should exist"))?;
+        assert!(!noise.is_empty());
+        assert!(chained.load("NoiseAsset_256.png").is_err());
+        Ok(())
     }
 
     #[test]

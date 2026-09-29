@@ -19,6 +19,7 @@ use crate::ui::{
     WindowExt,
 };
 use gpui_kit::component::IndexPath;
+use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::component::input::{
     InputEvent, InputState as GpuiInputState, NumberInput, NumberInputEvent, StepAction,
@@ -282,7 +283,7 @@ impl SettingsDialog {
 
         // Subscribe to transparency slider events
         cx.subscribe(&transparency_slider, |this, _, event: &SliderEvent, cx| {
-            let SliderEvent::Change(slider_value) = event;
+            let (SliderEvent::Change(slider_value) | SliderEvent::Release(slider_value)) = event;
             this.settings.window_transparency = slider_value.start() / 100.0;
             cx.notify();
             // Note: Can't call notify_change here since we don't have window access
@@ -792,11 +793,10 @@ impl SettingsDialog {
                 .w(px(400.))
                 .close_button(true)
                 .child(dialog_entity.clone())
-                .footer({
-                    let dialog_entity = dialog_entity.clone();
-                    move |_ok, cancel, window, cx| {
-                        vec![
-                            cancel(window, cx),
+                .footer(
+                    DialogFooter::new()
+                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
+                        .child(
                             Button::new("save-tool")
                                 .label("Save")
                                 .primary()
@@ -807,11 +807,9 @@ impl SettingsDialog {
                                             d.save(window, cx);
                                         });
                                     }
-                                })
-                                .into_any_element(),
-                        ]
-                    }
-                })
+                                }),
+                        ),
+                )
         });
     }
 
@@ -909,10 +907,10 @@ impl SettingsDialog {
                 .custom(
                     ButtonCustomVariant::new(cx)
                         .color(fill)
-                        .border(stroke)
                         .hover(fill)
                         .active(fill),
                 )
+                .border_color(stroke)
                 .rounded(px(999.0))
                 .compact()
                 .w(px(28.0))
