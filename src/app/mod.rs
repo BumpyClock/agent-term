@@ -4,7 +4,7 @@
 //! between the various sub-modules.
 
 pub mod actions;
-pub mod command_palette_provider;
+pub mod command_palette;
 pub mod constants;
 mod handlers;
 mod layout_manager;
@@ -28,8 +28,9 @@ use gpui_kit::{
     Window, WindowBackgroundAppearance, WindowOptions, div, prelude::*, px,
 };
 use gpui_kit::application;
-use gpui_kit::component::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
-use gpui_kit::assets::{Assets as ComponentAssets, chain as chain_asset_sources};
+use crate::ui::{NoiseIntensity, WindowLayoutMode, WindowShell, render_noise_overlay};
+use crate::assets::chain as chain_asset_sources;
+use gpui_kit::assets::Assets as ComponentAssets;
 use gpui_term::{Clear, Copy, FocusOut, Paste, SelectAll, SendShiftTab, SendTab};
 
 use crate::theme;
@@ -97,26 +98,6 @@ pub fn run() {
 
         // Initialize gpui-component (theme, input bindings, dialogs, menus, etc.)
         gpui_kit::component::init(cx);
-
-        // Initialize the new CommandPalette from gpui-component
-        gpui_kit::component::command_palette::CommandPalette::init(
-            cx,
-            gpui_kit::component::command_palette::CommandPaletteConfig {
-                placeholder: "Search sessions, workspaces, actions...".into(),
-                width: 600.0,
-                max_height: 500.0,
-                results_section_title: Some("Session History".into()),
-                shortcut: None,
-                status_provider: Some(std::sync::Arc::new(|_| {
-                    if search_manager::search_indexing_in_progress() {
-                        Some("Indexing search history...".into())
-                    } else {
-                        None
-                    }
-                })),
-                ..Default::default()
-            },
-        );
 
         // Warm the search index in the background after startup (optional).
         let warm_search_index = crate::settings::AppSettings::load().warm_search_index;
@@ -273,8 +254,6 @@ impl Render for AgentTermApp {
         // Build WindowShell with FloatingPanels mode
         let window_shell = WindowShell::new()
             .layout_mode(WindowLayoutMode::FloatingPanels)
-            .blur_enabled(blur_enabled)
-            .reduced_motion(self.settings.reduce_motion)
             .bg(base_bg)
             .when_some(background, |shell, bg| shell.background(bg))
             .when_some(sidebar_left, |shell, sidebar| shell.sidebar_left(sidebar))

@@ -1,7 +1,6 @@
 //! Action handlers for AgentTermApp.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use gpui_kit::{
     div, prelude::*, px, size, AnyWindowHandle, Bounds, Context, Focusable, IntoElement,
@@ -24,10 +23,9 @@ use crate::settings_dialog::SettingsDialog;
 use crate::ui::{v_flex, ActiveTheme, Button, ButtonVariants, WindowExt};
 
 use super::actions::*;
-use super::command_palette_provider::{AgentTermProvider, CommandPalettePayload};
+use super::command_palette::{CommandPaletteEvent, CommandPalettePayload, CommandPaletteView};
 use super::search_manager;
 use super::state::AgentTermApp;
-use gpui_kit::component::command_palette::{CommandPalette, CommandPaletteEvent};
 // TODO: Import UpdateState when update_state() helper is added
 // use crate::updater::UpdateState;
 
@@ -62,31 +60,45 @@ impl AgentTermApp {
         // Ensure search indexing starts in the background (non-blocking)
         search_manager::warm_search_manager_async(std::time::Duration::from_millis(0));
 
-        // Create the provider with current app state
-        let provider = Arc::new(AgentTermProvider::new(
-            self.sessions.clone(),
-            self.workspaces.clone(),
-        ));
+        let sessions = self.sessions.clone();
+        let workspaces = self.workspaces.clone();
+        let view = cx.new(|cx| CommandPaletteView::new(sessions, workspaces, window, cx));
 
-        // Open the palette using the new gpui-component CommandPalette
-        let handle = CommandPalette::open(window, cx, provider);
-
-        // Subscribe to palette events
         cx.subscribe_in(
-            handle.state(),
+            &view,
             window,
             |this, _, event: &CommandPaletteEvent, window, cx| match event {
-                CommandPaletteEvent::Selected { item } => {
-                    this.handle_command_palette_select(item, window, cx);
+                CommandPaletteEvent::Selected(payload) => {
+                    this.handle_command_palette_select(payload, window, cx);
                 }
                 CommandPaletteEvent::Dismissed => {
-                    this.close_command_palette(window, cx);
+                    this.command_palette = None;
+                    cx.notify();
                 }
             },
         )
         .detach();
 
-        self.command_palette = Some(handle.state().clone());
+        window.open_dialog(cx, {
+            let view = view.clone();
+            move |dialog, _window, _cx| {
+                dialog
+                    .w(px(600.))
+                    .min_h(px(0.))
+                    .overlay(true)
+                    .overlay_closable(true)
+                    .keyboard(true)
+                    .close_button(false)
+                    .p_0()
+                    .child(view.clone())
+                    .on_close({
+                        let view = view.clone();
+                        move |_, _, cx| view.update(cx, |view, cx| view.dismiss(cx))
+                    })
+            }
+        });
+
+        self.command_palette = Some(view);
         cx.notify();
     }
 
@@ -100,16 +112,15 @@ impl AgentTermApp {
     /// Handle selection from the command palette.
     fn handle_command_palette_select(
         &mut self,
-        item: &gpui_kit::component::command_palette::CommandPaletteItem,
+        payload: &CommandPalettePayload,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Close the palette first
         self.close_command_palette(window, cx);
 
-        // Extract payload and handle based on type
-        if let Some(payload) = &item.payload {
-            if let Some(payload) = payload.downcast_ref::<CommandPalettePayload>() {
+        {
+            {
                 match payload {
                     CommandPalettePayload::Session { id } => {
                         self.set_active_session_id(id.clone(), window, cx);

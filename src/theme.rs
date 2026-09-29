@@ -1,14 +1,12 @@
 use std::rc::Rc;
 
 use gpui_kit::{App, Window, WindowAppearance};
-use gpui_kit::component::theme::{
-    Theme as GpuiTheme, ThemeConfig, ThemeConfigColors, ThemeElevationConfig, ThemeMaterialConfig,
-    ThemeMode, ThemeMotionConfig, ThemeShadowToken,
-};
+use gpui_kit::component::theme::{Theme as GpuiTheme, ThemeConfig, ThemeConfigColors, ThemeMode};
 use gpui_term::set_terminal_palette;
 
 use crate::settings::{AppSettings, Theme};
 use crate::terminal_schemes;
+use crate::ui::{MaterialTheme, ThemeElevation, ThemeMaterial, ThemeShadowToken};
 
 #[derive(Clone, Copy)]
 pub struct AccentColor {
@@ -112,6 +110,7 @@ pub fn apply_theme_from_settings(
         theme.dark_theme = Rc::new(dark_config);
     }
 
+    build_material_theme().set(cx);
     GpuiTheme::change(mode, window, cx);
     GpuiTheme::global_mut(cx).colors.background = gpui_kit::transparent_black();
     mode
@@ -190,79 +189,28 @@ fn build_theme_config(mode: ThemeMode, accent: AccentColor) -> ThemeConfig {
             ThemeMode::Dark => "AgentTerm Dark".into(),
         },
         mode,
-        motion: Some(build_motion_config()),
-        elevation: Some(build_elevation_config()),
-        material: Some(build_material_config(mode)),
         colors,
         ..ThemeConfig::default()
     }
 }
 
-fn build_motion_config() -> ThemeMotionConfig {
-    ThemeMotionConfig {
-        fast_duration_ms: Some(187),
-        normal_duration_ms: Some(333),
-        slow_duration_ms: Some(500),
-        strong_invoke_duration_ms: Some(667),
-        soft_dismiss_duration_ms: Some(167),
-        fade_duration_ms: Some(83),
-        spring_mild_duration_ms: Some(333),
-        spring_medium_duration_ms: Some(500),
-        spring_mild_damping_ratio: Some(0.8),
-        spring_medium_damping_ratio: Some(0.6),
-        spring_mild_frequency: Some(4.0),
-        spring_medium_frequency: Some(3.0),
-        fast_invoke_easing: Some("cubic-bezier(0, 0, 0, 1)".into()),
-        strong_invoke_easing: Some("cubic-bezier(0.13, 1, 0, 0.92)".into()),
-        fast_dismiss_easing: Some("cubic-bezier(0, 0, 0, 1)".into()),
-        soft_dismiss_easing: Some("cubic-bezier(1, 0, 1, 1)".into()),
-        point_to_point_easing: Some("cubic-bezier(0.55, 0.55, 0, 1)".into()),
-        fade_easing: Some("linear".into()),
-    }
-}
-
-fn build_elevation_config() -> ThemeElevationConfig {
-    ThemeElevationConfig {
-        control_level: Some(2),
-        card_rest_level: Some(8),
-        tooltip_level: Some(16),
-        flyout_level: Some(32),
-        dialog_level: Some(128),
-        shell_level: Some(36),
-        inactive_window_level: Some(64),
-        active_window_level: Some(128),
-        surface_flyout_shadow: Some(ThemeShadowToken::Sm),
-        surface_panel_shadow: Some(ThemeShadowToken::Lg),
-        surface_card_shadow: Some(ThemeShadowToken::Sm),
-    }
-}
-
-fn build_material_config(_mode: ThemeMode) -> ThemeMaterialConfig {
-    ThemeMaterialConfig {
-        flyout_blur_radius: Some(60.0),
-        panel_blur_radius: Some(120.0),
-        flyout_light_opacity: Some(0.75),
-        flyout_dark_opacity: Some(0.85),
-        panel_light_opacity: Some(0.85),
-        panel_dark_opacity: Some(0.90),
-        card_light_opacity: Some(0.70),
-        card_dark_opacity: Some(0.05),
-        subtle_stroke_light_opacity: Some(0.5),
-        subtle_stroke_dark_opacity: Some(0.5),
-        smoke_light: Some("#0000004D".into()),
-        smoke_dark: Some("#0000004D".into()),
-        layer_light: Some("#FFFFFF80".into()),
-        layer_dark: Some("#3A3A3A4C".into()),
-        layer_alt_light: Some("#FFFFFFFF".into()),
-        layer_alt_dark: Some("#FFFFFF0D".into()),
-        mica_base_light: Some("#F3F3F3".into()),
-        mica_base_dark: Some("#202020".into()),
-        mica_base_alt_light: Some("#DADADA80".into()),
-        mica_base_alt_dark: Some("#0A0A0A00".into()),
-        acrylic_base_light: Some("#F3F3F3".into()),
-        acrylic_base_dark: Some("#202020".into()),
-        acrylic_default_light: Some("#FCFCFC".into()),
-        acrylic_default_dark: Some("#2C2C2C".into()),
+fn build_material_theme() -> MaterialTheme {
+    MaterialTheme {
+        elevation: ThemeElevation {
+            surface_flyout_shadow: ThemeShadowToken::Sm,
+            surface_panel_shadow: ThemeShadowToken::Lg,
+            surface_card_shadow: ThemeShadowToken::Sm,
+        },
+        material: ThemeMaterial {
+            flyout_light_opacity: 0.75,
+            flyout_dark_opacity: 0.85,
+            panel_light_opacity: 0.85,
+            panel_dark_opacity: 0.90,
+            card_light_opacity: 0.70,
+            card_dark_opacity: 0.05,
+            subtle_stroke_light_opacity: 0.5,
+            subtle_stroke_dark_opacity: 0.5,
+        },
     }
 }
 

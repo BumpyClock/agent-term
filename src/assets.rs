@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use gpui_kit::{AssetSource, SharedString};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::path::Path;
 
 #[derive(RustEmbed)]
@@ -50,11 +51,45 @@ impl AssetSource for Assets {
     }
 }
 
+/// Asset source that tries `primary` first and falls back to `fallback`.
+pub struct AssetSourceChain<P, F> {
+    primary: P,
+    fallback: F,
+}
+
+pub fn chain<P, F>(primary: P, fallback: F) -> AssetSourceChain<P, F> {
+    AssetSourceChain { primary, fallback }
+}
+
+impl<P: AssetSource, F: AssetSource> AssetSource for AssetSourceChain<P, F> {
+    fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
+        match self.primary.load(path) {
+            Ok(Some(asset)) => Ok(Some(asset)),
+            Ok(None) => self.fallback.load(path),
+            Err(primary_error) => match self.fallback.load(path) {
+                Ok(Some(asset)) => Ok(Some(asset)),
+                Ok(None) | Err(_) => Err(primary_error),
+            },
+        }
+    }
+
+    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
+        let mut assets = self.primary.list(path)?;
+        let mut seen: HashSet<SharedString> = assets.iter().cloned().collect();
+        for asset in self.fallback.list(path)? {
+            if seen.insert(asset.clone()) {
+                assets.push(asset);
+            }
+        }
+        Ok(assets)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Assets;
+    use super::{Assets, chain as chain_asset_sources};
     use gpui_kit::AssetSource;
-    use gpui_kit::assets::{Assets as ComponentAssets, chain as chain_asset_sources};
+    use gpui_kit::assets::Assets as ComponentAssets;
 
     #[test]
     fn app_assets_chain_falls_back_to_gpui_component_assets() {

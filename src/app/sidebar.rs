@@ -5,13 +5,15 @@ use std::collections::HashMap;
 use agentterm_session::{SessionRecord, SessionStatus, SessionTool, DEFAULT_WORKSPACE_ID};
 use agentterm_tools::ShellType;
 use gpui_kit::{
-    div, point, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Corner, Div,
+    div, point, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Anchor, Div,
     Entity, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
     Pixels, Point, Styled, Window,
 };
 
 use super::window_registry::WindowRegistry;
-use gpui_kit::component::{ElementExt, SidebarShell, TITLE_BAR_HEIGHT};
+use gpui_kit::component::{ElementExt, TITLE_BAR_HEIGHT};
+
+use crate::ui::SidebarShell;
 
 use super::constants::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 
@@ -52,8 +54,6 @@ impl AgentTermApp {
         let entity_for_end = entity.clone();
 
         SidebarShell::left(px(self.sidebar_width))
-            .min_width(px(SIDEBAR_MIN_WIDTH))
-            .max_width(px(SIDEBAR_MAX_WIDTH))
             .inset(px(SIDEBAR_INSET))
             .blur_enabled(self.settings.blur_enabled)
             .on_resize_start(move |width, x, _window, cx| {
@@ -645,7 +645,7 @@ impl AgentTermApp {
                             .ghost()
                             .compact()
                             .dropdown_menu_with_anchor(
-                                Corner::TopRight,
+                                Anchor::TopRight,
                                 move |menu, _window, _cx| {
                                     Self::build_add_menu(
                                         menu,

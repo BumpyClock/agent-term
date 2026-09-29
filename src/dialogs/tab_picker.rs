@@ -10,7 +10,7 @@ use gpui_kit::{
     SharedString, Styled, Window, div, prelude::*, px,
 };
 
-use crate::ui::{ActiveTheme, Divider, WindowExt, v_flex};
+use crate::ui::{ActiveTheme, Separator, WindowExt, v_flex};
 
 use super::AgentTermApp;
 
@@ -323,7 +323,7 @@ impl Render for TabPickerDialog {
                 for shell in pinned_shells {
                     body = body.child(self.render_shell_row(shell, true, cx));
                 }
-                body = body.child(Divider::horizontal().pt(px(2.0)));
+                body = body.child(Separator::horizontal().pt(px(2.0)));
             }
 
             body = body.child(
@@ -340,7 +340,7 @@ impl Render for TabPickerDialog {
                 body = body.child(self.render_shell_row(shell, false, cx));
             }
 
-            body = body.child(Divider::horizontal().pt(px(2.0)));
+            body = body.child(Separator::horizontal().pt(px(2.0)));
 
             body = body.child(
                 div()
@@ -355,7 +355,7 @@ impl Render for TabPickerDialog {
             }
 
             if !custom_tools.is_empty() {
-                body = body.child(Divider::horizontal().pt(px(2.0)));
+                body = body.child(Separator::horizontal().pt(px(2.0)));
                 body = body.child(
                     div()
                         .pt(px(8.0))

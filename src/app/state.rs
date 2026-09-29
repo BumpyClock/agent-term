@@ -31,7 +31,7 @@ use crate::theme;
 use crate::ui::WorkspaceItem;
 use crate::updater::UpdateManager;
 
-use gpui_kit::component::command_palette::CommandPaletteState;
+use super::command_palette::CommandPaletteView;
 
 const RECENTLY_CLOSED_TERMINAL_TTL: Duration = Duration::from_secs(120);
 const GIT_STATUS_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -131,7 +131,7 @@ pub struct AgentTermApp {
     pub(crate) layout_window_id: String,
 
     /// Command palette state entity when open.
-    pub(crate) command_palette: Option<Entity<CommandPaletteState>>,
+    pub(crate) command_palette: Option<Entity<CommandPaletteView>>,
 
     /// Update manager for auto-update functionality.
     pub(crate) update_manager: Entity<UpdateManager>,
