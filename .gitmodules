@@ -1,4 +1,0 @@
-[submodule "vendor/gpui-component"]
-	path = vendor/gpui-component
-	url = https://github.com/BumpyClock/gpui-component
-	branch = main
