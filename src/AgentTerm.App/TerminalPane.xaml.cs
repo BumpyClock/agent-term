@@ -22,9 +22,6 @@ internal sealed partial class TerminalPane : UserControl
 
     internal void SetFocused(bool focused, bool multiplePanes)
     {
-        var stroke = new Thickness(multiplePanes ? 0.5 : 0);
-        SolidSurface.BorderThickness = stroke;
-        AcrylicSurface.BorderThickness = stroke;
         ActiveBorder.Visibility = focused && multiplePanes ? Visibility.Visible : Visibility.Collapsed;
     }
 
