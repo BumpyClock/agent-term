@@ -7,7 +7,16 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     private Task? _reader;
     private readonly CancellationTokenSource _lifetime = new();
     public AgentTimeline Timeline { get; } = new();
-    private Guid? _turn;
+    private Guid? _turn => _operation?.Id;
+    private IHostTerminal? _boundTerminal;
+    private TurnOperation? _operation;
+    private sealed class TurnOperation(Guid id, CancellationToken lifetime)
+    {
+        public Guid Id { get; } = id;
+        public CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+        public TaskCompletionSource Submitted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource? Stop;
+    }
     public AgentState State { get; private set; } = AgentState.Idle;
     public AgentLocation? Location { get; private set; }
     private readonly Queue<AgentEvent> _requests = new();
@@ -40,14 +49,16 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     {
         if (!CanSubmit || string.IsNullOrWhiteSpace(text)) return false;
         var turn = Guid.NewGuid();
+        var operation = _operation = new TurnOperation(turn, _lifetime.Token);
+        var token = operation.Cancellation.Token;
+        var invokingTerminal = terminal?.Invoke();
         (CurrentTask ?? BeginTask()).Add(turn, text);
         State = AgentState.Starting;
-        _turn = turn;
         Timeline.Message(turn, MessageRole.User, text);
         Changed?.Invoke();
         try
         {
-            if (_session is not null && Location != location)
+            if (_session is not null && (Location != location || !ReferenceEquals(_boundTerminal, invokingTerminal)))
             {
                 await _session.DisposeAsync();
                 if (_reader is not null) await _reader;
@@ -55,30 +66,44 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
             }
             if (_session is null)
             {
-                var description = await harness.DescribeAsync(location, _lifetime.Token);
-                if (_lifetime.IsCancellationRequested) return false;
+                var description = await harness.DescribeAsync(location, token);
+                token.ThrowIfCancellationRequested();
                 if (!description.Available) throw new InvalidOperationException(description.Message);
-                var opened = await harness.OpenAsync(new(location, model, terminal?.Invoke()), _lifetime.Token);
-                if (_lifetime.IsCancellationRequested) { await opened.DisposeAsync(); return false; }
+                var opened = await harness.OpenAsync(new(location, model, invokingTerminal), token);
+                if (token.IsCancellationRequested) { await opened.DisposeAsync(); token.ThrowIfCancellationRequested(); }
                 _session = opened;
                 Location = location;
+                _boundTerminal = invokingTerminal;
                 _reader = ReadAsync(_session);
             }
+            token.ThrowIfCancellationRequested();
             State = AgentState.Running;
             Changed?.Invoke();
-            await _session.SubmitAsync(new(turn, text), _lifetime.Token);
+            await _session.SubmitAsync(new(turn, text), token);
             return true;
         }
-        catch (Exception) when (_lifetime.IsCancellationRequested) { return false; }
+        catch (Exception) when (token.IsCancellationRequested)
+        {
+            if (State != AgentState.Disposed)
+            {
+                Timeline.Message(turn, MessageRole.Notice, "Interrupted.");
+                Finish(AgentState.Idle); Changed?.Invoke();
+            }
+            return false;
+        }
         catch (Exception ex) when (State != AgentState.Disposed)
         {
-            Timeline.Settle(turn);
-            _turn = null;
-            State = AgentState.Failed;
+            if (_turn != turn) return false;
+            var failedSession = _session;
+            _session = null;
+            if (failedSession is not null) await failedSession.DisposeAsync();
+            if (_reader is not null) await _reader;
+            Finish(AgentState.Failed);
             Timeline.Message(turn, MessageRole.Failure, ex.Message);
             Changed?.Invoke();
             return false;
         }
+        finally { operation.Submitted.TrySetResult(); }
     }
     private async Task ReadAsync(IAgentSession session)
     {
@@ -102,10 +127,18 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex) when (State != AgentState.Disposed)
         {
+            if (!ReferenceEquals(_session, session)) return;
+            _session = null;
+            await session.DisposeAsync();
             Timeline.Message(_turn ?? Guid.Empty, MessageRole.Failure, ex.Message); Finish(AgentState.Failed); Changed?.Invoke();
         }
     }
-    private void Finish(AgentState state) { if (_turn is { } turn) Timeline.Settle(turn); _turn = null; _requests.Clear(); State = state; }
+    private void Finish(AgentState state)
+    {
+        if (_turn is { } turn) Timeline.Settle(turn);
+        _operation?.Cancellation.Dispose(); _operation = null;
+        _requests.Clear(); State = state;
+    }
     private void UpdateRequestState() => State = Request switch
     {
         ApprovalRequest => AgentState.WaitingForApproval,
@@ -141,16 +174,38 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
             return false;
         }
     }
-    public async Task InterruptAsync()
+    public Task InterruptAsync()
     {
-        if (_turn is not { } turn || _session is null) return;
+        if (_turn is not { } turn || _operation is not { } operation) return Task.CompletedTask;
+        if (operation.Stop is { } pending) return pending.Task;
+        var completion = operation.Stop = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = CompleteStopAsync();
+        return completion.Task;
+        async Task CompleteStopAsync()
+        {
+            try { await StopAsync(turn, operation); completion.TrySetResult(); }
+            catch (Exception ex) { completion.TrySetException(ex); }
+        }
+    }
+    private async Task StopAsync(Guid turn, TurnOperation operation)
+    {
+        var starting = State == AgentState.Starting;
         State = AgentState.Interrupting; _requests.Clear(); Changed?.Invoke();
-        try { await _session.InterruptAsync(turn, _lifetime.Token); }
+        if (starting)
+        {
+            operation.Cancellation.Cancel();
+            await operation.Submitted.Task;
+            return;
+        }
+        var session = _session!;
+        try { await session.InterruptAsync(turn, _lifetime.Token); }
         catch (Exception ex)
         {
-            await _session.DisposeAsync();
+            // An old Stop must never recover a session after its turn has finished.
+            if (_turn != turn || State == AgentState.Disposed) return;
+            await session.DisposeAsync();
             if (_reader is not null) await _reader;
-            _session = null;
+            if (ReferenceEquals(_session, session)) _session = null;
             Timeline.Message(turn, MessageRole.Failure, $"Interruption failed. {ex.Message}");
             Finish(AgentState.Failed); Changed?.Invoke();
         }
@@ -158,7 +213,7 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     public async ValueTask DisposeAsync()
     {
         if (State == AgentState.Disposed) return;
-        Finish(AgentState.Disposed); _lifetime.Cancel();
+        _lifetime.Cancel(); Finish(AgentState.Disposed);
         if (_session is not null) await _session.DisposeAsync();
         if (_reader is not null) await _reader;
         Changed?.Invoke();

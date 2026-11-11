@@ -45,6 +45,8 @@ These are responsibility boundaries, not a requirement for six new projects. Sta
 
 The shared controller owns turn admission, draft submission, transcript projection, pending requests, UI state, and lifecycle. The adapter owns protocol parsing, runtime startup, native identifiers, authentication integration, and translation to the shared contract. The harness itself owns planning, tool selection, and execution of its agent loop.
 
+The implemented controller retains one turn owner through startup and interruption. Stop during availability checks or session creation cancels that startup; a late session is disposed without sending the prompt. Session reuse requires both the same location and the same host-terminal identity. Repeated Stop calls share one operation. In the Copilot adapter, a native error retains turn ownership until native idle arrives. A failed or timed-out drain closes the event stream so the controller discards the unusable session before admitting a retry. Native drain is bounded to 30 seconds. Deterministic lifecycle tests exercise these transitions; the shared-controller fixture pumps one UI synchronization context like the app.
+
 The app composition root registers adapters. No `if Copilot`, `if Codex`, or `if Pi` in the composer, reducer, approval UI, or context builder. Capability checks are allowed. Provider wire payloads never reach these consumers.
 
 ### Proposed contract
@@ -114,9 +116,9 @@ Sources read for this design.
 ## Delivery and acceptance
 
 1. Build the shared contract and deterministic fake harness. Prove one transcript/controller handles streaming, approvals, questions, failure, interruption, and disposal. This establishes the contract before adapter implementation is delegated.
-2. Build PowerShell readiness and command submission with an explicit-mode composer. Verify persistent cwd and variables, multiline commands, interactive input, exit status, IME, and raw fallback. Do not call prompt replacement complete while both editors are active.
+2. Build PowerShell readiness and command submission with the explicit `/agent` composer. Verify persistent cwd and variables, multiline commands, interactive input, exit status, IME, and raw fallback. Do not call prompt replacement complete while both editors are active.
 3. Add Copilot through the same controller. Verify a real streamed turn, approval rejection and acceptance, user input, cancellation, and missing-auth behavior. Cancelling an agent must leave the shell usable.
-4. Add visible Auto routing. Verify commands, aliases, prose, mixed-language text, ambiguous text, offline operation, and explicit overrides. A routing error must not trigger a second execution path.
+4. Verify explicit `/agent` routing. Ordinary commands and aliases run unchanged without a network classifier. Bare `/agent` opens a task; `/agent <request>` submits it. `/agentx`, `/Agent` and leading-space text remain shell commands. Returning to the terminal and reopening a task must preserve shell and conversation state.
 5. Add Codex and then Pi through the same contract suite. UI and shared controller should not require harness-name branches. Test actual protocol behavior in addition to the fake harness.
 
 Run relevant repository checks on Boat for implementation changes. Windows shell and WinUI acceptance require a Windows environment. Use the requested 6.1-Sol medium/high or 6.1-Terra high for implementation delegates, and 6.1-Terra high for computer-use verification. Check Warp visually during that implementation pass before claiming visual parity.

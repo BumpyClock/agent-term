@@ -21,6 +21,7 @@ public sealed partial class MainPage
     private bool _composerIme;
     private bool _rawMode;
     private bool _surfaceOpen;
+    private bool _startingTask;
     private AgentEvent? _shownRequest;
     private ShellPromptState _lastPrompt;
     private string? _promptFont;
@@ -64,7 +65,7 @@ public sealed partial class MainPage
         else
         {
             // One line that never changes with shell state, so the prompt height and the PTY size stay put during a command.
-            Composer.PlaceholderText = _rawMode ? "Native prompt is active. Esc returns here." : "Run a command, or /agent to ask the agent";
+            Composer.PlaceholderText = _rawMode ? "Native prompt is active. Click Smart prompt to return." : "Run a command, or /agent to ask the agent";
             PromptHint.Text = "/agent ask the agent" + (_agent.CurrentTask is not null ? " · ctrl+shift+y open last task" : "") + " · esc native prompt";
         }
         SubmitPrompt.IsEnabled = CanSend(Composer.Text, state, owns);
@@ -73,7 +74,7 @@ public sealed partial class MainPage
         {
             RawTerminalButton.Content = raw;
             ToolTipService.SetToolTip(RawTerminalButton, owns ? "Let keystrokes reach the command the agent is running"
-                : _rawMode ? "Return to the smart prompt (Esc)" : "Use the shell's own prompt (Esc)");
+                : _rawMode ? "Return to the smart prompt" : "Use the shell's own prompt (Esc)");
         }
         RawTerminalButton.Visibility = owns || !_surfaceOpen ? Visibility.Visible : Visibility.Collapsed;
         StopAgentButton.Visibility = AgentBusy ? Visibility.Visible : Visibility.Collapsed;
@@ -83,6 +84,7 @@ public sealed partial class MainPage
 
     private bool CanSend(string text, ShellPromptState state, bool owns)
     {
+        if (_startingTask) return false;
         if (string.IsNullOrWhiteSpace(text)) return false;
         if (PromptRouter.Parse(text) is AgentIntent) return true;
         if (_surfaceOpen) return _agent.Request is QuestionRequest { AllowFreeform: true } || (_agent.CanSubmit && _agent.Request is null);
@@ -157,8 +159,9 @@ public sealed partial class MainPage
             RequestChoices.Children.Clear();
             foreach (var choice in question?.Choices ?? [])
             {
-                var button = new Button { Content = choice, Padding = new Thickness(10, 3, 10, 3), MinHeight = 0 };
-                button.Click += async (_, _) => { if (_agent.Request is QuestionRequest pending) await _agent.RespondAsync(new(pending.Request, Answer: choice)); };
+                var button = new Button { Content = new TextBlock { Text = choice, TextWrapping = TextWrapping.Wrap }, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 3, 10, 3), MinHeight = 0 };
+                var requestId = question!.Request;
+                button.Click += async (_, _) => await _agent.RespondAsync(new(requestId, Answer: choice));
                 RequestChoices.Children.Add(button);
             }
         }
@@ -214,13 +217,14 @@ public sealed partial class MainPage
             _lastPrompt = ShellPromptState.Executing;
             session.SubmitCommand(text);
             Composer.Text = "";
+            Terminal.FocusInput(FocusState.Programmatic);
         }
         RefreshComposer();
     }
 
     private async Task SendToAgentAsync(string text)
     {
-        if (_agent.Request is QuestionRequest { AllowFreeform: true } question)
+        if (_shownRequest is QuestionRequest { AllowFreeform: true } question)
         {
             if (await _agent.RespondAsync(new(question.Request, Answer: text)) && Composer.Text == text) Composer.Text = "";
             return;
@@ -239,21 +243,27 @@ public sealed partial class MainPage
     private async Task StartTaskAsync(string request)
     {
         if (AgentBusy) { if (_agent.RunningTask is { } running) OpenSurface(running); return; }
-        var task = _agent.BeginTask();
-        Composer.Text = "";
-        if (_session is { } session && !_rawMode && session.ReserveRows() is { } anchor)
+        if (_startingTask) return;
+        _startingTask = true;
+        try
         {
-            var card = new AgentTaskCard(task);
-            card.Click += (_, _) => OpenSurface(task);
-            card.Update(_agent, false);
-            TaskCardLayer.Children.Add(card);
-            _cards[task] = (session, anchor, card);
-            using var ready = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            try { while (session.PromptState != ShellPromptState.Ready) await Task.Delay(16, ready.Token); }
-            catch (OperationCanceledException) { }
+            var task = _agent.BeginTask();
+            Composer.Text = "";
+            if (_session is { } session && !_rawMode && session.ReserveRows() is { } anchor)
+            {
+                var card = new AgentTaskCard(task);
+                card.Click += (_, _) => OpenSurface(task);
+                card.Update(_agent, false);
+                TaskCardLayer.Children.Add(card);
+                _cards[task] = (session, anchor, card);
+                using var ready = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try { while (session.PromptState != ShellPromptState.Ready) await Task.Delay(16, ready.Token); }
+                catch (OperationCanceledException) { }
+            }
+            OpenSurface(task);
+            if (request.Length > 0) await SendToAgentAsync(request);
         }
-        OpenSurface(task);
-        if (request.Length > 0) await SendToAgentAsync(request);
+        finally { _startingTask = false; RefreshComposer(); }
     }
 
     /// <summary>Positions cards from their anchors on every frame. An expired anchor removes its card; the task remains reachable from the prompt.</summary>
@@ -314,7 +324,10 @@ public sealed partial class MainPage
                 return;
             case VirtualKey.Enter when !shift:
                 e.Handled = true;
-                if (_surfaceOpen && _agent.Request is ApprovalRequest && Composer.Text.Length == 0) ApproveRequest_Click(sender, e);
+                if (_surfaceOpen && _shownRequest is ApprovalRequest && Composer.Text.Length == 0)
+                {
+                    if (!e.KeyStatus.WasKeyDown) ApproveRequest_Click(sender, e);
+                }
                 else await SubmitComposerAsync();
                 return;
         }
@@ -341,7 +354,7 @@ public sealed partial class MainPage
         catch (Exception ex) { PromptHint.Text = ex.Message; }
     }
     private async void ApproveRequest_Click(object sender, RoutedEventArgs e)
-    { if (_agent.Request is ApprovalRequest request) await _agent.RespondAsync(new(request.Request, true)); }
+    { if (_shownRequest is ApprovalRequest request) await _agent.RespondAsync(new(request.Request, true)); }
     private async void DenyRequest_Click(object sender, RoutedEventArgs e)
-    { if (_agent.Request is ApprovalRequest request) await _agent.RespondAsync(new(request.Request)); }
+    { if (_shownRequest is ApprovalRequest request) await _agent.RespondAsync(new(request.Request)); }
 }

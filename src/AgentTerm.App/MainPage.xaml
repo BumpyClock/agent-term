@@ -119,9 +119,13 @@
                         </StackPanel>
                     </Grid>
                     <Border x:Name="RequestDetail" Grid.Row="1" Padding="10,6" CornerRadius="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
-                        <TextBlock x:Name="RequestText" Style="{StaticResource AgentBodyText}" MaxLines="6" TextTrimming="CharacterEllipsis" />
+                        <ScrollViewer MaxHeight="120" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <TextBlock x:Name="RequestText" Style="{StaticResource AgentBodyText}" />
+                        </ScrollViewer>
                     </Border>
-                    <StackPanel x:Name="RequestChoices" Grid.Row="2" Orientation="Horizontal" Spacing="6" />
+                    <ScrollViewer Grid.Row="2" MaxHeight="120" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="RequestChoices" Spacing="6" />
+                    </ScrollViewer>
                 </Grid>
             </Border>
         </Grid>
