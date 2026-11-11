@@ -14,6 +14,8 @@ Terminal defaults follow the Windows light or dark theme. Light mode uses dark t
 
 Colored cell backgrounds and selection join without grid seams at fractional cell widths or display scaling. Text retains normal antialiasing.
 
+An avatar button at the right end of the title bar opens a GitHub dashboard with your contribution heatmap, Copilot usage, activity, pull requests, review requests, and repositories. It reads from the GitHub CLI you already signed in to. See [GitHub dashboard](#github-dashboard).
+
 ## Controls
 
 | Action | Input |
@@ -36,6 +38,11 @@ Colored cell backgrounds and selection join without grid seams at fractional cel
 | Search history | Ctrl+Shift+F; Enter next; Shift+Enter previous |
 | Zoom | Ctrl+wheel, Ctrl++ / Ctrl+-; Ctrl+0 resets |
 | Settings | Profile menu or Ctrl+, |
+| Open GitHub dashboard | Avatar button in the title bar |
+| Refresh GitHub dashboard | Refresh button or F5 |
+| Switch dashboard section | Left / Right (wraps); Home / End for first / last |
+| Inspect a heatmap day | Left / Right moves a week; Up / Down moves a day; Home / End jump to the first / latest day |
+| Close dashboard | Escape, click outside, or click the avatar again |
 
 Drag beyond the top or bottom to scroll while selecting. Copy joins soft-wrapped text and preserves explicit line breaks. Paste honors bracketed paste mode and sanitizes terminal control characters. Clipboard errors do not stop the shell. Screen switches clear selection. Search wraps; case-insensitive search currently folds ASCII letters only.
 
@@ -71,6 +78,25 @@ Git 2.45 or newer must be on `PATH`. Queries run asynchronously at most once eve
 
 WSL launch commands are unchanged. A WSL shell must already emit OSC 7 file URLs for directory reporting; automatic Bash/Zsh hook installation is not included. Accepted WSL reports retain the named distribution and Git runs inside it, with a Linux-side timeout. Remote-host URLs and unsupported reports clear context rather than querying Windows Git against a remote path. WSL execution has not been verified live.
 
+## GitHub dashboard
+
+The avatar button sits at the right end of the title bar, beside the caption buttons. Clicking it opens a flyout over the title bar, with your name, login, and contribution total beside the avatar. Clicking the avatar again closes it. The flyout shows a contribution heatmap for the last 12 months, Copilot usage, and four lists: **Activity**, **My PRs**, **Reviews**, and **Repos**. Each list shows at most 30 entries. Pull request cards show state, review decision, branch, labels, comment count, and a checks pill that lists up to 100 checks. Clicking a card or title opens it in your default browser, only for `https://github.com/` URLs. The lists cover your whole account, not the repository of the active terminal.
+
+**Requirements.** Install the GitHub CLI so `gh.exe` is on `PATH`, and sign in with `gh auth login --hostname github.com`. Only github.com is supported. The app runs `gh api --hostname github.com` and never reads or stores a token. If `gh` is missing, the flyout shows a "GitHub CLI not found" panel with an install command. Restart AgentTerm after installing so it sees the new `PATH`. If `gh` has no active account or its token is rejected, the flyout shows a "Sign in to GitHub CLI" panel with a copyable command and a **Retry** button. The app never signs in for you. Other failures, such as no network, show a banner with **Retry** and keep earlier data. A section that fails alone keeps its earlier data marked "Stale data."
+
+**Refresh.** The flyout refreshes when it opens if no refresh has succeeded this session or the last one is 5 minutes old or older. It then refreshes every 5 minutes while it stays open. The refresh button and F5 refresh on demand. Automatic refreshes reuse sections that are still fresh (5 minutes for lists and Copilot usage, 15 minutes for the heatmap and repos). Manual refresh reloads everything. Each request times out after 45 seconds. While the flyout is closed nothing refreshes. At startup the app reads its cache and makes one `gh api user` call to show your avatar.
+
+**What leaves the machine.** `gh` sends read-only queries to github.com for your profile, contribution calendar, pull requests, review requests, events, repositories, and Copilot usage. The app itself requests avatar images from `avatars.githubusercontent.com` and rejects any other image host. A failed avatar image leaves your initials in place.
+
+**What is stored.** A snapshot is cached at `%LOCALAPPDATA%\AgentTerm\github-dashboard.json` so the flyout paints at once. It holds your account id, login, name, avatar URL, and the last fetched lists, heatmap, and Copilot usage. That includes pull request titles and repository names, which can be private. It holds no credentials. Each section expires after 7 days, and an unreadable cache is ignored. Delete the file to clear it. Cached data shows as "Saved" until a refresh confirms the account.
+
+**Limits and known gaps.**
+
+- Copilot usage comes from the undocumented `copilot_internal/user` endpoint and may stop working. When it fails, the other sections still load.
+- The button hides when the window is too narrow to fit it beside the caption buttons. There is no setting to hide it otherwise.
+- With Windows animations off, the flyout entrance, heatmap reveal, tab slide, and loading shimmer are skipped, and the refresh icon dims instead of spinning.
+- Automated checks cover parsing, caching, refresh rules, and text and layout rules. They do not exercise the flyout. High contrast, a failed avatar image, and the section-level "Stale data." line have not been verified live. See [interaction testing](docs/interaction-testing.md).
+
 ## Build and run
 
 Use Windows x64, Windows 10 version 2004 or newer, a .NET 10 SDK, and PowerShell. Windows SDK/XAML tools restore through NuGet. Internet access is needed for the first build.
@@ -80,7 +106,7 @@ Use Windows x64, Windows 10 version 2004 or newer, a .NET 10 SDK, and PowerShell
 dotnet run --project src/AgentTerm.App -p:Platform=x64 -c Release
 ```
 
-The check script downloads checksum-pinned Ghostty and Zig archives, builds the native DLL and app, and runs shell-icon extraction and WinUI decoding checks, native VT/input/history/search tests, real shell integration tests, and Win2D pixel checks. Images are saved to `artifacts/renderer-smoke.png` and `artifacts/selection-smoke.png`. Generated files stay in ignored `.deps`, `artifacts`, `bin`, and `obj` folders. First native builds take several minutes.
+The check script downloads checksum-pinned Ghostty and Zig archives, builds the native DLL and app, and runs shell-icon extraction and WinUI decoding checks, native VT/input/history/search tests, GitHub dashboard parsing, cache, refresh, and presentation checks, real shell integration tests, and Win2D pixel checks. The GitHub checks run inside `AgentTerm.Terminal.Smoke` with fake transports and no network. Images are saved to `artifacts/renderer-smoke.png` and `artifacts/selection-smoke.png`. Generated files stay in ignored `.deps`, `artifacts`, `bin`, and `obj` folders. First native builds take several minutes.
 
 The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packaging, signing, and additional architectures are future work.
 
@@ -97,7 +123,13 @@ The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packa
 - `src/AgentTerm.Terminal/ConPtyConnection.cs` owns process creation, pipes, output draining, resize, and cleanup.
 - `src/AgentTerm.Terminal/GhosttyTerminal.*` owns the pinned native ABI and terminal, render, selection, search, and input handles.
 - `src/AgentTerm.Terminal/ShellProfile.cs` discovers installed shell profiles.
+- `src/AgentTerm.App/GitHubDashboardButton` owns the title-bar avatar button, its flyout, flyout sizing, and returning focus to the terminal after pointer use.
+- `src/AgentTerm.App/MainWindow.GitHub.cs` sizes the spacer that keeps the title-bar content clear of the caption buttons, and hides the avatar button when it would overlap them.
+- `src/AgentTerm.App/GitHubDashboardView` owns the snapshot, refresh timers, cache use, sign-in and missing-`gh` panels, and the tab and F5 keys. `GitHubCards.cs` builds the list cards.
+- `src/AgentTerm.App/GitHubHeatmap.cs` draws the contribution calendar and handles its keyboard navigation. `GitHubAvatar.cs` shows initials until a picture decodes. `GitHubMotion.cs` owns animations and turns them off with Windows animations.
+- `src/AgentTerm.App/GitHub/` holds the WinUI-free logic. `GitHubCli.cs` runs `gh`, `GitHubData.cs` owns queries, parsing, and section refresh, `GitHubCache.cs` owns the on-disk snapshot, `GitHubJson.cs` parses strict JSON, `GitHubPresentation.cs` and `GitHubStrings.cs` own display text and layout rules, and `GitHubModel.cs` owns the shared types.
 - `tests` contains real native, shell, and rendered-pixel checks.
+- `tests/AgentTerm.Terminal.Smoke/GitHubChecks.cs` checks the GitHub dashboard logic with fake transports and no network.
 
 `StopAsync` releases ConPTY while retaining Ghostty state for inspection. `DisposeAsync` also releases that terminal state. Hidden tabs pause drawing, not their shell output reader. Native Ghostty owns scrollback and tracked selection references; frame snapshots own their cell arrays and consumers must not mutate them.
 
