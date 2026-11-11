@@ -85,26 +85,23 @@
                               FallbackColor="{ThemeResource SolidBackgroundFillColorBase}" />
             </Border.Background>
         </Border>
-        <Grid Margin="1" RowDefinitions="32,*">
-            <Grid Padding="10,0,4,0" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="4">
-                <FontIcon Glyph="&#xE756;" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                <TextBlock x:Name="TitleText" Grid.Column="1" VerticalAlignment="Center" FontSize="12"
-                           TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Button x:Name="SplitRightButton" Grid.Column="2" Width="28" MinWidth="0" Height="28" Padding="0"
+        <Grid Margin="1" RowDefinitions="28,*">
+            <Grid Padding="0,0,4,0" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
+                <Button x:Name="SplitRightButton" Grid.Column="1" Width="28" MinWidth="0" Height="28" Padding="0"
                         Style="{StaticResource PaneActionButtonStyle}"
                         Click="SplitRight_Click" AutomationProperties.Name="Split pane right" ToolTipService.ToolTip="Split pane right">
                     <Border Width="13" Height="12" CornerRadius="1" BorderThickness="1" BorderBrush="{Binding Foreground, ElementName=SplitRightButton}">
                         <Rectangle Width="1" Height="10" Fill="{Binding Foreground, ElementName=SplitRightButton}" />
                     </Border>
                 </Button>
-                <Button x:Name="SplitDownButton" Grid.Column="3" Width="28" MinWidth="0" Height="28" Padding="0"
+                <Button x:Name="SplitDownButton" Grid.Column="2" Width="28" MinWidth="0" Height="28" Padding="0"
                         Style="{StaticResource PaneActionButtonStyle}"
                         Click="SplitDown_Click" AutomationProperties.Name="Split pane down" ToolTipService.ToolTip="Split pane down">
                     <Border Width="13" Height="12" CornerRadius="1" BorderThickness="1" BorderBrush="{Binding Foreground, ElementName=SplitDownButton}">
                         <Rectangle Width="11" Height="1" Fill="{Binding Foreground, ElementName=SplitDownButton}" />
                     </Border>
                 </Button>
-                <Button Grid.Column="4" Width="28" MinWidth="0" Height="28" Padding="0"
+                <Button Grid.Column="3" Width="28" MinWidth="0" Height="28" Padding="0"
                         Style="{StaticResource PaneActionButtonStyle}"
                         Click="Close_Click" AutomationProperties.Name="Close pane" ToolTipService.ToolTip="Close pane">
                     <FontIcon Glyph="&#xE8BB;" FontSize="11" />

@@ -15,7 +15,6 @@ internal sealed partial class TerminalPane : UserControl
     {
         _profileId = page.Profile.Id;
         InitializeComponent();
-        TitleText.Text = page.Profile.Name;
         TerminalContent.Content = page;
         ApplyMaterial();
     }

@@ -53,6 +53,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     }
 
     internal string Title => string.Join(" · ", _panes.Select(pane => pane.Page.Profile.Name).Distinct().Take(2));
+    internal ShellProfile PrimaryProfile => _panes[0].Page.Profile;
     internal int PaneCount => _panes.Count;
     internal MainPage ActivePage => _active.Page;
     internal bool IsClosing => _disposal is not null || (_panes.Count == 1 && _retiring is not null);

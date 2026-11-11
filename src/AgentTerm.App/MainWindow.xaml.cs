@@ -11,7 +11,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
+using Windows.Storage;
+using Windows.Storage.FileProperties;
 using Windows.System;
 using Windows.UI.Core;
 using Windows.UI.ViewManagement;
@@ -134,10 +137,35 @@ public sealed partial class MainWindow : Window
             Content = tab,
             Style = (Style)WindowRoot.Resources["PillTabStyle"]
         };
-        tab.TitleChanged += () => item.Header = tab.Title;
+        _ = SetShellIconAsync(item, tab);
+        tab.TitleChanged += () =>
+        {
+            item.Header = tab.Title;
+            _ = SetShellIconAsync(item, tab);
+        };
         tab.CloseRequested += async () => await CloseTabAsync(item);
         Tabs.TabItems.Add(item);
         Tabs.SelectedItem = item;
+    }
+
+    private static async Task SetShellIconAsync(TabViewItem item, TerminalTab tab)
+    {
+        var profile = tab.PrimaryProfile;
+        item.IconSource = new FontIconSource { Glyph = "\uE756" };
+        try
+        {
+            var executable = await StorageFile.GetFileFromPathAsync(profile.Executable);
+            using var thumbnail = await executable.GetThumbnailAsync(ThumbnailMode.SingleItem, 32);
+            if (thumbnail is null) return;
+            var image = new BitmapImage();
+            await image.SetSourceAsync(thumbnail);
+            if (tab.PrimaryProfile.Id == profile.Id)
+                item.IconSource = new ImageIconSource { ImageSource = image };
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
+        {
+            // The installed executable's icon is optional. Keep the terminal glyph if Windows cannot read it.
+        }
     }
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
