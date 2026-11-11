@@ -5,4 +5,4 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
-</Project>
+<ItemGroup><ProjectReference Include="../AgentTerm.Agents/AgentTerm.Agents.csproj" /></ItemGroup></Project>

@@ -246,7 +246,11 @@ public sealed partial class MainWindow : Window
         var alt = Down(VirtualKey.Menu);
         var firstPress = !e.KeyStatus.WasKeyDown;
 
-        if (control && !alt && e.Key == VirtualKey.Tab)
+        if (!control && !shift && !alt && e.Key == VirtualKey.Escape && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
+        {
+            e.Handled = true;
+        }
+        else if (control && !alt && e.Key == VirtualKey.Tab)
         {
             e.Handled = true;
             SwitchTab(shift ? -1 : 1);

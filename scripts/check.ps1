@@ -5,9 +5,17 @@ $root = Split-Path $PSScriptRoot -Parent
 if ($LASTEXITCODE -ne 0) { throw "App build failed with exit code $LASTEXITCODE." }
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.Icons.Smoke/AgentTerm.Icons.Smoke.csproj') -c Release
 if ($LASTEXITCODE -ne 0) { throw "Icon smoke tests failed with exit code $LASTEXITCODE." }
+& dotnet run --project (Join-Path $root 'tests/AgentTerm.AgentUi.Smoke/AgentTerm.AgentUi.Smoke.csproj') -c Release
+if ($LASTEXITCODE -ne 0) { throw "Native agent UI checks failed with exit code $LASTEXITCODE." }
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.Terminal.Smoke/AgentTerm.Terminal.Smoke.csproj') -c Release
 if ($LASTEXITCODE -ne 0) { throw "Smoke tests failed with exit code $LASTEXITCODE." }
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.ConPty.Smoke/AgentTerm.ConPty.Smoke.csproj') -c Release
 if ($LASTEXITCODE -ne 0) { throw "ConPTY smoke tests failed with exit code $LASTEXITCODE." }
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.Renderer.Smoke/AgentTerm.Renderer.Smoke.csproj') -c Release -- (Join-Path $root 'artifacts/renderer-smoke.png')
 if ($LASTEXITCODE -ne 0) { throw "Renderer smoke tests failed with exit code $LASTEXITCODE." }
+
+& dotnet run --project (Join-Path $root 'tests/AgentTerm.Agents.Smoke/AgentTerm.Agents.Smoke.csproj') -c Release
+if ($LASTEXITCODE -ne 0) { throw "Agent behavior checks failed with exit code $LASTEXITCODE." }
+
+& dotnet run --project (Join-Path $root 'tests/AgentTerm.Copilot.Smoke/AgentTerm.Copilot.Smoke.csproj') -c Release -- --normalization-only
+if ($LASTEXITCODE -ne 0) { throw "Copilot normalization checks failed with exit code $LASTEXITCODE." }

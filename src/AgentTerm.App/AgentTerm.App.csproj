@@ -23,4 +23,7 @@
     <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
     <AppxManifest Remove="Package.appxmanifest" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AgentTerm.Copilot\AgentTerm.Copilot.csproj" />
+  </ItemGroup>
 </Project>

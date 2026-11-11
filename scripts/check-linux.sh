@@ -22,3 +22,7 @@ prefix="$root/artifacts/native/linux-x64"
 (cd "$source" && "$zig" build -Demit-lib-vt -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu --prefix "$prefix")
 export LD_LIBRARY_PATH="$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 dotnet run --project "$root/tests/AgentTerm.Terminal.Smoke/AgentTerm.Terminal.Smoke.csproj" -c Release
+
+dotnet run --project "$root/tests/AgentTerm.Agents.Smoke/AgentTerm.Agents.Smoke.csproj" -c Release
+
+dotnet run --project "$root/tests/AgentTerm.Copilot.Smoke/AgentTerm.Copilot.Smoke.csproj" -c Release -- --normalization-only

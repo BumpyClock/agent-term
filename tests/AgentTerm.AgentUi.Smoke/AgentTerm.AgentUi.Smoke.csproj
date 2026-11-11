@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+    <ProjectReference Include="../../src/AgentTerm.Agents/AgentTerm.Agents.csproj" />
+    <Compile Include="../../src/AgentTerm.App/ActivityLabel.cs" Link="ActivityLabel.cs" />
+    <Compile Include="../../src/AgentTerm.App/AgentTimelineView.cs" Link="AgentTimelineView.cs" />
+    <Page Include="../../src/AgentTerm.App/AgentStyles.xaml" Link="AgentStyles.xaml" />
+  </ItemGroup>
+</Project>

@@ -1,14 +1,29 @@
 using System.Text;
+using AgentTerm.Agents;
 
 namespace AgentTerm.Terminal;
 
 /// <summary>Owns one shell and serializes access to its Ghostty terminal state.</summary>
-public sealed class TerminalSession : IAsyncDisposable
+public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 {
     private readonly object _gate = new();
     private readonly GhosttyTerminal _terminal;
     private readonly ConPtyConnection _connection;
     private readonly ShellProfile _profile;
+    private readonly string _promptToken = Guid.NewGuid().ToString("N");
+    private readonly ShellPromptProtocol _prompt;
+    private sealed class OwnedCommand
+    {
+        public readonly string Id = "a:" + Guid.NewGuid().ToString("N")[..8];
+        public readonly CommandOutputCapture Capture;
+        public OwnedCommand() { Capture = new(Id); }
+        public readonly TaskCompletionSource<TerminalExecutionResult> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Interrupted;
+        public bool InteractiveInput;
+    }
+    private OwnedCommand? _owned;
+    public bool AgentOwnsTerminal { get { lock (_gate) return _owned is not null; } }
+    public void AllowAgentInteractiveInput() { lock (_gate) { if (_owned is not null) _owned.InteractiveInput = true; } }
     private bool _started;
     private Task? _stopTask;
     private Task? _disposeTask;
@@ -17,6 +32,9 @@ public sealed class TerminalSession : IAsyncDisposable
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("ConPTY requires Windows.");
         _profile = profile ?? ShellProfile.Default;
+        _prompt = new(_promptToken);
+        _prompt.OutputByte += b => _owned?.Capture.Feed(b);
+        _prompt.Marker += message => _owned?.Capture.Marker(message);
         _connection = new ConPtyConnection(columns, rows);
         _terminal = new GhosttyTerminal(columns, rows);
         _connection.OutputReceived += ProcessOutput;
@@ -33,7 +51,7 @@ public sealed class TerminalSession : IAsyncDisposable
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_started) throw new InvalidOperationException("This session has already started.");
-            _connection.Start(_profile.Executable, ShellIntegration.Arguments(_profile), _profile.StartingDirectory);
+            _connection.Start(_profile.Executable, ShellIntegration.Arguments(_profile, _promptToken), _profile.StartingDirectory);
             _started = true;
         }
     }
@@ -43,10 +61,117 @@ public sealed class TerminalSession : IAsyncDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_owned is { InteractiveInput: false }) return;
             var bytes = Encoding.UTF8.GetBytes(text);
             if (bytes.Length != 0) PrepareInput();
             _connection.Send(bytes);
         }
+    }
+
+    public ShellPromptState PromptState { get { lock (_gate) return Completion.IsCompleted ? ShellPromptState.Exited : _prompt.State; } }
+    public IReadOnlySet<string> KnownCommands { get { lock (_gate) return _prompt.Commands; } }
+    public bool? LastCommandSucceeded { get { lock (_gate) return _prompt.LastCommandSucceeded; } }
+    public void EnableManagedPrompt()
+    {
+        lock (_gate)
+        {
+            if (_prompt.State != ShellPromptState.Raw) throw new InvalidOperationException("Shell integration is not ready.");
+            _prompt.State = ShellPromptState.Executing;
+            Send("$global:__AgentTermManaged=$true\r");
+        }
+    }
+    public void RestoreRawPrompt()
+    {
+        lock (_gate)
+        {
+            if (_owned is not null || _prompt.State != ShellPromptState.Ready) return;
+            _prompt.State = ShellPromptState.Executing;
+            Send("$global:__AgentTermManaged=$false\r");
+        }
+    }
+    public void SubmitCommand(string command) => SubmitCommand(command, Guid.NewGuid().ToString("N"));
+    private void SubmitCommand(string command, string id)
+    {
+        lock (_gate)
+        {
+            if (_owned is not null) throw new InvalidOperationException("Agent using terminal.");
+            if (_prompt.State != ShellPromptState.Ready) throw new InvalidOperationException("Wait for shell readiness or use terminal input.");
+            var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(id + "\n" + command));
+            _prompt.State = ShellPromptState.Executing;
+            _connection.Send(Encoding.UTF8.GetBytes(encoded + "\u001b[24;5~"));
+        }
+    }
+
+    /// <summary>
+    /// Reserves two blank history rows at the managed prompt for an inline card, without echo or a command.
+    /// Returns null unless the managed prompt is ready. The anchor marks the first reserved row.
+    /// </summary>
+    public TerminalAnchor? ReserveRows()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_owned is not null || _prompt.State != ShellPromptState.Ready) return null;
+            _terminal.ScrollToBottom();
+            var frame = _terminal.ReadFrame();
+            if (frame.Viewport.IsAlternateScreen) return null;
+            var anchor = _terminal.AnchorActiveRow(Math.Clamp(frame.Cursor.Row, 0, frame.Rows - 1));
+            SubmitCommand("", "c:" + Guid.NewGuid().ToString("N")[..8]);
+            return anchor;
+        }
+    }
+    public long? ReadAnchor(TerminalAnchor anchor)
+    {
+        lock (_gate) return _disposeTask is null ? _terminal.ReadAnchor(anchor) : null;
+    }
+    public void ReleaseAnchor(TerminalAnchor anchor)
+    {
+        lock (_gate) { if (_disposeTask is null) _terminal.ReleaseAnchor(anchor); }
+    }
+
+    public async Task<TerminalExecutionResult> ExecuteAsync(TerminalExecutionRequest request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        OwnedCommand owned;
+        lock (_gate)
+        {
+            if (_disposeTask is not null || Completion.IsCompleted) return new(TerminalExecutionStatus.Exited);
+            if (_owned is not null || _prompt.State == ShellPromptState.Executing) return new(TerminalExecutionStatus.Busy);
+            if (_prompt.State != ShellPromptState.Ready) return new(TerminalExecutionStatus.Unsupported, Message: "Managed PowerShell must be ready.");
+            owned = new();
+            SubmitCommand(request.Command, owned.Id);
+            _owned = owned;
+        }
+        using var cancel = cancellationToken.Register(() =>
+        {
+            lock (_gate)
+            {
+                if (_owned != owned) return;
+                owned.Interrupted = true;
+                _connection.Send([3]);
+            }
+        });
+        using var signalLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var exited = Completion;
+        var finished = await Task.WhenAny(owned.Completion.Task, exited, CancellationSignal(signalLifetime.Token)).ConfigureAwait(false);
+        signalLifetime.Cancel();
+        if (finished == owned.Completion.Task) return await owned.Completion.Task.ConfigureAwait(false);
+        if (finished == exited)
+        {
+            lock (_gate) { if (_owned == owned) _owned = null; }
+            return new(TerminalExecutionStatus.Exited, owned.Capture.Text);
+        }
+        try { return await owned.Completion.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
+        catch (TimeoutException)
+        {
+            // Ownership deliberately remains held until the shell actually reports ready.
+            return new(TerminalExecutionStatus.InterruptionFailed, Message: "PowerShell did not report readiness after Ctrl+C. Terminal remains agent-owned; use interactive input or close the pane.");
+        }
+    }
+    private static async Task CancellationSignal(CancellationToken token)
+    {
+        try { await Task.Delay(Timeout.Infinite, token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
     }
 
     public string ReadText()
@@ -81,6 +206,7 @@ public sealed class TerminalSession : IAsyncDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_owned is { InteractiveInput: false }) return;
             var bytes = _terminal.EncodeKey(virtualKey, modifiers, action, text);
             if (bytes.Length != 0 && action != TerminalKeyAction.Release &&
                 virtualKey is not (0x10 or 0x11 or 0x12 or 0x5B or 0x5C or >= 0xA0 and <= 0xA5)) PrepareInput();
@@ -106,6 +232,7 @@ public sealed class TerminalSession : IAsyncDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_owned is { InteractiveInput: false }) return true;
             if ((mouse.Modifiers & TerminalModifiers.Shift) != 0 || !_terminal.IsMouseTrackingEnabled) return false;
             var bytes = _terminal.EncodeMouse(mouse, geometry);
             // Mouse coordinates refer to the displayed viewport. Hover and drag must not jump it to the bottom.
@@ -120,6 +247,7 @@ public sealed class TerminalSession : IAsyncDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if (_owned is { InteractiveInput: false }) return;
             var bytes = _terminal.EncodePaste(text);
             if (bytes.Length != 0) PrepareInput();
             _connection.Send(bytes);
@@ -198,6 +326,14 @@ public sealed class TerminalSession : IAsyncDisposable
         lock (_gate)
         {
             _terminal.Write(bytes.Span);
+            _prompt.Feed(bytes.Span);
+            if (_owned is { } owned && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == owned.Id && owned.Capture.Ended)
+            {
+                _owned = null;
+                owned.Completion.TrySetResult(new(owned.Interrupted ? TerminalExecutionStatus.Interrupted : TerminalExecutionStatus.Completed,
+                    owned.Capture.Text, _prompt.LastCommandSucceeded, _prompt.LastExitCode,
+                    ShellDirectory.FromReport(_terminal.ReadWorkingDirectory(), _profile)?.Path, owned.Capture.Truncated));
+            }
             foreach (var reply in _terminal.TakeResponses())
             {
                 // During teardown keep draining output, but the input channel is closing.

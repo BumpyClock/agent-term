@@ -33,7 +33,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private ushort _rows = 24;
     private readonly TerminalKeyboardInput _keyboard = new();
     private readonly TerminalCompositionInput _composition = new();
-    public bool IsComposing => _composition.IsComposing;
+    public bool IsComposing => _composition.IsComposing || _composerIme;
     private bool _clearingInput;
     private TerminalKeyboardInput.PhysicalKey? _textKey;
     private int _blinkTicks;
@@ -73,7 +73,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         Profile = profile;
         _appearance = TerminalPreferences.Current.ResolveAppearance(profile.Id);
+        _agent = new(App.AgentHarness, () => _session);
         InitializeComponent();
+        _agent.Changed += AgentChanged;
         Terminal.Input.TextCompositionStarted += Input_CompositionStarted;
         Terminal.Input.TextCompositionEnded += Input_CompositionEnded;
         Terminal.Input.TextChanging += Input_TextChanging;
@@ -111,6 +113,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     public void SetActive(bool visible)
     {
         _viewActive = visible;
+        SetAgentAnimation(visible && IsLoaded);
         if (_state == SessionState.Disposed) return;
         if (!visible)
         {
@@ -131,7 +134,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     public void FocusTerminal()
     {
         if (_viewActive && _state is SessionState.Running or SessionState.Idle)
-            Terminal.FocusInput(FocusState.Programmatic);
+        {
+            if (_surfaceOpen || (!_rawMode && _session?.PromptState == ShellPromptState.Ready)) Composer.Focus(FocusState.Programmatic);
+            else Terminal.FocusInput(FocusState.Programmatic);
+        }
     }
 
     private async void NewSession_Click(object sender, RoutedEventArgs e) => await RestartSessionAsync();
@@ -229,8 +235,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void RefreshOutput(TerminalSession session)
     {
+        RefreshComposer();
         var frame = session.ReadFrame();
         Terminal.SetFrame(frame);
+        RefreshTaskCards(frame);
         PaneStatus.Refresh(session.ReadWorkingDirectory(), _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
         if (_terminalBackground != frame.Background)
         {
@@ -833,6 +841,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Terminal_GotFocus(object sender, RoutedEventArgs e)
     {
+        if (_session?.AgentOwnsTerminal != true && _session?.PromptState == ShellPromptState.Ready) { _rawMode = true; _session.RestoreRawPrompt(); }
         if (_state == SessionState.Running) _session?.SetFocus(true);
         Terminal.RefreshCursor();
     }
@@ -963,6 +972,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Page_Unloaded(object sender, RoutedEventArgs e)
     {
+        SetAgentAnimation(false);
         CancelSelectionGesture();
     }
 
@@ -971,6 +981,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private async Task DisposeCoreAsync()
     {
         SetState(SessionState.Disposed);
+        await _agent.DisposeAsync();
         PaneStatus.Dispose();
         _refreshTimer.Stop();
         _selectionTimer.Stop();

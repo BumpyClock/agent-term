@@ -4,6 +4,7 @@ namespace AgentTerm_App;
 
 public partial class App : Application
 {
+    internal static AgentTerm.Agents.IAgentHarness AgentHarness { get; } = new AgentTerm.Copilot.CopilotHarness();
     private Window? _window;
 
     public App()
