@@ -8,11 +8,12 @@ internal static class PreferencesChecks
         try
         {
             var prefs = new TerminalPreferences(path);
-            if (prefs.FontSize != 14 || prefs.FontFamily != "" || prefs.LoadError is not null)
+            if (prefs.FontSize != 14 || prefs.FontFamily != "" || prefs.BackgroundOpacity != 0.8 || prefs.LoadError is not null)
                 throw new Exception("Missing settings should use defaults and automatic font selection.");
             File.WriteAllText(path, """{"DefaultProfileId":"cmd","FontSize":17,"UseAcrylic":true}""");
             var legacy = new TerminalPreferences(path);
-            if (legacy.DefaultProfileId != "cmd" || legacy.FontSize != 17 || !legacy.UseAcrylic || legacy.FontFamily != "")
+            if (legacy.DefaultProfileId != "cmd" || legacy.FontSize != 17 || !legacy.UseAcrylic || legacy.FontFamily != "" ||
+                legacy.BackgroundOpacity != 0.8)
                 throw new Exception("Legacy settings should preserve their values and select the font automatically.");
             prefs.Update("cmd", 18, useAcrylic: true, fontFamily: "FiraCode Nerd Font Mono");
             var reopened = new TerminalPreferences(path);
@@ -69,6 +70,49 @@ internal static class PreferencesChecks
             var normalized = new TerminalPreferences(path);
             if (normalized.ProfileOverrides.Count != 1 || normalized.ResolveAppearance("partial") != new TerminalAppearance("", 8, false))
                 throw new Exception("Loaded overrides must normalize nulls, empty entries, automatic font and size limits.");
+            normalized.Update("cmd", 14, true, profileOverrides: new Dictionary<string, ProfileAppearanceOverride>
+            {
+                ["transparent"] = new(BackgroundOpacity: 0),
+                ["opaque"] = new(BackgroundOpacity: 1),
+                ["wsl:offline opacity"] = new(BackgroundOpacity: 0.25)
+            }, backgroundOpacity: 0.4);
+            var opacityRoundTrip = new TerminalPreferences(path);
+            if (opacityRoundTrip.BackgroundOpacity != 0.4 || opacityRoundTrip.ResolveAppearance("inherited").BackgroundOpacity != 0.4 ||
+                opacityRoundTrip.ResolveAppearance("transparent").BackgroundOpacity != 0 ||
+                opacityRoundTrip.ResolveAppearance("opaque").BackgroundOpacity != 1 ||
+                opacityRoundTrip.ResolveAppearance("wsl:offline opacity").BackgroundOpacity != 0.25)
+                throw new Exception("Default opacity, full-range profile overrides and unknown profile IDs must survive restart.");
+            opacityRoundTrip.Update("cmd", 16, false, backgroundOpacity: 0.6);
+            if (opacityRoundTrip.ResolveAppearance("inherited").BackgroundOpacity != 0.6 ||
+                opacityRoundTrip.ResolveAppearance("transparent").BackgroundOpacity != 0 ||
+                opacityRoundTrip.ResolveAppearance("opaque").BackgroundOpacity != 1)
+                throw new Exception("Changing default opacity must affect inherited profiles and preserve explicit zero and one.");
+            opacityRoundTrip.Update("cmd", 18);
+            if (new TerminalPreferences(path).BackgroundOpacity != 0.6)
+                throw new Exception("Unrelated settings changes must preserve default opacity.");
+            opacityRoundTrip.Update("cmd", 18, profileOverrides: new Dictionary<string, ProfileAppearanceOverride>
+            {
+                ["wsl:offline opacity"] = opacityRoundTrip.ProfileOverrides["wsl:offline opacity"]
+            });
+            var resetOpacity = new TerminalPreferences(path);
+            if (resetOpacity.ResolveAppearance("transparent").BackgroundOpacity != 0.6 ||
+                resetOpacity.ResolveAppearance("opaque").BackgroundOpacity != 0.6 ||
+                resetOpacity.ResolveAppearance("wsl:offline opacity").BackgroundOpacity != 0.25)
+                throw new Exception("Resetting profile overrides must restore opacity inheritance and preserve unrelated profiles.");
+            File.WriteAllText(path, """{"BackgroundOpacity":2,"Profiles":{"low":{"BackgroundOpacity":-1},"high":{"BackgroundOpacity":3},"inherit":{"BackgroundOpacity":null}}}""");
+            var boundedOpacity = new TerminalPreferences(path);
+            if (boundedOpacity.BackgroundOpacity != 1 || boundedOpacity.ResolveAppearance("low").BackgroundOpacity != 0 ||
+                boundedOpacity.ResolveAppearance("high").BackgroundOpacity != 1 || boundedOpacity.ProfileOverrides.ContainsKey("inherit"))
+                throw new Exception("Loaded opacity must stay within zero and one, while null inherits.");
+            boundedOpacity.Update("cmd", 14, profileOverrides: new Dictionary<string, ProfileAppearanceOverride>
+            {
+                ["low"] = new(BackgroundOpacity: -4),
+                ["high"] = new(BackgroundOpacity: 4)
+            }, backgroundOpacity: -2);
+            var savedBounds = new TerminalPreferences(path);
+            if (savedBounds.BackgroundOpacity != 0 || savedBounds.ResolveAppearance("low").BackgroundOpacity != 0 ||
+                savedBounds.ResolveAppearance("high").BackgroundOpacity != 1)
+                throw new Exception("Saved opacity must normalize global and profile values to the supported range.");
             File.WriteAllText(path, "{broken");
             var invalid = new TerminalPreferences(path);
             if (invalid.LoadError is null || invalid.FontSize != 14) throw new Exception("Invalid settings should report the failure and use defaults.");
