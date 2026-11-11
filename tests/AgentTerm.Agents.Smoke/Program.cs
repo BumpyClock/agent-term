@@ -108,13 +108,19 @@ sealed class FakeHarness : IAgentHarness
 sealed class FakeSession : IAgentSession
 {
     public bool FailResponse;
+    public bool FailSubmit, Disposing;
+    public TaskCompletionSource? DisposeRelease;
     public TaskCompletionSource? StopRelease;
     public int InterruptCalls;
     private readonly Channel<AgentEvent> _events = Channel.CreateUnbounded<AgentEvent>(); public Guid Turn; public AgentResponse? Response; public bool Disposed;
     public void Emit(AgentEvent item) => _events.Writer.TryWrite(item);
     public void Fail(Exception error) => _events.Writer.TryComplete(error);
     public IAsyncEnumerable<AgentEvent> Events(CancellationToken cancellationToken = default) => _events.Reader.ReadAllAsync(cancellationToken);
-    public Task SubmitAsync(AgentPrompt prompt, CancellationToken cancellationToken = default) { Turn = prompt.Turn; return Task.CompletedTask; }
+    public Task SubmitAsync(AgentPrompt prompt, CancellationToken cancellationToken = default)
+    {
+        if (FailSubmit) throw new IOException("Fixture submission failed.");
+        Turn = prompt.Turn; return Task.CompletedTask;
+    }
     public Task RespondAsync(AgentResponse response, CancellationToken cancellationToken = default)
     {
         if (FailResponse) throw new IOException("Fixture response transport failed.");
@@ -127,5 +133,10 @@ sealed class FakeSession : IAgentSession
         if (StopRelease is not null) { await StopRelease.Task; throw new IOException("Old interruption failed."); }
         Emit(new TurnInterrupted(turn));
     }
-    public ValueTask DisposeAsync() { Disposed = true; _events.Writer.TryComplete(); return ValueTask.CompletedTask; }
+    public async ValueTask DisposeAsync()
+    {
+        Disposing = true;
+        if (DisposeRelease is not null) await DisposeRelease.Task;
+        Disposed = true; _events.Writer.TryComplete();
+    }
 }

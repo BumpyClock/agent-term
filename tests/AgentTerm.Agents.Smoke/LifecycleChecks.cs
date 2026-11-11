@@ -67,6 +67,33 @@ static class LifecycleChecks
             Check(!await submission && controller.State == AgentState.Idle, "Canceled startup returns idle without sending.");
             Check(harness.Sessions.All(s => s.Disposed && s.Turn == Guid.Empty), "Late opened sessions are discarded without submitting.");
         }
+        foreach (var failSubmit in new[] { false, true })
+        {
+            harness = new LifecycleHarness();
+            await using var controller = new AgentSessionController(harness);
+            await controller.SubmitAsync("first", location);
+            var session = harness.Sessions.Single();
+            if (failSubmit)
+            {
+                session.Emit(new TurnCompleted(session.Turn));
+                await wait(() => controller.CanSubmit);
+            }
+            session.DisposeRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<bool>? submission = null;
+            if (failSubmit) { session.FailSubmit = true; submission = controller.SubmitAsync("failed send", location); }
+            else session.Fail(new IOException("Fixture stream failed."));
+            await wait(() => session.Disposing);
+            try
+            {
+                await controller.InterruptAsync();
+                Check(!controller.CanSubmit && session.InterruptCalls == 0, "Stop during failure cleanup neither interrupts a detached session nor admits retry.");
+            }
+            finally { session.DisposeRelease.TrySetResult(); }
+            if (submission is not null) Check(!await submission, "Failed submission remains failed after cleanup.");
+            await wait(() => controller.State == AgentState.Failed);
+            Check(session.Disposed, "Failure cleanup completes after Stop.");
+            Check(await controller.SubmitAsync("retry", location) && harness.Sessions.Count == 2, "Retry after failure cleanup opens a fresh session.");
+        }
         Console.WriteLine("Controller lifecycle and UI-context checks passed.");
     }
     private sealed class Terminal : IHostTerminal

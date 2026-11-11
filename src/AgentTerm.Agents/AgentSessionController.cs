@@ -197,7 +197,7 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
             await operation.Submitted.Task;
             return;
         }
-        var session = _session!;
+        if (_session is not { } session) return;
         try { await session.InterruptAsync(turn, _lifetime.Token); }
         catch (Exception ex)
         {
