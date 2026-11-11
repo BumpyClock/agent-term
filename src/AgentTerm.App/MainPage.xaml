@@ -10,6 +10,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Grid x:Name="SessionHeader" ColumnSpacing="12" Visibility="Collapsed">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -56,13 +57,117 @@
                                AutomationProperties.LiveSetting="Polite" />
                 </Grid>
             </Grid>
-            <local:TerminalSurface Grid.Row="1" x:Name="Terminal" MinHeight="120" SizeChanged="Output_SizeChanged"
+            <local:TerminalSurface Grid.Row="1" x:Name="Terminal" MinHeight="0" SizeChanged="Output_SizeChanged"
              PreviewKeyDown="Terminal_KeyDown" GotFocus="Terminal_GotFocus" LostFocus="Terminal_LostFocus"
              AutomationProperties.Name="Terminal" ToolTipService.ToolTip="Drag to select. Ctrl+Shift+C copies selection. Ctrl+Shift+V pastes. Ctrl+Shift+Tab switches to the previous tab." />
+            <!-- Agent task cards sit on two blank history rows reserved at invocation and scroll with that history. -->
+            <Canvas x:Name="TaskCardLayer" Grid.Row="1" SizeChanged="TaskCardLayer_SizeChanged"
+                    PointerWheelChanged="TaskCardLayer_PointerWheelChanged" AutomationProperties.Name="Agent tasks in terminal history" />
             <ScrollBar x:Name="HistoryScrollBar" Grid.Row="1" Grid.Column="1" Orientation="Vertical" Minimum="0" Maximum="0"
                        ValueChanged="HistoryScrollBar_ValueChanged" AutomationProperties.Name="Terminal scrollback" />
         </Grid>
-        <Grid x:Name="SessionFooter" Grid.Row="3" ColumnSpacing="12" Visibility="Collapsed">
+        <!-- The agent surface replaces the terminal view in place. The shell keeps running underneath at the same size. -->
+        <Grid x:Name="AgentSurface" Grid.Row="2" Visibility="Collapsed" RowDefinitions="Auto,*,Auto" RowSpacing="8">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" MinHeight="32">
+                <Button x:Name="LeaveSurfaceButton" Style="{StaticResource AgentQuietButtonStyle}" Padding="6,2" Click="LeaveSurface_Click"
+                        AutomationProperties.Name="Back to terminal" ToolTipService.ToolTip="Back to the terminal. The agent keeps working.">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE72B;" FontSize="12" />
+                        <Border Style="{StaticResource AgentKeyChip}"><TextBlock Text="Esc" FontSize="11" /></Border>
+                        <TextBlock Text="for terminal" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE99A;" FontSize="13" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    <TextBlock x:Name="SurfaceTitle" Style="{StaticResource AgentCommandText}" MaxWidth="560" AutomationProperties.HeadingLevel="Level1" />
+                </StackPanel>
+                <Button x:Name="StopAgentButton" Grid.Column="2" Style="{StaticResource AgentQuietButtonStyle}" Padding="8,2" Click="InterruptAgent_Click"
+                        Visibility="Collapsed" AutomationProperties.Name="Stop the agent" ToolTipService.ToolTip="Stop the agent's current turn (Ctrl+C)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE71A;" FontSize="11" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <TextBlock Text="Stop" VerticalAlignment="Center" />
+                        <Border Style="{StaticResource AgentKeyChip}"><TextBlock Text="Ctrl+C" FontSize="11" /></Border>
+                    </StackPanel>
+                </Button>
+            </Grid>
+            <ScrollViewer x:Name="AgentOutput" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="4,0,16,0">
+                <Grid x:Name="AgentTimelineHost" VerticalAlignment="Bottom" />
+            </ScrollViewer>
+            <!-- Approvals and questions sit where the next action happens: directly above the input. -->
+            <Border x:Name="RequestPanel" Grid.Row="2" Visibility="Collapsed" Padding="12,10" CornerRadius="6" BorderThickness="1"
+                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <FontIcon Glyph="&#xEA18;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="RequestTitle" Grid.Column="1" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center"
+                                   AutomationProperties.LiveSetting="Assertive" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                            <Button x:Name="DenyRequest" Style="{StaticResource AgentQuietButtonStyle}" Padding="8,2" Click="DenyRequest_Click"
+                                    AutomationProperties.Name="Reject" ToolTipService.ToolTip="Reject (Ctrl+C)">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="Reject" VerticalAlignment="Center" />
+                                    <Border Style="{StaticResource AgentKeyChip}"><TextBlock Text="Ctrl+C" FontSize="11" /></Border>
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="ApproveRequest" Style="{StaticResource AccentButtonStyle}" Padding="10,3" MinHeight="0" Click="ApproveRequest_Click"
+                                    AutomationProperties.Name="Run once" ToolTipService.ToolTip="Allow this once (Enter)">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="Run" VerticalAlignment="Center" />
+                                    <TextBlock Text="&#x21B5;" VerticalAlignment="Center" Opacity="0.8" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                    <Border x:Name="RequestDetail" Grid.Row="1" Padding="10,6" CornerRadius="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                        <ScrollViewer MaxHeight="120" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <TextBlock x:Name="RequestText" Style="{StaticResource AgentBodyText}" />
+                        </ScrollViewer>
+                    </Border>
+                    <ScrollViewer Grid.Row="2" MaxHeight="120" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="RequestChoices" Spacing="6" />
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+        <!-- One borderless prompt line for both views: a shell command, /agent, or a follow-up while the agent surface is open. -->
+        <Grid x:Name="PromptArea" Grid.Row="3" RowDefinitions="Auto,Auto" RowSpacing="2" Padding="0,8,0,0" BorderThickness="0,1,0,0"
+              BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                <TextBlock x:Name="PromptGlyph" Text="&#x276F;" Style="{StaticResource AgentPromptGlyph}" Margin="2,5,0,0"
+                           AutomationProperties.AccessibilityView="Raw" />
+                <TextBox x:Name="Composer" Grid.Column="1" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="0" MaxHeight="132" Padding="0,4,0,4"
+                         FontSize="14" Background="Transparent" BorderThickness="0" IsSpellCheckEnabled="False"
+                         TextChanged="Composer_Changed" PreviewKeyDown="Composer_KeyDown" GotFocus="Composer_FocusChanged" LostFocus="Composer_FocusChanged"
+                         AutomationProperties.Name="Prompt" TextCompositionStarted="Composer_CompositionStarted" TextCompositionEnded="Composer_CompositionEnded">
+                    <TextBox.Resources>
+                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                        <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                    </TextBox.Resources>
+                </TextBox>
+                <Button x:Name="SubmitPrompt" Grid.Column="2" Style="{StaticResource AgentIconButtonStyle}" VerticalAlignment="Top" Click="SubmitPrompt_Click"
+                        AutomationProperties.Name="Send" ToolTipService.ToolTip="Send (Enter)">
+                    <FontIcon Glyph="&#xE724;" FontSize="13" />
+                </Button>
+            </Grid>
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="22,0,0,2" Height="22">
+                <TextBlock x:Name="PromptHint" Style="{StaticResource AgentHintText}" AutomationProperties.LiveSetting="Polite" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                    <Button x:Name="TaskStatusButton" Style="{StaticResource AgentQuietButtonStyle}" FontSize="12" Padding="6,0" MinHeight="22" Visibility="Collapsed"
+                            Click="TaskStatus_Click" ToolTipService.ToolTip="Open the agent task (Ctrl+Shift+Y)">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon x:Name="TaskStatusIcon" Glyph="&#xE99A;" FontSize="11" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <Grid x:Name="TaskStatusLabelHost" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="RawTerminalButton" Style="{StaticResource AgentQuietButtonStyle}" FontSize="12" Padding="6,0" MinHeight="22" Click="RawTerminal_Click" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+        <Grid x:Name="SessionFooter" Grid.Row="4" ColumnSpacing="12" Visibility="Collapsed">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <TextBlock x:Name="StatusText" Text="Starting session..." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.LiveSetting="Polite" />
             <TextBlock x:Name="GridSizeText" Grid.Column="1" Text="80 × 24" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

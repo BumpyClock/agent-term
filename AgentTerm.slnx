@@ -1,10 +1,15 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/AgentTerm.Agents/AgentTerm.Agents.csproj" />
     <Project Path="src/AgentTerm.App/AgentTerm.App.csproj" />
+    <Project Path="src/AgentTerm.Copilot/AgentTerm.Copilot.csproj" />
     <Project Path="src/AgentTerm.Terminal/AgentTerm.Terminal.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/AgentTerm.AgentUi.Smoke/AgentTerm.AgentUi.Smoke.csproj" />
+    <Project Path="tests/AgentTerm.Agents.Smoke/AgentTerm.Agents.Smoke.csproj" />
     <Project Path="tests/AgentTerm.ConPty.Smoke/AgentTerm.ConPty.Smoke.csproj" />
+    <Project Path="tests/AgentTerm.Copilot.Smoke/AgentTerm.Copilot.Smoke.csproj" />
     <Project Path="tests/AgentTerm.Renderer.Smoke/AgentTerm.Renderer.Smoke.csproj" />
     <Project Path="tests/AgentTerm.Terminal.Smoke/AgentTerm.Terminal.Smoke.csproj" />
   </Folder>

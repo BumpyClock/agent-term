@@ -225,7 +225,7 @@ public sealed partial class GhosttyTerminal
     [StructLayout(LayoutKind.Sequential)] private struct GestureBehaviors { public int Single, Double, Triple; }
     [StructLayout(LayoutKind.Sequential)] private struct GestureGeometry { public uint Columns, CellWidth, PaddingLeft, Height; }
     [StructLayout(LayoutKind.Sequential)] private struct SurfacePosition { public double X, Y; }
-    private sealed class TrackedHandle : SafeHandleZeroOrMinusOneIsInvalid { public TrackedHandle(IntPtr p) : base(true) => SetHandle(p); protected override bool ReleaseHandle() { ScrollNative.ghostty_tracked_grid_ref_free(handle); return true; } }
+    internal sealed class TrackedHandle : SafeHandleZeroOrMinusOneIsInvalid { public TrackedHandle(IntPtr p) : base(true) => SetHandle(p); protected override bool ReleaseHandle() { ScrollNative.ghostty_tracked_grid_ref_free(handle); return true; } }
     private sealed class GestureHandle : SafeHandleZeroOrMinusOneIsInvalid { public GestureHandle(IntPtr p) : base(true) => SetHandle(p); protected override bool ReleaseHandle() { ScrollNative.ghostty_selection_gesture_free(handle, IntPtr.Zero); return true; } }
     private sealed class GestureEventHandle : SafeHandleZeroOrMinusOneIsInvalid { public GestureEventHandle(IntPtr p) : base(true) => SetHandle(p); protected override bool ReleaseHandle() { ScrollNative.ghostty_selection_gesture_event_free(handle); return true; } }
     private static unsafe class ScrollNative

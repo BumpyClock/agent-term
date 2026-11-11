@@ -1,0 +1,369 @@
+using System.Numerics;
+using AgentTerm.Agents;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.UI.ViewManagement;
+
+namespace AgentTerm_App;
+
+/// <summary>Shared building blocks for the agent surface. Styles live in AgentStyles.xaml.</summary>
+internal static class AgentUi
+{
+    public const double Gutter = 22;
+    public const int OutputLines = 12;
+    public static readonly string Chevron = Glyph(0xE76C), Check = Glyph(0xE73E), Cross = Glyph(0xE711), Prompt = Glyph(0xE756),
+        File = Glyph(0xE8A5), Edit = Glyph(0xE70F), Tool = Glyph(0xE90F), Idea = Glyph(0xE82F), Info = Glyph(0xE946),
+        Stop = Glyph(0xE71A), CopyGlyph = Glyph(0xE8C8), Person = Glyph(0xE77B), Agent = Glyph(0xE99A), Shield = Glyph(0xEA18);
+    private static readonly UISettings Settings = new();
+    public static string Glyph(int code) => ((char)code).ToString();
+    public static Style Style(string key) => (Style)Application.Current.Resources[key];
+    public static FontFamily Symbols => (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"];
+    public static bool Animate => Settings.AnimationsEnabled;
+    public static FontIcon Icon(string glyph, string style = "AgentIcon")
+    {
+        var icon = new FontIcon { Glyph = glyph, FontFamily = Symbols, Style = Style(style), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetAccessibilityView(icon, AccessibilityView.Raw);
+        return icon;
+    }
+    public static TextBlock Text(string style, string text = "") => new() { Style = Style(style), Text = text };
+    public static Grid Row(UIElement? gutter, UIElement content, UIElement? trailing = null)
+    {
+        var row = new Grid { ColumnSpacing = 6, ColumnDefinitions = { new() { Width = new GridLength(Gutter - 6) }, new() { Width = new GridLength(1, GridUnitType.Star) }, new() { Width = GridLength.Auto } } };
+        if (gutter is FrameworkElement g) { g.HorizontalAlignment = HorizontalAlignment.Center; g.VerticalAlignment = VerticalAlignment.Top; g.Margin = new Thickness(0, 4, 0, 0); row.Children.Add(g); }
+        Grid.SetColumn((FrameworkElement)content, 1); row.Children.Add(content);
+        if (trailing is not null) { Grid.SetColumn((FrameworkElement)trailing, 2); row.Children.Add(trailing); }
+        return row;
+    }
+    public static void Copy(string text)
+    {
+        var data = new DataPackage();
+        data.SetText(text);
+        Clipboard.SetContent(data);
+    }
+    public static string FirstLine(string text, out string rest)
+    {
+        var split = text.IndexOf('\n');
+        rest = split < 0 ? "" : text[(split + 1)..].Trim();
+        return (split < 0 ? text : text[..split]).Trim();
+    }
+}
+
+/// <summary>A quiet row button that exposes ExpandCollapse to assistive technology and owns its chevron.</summary>
+internal sealed class DisclosureButton : Button
+{
+    private bool _expanded;
+    public FontIcon Chevron { get; } = AgentUi.Icon(AgentUi.Chevron);
+    public event Action<bool>? Toggled;
+    public DisclosureButton()
+    {
+        Style = AgentUi.Style("AgentRowButtonStyle");
+        Chevron.FontSize = 10; Chevron.Width = Chevron.Height = 12; Chevron.CenterPoint = new Vector3(6, 6, 0);
+        if (AgentUi.Animate) Chevron.RotationTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(120) };
+        Click += (_, _) => Toggle();
+    }
+    public bool IsExpanded
+    {
+        get => _expanded;
+        set
+        {
+            if (_expanded == value) return;
+            _expanded = value;
+            Chevron.Rotation = value ? 90 : 0;
+            (FrameworkElementAutomationPeer.FromElement(this) as Peer)?.Raise(!value, value);
+        }
+    }
+    public void Toggle() { IsExpanded = !IsExpanded; Toggled?.Invoke(IsExpanded); }
+    protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);
+    private sealed class Peer(DisclosureButton owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider
+    {
+        public ExpandCollapseState ExpandCollapseState => owner.IsExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        public void Expand() { if (!owner.IsExpanded) owner.Toggle(); }
+        public void Collapse() { if (owner.IsExpanded) owner.Toggle(); }
+        protected override object GetPatternCore(PatternInterface pattern) => pattern == PatternInterface.ExpandCollapse ? this : base.GetPatternCore(pattern);
+        public void Raise(bool wasExpanded, bool expanded) => RaisePropertyChangedEvent(ExpandCollapsePatternIdentifiers.ExpandCollapseStateProperty,
+            wasExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed, expanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed);
+    }
+}
+
+/// <summary>
+/// One task's conversation: requests, streamed answers, grouped tool calls and outcomes. Rows are retained per
+/// timeline entry, so disclosure state and focus survive incoming events. Expansion state lives on the model.
+/// </summary>
+internal sealed class AgentTimelineView : StackPanel
+{
+    private readonly Dictionary<Guid, IRow> _rows = [];
+    private readonly ActivityLabel _activity = new();
+    private readonly Grid _activityRow;
+    private readonly TextBlock _trimmed = AgentUi.Text("AgentHintText", "Earlier activity in this pane was trimmed.");
+    private AgentTask? _task;
+    public FontFamily Mono { get; set; } = new("Cascadia Mono, Consolas");
+
+    public AgentTimelineView()
+    {
+        Spacing = 6;
+        _activityRow = AgentUi.Row(null, _activity);
+        _trimmed.Margin = new Thickness(AgentUi.Gutter, 0, 0, 0);
+        Children.Add(_trimmed); Children.Add(_activityRow);
+        AutomationProperties.SetName(this, "Agent conversation");
+    }
+
+    public void Update(AgentSessionController controller, AgentTask? task, bool active)
+    {
+        if (task != _task)
+        {
+            foreach (var row in _rows.Values) Children.Remove(row.Element);
+            _rows.Clear();
+            _task = task;
+        }
+        var entries = controller.Timeline.Entries.Where(e => task?.Contains(e.Turn) == true).ToArray();
+        _trimmed.Visibility = controller.Timeline.HasTrimmed && task is not null && task.Turns.Count > 0 && !controller.Timeline.Entries.Any(e => e.Turn == task.Turns[0])
+            ? Visibility.Visible : Visibility.Collapsed;
+        var retained = entries.Select(e => e.Id).ToHashSet();
+        foreach (var id in _rows.Keys.Where(id => !retained.Contains(id)).ToArray()) { Children.Remove(_rows[id].Element); _rows.Remove(id); }
+        var running = controller.State is AgentState.Running or AgentState.Starting && controller.RunningTask == task;
+        var index = 1;
+        foreach (var entry in entries)
+        {
+            if (!_rows.TryGetValue(entry.Id, out var row))
+            {
+                row = entry switch
+                {
+                    TimelineWorkGroup group => new WorkRow(group, Mono),
+                    TimelineMessage { Role: MessageRole.User } message => new RequestRow(message, Mono),
+                    TimelineMessage { Role: MessageRole.Assistant } message => new AnswerRow(message, Mono),
+                    TimelineMessage message => new OutcomeRow(message, Mono),
+                    _ => throw new InvalidOperationException("Unknown timeline entry."),
+                };
+                _rows.Add(entry.Id, row);
+                Children.Insert(index, row.Element);
+            }
+            else if (Children.IndexOf(row.Element) != index) { Children.Remove(row.Element); Children.Insert(index, row.Element); }
+            row.Update(active && running, entry == entries[^1]);
+            index++;
+        }
+        var toolsRunning = entries.OfType<TimelineWorkGroup>().Any(g => g.Active);
+        var thinking = entries.LastOrDefault() is TimelineWorkGroup { Reasoning: not null, Tools.Count: 0 };
+        var working = running && !toolsRunning && !thinking;
+        _activityRow.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
+        _activity.Update(controller.State == AgentState.Starting ? "Starting" : "Working", working && active);
+    }
+
+    private interface IRow
+    {
+        FrameworkElement Element { get; }
+        /// <param name="live">The pane is visible and this task's turn is running.</param>
+        /// <param name="last">The entry is the newest in the task.</param>
+        void Update(bool live, bool last);
+    }
+
+    private static TextBlock MonoText(string style, FontFamily font, string text = "")
+    {
+        var block = AgentUi.Text(style, text);
+        block.FontFamily = font;
+        return block;
+    }
+
+    private sealed class RequestRow(TimelineMessage message, FontFamily font) : IRow
+    {
+        private readonly TextBlock _text = MonoText("AgentBodyText", font);
+        private FrameworkElement? _element;
+        public FrameworkElement Element => _element ??= Build();
+        private Grid Build()
+        {
+            _text.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            var row = AgentUi.Row(AgentUi.Icon(AgentUi.Person), _text);
+            row.Margin = new Thickness(0, 8, 0, 0);
+            return row;
+        }
+        public void Update(bool live, bool last)
+        {
+            _ = Element;
+            if (_text.Text != message.Text) { _text.Text = message.Text; AutomationProperties.SetName(_text, "You asked: " + message.Text); }
+        }
+    }
+
+    private sealed class AnswerRow(TimelineMessage message, FontFamily font) : IRow
+    {
+        private readonly TextBlock _text = MonoText("AgentBodyText", font);
+        private FrameworkElement? _element;
+        public FrameworkElement Element => _element ??= AgentUi.Row(null, _text);
+        public void Update(bool live, bool last)
+        {
+            _ = Element;
+            if (_text.Text != message.Text) _text.Text = message.Text;
+        }
+    }
+
+    /// <summary>Failures, cancellations, decisions and notices. A failure stays outside any collapsed group.</summary>
+    private sealed class OutcomeRow(TimelineMessage message, FontFamily font) : IRow
+    {
+        private readonly TextBlock _label = AgentUi.Text("AgentLabelText");
+        private readonly TextBlock _detail = MonoText("AgentDetailText", font);
+        private FrameworkElement? _element;
+        public FrameworkElement Element => _element ??= Build();
+        private Grid Build()
+        {
+            var critical = message.Role == MessageRole.Failure;
+            var label = AgentUi.FirstLine(message.Text, out _);
+            var icon = message.Role switch
+            {
+                MessageRole.Failure => AgentUi.Icon(AgentUi.Cross, "AgentCriticalIcon"),
+                MessageRole.Cancelled => AgentUi.Icon(AgentUi.Stop),
+                _ => AgentUi.Icon(AgentUi.Info),
+            };
+            if (critical) _label.Style = AgentUi.Style("AgentCriticalText");
+            _label.TextWrapping = TextWrapping.Wrap;
+            _detail.MaxLines = 4;
+            var stack = new StackPanel { Spacing = 2, Children = { _label, _detail } };
+            return AgentUi.Row(icon, stack);
+        }
+        public void Update(bool live, bool last)
+        {
+            _ = Element;
+            var label = AgentUi.FirstLine(message.Text, out var detail);
+            _label.Text = label;
+            _detail.Text = detail;
+            _detail.Visibility = detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ToolTipService.SetToolTip(_detail, detail.Length > 0 ? detail : null);
+            AutomationProperties.SetName(_label, (message.Role == MessageRole.Failure ? "Failed: " : "") + label);
+        }
+    }
+
+    /// <summary>
+    /// A run of tool calls. One call renders as its card directly. Several collapse behind a summary that keeps
+    /// failures visible. Live reasoning shows as Thinking only when the harness sent a summary.
+    /// </summary>
+    private sealed class WorkRow(TimelineWorkGroup group, FontFamily font) : IRow
+    {
+        private readonly StackPanel _root = new() { Spacing = 4 };
+        private readonly DisclosureButton _header = new();
+        private readonly FontIcon _icon = AgentUi.Icon(AgentUi.Tool);
+        private readonly ActivityLabel _label = new();
+        private readonly FontIcon _failed = AgentUi.Icon(AgentUi.Cross, "AgentCriticalIcon");
+        private readonly StackPanel _details = new() { Spacing = 4, Margin = new Thickness(AgentUi.Gutter, 0, 0, 0) };
+        private readonly TextBlock _reasoning = AgentUi.Text("AgentDetailText");
+        private readonly Dictionary<string, ToolCard> _cards = [];
+        private bool _built;
+        public FrameworkElement Element { get { Build(); return _root; } }
+        private void Build()
+        {
+            if (_built) return;
+            _built = true;
+            var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center, Children = { _failed, _header.Chevron } };
+            _header.Content = AgentUi.Row(_icon, _label, trailing);
+            _header.IsExpanded = group.Expanded;
+            _header.Toggled += expanded => { group.Expanded = expanded; Layout(); };
+            _details.Children.Add(_reasoning);
+            _root.Children.Add(_header); _root.Children.Add(_details);
+        }
+        public void Update(bool live, bool last)
+        {
+            Build();
+            foreach (var tool in group.Tools)
+            {
+                if (!_cards.TryGetValue(tool.CallId, out var card)) { card = new ToolCard(tool, font); _cards.Add(tool.CallId, card); _details.Children.Add(card.Element); }
+                card.Refresh(live);
+            }
+            var reasoningOnly = group.Tools.Count == 0;
+            var thinking = live && reasoningOnly && last;
+            var label = reasoningOnly ? (thinking ? "Thinking" : "Thought") : group.Summary;
+            _label.Update(label, thinking || (live && group.Active && group.Tools.Count > 1));
+            _icon.Glyph = reasoningOnly ? AgentUi.Idea : group.Tools.All(t => t.Category == ToolCategory.Command) ? AgentUi.Prompt
+                : group.Tools.All(t => t.Category == ToolCategory.ReadFile) ? AgentUi.File : group.Tools.All(t => t.Category == ToolCategory.WriteFile) ? AgentUi.Edit : AgentUi.Tool;
+            var failed = group.Tools.Any(t => t.Status == WorkStatus.Failed);
+            _failed.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
+            AutomationProperties.SetName(_header, label + (failed ? ", includes a failed call" : ""));
+            if (_reasoning.Text != (group.Reasoning ?? "")) _reasoning.Text = group.Reasoning ?? "";
+            _reasoning.Visibility = group.Reasoning is null ? Visibility.Collapsed : Visibility.Visible;
+            Layout();
+        }
+        private void Layout()
+        {
+            var single = group.Tools.Count == 1 && group.Reasoning is null;
+            _header.Visibility = single ? Visibility.Collapsed : Visibility.Visible;
+            _details.Margin = new Thickness(AgentUi.Gutter, 0, 0, 0);
+            _details.Visibility = single || group.Expanded ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>One call as a card: status, the command on one line, then the full command and output on demand.</summary>
+    private sealed class ToolCard
+    {
+        private readonly TimelineTool _tool;
+        private readonly Border _card = new() { Style = AgentUi.Style("AgentCard") };
+        private readonly DisclosureButton _header = new();
+        private readonly Grid _status = new() { Width = 14 };
+        private readonly FontIcon _statusIcon = AgentUi.Icon(AgentUi.Check, "AgentSuccessIcon");
+        private readonly TextBlock _command;
+        private readonly ActivityLabel _runningHint = new();
+        private readonly StackPanel _body = new() { Spacing = 6, Padding = new Thickness(AgentUi.Gutter + 8, 0, 10, 10) };
+        private readonly TextBlock _fullCommand;
+        private readonly TextBlock _output;
+        private readonly Button _more = new() { Style = AgentUi.Style("AgentQuietButtonStyle"), FontSize = 12 };
+        private bool _showAll;
+        private bool _live;
+        public FrameworkElement Element => _card;
+        public ToolCard(TimelineTool tool, FontFamily font)
+        {
+            _tool = tool;
+            _command = MonoText("AgentCommandText", font);
+            _fullCommand = MonoText("AgentDetailText", font);
+            _output = MonoText("AgentDetailText", font);
+            _status.Children.Add(_statusIcon);
+            var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, Children = { _runningHint, _header.Chevron } };
+            var header = AgentUi.Row(_status, _command, trailing);
+            header.Margin = new Thickness(8, 4, 8, 4);
+            ((FrameworkElement)header.Children[0]).Margin = new Thickness(0, 2, 0, 0);
+            _header.Content = header;
+            _header.Padding = new Thickness(0);
+            _header.IsExpanded = tool.OutputExpanded;
+            _header.Toggled += expanded => { tool.OutputExpanded = expanded; Refresh(); };
+            var copy = new Button { Style = AgentUi.Style("AgentQuietButtonStyle"), FontSize = 12, Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { AgentUi.Icon(AgentUi.CopyGlyph), new TextBlock { Text = "Copy output" } } } };
+            copy.Click += (_, _) => AgentUi.Copy(tool.Output);
+            _more.Click += (_, _) => { _showAll = !_showAll; Refresh(); };
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(-4, 0, 0, 0), Children = { _more, copy } };
+            _body.Children.Add(_fullCommand); _body.Children.Add(_output); _body.Children.Add(actions);
+            var menu = new MenuFlyout();
+            var copyCommand = new MenuFlyoutItem { Text = "Copy command" }; copyCommand.Click += (_, _) => AgentUi.Copy(tool.Command.Length > 0 ? tool.Command : tool.Action);
+            var copyOutput = new MenuFlyoutItem { Text = "Copy output" }; copyOutput.Click += (_, _) => AgentUi.Copy(tool.Output);
+            menu.Items.Add(copyCommand); menu.Items.Add(copyOutput);
+            _header.ContextFlyout = menu;
+            _card.Child = new StackPanel { Children = { _header, _body } };
+        }
+        public void Refresh(bool? live = null)
+        {
+            if (live is { } active) _live = active;
+            var command = _tool.Command.Length > 0 ? _tool.Command : _tool.Action;
+            var line = AgentUi.FirstLine(command, out var more);
+            if (_command.Text != line) _command.Text = line;
+            ToolTipService.SetToolTip(_command, command);
+            var running = _tool.Status == WorkStatus.Running;
+            _statusIcon.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+            _statusIcon.Glyph = _tool.Status == WorkStatus.Succeeded ? AgentUi.Check : _tool.Status == WorkStatus.Failed ? AgentUi.Cross : AgentUi.Stop;
+            _statusIcon.Style = AgentUi.Style(_tool.Status switch { WorkStatus.Succeeded => "AgentSuccessIcon", WorkStatus.Failed => "AgentCriticalIcon", _ => "AgentIcon" });
+            var hint = _tool.Status switch { WorkStatus.Running => "running", WorkStatus.Failed => "failed", WorkStatus.Cancelled => "stopped", _ => "" };
+            _runningHint.Update(hint, running && _live);
+            _runningHint.Visibility = hint.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            var status = _tool.Status switch { WorkStatus.Running => "running", WorkStatus.Failed => "failed", WorkStatus.Cancelled => "stopped", _ => "done" };
+            AutomationProperties.SetName(_header, $"{line}, {status}");
+            var hasBody = _tool.Output.Length > 0 || more.Length > 0 || line.Length < command.Length;
+            _header.Chevron.Visibility = hasBody ? Visibility.Visible : Visibility.Collapsed;
+            _body.Visibility = hasBody && _tool.OutputExpanded ? Visibility.Visible : Visibility.Collapsed;
+            if (_body.Visibility == Visibility.Collapsed) return;
+            _fullCommand.Text = command;
+            _fullCommand.Visibility = command.Contains('\n') || command.Length > 80 ? Visibility.Visible : Visibility.Collapsed;
+            if (_output.Text != _tool.Output) _output.Text = _tool.Output;
+            _output.Visibility = _tool.Output.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            var lines = _tool.Output.Count(c => c == '\n') + 1;
+            var clamped = lines > AgentUi.OutputLines || _tool.Output.Length > AgentUi.OutputLines * 120;
+            _output.MaxLines = _showAll ? 0 : AgentUi.OutputLines;
+            _more.Visibility = clamped ? Visibility.Visible : Visibility.Collapsed;
+            _more.Content = _showAll ? "Show less" : $"Show all {lines} lines";
+        }
+    }
+}

@@ -40,6 +40,16 @@ public sealed class TerminalSurface : UserControl
         _canvas.Invalidate();
     }
 
+    // The smart prompt owns the input line while the shell waits, so the idle shell cursor is not drawn.
+    private bool _cursorSuppressed;
+    internal string TerminalFontFamily => _terminalFontFamily;
+    internal void SetCursorSuppressed(bool suppressed)
+    {
+        if (_cursorSuppressed == suppressed) return;
+        _cursorSuppressed = suppressed;
+        _canvas.Invalidate();
+    }
+
     private TerminalFrame? _frame;
     private bool _cursorPhase = true;
     private bool _resourcesReady;
@@ -155,7 +165,7 @@ public sealed class TerminalSurface : UserControl
     {
         if (_frame is { } frame)
             DrawFrame(args.DrawingSession, frame, CellWidth, CellHeight,
-                _input.FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily, _compositionVisible);
+                _input.FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily, _compositionVisible || _cursorSuppressed);
         else
         {
             var shade = ActualTheme == ElementTheme.Light ? (byte)250 : (byte)0;

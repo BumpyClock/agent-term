@@ -155,6 +155,7 @@ public sealed partial class GhosttyTerminal : IDisposable
 
         _disposed = true;
         DisposeSearch();
+        DisposeAnchors();
         DisposeSelection();
         DisposeInput();
         DisposeRender();
