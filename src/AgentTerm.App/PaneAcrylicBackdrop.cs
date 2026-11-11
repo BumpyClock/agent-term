@@ -11,7 +11,7 @@ using Windows.UI.Composition;
 namespace AgentTerm_App;
 
 // The controller owns policy. Its proxy prevents native updates from replacing our active recipe.
-internal sealed class PaneAcrylicBackdrop : SystemBackdrop
+internal sealed class PaneAcrylicBackdrop : SystemBackdrop, IDisposable
 {
     private DesktopAcrylicController? _controller;
     private ICompositionSupportsSystemBackdrop? _target;
@@ -20,6 +20,7 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop
     private CompositionEffectBrush? _effect;
     private CompositionBackdropBrush? _host;
     private bool _hasPolicyTarget;
+    private bool _disposed;
     private Color _color = Color.FromArgb(255, 0, 0, 0);
     private double _opacity = 0.8;
     internal bool IsAttached { get; private set; }
@@ -27,6 +28,7 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop
 
     internal void UpdateMaterial(Color color, double opacity)
     {
+        if (_disposed) return;
         _color = color;
         _opacity = opacity;
         if (_controller is not null)
@@ -40,8 +42,9 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop connectedTarget, XamlRoot xamlRoot)
     {
         base.OnTargetConnected(connectedTarget, xamlRoot);
-        if (!DesktopAcrylicController.IsSupported()) return;
+        // The projection owns a thread-affine native link. Root it until XAML actually disconnects it.
         _target = connectedTarget;
+        if (_disposed || !DesktopAcrylicController.IsSupported()) return;
         _policyTarget = new PolicyTarget(this);
         // The controller's native crossfade can remain visible during policy transitions.
         _controller = new DesktopAcrylicController { TintColor = _color, FallbackColor = _color };
@@ -60,7 +63,24 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop
 
     protected override void OnTargetDisconnected(ICompositionSupportsSystemBackdrop disconnectedTarget)
     {
-        base.OnTargetDisconnected(disconnectedTarget);
+        try { base.OnTargetDisconnected(disconnectedTarget); }
+        finally
+        {
+            CloseResources();
+            _target = null;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        // Release our resources on the UI thread, retaining the borrowed target until XAML disconnects it.
+        CloseResources();
+    }
+
+    private void CloseResources()
+    {
         _hasPolicyTarget = false;
         SetBrush(null);
         if (_controller is not null)
@@ -70,7 +90,6 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop
             _controller.Dispose();
             _controller = null;
         }
-        _target = null;
         _policyTarget = null;
         ReleaseGraph();
     }
@@ -84,6 +103,12 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop
             SetBrush(null);
             return;
         }
+        if (_opacity >= 1)
+        {
+            // The opaque pane surface owns 100%; leave the backdrop target connected.
+            SetBrush(null);
+            return;
+        }
         if (_controller.State != SystemBackdropState.Active)
         {
             SetBrush(native);
@@ -92,12 +117,6 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop
         try
         {
             var compositor = native.Compositor;
-            if (_opacity >= 1)
-            {
-                // TerminalPane owns the opaque surface and detaches this backdrop at 100%.
-                SetBrush(null);
-                return;
-            }
             if (_effect is null || !_effect.Compositor.Equals(compositor))
             {
                 ReleaseGraph();

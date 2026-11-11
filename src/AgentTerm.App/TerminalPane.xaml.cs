@@ -23,6 +23,8 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
         // Splits can deliver a late Unloaded after this pane is reparented and visible again.
         TerminalPreferences.Current.Changed += ApplyMaterial;
         _page.TerminalBackgroundChanged += ApplyMaterial;
+        // Keep the native backdrop link stable across material and opacity changes.
+        PaneBackdrop.SystemBackdrop = _backdrop;
         ApplyMaterial();
     }
 
@@ -41,7 +43,7 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
         _page.TerminalBackgroundChanged -= ApplyMaterial;
         ActualThemeChanged -= Pane_ActualThemeChanged;
         Loaded -= Pane_Loaded;
-        PaneBackdrop.SystemBackdrop = null;
+        _backdrop.Dispose();
         _backdrop.AttachmentChanged -= UpdateSolidFallback;
     }
 
@@ -51,15 +53,12 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
         var background = _page.TerminalBackground;
         var color = Color.FromArgb(255, background.R, background.G, background.B);
         SolidSurface.Background = new SolidColorBrush(color);
-        _backdrop.UpdateMaterial(color, appearance.BackgroundOpacity);
-        var acrylic = appearance.UseAcrylic && appearance.BackgroundOpacity < 1;
-        PaneBackdrop.SystemBackdrop = acrylic ? _backdrop : null;
-        AcrylicSurface.Visibility = acrylic ? Visibility.Visible : Visibility.Collapsed;
+        _backdrop.UpdateMaterial(color, appearance.UseAcrylic ? appearance.BackgroundOpacity : 1);
         UpdateSolidFallback();
     }
 
     private void UpdateSolidFallback() => SolidSurface.Visibility =
-        PaneBackdrop.SystemBackdrop is not null && _backdrop.IsAttached ? Visibility.Collapsed : Visibility.Visible;
+        _backdrop.IsAttached ? Visibility.Collapsed : Visibility.Visible;
 
     private void SplitRight_Click(object sender, RoutedEventArgs e) => SplitRequested?.Invoke(true);
     private void SplitDown_Click(object sender, RoutedEventArgs e) => SplitRequested?.Invoke(false);

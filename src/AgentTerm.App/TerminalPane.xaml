@@ -77,9 +77,8 @@
         </ResourceDictionary>
     </UserControl.Resources>
     <Grid Background="Transparent">
-        <Border x:Name="SolidSurface" CornerRadius="10" Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}"
-                BorderBrush="{ThemeResource PaneBoundaryBrush}" BorderThickness="1" />
-        <Border x:Name="AcrylicSurface" CornerRadius="10" BorderBrush="{ThemeResource PaneBoundaryBrush}" BorderThickness="1" Visibility="Collapsed">
+        <Border x:Name="SolidSurface" CornerRadius="10" Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}" />
+        <Border x:Name="AcrylicSurface" CornerRadius="10" BorderBrush="{ThemeResource PaneBoundaryBrush}" BorderThickness="1">
             <SystemBackdropElement x:Name="PaneBackdrop" CornerRadius="9" IsHitTestVisible="False" />
         </Border>
         <Grid Margin="1" RowDefinitions="28,*">
