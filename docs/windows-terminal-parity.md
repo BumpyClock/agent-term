@@ -6,7 +6,8 @@ This baseline covers local interactive shells, tabs and panes, terminal renderin
 | --- | --- | --- |
 | ConPTY shells | Independent PowerShell and Command Prompt sessions; installed WSL distribution profiles; normal PowerShell profile loading | Native shell tests pass for launch, independent state, interrupts, resize, output draining and cleanup. WSL discovery and argument quoting pass; distro shell execution remains untested. |
 | Tabs and panes | Profile menu, tab switching, nested splits, directional focus, mouse/keyboard resizing, close active pane/tab, await-all window shutdown | Live checks confirm tab creation, retained output after switching, full-height layout, both divider orientations, keyboard resizing, and nested collapse retaining the original session. |
-| Rendering | ANSI/indexed/RGB colors, Unicode cells, styles, cursor shapes, alternate screen | Native and Win2D pixel tests pass; full-screen console fixture passes. |
+| Rendering | ANSI/indexed/RGB colors, Unicode cells, styles, cursor shapes, alternate screen; theme-aware default text, cursor and ANSI palette | Native and Win2D pixel tests pass; full-screen console fixture passes. Windows and Boat theme checks cover live changes, preserved content/history/selection, application RGB/OSC overrides, and color-scheme queries. Light single and split panes were visually checked. |
+| Application mouse | Native mouse-mode encoding for buttons, releases, motion, wheel, and SGR pixels; Shift local override; Ctrl-wheel zoom | Windows and Boat protocol checks pass for tracking modes, coordinates, modifiers, resize and DPI. A real ConPTY fixture verifies press/release/wheel, Shift bypass, and tracking disable. Full mouse-enabled TUI interaction through the WinUI surface remains unverified. |
 | Scrollback | Wheel, scrollbar and keyboard navigation; retained history after stop/exit; input snaps to bottom | Native and real shell tests pass. Live wheel navigation reveals older lines; Ctrl+Shift+End returns to the latest output. |
 | Selection and clipboard | Linear, word, line, rectangular and extended selection; autoscroll; native text formatting; paste framing; viewport pinning during output | Native and pixel tests pass. Live drag, Ctrl+C/Ctrl+Shift+C copy, Ctrl+V/Shift+Insert/right-click paste, and selection retention during output pass. |
 | Search | Previous/next history matches with wrap and exact-case option | Native search tests and live match/no-match checks pass. Case-insensitive matching folds ASCII only. |
@@ -14,7 +15,11 @@ This baseline covers local interactive shells, tabs and panes, terminal renderin
 
 ## Known gaps
 
-Application mouse reporting, IME composition/candidate positioning, a terminal UI Automation text provider, keyboard selection/mark mode, custom key bindings, advanced profile editing, extension APIs, and complete VT compatibility testing remain outside this baseline. Window/session layout restoration is not yet implemented.
+IME composition/candidate positioning, a terminal UI Automation text provider, keyboard selection/mark mode, custom key bindings, advanced profile editing, extension APIs, and complete VT compatibility testing remain outside this baseline. Window/session layout restoration is not yet implemented.
+
+Native tab dragging and reordering are enabled, but automated drag checks did not change tab order. The cause remains unresolved. Tab switching and creation pass; drag reordering is not verified.
+
+The next core priorities are IME text entry and candidate positioning, accessible terminal text, then keyboard mark mode and configurable actions. These affect input and access before broader profile and session-management features.
 
 Switching primary/alternate screens clears selection. Acrylic currently identifies default backgrounds by resolved RGB, so an explicit ANSI background with the same RGB is transparent too. Settings offers installed terminal fonts; automatic selection prefers an installed CaskaydiaCove Nerd Font before Cascadia Mono and Consolas.
 
@@ -33,6 +38,8 @@ Settings opens in a separate window with Startup, Profile defaults, and each she
 Per-profile live checks confirmed that Command Prompt overrides update existing and newly split Command Prompt panes while PowerShell panes remain unchanged. Saving an unrelated profile preserved a zoomed PowerShell pane. Changing Defaults updated inheriting panes while keeping explicit overrides; Reset restored inheritance for both panes of the same profile. The original settings file was restored and its hash checked after testing.
 
 A Command Prompt font-family override changed its live pane without changing the adjacent PowerShell font. Saving an invalid profile draft from another profile now navigates to the invalid field and keeps the error visible on the first Save. Independent 6.1-terra-high UX review accepted the main and minimum-width settings layouts and prompted full font-value tooltips and visible inherited values.
+
+The chrome refinement keeps 4-DIP gutters, removes the single-pane border, and uses native shadows with quieter pane actions and rounded pill tabs. Live checks confirmed hover emphasis, keyboard focus and activation, and profile opacity Save/Discard/inheritance. Solid mode disables the opacity slider. Original preferences were restored and their hash verified. Independent 6.1-terra-high visual review found no blocker in the supplied light/dark captures. An independent 6.1-sol-high judge rated the implemented chrome/settings/theme visuals 9.1/10. This is a subjective screenshot assessment, not a claim of full terminal parity or accessibility conformance.
 
 ## References
 

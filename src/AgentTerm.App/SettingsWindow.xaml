@@ -98,6 +98,20 @@
                                     </ComboBox>
                                 </Grid>
                             </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Background opacity" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock x:Name="OpacityDescription" Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <TextBlock x:Name="OpacityValue" HorizontalAlignment="Right" />
+                                        <Slider x:Name="OpacitySlider" Minimum="0" Maximum="100" StepFrequency="1"
+                                                ValueChanged="OpacityChanged" AutomationProperties.Name="Default background opacity"
+                                                AutomationProperties.HelpText="Acrylic background opacity in percent. Terminal text stays opaque." />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
                         </StackPanel>
                     </StackPanel>
                     <StackPanel x:Name="ProfilePage" Spacing="20" Visibility="Collapsed">
@@ -145,6 +159,22 @@
                                         <ComboBoxItem Content="Solid" />
                                         <ComboBoxItem Content="Acrylic" />
                                     </ComboBox>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Background opacity" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock x:Name="ProfileOpacityDescription" Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <CheckBox x:Name="ProfileInheritOpacity" Content="Use default" Checked="DraftChanged" Unchecked="DraftChanged"
+                                                  AutomationProperties.Name="Use default background opacity" />
+                                        <TextBlock x:Name="ProfileOpacityValue" HorizontalAlignment="Right" />
+                                        <Slider x:Name="ProfileOpacitySlider" Minimum="0" Maximum="100" StepFrequency="1"
+                                                ValueChanged="OpacityChanged" AutomationProperties.Name="Profile background opacity"
+                                                AutomationProperties.HelpText="Acrylic background opacity in percent. Terminal text stays opaque." />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                         </StackPanel>

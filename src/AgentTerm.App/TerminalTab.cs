@@ -328,7 +328,8 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private void UpdateFocus()
     {
         foreach (var pane in _panes)
-            pane.View.SetFocused(_visible && ReferenceEquals(pane, _active) && !ReferenceEquals(pane, _retiring));
+            pane.View.SetFocused(_visible && ReferenceEquals(pane, _active) && !ReferenceEquals(pane, _retiring),
+                multiplePanes: _panes.Count > 1);
     }
 
     private Rect Bounds(FrameworkElement pane) => pane.TransformToVisual(_layout)

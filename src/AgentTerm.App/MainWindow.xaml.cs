@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using AgentTerm.Terminal;
 using Microsoft.UI.Input;
@@ -13,6 +14,7 @@ using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using Windows.System;
 using Windows.UI.Core;
+using Windows.UI.ViewManagement;
 
 namespace AgentTerm_App;
 
@@ -28,7 +30,12 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
-        WindowRoot.Loaded += (_, _) => SetTitleBar(TabDragRegion);
+        WindowRoot.Loaded += (_, _) =>
+        {
+            SetTitleBar(TabDragRegion);
+            ApplyCaptionTheme();
+        };
+        WindowRoot.ActualThemeChanged += (_, _) => ApplyCaptionTheme();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         AppWindow.Resize(new SizeInt32(1040, 760));
         SystemBackdrop = new MicaBackdrop();
@@ -37,6 +44,30 @@ public sealed partial class MainWindow : Window
         AppWindow.Closing += Window_Closing;
         Closed += (_, _) => _settingsWindow?.Close();
     }
+
+    private void ApplyCaptionTheme()
+    {
+        int dark = WindowRoot.ActualTheme == ElementTheme.Dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(WinRT.Interop.WindowNative.GetWindowHandle(this), 20, in dark, sizeof(int));
+
+        // Extended captions keep the OS theme unless their button colors are set explicitly.
+        var highContrast = new AccessibilitySettings().HighContrast;
+        var titleBar = AppWindow.TitleBar;
+        Windows.UI.Color? foreground = highContrast ? null : dark != 0 ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        titleBar.ButtonForegroundColor = foreground;
+        titleBar.ButtonHoverForegroundColor = foreground;
+        titleBar.ButtonPressedForegroundColor = foreground;
+        titleBar.ButtonInactiveForegroundColor = highContrast ? null : dark != 0
+            ? Windows.UI.Color.FromArgb(255, 153, 153, 153) : Windows.UI.Color.FromArgb(255, 96, 96, 96);
+        titleBar.ButtonBackgroundColor = highContrast ? null : Microsoft.UI.Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = highContrast ? null : Microsoft.UI.Colors.Transparent;
+        var overlay = dark != 0 ? (byte)255 : (byte)0;
+        titleBar.ButtonHoverBackgroundColor = highContrast ? null : Windows.UI.Color.FromArgb(24, overlay, overlay, overlay);
+        titleBar.ButtonPressedBackgroundColor = highContrast ? null : Windows.UI.Color.FromArgb(40, overlay, overlay, overlay);
+    }
+
+    [DllImport("dwmapi.dll", ExactSpelling = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
 
     private ShellProfile DefaultProfile => _profiles.FirstOrDefault(profile =>
         profile.Id == TerminalPreferences.Current.DefaultProfileId) ?? _profiles.FirstOrDefault() ?? ShellProfile.Default;
@@ -91,13 +122,18 @@ public sealed partial class MainWindow : Window
         ProfileMenu.Items.Add(settings);
     }
 
-    private void NewTabButton_Click(SplitButton sender, SplitButtonClickEventArgs args) => AddTab(DefaultProfile);
+    private void NewTabButton_Click(object sender, RoutedEventArgs args) => AddTab(DefaultProfile);
 
     private void AddTab(ShellProfile profile)
     {
         if (_closing) return;
         var tab = new TerminalTab(profile, (Style)WindowRoot.Resources["PaneSplitterStyle"]);
-        var item = new TabViewItem { Header = tab.Title, Content = tab };
+        var item = new TabViewItem
+        {
+            Header = tab.Title,
+            Content = tab,
+            Style = (Style)WindowRoot.Resources["PillTabStyle"]
+        };
         tab.TitleChanged += () => item.Header = tab.Title;
         tab.CloseRequested += async () => await CloseTabAsync(item);
         Tabs.TabItems.Add(item);

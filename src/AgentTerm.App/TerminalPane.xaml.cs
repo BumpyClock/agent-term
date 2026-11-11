@@ -20,7 +20,13 @@ internal sealed partial class TerminalPane : UserControl
         ApplyMaterial();
     }
 
-    internal void SetFocused(bool focused) => ActiveBorder.Visibility = focused ? Visibility.Visible : Visibility.Collapsed;
+    internal void SetFocused(bool focused, bool multiplePanes)
+    {
+        var stroke = new Thickness(multiplePanes ? 0.5 : 0);
+        SolidSurface.BorderThickness = stroke;
+        AcrylicSurface.BorderThickness = stroke;
+        ActiveBorder.Visibility = focused && multiplePanes ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void Pane_Loaded(object sender, RoutedEventArgs e)
     {
@@ -41,9 +47,10 @@ internal sealed partial class TerminalPane : UserControl
 
     private void ApplyMaterial()
     {
-        var acrylic = TerminalPreferences.Current.ResolveAppearance(_profileId).UseAcrylic;
-        SolidSurface.Visibility = acrylic ? Visibility.Collapsed : Visibility.Visible;
-        AcrylicSurface.Visibility = acrylic ? Visibility.Visible : Visibility.Collapsed;
+        var appearance = TerminalPreferences.Current.ResolveAppearance(_profileId);
+        PaneAcrylicBrush.TintOpacity = appearance.BackgroundOpacity;
+        SolidSurface.Visibility = appearance.UseAcrylic ? Visibility.Collapsed : Visibility.Visible;
+        AcrylicSurface.Visibility = appearance.UseAcrylic ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SplitRight_Click(object sender, RoutedEventArgs e) => SplitRequested?.Invoke(true);

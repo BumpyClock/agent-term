@@ -8,6 +8,8 @@ Child shells receive `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PRO
 
 The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles, cursor shapes, and alternate screens. History, search, selection, and keyboard encoding use Ghostty's native APIs. Selection pins the viewport while output continues. Typing or pasting returns to live output.
 
+Terminal defaults follow the Windows light or dark theme. Light mode uses dark text and cursor colors with a matching ANSI palette. Switching themes preserves shell output, history, selection, and application-defined RGB or OSC colors.
+
 ## Controls
 
 | Action | Input |
@@ -33,13 +35,15 @@ The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles,
 
 Drag beyond the top or bottom to scroll while selecting. Copy joins soft-wrapped text and preserves explicit line breaks. Paste honors bracketed paste mode and sanitizes terminal control characters. Clipboard errors do not stop the shell. Screen switches clear selection. Search wraps; case-insensitive search currently folds ASCII letters only.
 
+Mouse-enabled terminal applications receive clicks, releases, motion, and wheel events through Ghostty's native encoder. Hold **Shift** to use local selection, copy/paste, and scrollback instead. **Ctrl+wheel** still zooms. Passive mouse movement does not jump the viewport to the latest output.
+
 ## Appearance and profiles
 
-Settings opens in its own window from the profile menu or Ctrl+,. The terminal stays usable while settings is open. **Startup** selects the default shell. **Profiles > Defaults** sets the shared font family, font size, and pane background. Each discovered shell has its own **Appearance** page under Profiles. Changes stay in a draft across pages until **Save**. **Discard changes** restores saved values; closing the window discards unsaved edits.
+Settings opens in its own window from the profile menu or Ctrl+,. The terminal stays usable while settings is open. **Startup** selects the default shell. **Profiles > Defaults** sets the shared font family, font size, pane background, and acrylic opacity. Each discovered shell has its own **Appearance** page under Profiles. Changes stay in a draft across pages until **Save**. **Discard changes** restores saved values; closing the window discards unsaved edits.
 
 Each profile inherits Defaults unless a setting is overridden. Choose **Use default** to restore inheritance for a field, or reset the profile to remove all its overrides. An explicit **Automatic** font uses the app's installed-font selection independently of the font chosen in Defaults. Saving updates existing panes for that profile and applies to future tabs and splits. Overrides for temporarily unavailable profiles remain saved.
 
-Settings save the default profile, shared appearance defaults, and profile overrides to `%LOCALAPPDATA%\AgentTerm\settings.json`. The window uses Windows Mica with native caption controls. Each terminal sits in a rounded card with quiet header actions, 4-DIP outer spacing and gutters, and a subtle native shadow. Settings uses the same rounded surfaces. Choose **Solid** for an opaque terminal or **Acrylic** for a transparent terminal surface over a separate in-app acrylic card. Selection and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
+Settings save the default profile, shared appearance defaults, and profile overrides to `%LOCALAPPDATA%\AgentTerm\settings.json`. The window uses Windows Mica with native caption controls and rounded tabs. Each terminal sits in a rounded card with quiet header actions, 4-DIP outer spacing and gutters, and a subtle native shadow. A single pane has no border; split panes use faint outlines to show focus. Pane actions brighten on hover or keyboard focus. Settings uses the same rounded surfaces. Choose **Solid** for an opaque terminal or **Acrylic** for a transparent terminal surface over a separate in-app acrylic card. The **Background opacity** slider adjusts acrylic tint from 0% to 100%, independently for each profile or inherited from Defaults. It is disabled for Solid. Text, selection, and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
 
 Automatic font selection prefers an installed CaskaydiaCove Nerd Font, then Cascadia Mono, then Consolas. Settings lists available terminal fonts. No fonts are downloaded or installed. WinUI's in-app acrylic blurs app content; it does not sample the desktop or the Mica system backdrop. Windows controls material fallback when transparency is unavailable.
 
@@ -47,7 +51,7 @@ New panes fade in over 200 ms. Closing panes fade out over 140 ms before removal
 
 Zoom applies to the current pane; Ctrl+0 restores that profile's font size. A saved font-size change updates panes whose resolved profile size changed. Saving another profile's settings preserves unrelated pane zoom. History is configured for 10 MiB and 10,000 physical lines; Ghostty retains whole pages, so these limits are approximate. WSL discovery is bounded and skips unavailable distributions. WSL itself is not installed by the app.
 
-This is a base terminal experience, not complete Windows Terminal compatibility. Application mouse reporting, IME composition, a terminal UI Automation text provider, advanced profile editing, and custom themes/key bindings remain open. See [the parity tracker](docs/windows-terminal-parity.md).
+This is a base terminal experience, not complete Windows Terminal compatibility. IME composition, a terminal UI Automation text provider, advanced profile editing, and custom themes/key bindings remain open. See [the parity tracker](docs/windows-terminal-parity.md).
 
 ## Build and run
 
