@@ -1,21 +1,28 @@
 using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 
 namespace AgentTerm_App;
 
-internal sealed partial class TerminalPane : UserControl
+internal sealed partial class TerminalPane : UserControl, IDisposable
 {
-    private bool _subscribed;
-    private readonly string _profileId;
+    private readonly MainPage _page;
+    private readonly PaneAcrylicBackdrop _backdrop = new();
     internal event Action<bool>? SplitRequested;
     internal event Action? CloseRequested;
 
     internal TerminalPane(MainPage page)
     {
-        _profileId = page.Profile.Id;
+        _page = page;
         InitializeComponent();
+        _backdrop.AttachmentChanged += UpdateSolidFallback;
         TerminalContent.Content = page;
+        ActualThemeChanged += Pane_ActualThemeChanged;
+        // Splits can deliver a late Unloaded after this pane is reparented and visible again.
+        TerminalPreferences.Current.Changed += ApplyMaterial;
+        _page.TerminalBackgroundChanged += ApplyMaterial;
         ApplyMaterial();
     }
 
@@ -24,30 +31,35 @@ internal sealed partial class TerminalPane : UserControl
         ActiveBorder.Visibility = focused && multiplePanes ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void Pane_Loaded(object sender, RoutedEventArgs e)
-    {
-        if (!_subscribed)
-        {
-            TerminalPreferences.Current.Changed += ApplyMaterial;
-            _subscribed = true;
-        }
-        ApplyMaterial();
-    }
+    private void Pane_Loaded(object sender, RoutedEventArgs e) => ApplyMaterial();
 
-    private void Pane_Unloaded(object sender, RoutedEventArgs e)
+    private void Pane_ActualThemeChanged(FrameworkElement sender, object args) => ApplyMaterial();
+
+    public void Dispose()
     {
-        if (!_subscribed) return;
         TerminalPreferences.Current.Changed -= ApplyMaterial;
-        _subscribed = false;
+        _page.TerminalBackgroundChanged -= ApplyMaterial;
+        ActualThemeChanged -= Pane_ActualThemeChanged;
+        Loaded -= Pane_Loaded;
+        PaneBackdrop.SystemBackdrop = null;
+        _backdrop.AttachmentChanged -= UpdateSolidFallback;
     }
 
     private void ApplyMaterial()
     {
-        var appearance = TerminalPreferences.Current.ResolveAppearance(_profileId);
-        PaneAcrylicBrush.TintOpacity = appearance.BackgroundOpacity;
-        SolidSurface.Visibility = appearance.UseAcrylic ? Visibility.Collapsed : Visibility.Visible;
-        AcrylicSurface.Visibility = appearance.UseAcrylic ? Visibility.Visible : Visibility.Collapsed;
+        var appearance = TerminalPreferences.Current.ResolveAppearance(_page.Profile.Id);
+        var background = _page.TerminalBackground;
+        var color = Color.FromArgb(255, background.R, background.G, background.B);
+        SolidSurface.Background = new SolidColorBrush(color);
+        _backdrop.UpdateMaterial(color, appearance.BackgroundOpacity);
+        var acrylic = appearance.UseAcrylic && appearance.BackgroundOpacity < 1;
+        PaneBackdrop.SystemBackdrop = acrylic ? _backdrop : null;
+        AcrylicSurface.Visibility = acrylic ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSolidFallback();
     }
+
+    private void UpdateSolidFallback() => SolidSurface.Visibility =
+        PaneBackdrop.SystemBackdrop is not null && _backdrop.IsAttached ? Visibility.Collapsed : Visibility.Visible;
 
     private void SplitRight_Click(object sender, RoutedEventArgs e) => SplitRequested?.Invoke(true);
     private void SplitDown_Click(object sender, RoutedEventArgs e) => SplitRequested?.Invoke(false);

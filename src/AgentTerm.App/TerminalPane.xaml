@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
     Translation="0,0,4"
-    Loaded="Pane_Loaded" Unloaded="Pane_Unloaded">
+    Loaded="Pane_Loaded">
     <UserControl.Shadow><ThemeShadow /></UserControl.Shadow>
     <UserControl.Resources>
         <ResourceDictionary>
@@ -80,10 +80,7 @@
         <Border x:Name="SolidSurface" CornerRadius="10" Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}"
                 BorderBrush="{ThemeResource PaneBoundaryBrush}" BorderThickness="1" />
         <Border x:Name="AcrylicSurface" CornerRadius="10" BorderBrush="{ThemeResource PaneBoundaryBrush}" BorderThickness="1" Visibility="Collapsed">
-            <Border.Background>
-                <AcrylicBrush x:Name="PaneAcrylicBrush" TintColor="{ThemeResource SystemChromeMediumColor}"
-                              FallbackColor="{ThemeResource SolidBackgroundFillColorBase}" />
-            </Border.Background>
+            <SystemBackdropElement x:Name="PaneBackdrop" CornerRadius="9" IsHitTestVisible="False" />
         </Border>
         <Grid Margin="1" RowDefinitions="28,*">
             <Grid Padding="0,0,4,0" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">

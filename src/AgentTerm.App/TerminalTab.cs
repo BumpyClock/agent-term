@@ -171,6 +171,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         branch.Children.Clear();
         Replace(branch, sibling);
         _panes.Remove(old);
+        old.View.Dispose();
         _retiring = null;
         UpdateFocus();
         TitleChanged?.Invoke();
@@ -353,6 +354,10 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         SetVisible(false);
         // A closing pane may still be attached while fading. Finish that operation before enumerating survivors.
         try { await _paneClose; }
-        finally { await Task.WhenAll(_panes.Select(pane => pane.Page.DisposeAsync().AsTask())); }
+        finally
+        {
+            foreach (var pane in _panes) pane.View.Dispose();
+            await Task.WhenAll(_panes.Select(pane => pane.Page.DisposeAsync().AsTask()));
+        }
     }
 }

@@ -57,7 +57,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private int _clickCount;
     private bool _viewActive = true;
     private bool _loadedOnce;
+    private TerminalColor? _terminalBackground;
     public ShellProfile Profile { get; }
+    internal TerminalColor TerminalBackground => _terminalBackground ?? (ActualTheme == ElementTheme.Light
+        ? new TerminalColor(250, 250, 250) : new TerminalColor(0, 0, 0));
+    internal event Action? TerminalBackgroundChanged;
     public event Action? SessionReady;
     public bool CanStopSession => _state is SessionState.Starting or SessionState.Running;
     public bool CanRestartSession => _state == SessionState.Idle;
@@ -226,6 +230,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         var frame = session.ReadFrame();
         Terminal.SetFrame(frame);
+        if (_terminalBackground != frame.Background)
+        {
+            _terminalBackground = frame.Background;
+            TerminalBackgroundChanged?.Invoke();
+        }
         _updatingScrollBar = true;
         try
         {

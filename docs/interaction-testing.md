@@ -18,3 +18,11 @@ Pass when order changes, each tab retains its shell and history, the dragged tab
 On 2026-11-10, the available Windows `sky.drag` and unified CUA drag APIs exposed no duration or held-button controls. A measured `sky.drag` gesture pressed, moved once, and released in about 22 ms. WinUI raised `TabDragStarting`, then completed with `None` and preserved the order. A manual held drag in the same window completed with `Move`, moved Command Prompt before PowerShell, and retained both tab object identities.
 
 Treat this instant synthetic gesture as an inconclusive reorder check. Use an automation API that can keep the button held across multiple moves and wait for insertion feedback, or perform a manual drag. The measured timing is evidence for that tool invocation, not a minimum drag duration requirement.
+
+## Pane materials
+
+1. Record the existing appearance values. Open a separate test window over contrasting desktop content. Keep Windows transparency and theme settings unchanged.
+2. In Settings, choose Acrylic and compare saved opacity values of 0%, 50%, and 100%. Focus the terminal window after each save so inactive-window fallback does not mask the result. Low values should reveal a frosted desktop background; high values should add tint. Text stays opaque. The title bar and outer window keep Mica throughout.
+3. Give a second shell profile a different opacity. Create a mixed-shell split and check that each pane retains its own material. Resize, switch tabs, and close one pane. Check that the remaining backdrop still covers its pane without stale rectangles or losing keyboard input.
+4. Switch a profile to Solid. Check that its desktop backdrop disappears, the opacity slider disables, and other profiles remain unchanged.
+5. Restore the recorded appearance values. Record Windows-controlled fallback behavior separately from the active acrylic result. Do not change Windows configuration just to force the effect.
