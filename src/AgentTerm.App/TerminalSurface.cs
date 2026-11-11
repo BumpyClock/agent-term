@@ -35,6 +35,7 @@ public sealed class TerminalSurface : UserControl
         Content = _canvas;
         _canvas.Draw += Draw;
         _canvas.CreateResources += (_, _) => { _resourcesReady = true; MeasureCells(); };
+        ActualThemeChanged += (_, _) => _canvas.Invalidate();
         PointerPressed += (_, _) => Focus(FocusState.Pointer);
     }
 
@@ -112,7 +113,11 @@ public sealed class TerminalSurface : UserControl
             DrawFrame(args.DrawingSession, frame, CellWidth, CellHeight,
                 FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily);
         else
-            args.DrawingSession.Clear(_acrylicBackground ? Color.FromArgb(0, 0, 0, 0) : Color.FromArgb(255, 12, 12, 12));
+        {
+            // Match the native palette while the first frame is being prepared.
+            var shade = ActualTheme == ElementTheme.Light ? (byte)250 : (byte)0;
+            args.DrawingSession.Clear(_acrylicBackground ? Color.FromArgb(0, 0, 0, 0) : Color.FromArgb(255, shade, shade, shade));
+        }
     }
 
     public static void DrawFrame(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,

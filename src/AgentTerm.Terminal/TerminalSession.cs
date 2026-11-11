@@ -126,6 +126,8 @@ public sealed class TerminalSession : IAsyncDisposable
         }
     }
 
+    public void SetLightTheme(bool light) => MutateView(() => _terminal.SetLightTheme(light));
+
     public void Resize(ushort columns, ushort rows)
     {
         bool stopped;

@@ -76,6 +76,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _selectionTimer = DispatcherQueue.CreateTimer();
         _selectionTimer.Interval = TimeSpan.FromMilliseconds(50);
         _selectionTimer.Tick += SelectionTimer_Tick;
+        ActualThemeChanged += Page_ActualThemeChanged;
     }
 
     private async void Page_Loaded(object sender, RoutedEventArgs e)
@@ -100,6 +101,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
+            session.SetLightTheme(ActualTheme == ElementTheme.Light);
             UpdateGridSize();
             RefreshOutput(session);
             if (_state == SessionState.Running) _refreshTimer.Start();
@@ -133,6 +135,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             UpdateGridSize();
             var session = new TerminalSession(_columns, _rows, Profile);
             _session = session;
+            session.SetLightTheme(ActualTheme == ElementTheme.Light);
             // Publish ownership before starting. Closing the window can then await startup and release it.
             _startup = Task.Run(session.Start);
             await _startup;
@@ -281,6 +284,17 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         else if (previous.FontFamily != _appearance.FontFamily)
             SetFontSize(_fontSize);
         Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
+    }
+
+    private void Page_ActualThemeChanged(FrameworkElement sender, object args)
+    {
+        if (_state == SessionState.Disposed || _session is not { } session) return;
+        try
+        {
+            session.SetLightTheme(ActualTheme == ElementTheme.Light);
+            if (_viewActive) RefreshOutput(session);
+        }
+        catch (Exception exception) { ShowInteractionFailure(exception); }
     }
 
     private void SetFontSize(int size)
@@ -537,7 +551,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 var point = e.GetCurrentPoint(Terminal);
                 var button = ChangedMouseButton(point);
-                if (button is not null)
+                if (button is not null && _applicationMouseButtons.Contains(button.Value))
                 {
                     if (SendApplicationMouse(point, TerminalMouseAction.Release, button)) e.Handled = true;
                     _applicationMouseButtons.Remove(button.Value);
@@ -903,6 +917,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _selectionTimer.Stop();
         await ReleaseSessionAsync();
         TerminalPreferences.Current.Changed -= PreferencesChanged;
+        ActualThemeChanged -= Page_ActualThemeChanged;
         Terminal.ReleaseResources();
     }
 }
