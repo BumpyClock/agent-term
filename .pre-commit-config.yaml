@@ -1,0 +1,33 @@
+minimum_pre_commit_version: '4.0.0'
+default_stages: [pre-commit]
+exclude: '(^|/)(\.deps|\.venv|artifacts|bin|obj)/'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
+    hooks:
+      - id: check-merge-conflict
+        args: [--assume-in-merge]
+      - id: check-case-conflict
+      - id: check-illegal-windows-names
+      - id: check-added-large-files
+        args: [--maxkb=1024, --enforce-all]
+      - id: check-json
+      - id: check-yaml
+      - id: check-xml
+        types: [file]
+        files: '\.(csproj|props|targets|slnx|xaml|xml|manifest)$'
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        exclude: '^src/AgentTerm\.App/Assets/.*\.(LICENSE|NOTICE)\.txt$'
+      - id: end-of-file-fixer
+        exclude: '^src/AgentTerm\.App/Assets/.*\.(LICENSE|NOTICE)\.txt$'
+
+  - repo: local
+    hooks:
+      - id: bash-syntax
+        name: Check Bash syntax
+        language: system
+        entry: bash -c 'for file in "$@"; do bash -n "$file" || exit; done' --
+        files: '\.sh$'
+        types: [file]

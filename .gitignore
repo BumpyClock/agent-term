@@ -1,4 +1,5 @@
 .deps/
+.venv/
 artifacts/
 **/bin/
 **/obj/

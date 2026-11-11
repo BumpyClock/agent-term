@@ -1,0 +1,4 @@
+self-hosted-runner:
+  labels:
+    - boat
+    - boat-small

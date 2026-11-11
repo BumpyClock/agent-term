@@ -90,7 +90,31 @@ The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packa
 
 ## CI and verification
 
-`scripts/check.ps1` validates Windows. `bash scripts/check-linux.sh` validates the portable wrapper on Linux x64 with .NET 10, Python 3, curl, tar, and xz. The workflow uses Boat for portable native checks and `windows-latest` for Windows builds and integration. Hosted CI requires the Boat GitHub App and a pushed branch; local Boat runs are separate validation.
+Pull requests run the shared pre-commit checks and GitHub Actions workflow lint on `boat-small`, without restoring .NET dependencies or compiling the app or native code. Formatting hooks leave third-party license and notice files unchanged. Pushes to `release` or `release/**` run lint first, then the full Linux and Windows builds and smoke tests. Pushes to other branches and tags do not start CI. New commits cancel older runs for the same pull request or release branch. Jobs have time limits, read-only repository permissions, and pinned action versions.
+
+`scripts/check.ps1` validates Windows. `bash scripts/check-linux.sh` validates the portable wrapper on Linux x64 with .NET 10, Python 3, curl, tar, and xz. Release builds use Boat for portable native checks and `windows-latest` for Windows builds and integration. Hosted CI requires the Boat GitHub App; local Boat runs are separate validation.
+
+### Local commit hooks
+
+Install once per clone with Python 3.11+ and Git Bash on Windows:
+
+```powershell
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+./.venv/Scripts/python.exe -m pre_commit install --install-hooks
+```
+
+On Linux or macOS, use `python3` to create the environment and `.venv/bin/python` for the remaining commands. Bash must be on `PATH`. First-time setup downloads the pinned hook dependencies.
+
+Commits check staged files only. Hooks validate JSON, YAML, XML (including XAML and MSBuild files), Bash syntax, merge markers, Windows filename compatibility, and a 1 MiB file-size limit. They fix trailing whitespace and final newlines while preserving Markdown hard line breaks and third-party license/notice files. If a hook fixes a file, review and stage that fix, then commit again. Local hooks never build code or download native dependencies. No pre-push hook is installed. Workflow-specific lint runs separately in CI and needs no local Docker installation.
+
+Run all checks manually on Windows:
+
+```powershell
+./.venv/Scripts/python.exe -m pre_commit run --all-files --show-diff-on-failure
+```
+
+CI runs this same configuration over all tracked files. Local hook environments are reused between commits.
 
 ## References and licenses
 
