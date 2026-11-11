@@ -1,0 +1,11 @@
+Windows Terminal stable application icon
+
+AppIcon.ico is an unmodified copy of res/terminal.ico from Windows Terminal.
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+Source asset
+https://github.com/microsoft/terminal/blob/38c91fcaf64e316b2e98ea605ece1a15850694cd/res/terminal.ico
+
+Licensed under Creative Commons Attribution-NoDerivatives 4.0 International.
+The full license and warranty disclaimer are in WindowsTerminal.LICENSE.txt.
+The icon artwork is unchanged. Its filename is AppIcon.ico in this application.

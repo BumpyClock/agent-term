@@ -101,3 +101,5 @@ The app is unpackaged and self-contained. Windows App SDK 1.8 is pinned. Packagi
 - [Boat CI](https://docs.boat.dev/ci).
 
 Ghostty is MIT licensed. Keep its license and bundled dependency notices with redistributed native binaries. Generated Ghostty binaries are not committed.
+
+The application uses the unmodified Windows Terminal stable icon by Microsoft. Its CC BY-ND 4.0 license and source attribution ship in `Assets/WindowsTerminal.LICENSE.txt` and `Assets/WindowsTerminal.NOTICE.txt`.
