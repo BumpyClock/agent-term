@@ -1,0 +1,8 @@
+.deps/
+artifacts/
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+AppPackages/

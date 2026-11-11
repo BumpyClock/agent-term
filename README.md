@@ -1,0 +1,79 @@
+# Agent Term
+
+A Windows terminal built with WinUI 3, .NET 10, Win2D, Windows ConPTY, and libghostty-vt 1.0.0.
+
+Each tab or pane owns an independent shell, terminal state, and scrollback. The profile menu discovers installed PowerShell versions, Command Prompt, and individual WSL distributions. PowerShell loads your normal shell profile. Closing a pane releases its shell; switching tabs preserves it. Stopped and exited sessions keep their history available until restarted or closed.
+
+The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles, cursor shapes, and alternate screens. History, search, selection, and keyboard encoding use Ghostty's native APIs. Selection pins the viewport while output continues. Typing or pasting returns to live output.
+
+## Controls
+
+| Action | Input |
+| --- | --- |
+| New default-profile tab | Plus button or Ctrl+Shift+T |
+| New profile tab | Profile dropdown |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Close active pane or tab | Ctrl+Shift+W |
+| Split active pane | Ctrl+Shift+D, Alt+Shift++ or Alt+Shift+- |
+| Focus adjacent pane | Alt+arrow |
+| Scroll history | Wheel, scrollbar, Ctrl+Shift+Up/Down or PageUp/PageDown |
+| Oldest / latest output | Ctrl+Shift+Home / End |
+| Select text | Left drag; double-click word; triple-click line |
+| Extend / rectangular selection | Shift+click / Alt+drag |
+| Copy selection and dismiss | Ctrl+C, Ctrl+Shift+C, Ctrl+Insert, Enter, or right-click |
+| Interrupt without a selection | Ctrl+C |
+| Paste | Ctrl+V, Ctrl+Shift+V, Shift+Insert, or right-click without a selection |
+| Clear selection | Escape or single click |
+| Search history | Ctrl+Shift+F; Enter next; Shift+Enter previous |
+| Zoom | Ctrl+wheel, Ctrl++ / Ctrl+-; Ctrl+0 resets |
+| Settings | Profile menu or Ctrl+, |
+
+Drag beyond the top or bottom to scroll while selecting. Copy joins soft-wrapped text and preserves explicit line breaks. Paste honors bracketed paste mode and sanitizes terminal control characters. Clipboard errors do not stop the shell. Screen switches clear selection. Search wraps; case-insensitive search currently folds ASCII letters only.
+
+## Appearance and profiles
+
+Settings save the default profile, font size, and background choice to `%LOCALAPPDATA%\AgentTerm\settings.json`. Choose **Solid** for an opaque terminal or **Acrylic** for a transparent terminal surface over Windows' desktop acrylic backdrop. Selection and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
+
+Zoom applies to the current pane. A settings font-size change applies to all panes. History is configured for 10 MiB and 10,000 physical lines; Ghostty retains whole pages, so these limits are approximate. WSL discovery is bounded and skips unavailable distributions. WSL itself is not installed by the app.
+
+This is a base terminal experience, not complete Windows Terminal compatibility. Application mouse reporting, IME composition, a terminal UI Automation text provider, advanced profile editing, and custom themes/key bindings remain open. See [the parity tracker](docs/windows-terminal-parity.md).
+
+## Build and run
+
+Use Windows x64, Windows 10 version 2004 or newer, a .NET 10 SDK, and PowerShell. Windows SDK/XAML tools restore through NuGet. Internet access is needed for the first build.
+
+```powershell
+./scripts/check.ps1
+dotnet run --project src/AgentTerm.App -p:Platform=x64 -c Release
+```
+
+The check script downloads checksum-pinned Ghostty and Zig archives, builds the native DLL and app, and runs native VT/input/history/search tests, real shell integration tests, and Win2D pixel checks. Images are saved to `artifacts/renderer-smoke.png` and `artifacts/selection-smoke.png`. Generated files stay in ignored `.deps`, `artifacts`, `bin`, and `obj` folders. First native builds take several minutes.
+
+The app is unpackaged and self-contained. Windows App SDK 1.8 is pinned. Packaging, signing, and additional architectures are future work.
+
+## Code map
+
+- `src/AgentTerm.App/MainWindow` owns the tab strip, profile menu, window backdrop, settings, and window shutdown.
+- `src/AgentTerm.App/TerminalTab.cs` owns nested pane layout and active-pane focus.
+- `src/AgentTerm.App/MainPage` owns one terminal view, input, clipboard, search, and session presentation.
+- `src/AgentTerm.App/TerminalSurface.cs` draws cells, selection, and cursors with shared font metrics.
+- `src/AgentTerm.Terminal/TerminalSession.cs` serializes Ghostty state and owns one shell connection.
+- `src/AgentTerm.Terminal/ConPtyConnection.cs` owns process creation, pipes, output draining, resize, and cleanup.
+- `src/AgentTerm.Terminal/GhosttyTerminal.*` owns the pinned native ABI and terminal, render, selection, search, and input handles.
+- `src/AgentTerm.Terminal/ShellProfile.cs` discovers installed shell profiles.
+- `tests` contains real native, shell, and rendered-pixel checks.
+
+`StopAsync` releases ConPTY while retaining Ghostty state for inspection. `DisposeAsync` also releases that terminal state. Hidden tabs pause drawing, not their shell output reader. Native Ghostty owns scrollback and tracked selection references; frame snapshots own their cell arrays and consumers must not mutate them.
+
+## CI and verification
+
+`scripts/check.ps1` validates Windows. `bash scripts/check-linux.sh` validates the portable wrapper on Linux x64 with .NET 10, Python 3, curl, tar, and xz. The workflow uses Boat for portable native checks and `windows-latest` for Windows builds and integration. Hosted CI requires the Boat GitHub App and a pushed branch; local Boat runs are separate validation.
+
+## References and licenses
+
+- [libghostty-vt](https://lib.ghostty.org/vt/).
+- [Windows Terminal actions](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions).
+- [Windows Terminal selection](https://learn.microsoft.com/en-us/windows/terminal/selection).
+- [Boat CI](https://docs.boat.dev/ci).
+
+Ghostty is MIT licensed. Keep its license and bundled dependency notices with redistributed native binaries. Generated Ghostty binaries are not committed.

@@ -1,0 +1,50 @@
+<Page
+    x:Class="AgentTerm_App.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:AgentTerm_App"
+    Loaded="Page_Loaded" Unloaded="Page_Unloaded">
+    <Grid Padding="8" RowSpacing="4">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid x:Name="SessionHeader" ColumnSpacing="12" Visibility="Collapsed">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock x:Name="ShellText" Text="PowerShell" Visibility="Collapsed" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button x:Name="StopButton" Content="Stop session" Click="Stop_Click" IsEnabled="False" ToolTipService.ToolTip="End PowerShell and its child processes" />
+                <Button x:Name="NewSessionButton" Content="New session" Click="NewSession_Click" IsEnabled="False" ToolTipService.ToolTip="Start PowerShell after this session ends" />
+            </StackPanel>
+        </Grid>
+        <InfoBar x:Name="ErrorBanner" Grid.Row="1" IsOpen="False" IsClosable="True" Severity="Error" Title="Shell session unavailable" />
+        <Grid Grid.Row="2" ColumnSpacing="0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+            <StackPanel x:Name="FindBar" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6" Visibility="Collapsed">
+                <TextBox x:Name="FindBox" Width="220" PlaceholderText="Find in terminal" TextChanged="FindBox_TextChanged" KeyDown="FindBox_KeyDown" AutomationProperties.Name="Find in terminal" />
+                <Button Content="Previous" Click="FindPrevious_Click" ToolTipService.ToolTip="Previous match (Shift+Enter)" />
+                <Button Content="Next" Click="FindNext_Click" ToolTipService.ToolTip="Next match (Enter)" />
+                <CheckBox x:Name="FindMatchCase" Content="Match case" Checked="FindMatchCase_Changed" Unchecked="FindMatchCase_Changed" VerticalAlignment="Center" />
+                <TextBlock x:Name="FindStatus" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                <Button Content="Close" Click="FindClose_Click" ToolTipService.ToolTip="Close search (Escape)" />
+            </StackPanel>
+            <local:TerminalSurface Grid.Row="1" x:Name="Terminal" MinHeight="120" SizeChanged="Output_SizeChanged"
+             PointerPressed="Terminal_PointerPressed" PointerMoved="Terminal_PointerMoved" PointerReleased="Terminal_PointerReleased"
+             PointerCaptureLost="Terminal_PointerCaptureLost" PointerWheelChanged="Terminal_PointerWheelChanged"
+             PreviewKeyDown="Terminal_KeyDown" KeyUp="Terminal_KeyUp" CharacterReceived="Terminal_CharacterReceived" GotFocus="Terminal_GotFocus" LostFocus="Terminal_LostFocus"
+             AutomationProperties.Name="Terminal" ToolTipService.ToolTip="Drag to select. Ctrl+Shift+C copies selection. Ctrl+Shift+V pastes. Ctrl+Shift+Tab moves focus to the toolbar." />
+            <ScrollBar x:Name="HistoryScrollBar" Grid.Row="1" Grid.Column="1" Orientation="Vertical" Minimum="0" Maximum="0"
+                       ValueChanged="HistoryScrollBar_ValueChanged" AutomationProperties.Name="Terminal scrollback" />
+        </Grid>
+        <Grid x:Name="SessionFooter" Grid.Row="3" ColumnSpacing="12" Visibility="Collapsed">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <TextBlock x:Name="StatusText" Text="Starting session..." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.LiveSetting="Polite" />
+            <TextBlock x:Name="GridSizeText" Grid.Column="1" Text="80 × 24" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Grid>
+    </Grid>
+</Page>

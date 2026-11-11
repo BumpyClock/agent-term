@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup Condition="'$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe'">
+    <Content Include="$(MSBuildThisFileDirectory)artifacts/native/win-x64/bin/ghostty-vt.dll" Condition="$([MSBuild]::IsOSPlatform('Windows')) And Exists('$(MSBuildThisFileDirectory)artifacts/native/win-x64/bin/ghostty-vt.dll')" Link="ghostty-vt.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)artifacts/native/linux-x64/lib/libghostty-vt.so*" Condition="$([MSBuild]::IsOSPlatform('Linux'))" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

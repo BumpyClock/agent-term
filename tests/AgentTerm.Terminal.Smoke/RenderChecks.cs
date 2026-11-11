@@ -1,0 +1,50 @@
+using System.Text;
+using AgentTerm.Terminal;
+
+internal static class RenderChecks
+{
+    private static void Check(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
+    }
+
+    public static void Run()
+    {
+        using var terminal = new GhosttyTerminal(12, 3);
+        terminal.Write(Encoding.UTF8.GetBytes("\x1b]4;1;rgb:12/34/56\x1b\\\x1b[1;3;4;9;2;8;38;2;10;20;30;48;2;40;50;60mA\x1b[0;7;38;5;1;48;2;1;2;3mB\x1b[0m界e\u0301"));
+        var frame = terminal.ReadFrame();
+        var a = frame.Cells[0]; var b = frame.Cells[1];
+        Check(a.Text == "A" && a.Foreground == new TerminalColor(10, 20, 30) && a.Background == new TerminalColor(40, 50, 60), "RGB style must be preserved.");
+        Check(a.Bold && a.Italic && a.Underline && a.Strikethrough && a.Dim && a.Hidden, "Text attributes must be preserved.");
+        Check(b.Foreground == new TerminalColor(1, 2, 3) && b.Background == new TerminalColor(0x12, 0x34, 0x56), "Inverse must swap RGB and indexed colors.");
+        Check(frame.Cells[2].Text == "界" && frame.Cells[2].Width == 2 && frame.Cells[3].Width == 0, "Wide characters need a continuation cell.");
+        Check(frame.Cells[4].Text == "e\u0301", "Combining characters must stay in one cell.");
+        Check(ReferenceEquals(frame, terminal.ReadFrame()), "Unchanged captures should retain their identity.");
+        terminal.Write("\x1b[?25l"u8);
+        var hiddenCursor = terminal.ReadFrame();
+        Check(!hiddenCursor.Cursor.Visible, "Cursor visibility changes must invalidate the frame.");
+        terminal.Write("\x1b]4;1;rgb:78/9a/bc\x1b\\"u8);
+        Check(terminal.ReadFrame().Cells[1].Background == new TerminalColor(0x78, 0x9a, 0xbc), "Palette updates must recolor existing cells.");
+        terminal.Write("\x1b[?5h"u8);
+        var reverse = terminal.ReadFrame();
+        Check(reverse.Cells[0].Foreground == a.Background && reverse.Cells[0].Background == a.Foreground, "Reverse screen must swap cell colors.");
+        terminal.Write("\x1b[?5l\x1b[2;4H\x1b[6 q\x1b[?25l\x1b]12;rgb:aa/bb/cc\x1b\\"u8);
+        var cursor = terminal.ReadFrame().Cursor;
+        Check(cursor.Column == 3 && cursor.Row == 1 && !cursor.Visible && cursor.Shape == TerminalCursorShape.Bar && !cursor.Blink && cursor.Color == new TerminalColor(0xaa, 0xbb, 0xcc), "Cursor state must follow terminal controls.");
+        terminal.Write("\x1b[?1049h\x1b[Halt"u8);
+        Check(terminal.ReadFrame().Cells[0].Text == "a", "Alternate screen must be captured.");
+        terminal.Write("\x1b[?1049l"u8);
+        Check(terminal.ReadFrame().Cells[0].Text == "A", "Primary screen must return after leaving alternate screen.");
+        terminal.Resize(14, 4);
+        var resized = terminal.ReadFrame();
+        Check(resized.Columns == 14 && resized.Rows == 4 && resized.Cells.Length == 56, "Resize must update the full grid.");
+        Check(frame.Columns == 12 && frame.Cells[0].Text == "A", "Older frames must remain stable.");
+        terminal.Write("\x1b[?2026hchanged"u8);
+        Check(ReferenceEquals(resized, terminal.ReadFrame()), "Synchronized output must hold the previous frame.");
+        Thread.Sleep(1100);
+        var timedOut = terminal.ReadFrame();
+        Check(!ReferenceEquals(resized, timedOut), "A stalled synchronized update must refresh after the hold timeout.");
+        terminal.Write("\x1b[?2026l!"u8);
+        Check(!ReferenceEquals(timedOut, terminal.ReadFrame()), "Releasing synchronized output must capture pending changes.");
+    }
+}

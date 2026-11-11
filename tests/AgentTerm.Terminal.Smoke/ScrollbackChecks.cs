@@ -1,0 +1,114 @@
+using System.Text;
+using AgentTerm.Terminal;
+
+internal static class ScrollbackChecks
+{
+    private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
+    public static void Run()
+    {
+        using var terminal = new GhosttyTerminal(8, 3);
+        terminal.Write("one\r\ntwo\r\nthree\r\nfour\r\nfive"u8);
+        var bottom = terminal.ReadFrame();
+        Check(bottom.Viewport.TotalRows >= 5 && bottom.Viewport.IsAtBottom, "Scrollback must expose retained rows and start at bottom.");
+        terminal.ScrollLines(-1000);
+        var top = terminal.ReadFrame();
+        Check(top.Viewport.Offset == 0 && top.Cells[0].Text == "o", "Scrolling up must clamp to the first retained row.");
+        terminal.BeginSelection(0, 0);
+        terminal.ExtendSelection(2, 0);
+        terminal.EndSelection();
+        var selected = terminal.ReadFrame();
+        Check(selected.HasSelection && selected.Cells[0].Selected && selected.Cells[2].Selected && !selected.Cells[3].Selected, "Selection flags must match a selected span.");
+        Check(terminal.ReadSelectionText() == "one", "Copy must return selected text.");
+        terminal.ScrollLines(1);
+        var historyOffset = terminal.ReadFrame().Viewport.Offset;
+        terminal.Write("\r\nsix"u8);
+        Check(terminal.ReadFrame().Viewport.Offset == historyOffset, "Output must preserve the scrolled viewport.");
+        Check(terminal.ReadSelectionText() == "one", "Selection must survive output while viewing history.");
+        terminal.ScrollTo(long.MaxValue);
+        Check(terminal.ReadFrame().Viewport.IsAtBottom, "Absolute scrolling must clamp at bottom.");
+        terminal.ScrollTo(0);
+        terminal.BeginSelection(2, 1);
+        terminal.ExtendSelection(0, 0);
+        terminal.EndSelection();
+        Check(terminal.ReadSelectionText() == "one\ntwo", "Reverse selection must preserve hard row breaks.");
+        terminal.ExtendSelection(0, 1);
+        terminal.EndSelection();
+        Check(terminal.ReadSelectionText() == "two", "Shift-style extension must reuse the completed selection anchor.");
+        terminal.BeginSelection(0, 0);
+        terminal.ScrollLines(1);
+        terminal.ExtendSelection(2, 0);
+        terminal.EndSelection();
+        Check(terminal.ReadSelectionText() == "one\ntwo", "Dragging across a viewport scroll must track the original anchor.");
+        terminal.ScrollTo(0);
+        terminal.BeginSelection(0, 0, rectangular: true);
+        terminal.ExtendSelection(1, 1);
+        terminal.EndSelection();
+        Check(terminal.ReadSelectionText() == "on\ntw", "Rectangular copy must retain physical row breaks.");
+        terminal.BeginSelection(1, 0, 2);
+        terminal.EndSelection();
+        Check(terminal.ReadSelectionText() == "one", "Double-click must select a word.");
+        terminal.BeginSelection(1, 0, 2);
+        terminal.ExtendSelection(1, 1);
+        terminal.EndSelection();
+        Check(terminal.ReadSelectionText() == "one\ntwo", "Double-click drag must extend by whole words.");
+        terminal.BeginSelection(1, 1, 3);
+        terminal.EndSelection();
+        Check(terminal.ReadSelectionText() == "two", "Triple-click must select a line.");
+        terminal.Resize(10, 4);
+        Check(terminal.ReadSelectionText() == "two", "Selection must survive resize.");
+        terminal.Write("\x1b[?1049h\x1b[Halt"u8);
+        var alternate = terminal.ReadFrame();
+        Check(alternate.Viewport.IsAlternateScreen && alternate.Viewport.IsAtBottom && !alternate.HasSelection, "Alternate screen must have isolated selection and no history.");
+        terminal.ScrollLines(-1000);
+        Check(terminal.ReadFrame().Viewport.IsAtBottom, "Alternate screen scrolling must stay at bottom.");
+        terminal.Write("\x1b[?1049l"u8);
+        Check(!terminal.ReadFrame().Viewport.IsAlternateScreen && terminal.ReadSelectionText() is null, "Leaving the alternate screen must restore the primary viewport without leaking its selection.");
+        terminal.ClearSelection();
+        Check(terminal.ReadSelectionText() is null && !terminal.ReadFrame().HasSelection, "Clear must remove selection.");
+
+        using var wide = new GhosttyTerminal(4, 3);
+        wide.Write(Encoding.UTF8.GetBytes("ab界cd"));
+        wide.BeginSelection(0, 0);
+        wide.ExtendSelection(1, 1);
+        wide.EndSelection();
+        Check(wide.ReadSelectionText() == "ab界cd", "Copy must preserve wide characters and join soft-wrapped rows.");
+        wide.BeginSelection(2, 0);
+        wide.ExtendSelection(2, 0);
+        wide.EndSelection();
+        var lead = wide.ReadFrame();
+        Check(lead.Cells[2].Selected && lead.Cells[3].Selected && wide.ReadSelectionText() == "界", "Selecting a wide lead must highlight and copy the full character.");
+        wide.BeginSelection(3, 0);
+        wide.ExtendSelection(3, 0);
+        wide.EndSelection();
+        var tail = wide.ReadFrame();
+        Check(tail.Cells[2].Selected && tail.Cells[3].Selected && wide.ReadSelectionText() == "界", "Selecting a wide tail must highlight and copy the full character.");
+        wide.Write("\x1b[?2026h"u8);
+        wide.BeginSelection(0, 0);
+        wide.ExtendSelection(1, 0);
+        Check(wide.ReadFrame().Cells[0].Selected && wide.ReadSelectionText() == "ab", "Selection must update during synchronized output.");
+        wide.Write("\x1b[?2026l"u8);
+        using var live = new GhosttyTerminal(8, 3);
+        live.Write("one\r\ntwo\r\nthree\r\nfour\r\nfive"u8);
+        live.BeginSelection(0, 0); live.ExtendSelection(2, 0); live.EndSelection();
+        var held = live.ReadFrame();
+        live.Write("\r\nsix\r\nseven"u8);
+        var pinned = live.ReadFrame();
+        Check(pinned.Cells[0].Text == held.Cells[0].Text && live.ReadSelectionText() == "thr", "Live output must preserve the selected viewport and continue processing.");
+        live.ClearSelection(); live.ScrollToBottom();
+        Check(live.ReadFrame().Viewport.IsAtBottom && live.ReadText().Contains("seven"), "Input-style clear and bottom restore must show new output.");
+        live.Write("\r\neight"u8);
+        Check(live.ReadFrame().Viewport.IsAtBottom, "The viewport must follow output after selection is cleared.");
+
+        using var search = new GhosttyTerminal(12, 3);
+        search.Write("Cat one\r\ncat two\r\nCAT three\r\nnone"u8);
+        Check(search.Find("cat", false) && search.ReadSelectionText() == "CAT", "Search must find newer history matches.");
+        Check(search.Find("cat", false) && search.ReadSelectionText() == "cat", "Repeated search must move through history.");
+        Check(search.Find("cat", false) && search.ReadSelectionText() == "Cat", "Search must reach the oldest match.");
+        Check(search.Find("cat", false) && search.ReadSelectionText() == "CAT", "Search must wrap at the oldest match.");
+        Check(search.Find("cat", true) && search.ReadSelectionText() == "Cat", "Reverse search must wrap in the other direction.");
+        Check(search.Find("cat", false, true) && search.ReadSelectionText() == "cat", "Case-sensitive search must skip differently cased candidates.");
+        var oldViewport = search.ReadFrame().Viewport;
+        Check(!search.Find("cAt", false, true) && search.ReadSelectionText() == "cat" && search.ReadFrame().Viewport == oldViewport, "A failed case-sensitive search must preserve selection and viewport.");
+        Check(!search.Find("absent", false), "A missing query must return false.");
+        Check(!search.Find("", false), "An empty query must not select a match.");    }
+}

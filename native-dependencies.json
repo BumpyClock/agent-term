@@ -1,0 +1,18 @@
+{
+  "ghostty": {
+    "version": "1.0.0",
+    "url": "https://release.files.ghostty.org/libghostty-vt/1.0.0/libghostty-vt-1.0.0.tar.gz",
+    "sha256": "4a6ef758be721923e1969e7b81b443dcc92d8dd3fb5a39600c03a8817a753676"
+  },
+  "zig": {
+    "version": "0.17.0",
+    "windows": {
+      "url": "https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip",
+      "sha256": "b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428"
+    },
+    "linux": {
+      "url": "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz",
+      "sha256": "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026"
+    }
+  }
+}
