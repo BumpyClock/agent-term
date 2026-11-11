@@ -125,6 +125,9 @@ public sealed class TerminalSurface : UserControl
         string fontFamily = FallbackFont)
     {
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
+        var antialiasing = drawing.Antialiasing;
+        // Adjacent cell fills must meet without blending their shared edges into the backdrop.
+        drawing.Antialiasing = CanvasAntialiasing.Aliased;
         for (var row = 0; row < frame.Rows; row++)
         for (var col = 0; col < frame.Columns; col++)
         {
@@ -132,6 +135,7 @@ public sealed class TerminalSurface : UserControl
             if (cell.Selected || !transparentBackground || cell.Background != frame.Background)
                 drawing.FillRectangle(col * cellWidth, row * cellHeight, cellWidth, cellHeight, cell.Selected ? SelectionColor : ToColor(cell.Background));
         }
+        drawing.Antialiasing = antialiasing;
         using var normal = CreateFormat(false, false, fontSize, fontFamily);
         using var bold = CreateFormat(true, false, fontSize, fontFamily);
         using var italic = CreateFormat(false, true, fontSize, fontFamily);

@@ -80,7 +80,46 @@ internal static class Program
         Draw(image, terminal.ReadFrame(), true);
         if (image.GetPixelColors(391, 221, 1, 1)[0].A != 255)
             throw new Exception("Switching back to solid must restore an opaque background.");
+        AssertBackgroundContinuity(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");
+    }
+
+    private static void AssertBackgroundContinuity(CanvasDevice device)
+    {
+        var background = new TerminalColor(12, 12, 12);
+        TerminalColor[] bands = [new(240, 30, 40), new(30, 220, 80), new(40, 80, 240)];
+        var cells = Enumerable.Range(0, 36).Select(index => new TerminalCell(" ", 1,
+            new TerminalColor(230, 230, 230), bands[index % 12 / 4], false, false, false, false, false, false)
+            { Selected = index >= 12 && index < 24 }).ToArray();
+        var frame = new TerminalFrame(12, 3, cells,
+            new TerminalCursor(0, 0, false, false, TerminalCursorShape.Block, background), background, background);
+        foreach (var dpi in new[] { 96f, 120f, 144f })
+        foreach (var cellWidth in new[] { 8.4f, 8f })
+        foreach (var acrylic in new[] { false, true })
+        {
+            const float cellHeight = 20f;
+            var scale = dpi / 96f;
+            using var target = new CanvasRenderTarget(device, 12 * cellWidth, 3 * cellHeight, dpi);
+            using (var drawing = target.CreateDrawingSession())
+                TerminalSurface.DrawFrame(drawing, frame, cellWidth, cellHeight, true, true, transparentBackground: acrylic);
+            var pixels = target.GetPixelColors();
+            var width = (int)target.SizeInPixels.Width;
+            var height = (int)target.SizeInPixels.Height;
+            for (var y = 1; y < height - 1; y++)
+            {
+                var row = (int)((y + 0.5f) / (cellHeight * scale));
+                for (var x = 1; x < width - 1; x++)
+                {
+                    // Color transitions may land halfway through a pixel. Interior pixels must be solid.
+                    var bandPosition = (x + 0.5f) / (4 * cellWidth * scale);
+                    if (Math.Abs(bandPosition - Math.Round(bandPosition)) < 1 / (4 * cellWidth * scale)) continue;
+                    var expected = row == 1 ? new TerminalColor(45, 92, 150) : bands[(int)bandPosition];
+                    var actual = pixels[y * width + x];
+                    if (actual.A != 255 || actual.R != expected.R || actual.G != expected.G || actual.B != expected.B)
+                        throw new Exception($"Background seam at ({x},{y}), {dpi} DPI, {cellWidth} DIP cells, acrylic={acrylic}. Expected {expected}, got {actual}.");
+                }
+            }
+        }
     }
 
     private static void Draw(CanvasRenderTarget target, TerminalFrame frame, bool cursorPhase)

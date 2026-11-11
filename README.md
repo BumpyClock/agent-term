@@ -10,6 +10,8 @@ The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles,
 
 Terminal defaults follow the Windows light or dark theme. Light mode uses dark text and cursor colors with a matching ANSI palette. Switching themes preserves shell output, history, selection, and application-defined RGB or OSC colors.
 
+Colored cell backgrounds and selection join without grid seams at fractional cell widths or display scaling. Text retains normal antialiasing.
+
 ## Controls
 
 | Action | Input |
