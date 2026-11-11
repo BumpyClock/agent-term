@@ -186,6 +186,7 @@ public sealed partial class MainWindow : Window
 
     private async void WindowRoot_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (_visibleTab?.ActivePage.IsComposing == true) return;
         if (_closing || Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) return;
         var control = Down(VirtualKey.Control);
         var shift = Down(VirtualKey.Shift);

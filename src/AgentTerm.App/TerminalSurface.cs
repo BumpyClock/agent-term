@@ -19,6 +19,28 @@ public sealed class TerminalSurface : UserControl
     private const string FallbackFont = "Consolas";
     private static readonly Lazy<string[]> AvailableFonts = new(FindTerminalFonts);
     private readonly CanvasControl _canvas = new();
+    private readonly TextBox _input = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Top,
+        MinWidth = 0, MinHeight = 0, Padding = new Thickness(0), BorderThickness = new Thickness(0),
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+        Opacity = 0, FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(FallbackFont), FontSize = 14,
+        IsSpellCheckEnabled = false, IsTextPredictionEnabled = false,
+        ContextFlyout = null, SelectionFlyout = null,
+        AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap
+    };
+    internal TextBox Input => _input;
+    public bool FocusInput(FocusState state) => _input.Focus(state);
+
+    private bool _compositionVisible;
+    internal void SetCompositionVisible(bool visible)
+    {
+        _compositionVisible = visible;
+        _input.Opacity = visible ? 1 : 0;
+        _canvas.Invalidate();
+    }
+
     private TerminalFrame? _frame;
     private bool _cursorPhase = true;
     private bool _resourcesReady;
@@ -31,12 +53,21 @@ public sealed class TerminalSurface : UserControl
 
     public TerminalSurface()
     {
-        IsTabStop = true;
-        Content = _canvas;
+        IsTabStop = false;
+        var transparent = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        _input.Resources["TextControlBackgroundFocused"] = transparent;
+        _input.Resources["TextControlBorderBrushFocused"] = transparent;
+        _input.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        _input.Resources["TextControlBackgroundPointerOver"] = transparent;
+        _input.Resources["TextControlBorderBrushPointerOver"] = transparent;
+        var root = new Grid();
+        root.Children.Add(_canvas);
+        root.Children.Add(_input);
+        Content = root;
         _canvas.Draw += Draw;
         _canvas.CreateResources += (_, _) => { _resourcesReady = true; MeasureCells(); };
         ActualThemeChanged += (_, _) => _canvas.Invalidate();
-        PointerPressed += (_, _) => Focus(FocusState.Pointer);
+        PointerPressed += (_, _) => FocusInput(FocusState.Pointer);
     }
 
     public void SetAcrylicBackground(bool enabled)
@@ -72,6 +103,8 @@ public sealed class TerminalSurface : UserControl
         if (_terminalFontSize == size && _terminalFontFamily == family) return;
         _terminalFontSize = size;
         _terminalFontFamily = family;
+        _input.FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(family);
+        _input.FontSize = size;
         if (_resourcesReady) MeasureCells();
         _canvas.Invalidate();
     }
@@ -80,6 +113,7 @@ public sealed class TerminalSurface : UserControl
     {
         if (ReferenceEquals(_frame, frame)) return;
         _frame = frame;
+        PositionInput();
         _canvas.Invalidate();
     }
 
@@ -104,14 +138,25 @@ public sealed class TerminalSurface : UserControl
         using var layout = new CanvasTextLayout(_canvas, "M", format, 100, 100);
         CellWidth = (float)Math.Ceiling(layout.LayoutBounds.Width);
         CellHeight = (float)Math.Ceiling(layout.LayoutBounds.Height);
+        PositionInput();
         MetricsChanged?.Invoke();
+    }
+
+    private void PositionInput()
+    {
+        if (_frame is not { } frame) return;
+        var x = Math.Clamp(frame.Cursor.Column, 0, Math.Max(0, frame.Columns - 1)) * CellWidth;
+        var y = Math.Clamp(frame.Cursor.Row, 0, Math.Max(0, frame.Rows - 1)) * CellHeight;
+        _input.Margin = new Thickness(x, y, 0, 0);
+        _input.Width = Math.Max(CellWidth, (frame.Columns * CellWidth) - x);
+        _input.Height = CellHeight;
     }
 
     private void Draw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         if (_frame is { } frame)
             DrawFrame(args.DrawingSession, frame, CellWidth, CellHeight,
-                FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily);
+                _input.FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily, _compositionVisible);
         else
         {
             // Match the native palette while the first frame is being prepared.
@@ -122,7 +167,7 @@ public sealed class TerminalSurface : UserControl
 
     public static void DrawFrame(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, bool focused, bool cursorPhase, float fontSize = 14, bool transparentBackground = false,
-        string fontFamily = FallbackFont)
+        string fontFamily = FallbackFont, bool hideCursor = false)
     {
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
         var antialiasing = drawing.Antialiasing;
@@ -159,7 +204,7 @@ public sealed class TerminalSurface : UserControl
             if (cell.Strikethrough) drawing.DrawLine(x, y + cellHeight / 2, x + width, y + cellHeight / 2, foreground);
         }
         var cursor = frame.Cursor;
-        if (!cursor.Visible || (cursor.Blink && focused && !cursorPhase) || cursor.Column < 0 || cursor.Column >= frame.Columns || cursor.Row < 0 || cursor.Row >= frame.Rows) return;
+        if (hideCursor || !cursor.Visible || (cursor.Blink && focused && !cursorPhase) || cursor.Column < 0 || cursor.Column >= frame.Columns || cursor.Row < 0 || cursor.Row >= frame.Rows) return;
         var cx = cursor.Column * cellWidth;
         var cy = cursor.Row * cellHeight;
         var color = ToColor(cursor.Color);

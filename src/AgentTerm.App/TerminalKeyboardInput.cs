@@ -34,6 +34,14 @@ internal sealed class TerminalKeyboardInput
             ? new KeyEvent(key.Key, modifiers & ~key.ConsumedModifiers, TerminalKeyAction.Release)
             : null;
 
+    internal KeyEvent? Text(PhysicalKey? physical, string text)
+    {
+        if (text.Length == 0) return null;
+        if (physical is { } key && Rune.TryGetRuneAt(text, 0, out var rune) && rune.Utf16SequenceLength == text.Length)
+            return Character(key, (uint)rune.Value);
+        return new KeyEvent(0, TerminalModifiers.None, TerminalKeyAction.Press, text);
+    }
+
     internal KeyEvent? Character(PhysicalKey physical, uint codepoint)
     {
         // A scanless character can be an IME commit or injected Unicode input.

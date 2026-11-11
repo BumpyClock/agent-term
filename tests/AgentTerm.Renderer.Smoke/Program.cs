@@ -51,6 +51,17 @@ internal static class Program
         AssertPixel(image, 35, 190, background.R, background.G, background.B, "unfocused cursor hollow center");
         if (!image.GetPixelColors(30, 180, 10, 20).Any(c => c.R > 100 && c.G > 100 && c.B > 100))
             throw new Exception("Unfocused cursor outline must remain visible while blink phase is off.");
+        Draw(image, hidden, true);
+        var withoutCursor = image.GetPixelColors();
+        foreach (var shape in Enum.GetValues<TerminalCursorShape>())
+        foreach (var focused in new[] { false, true })
+        {
+            var composing = blinking with { Cursor = blinking.Cursor with { Shape = shape } };
+            using (var drawing = image.CreateDrawingSession())
+                TerminalSurface.DrawFrame(drawing, composing, 10, 20, focused, cursorPhase: true, hideCursor: true);
+            if (!image.GetPixelColors().SequenceEqual(withoutCursor))
+                throw new Exception($"IME caret suppression must hide the {shape} terminal cursor and preserve all cell rendering, focused={focused}.");
+        }
 
         terminal.BeginSelection(2, 2);
         terminal.ExtendSelection(5, 2);

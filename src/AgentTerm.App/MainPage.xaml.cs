@@ -32,6 +32,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private ushort _columns = 80;
     private ushort _rows = 24;
     private readonly TerminalKeyboardInput _keyboard = new();
+    private readonly TerminalCompositionInput _composition = new();
+    public bool IsComposing => _composition.IsComposing;
+    private bool _clearingInput;
+    private TerminalKeyboardInput.PhysicalKey? _textKey;
     private int _blinkTicks;
     private readonly UISettings _uiSettings = new();
     private readonly DispatcherQueueTimer _selectionTimer;
@@ -65,6 +69,16 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         Profile = profile;
         _appearance = TerminalPreferences.Current.ResolveAppearance(profile.Id);
         InitializeComponent();
+        Terminal.Input.TextCompositionStarted += Input_CompositionStarted;
+        Terminal.Input.TextCompositionEnded += Input_CompositionEnded;
+        Terminal.Input.TextChanging += Input_TextChanging;
+        // The native editor may handle pointer events before they bubble to the terminal.
+        Terminal.AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(Terminal_KeyUp), true);
+        Terminal.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(Terminal_PointerPressed), true);
+        Terminal.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(Terminal_PointerMoved), true);
+        Terminal.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(Terminal_PointerReleased), true);
+        Terminal.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(Terminal_PointerCaptureLost), true);
+        Terminal.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Terminal_PointerWheelChanged), true);
         ShellText.Text = profile.Name;
         _refreshTimer = DispatcherQueue.CreateTimer();
         _refreshTimer.Interval = TimeSpan.FromMilliseconds(33);
@@ -111,7 +125,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     public void FocusTerminal()
     {
         if (_viewActive && _state is SessionState.Running or SessionState.Idle)
-            Terminal.Focus(FocusState.Programmatic);
+            Terminal.FocusInput(FocusState.Programmatic);
     }
 
     private async void NewSession_Click(object sender, RoutedEventArgs e) => await RestartSessionAsync();
@@ -465,7 +479,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
             if (!_selecting && button is not null && SendApplicationMouse(point, TerminalMouseAction.Press, button))
             {
-                Terminal.Focus(FocusState.Pointer);
+                Terminal.FocusInput(FocusState.Pointer);
                 _applicationMouseButtons.Add(button.Value);
                 Terminal.CapturePointer(e.Pointer);
                 e.Handled = true;
@@ -479,7 +493,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 return;
             }
             if (!point.Properties.IsLeftButtonPressed || (button is not null && button != TerminalMouseButton.Left)) return;
-            Terminal.Focus(FocusState.Pointer);
+            Terminal.FocusInput(FocusState.Pointer);
             _selectionPointer = point.Position;
             var (column, row) = CellAt(point.Position);
             var now = Environment.TickCount64;
@@ -616,6 +630,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private async void Terminal_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (_session is not { } session || _state is not (SessionState.Running or SessionState.Idle)) return;
+        if (_composition.IsComposing) return;
         var status = e.KeyStatus;
         var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
         var key = IsSidedModifier(e.OriginalKey) ? e.OriginalKey : e.Key;
@@ -698,6 +713,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var action = _keyboard.KeyDown(physical, virtualKey, mods, status.WasKeyDown,
                 direct ? TerminalKeyboardInput.Route.Direct : TerminalKeyboardInput.Route.Text,
                 !direct && altGr ? ctrlAlt : TerminalModifiers.None);
+            _textKey = direct ? null : physical;
             if (direct)
             {
                 e.Handled = true;
@@ -759,24 +775,51 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             var status = e.KeyStatus;
             var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
+            if (_textKey == physical) _textKey = null;
             if (_keyboard.KeyUp(physical, Modifiers()) is { } key && _state == SessionState.Running)
                 session.SendKey(key.Key, key.Modifiers, key.Action);
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
     }
 
-    private async void Terminal_CharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs e)
+    private void Input_CompositionStarted(TextBox sender, TextCompositionStartedEventArgs args)
     {
-        if (_state != SessionState.Running || _session is not { } session) return;
+        _composition.Start(sender.Text);
+        _textKey = null;
+        Terminal.SetCompositionVisible(true);
+    }
+
+    private async void Input_CompositionEnded(TextBox sender, TextCompositionEndedEventArgs args)
+    {
+        var text = _composition.Finish(sender.Text);
+        Terminal.SetCompositionVisible(false);
+        ClearInput();
+        if (text.Length == 0 || _state != SessionState.Running || _session is not { } session) return;
+        try { session.SendKey(0, TerminalModifiers.None, TerminalKeyAction.Press, text); }
+        catch (Exception exception) { await FailSessionAsync(exception); }
+    }
+
+    private async void Input_TextChanging(TextBox sender, TextBoxTextChangingEventArgs args)
+    {
+        if (_clearingInput || _composition.IsComposing) return;
+        var text = sender.Text;
+        var physical = _textKey;
+        _textKey = null;
+        ClearInput();
+        if (text.Length == 0 || _state != SessionState.Running || _session is not { } session) return;
         try
         {
-            e.Handled = true;
-            var status = e.KeyStatus;
-            var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
-            if (_keyboard.Character(physical, e.Character) is { } key)
-                session.SendKey(key.Key, key.Modifiers, key.Action, key.Text);
+            if (_keyboard.Text(physical, text) is { } input)
+                session.SendKey(input.Key, input.Modifiers, input.Action, input.Text);
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
+    }
+
+    private void ClearInput()
+    {
+        _clearingInput = true;
+        try { Terminal.Input.Text = string.Empty; }
+        finally { _clearingInput = false; }
     }
 
     private void Terminal_GotFocus(object sender, RoutedEventArgs e)
@@ -787,6 +830,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async void Terminal_LostFocus(object sender, RoutedEventArgs e)
     {
+        _composition.Cancel();
+        _textKey = null;
+        Terminal.SetCompositionVisible(false);
+        ClearInput();
         var releases = _keyboard.Reset();
         Terminal.RefreshCursor();
         if (_state != SessionState.Running || _session is not { } session) return;

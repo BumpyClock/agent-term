@@ -6,6 +6,7 @@ internal static class InputChecks
     public static void Run()
     {
         CheckKeyboardRouting();
+        CheckComposition();
         using var terminal = new GhosttyTerminal();
 
         Check("a"u8, Key(0x41, text: "a"), "Printable key");
@@ -89,6 +90,21 @@ internal static class InputChecks
             throw new InvalidOperationException($"{description}. Expected {Convert.ToHexString(expected)}, got {Convert.ToHexString(actual)}.");
     }
 
+    private static void CheckComposition()
+    {
+        var composition = new TerminalCompositionInput();
+        composition.Start("a");
+        Expect(composition.IsComposing, "Composition should stay active while candidates change.");
+        Expect(composition.Finish("a日本語") == "日本語" && !composition.IsComposing,
+            "A committed composition should send its final text once without earlier input.");
+        Expect(composition.Finish("日本語") == "", "A duplicate completion must not send text again.");
+        composition.Start("");
+        Expect(composition.Finish("") == "", "A cancelled composition must not send text.");
+        composition.Start("");
+        composition.Cancel();
+        Expect(composition.Finish("界") == "", "A completion after cancellation must not send text.");
+    }
+
     private static void CheckKeyboardRouting()
     {
         var keyboard = new TerminalKeyboardInput();
@@ -97,6 +113,13 @@ internal static class InputChecks
         var letter = new TerminalKeyboardInput.PhysicalKey(0x12, false);
         var ime = new TerminalKeyboardInput.PhysicalKey(0, false);
         const TerminalModifiers ctrlAlt = TerminalModifiers.Control | TerminalModifiers.Alt;
+
+        keyboard.KeyDown(letter, 0x45, TerminalModifiers.Shift, false, TerminalKeyboardInput.Route.Text);
+        Expect(keyboard.Text(letter, "E") is { Key: 0x45, Text: "E", Modifiers: TerminalModifiers.Shift } &&
+            keyboard.KeyUp(letter, TerminalModifiers.Shift) is { Key: 0x45, Action: TerminalKeyAction.Release },
+            "Native text input should retain its physical key and release.");
+        Expect(keyboard.Text(null, "日本語") is { Key: 0, Text: "日本語" } && keyboard.Text(null, "") is null,
+            "Multi-character native text should be forwarded once without a physical key.");
 
         var firstTab = keyboard.KeyDown(tab, 0x09, TerminalModifiers.Shift, false, TerminalKeyboardInput.Route.Direct);
         var repeatTab = keyboard.KeyDown(tab, 0x09, TerminalModifiers.Shift, true, TerminalKeyboardInput.Route.Direct);

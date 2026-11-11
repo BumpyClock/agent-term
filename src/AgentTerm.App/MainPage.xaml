@@ -57,9 +57,7 @@
                 </Grid>
             </Grid>
             <local:TerminalSurface Grid.Row="1" x:Name="Terminal" MinHeight="120" SizeChanged="Output_SizeChanged"
-             PointerPressed="Terminal_PointerPressed" PointerMoved="Terminal_PointerMoved" PointerReleased="Terminal_PointerReleased"
-             PointerCaptureLost="Terminal_PointerCaptureLost" PointerWheelChanged="Terminal_PointerWheelChanged"
-             PreviewKeyDown="Terminal_KeyDown" KeyUp="Terminal_KeyUp" CharacterReceived="Terminal_CharacterReceived" GotFocus="Terminal_GotFocus" LostFocus="Terminal_LostFocus"
+             PreviewKeyDown="Terminal_KeyDown" GotFocus="Terminal_GotFocus" LostFocus="Terminal_LostFocus"
              AutomationProperties.Name="Terminal" ToolTipService.ToolTip="Drag to select. Ctrl+Shift+C copies selection. Ctrl+Shift+V pastes. Ctrl+Shift+Tab switches to the previous tab." />
             <ScrollBar x:Name="HistoryScrollBar" Grid.Row="1" Grid.Column="1" Orientation="Vertical" Minimum="0" Maximum="0"
                        ValueChanged="HistoryScrollBar_ValueChanged" AutomationProperties.Name="Terminal scrollback" />
