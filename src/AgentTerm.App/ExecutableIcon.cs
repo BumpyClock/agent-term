@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace AgentTerm_App;
 
@@ -11,6 +12,8 @@ internal static class ExecutableIcon
     {
         // Resource-only loading never runs the executable or its DLL entry point.
         var module = LoadLibraryEx(executable, IntPtr.Zero, 0x00000002 | 0x00000020);
+        if (module == IntPtr.Zero && ReadAppExecutionAliasTarget(executable) is { } target)
+            module = LoadLibraryEx(target, IntPtr.Zero, 0x00000002 | 0x00000020);
         if (module == IntPtr.Zero) return null;
         try
         {
@@ -56,6 +59,43 @@ internal static class ExecutableIcon
         }
     }
 
+    private static string? ReadAppExecutionAliasTarget(string executable)
+    {
+        // Store-installed shells can be discovered through zero-byte launch aliases.
+        // Inspect the alias metadata itself without starting a process.
+        using var file = CreateFile(executable, 0, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        if (file.IsInvalid) return null;
+        var data = new byte[16 * 1024]; // MAXIMUM_REPARSE_DATA_BUFFER_SIZE
+        if (!DeviceIoControl(file, 0x000900A8, IntPtr.Zero, 0, data, data.Length, out var count, IntPtr.Zero))
+            return null;
+        return ParseAppExecutionAliasTarget(data.AsSpan(0, count));
+    }
+
+    internal static string? ParseAppExecutionAliasTarget(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < 12 || BinaryPrimitives.ReadUInt32LittleEndian(data) != 0x8000001B)
+            return null; // IO_REPARSE_TAG_APPEXECLINK
+        var payloadLength = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
+        if (payloadLength < 4 || payloadLength > data.Length - 8 || (payloadLength & 1) != 0 ||
+            BinaryPrimitives.ReadUInt32LittleEndian(data[8..]) < 3)
+            return null;
+
+        // APPEXECLINK stores package identity, entry point, then executable path.
+        var strings = MemoryMarshal.Cast<byte, char>(data.Slice(12, payloadLength - 4));
+        for (var index = 0; index < 3; index++)
+        {
+            var end = strings.IndexOf('\0');
+            if (end <= 0) return null;
+            if (index == 2)
+            {
+                var target = strings[..end].ToString();
+                return Path.IsPathFullyQualified(target) ? target : null;
+            }
+            strings = strings[(end + 1)..];
+        }
+        return null;
+    }
+
     private static byte[]? ReadResource(IntPtr module, IntPtr resource)
     {
         if (resource == IntPtr.Zero) return null;
@@ -68,6 +108,13 @@ internal static class ExecutableIcon
     }
 
     private delegate bool EnumResourceNameCallback(IntPtr module, IntPtr type, IntPtr name, IntPtr parameter);
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern SafeFileHandle CreateFile(string file, uint access, uint sharing, IntPtr security, uint creation, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeviceIoControl(SafeFileHandle file, uint code, IntPtr input, int inputSize, byte[] output, int outputSize, out int returned, IntPtr overlapped);
 
     [DllImport("kernel32.dll", EntryPoint = "LoadLibraryExW", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern IntPtr LoadLibraryEx(string file, IntPtr reserved, uint flags);

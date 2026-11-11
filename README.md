@@ -4,7 +4,7 @@ A Windows terminal built with WinUI 3 on Windows App SDK 2.6.5, .NET 10, Win2D, 
 
 Each tab or pane owns an independent shell, terminal state, and scrollback. The profile menu discovers installed PowerShell versions, Command Prompt, and individual WSL distributions. PowerShell loads your normal shell profile. Closing a pane releases its shell; switching tabs preserves it. Stopped and exited sessions keep their history available until restarted or closed.
 
-Tabs read icons directly from the installed shell executable, avoiding generic Explorer thumbnails. Pill headers retain internal padding while their outer left edge aligns with the pane gutter. Mixed-shell tabs follow the first remaining pane for their icon and title order. Pane headers keep split and close controls without repeating the shell name.
+Tabs read icons directly from the installed shell executable, avoiding generic Explorer thumbnails. Store-installed PowerShell launch aliases resolve to their executable before icon extraction. Pill headers retain internal padding while their outer left edge aligns with the pane gutter. Mixed-shell tabs follow the first remaining pane for their icon and title order. Pane headers keep split and close controls without repeating the shell name.
 
 Child shells receive `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PROGRAM=AgentTerm`. The app removes inherited `NO_COLOR` from the child environment so launching it from automation does not suppress terminal colors. Other inherited variables remain available and the parent environment is unchanged.
 
@@ -68,9 +68,9 @@ Use Windows x64, Windows 10 version 2004 or newer, a .NET 10 SDK, and PowerShell
 dotnet run --project src/AgentTerm.App -p:Platform=x64 -c Release
 ```
 
-The check script downloads checksum-pinned Ghostty and Zig archives, builds the native DLL and app, and runs native VT/input/history/search tests, real shell integration tests, and Win2D pixel checks. Images are saved to `artifacts/renderer-smoke.png` and `artifacts/selection-smoke.png`. Generated files stay in ignored `.deps`, `artifacts`, `bin`, and `obj` folders. First native builds take several minutes.
+The check script downloads checksum-pinned Ghostty and Zig archives, builds the native DLL and app, and runs shell-icon extraction and WinUI decoding checks, native VT/input/history/search tests, real shell integration tests, and Win2D pixel checks. Images are saved to `artifacts/renderer-smoke.png` and `artifacts/selection-smoke.png`. Generated files stay in ignored `.deps`, `artifacts`, `bin`, and `obj` folders. First native builds take several minutes.
 
-The app is unpackaged and self-contained. Windows App SDK 1.8 is pinned. Packaging, signing, and additional architectures are future work.
+The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packaging, signing, and additional architectures are future work.
 
 ## Code map
 
