@@ -274,7 +274,7 @@
                 </Setter>
             </Style>
         </Grid.Resources>
-        <TabView x:Name="Tabs" Background="Transparent" Padding="12,0,0,0"
+        <TabView x:Name="Tabs" Background="Transparent" Padding="2,0,0,0" Loaded="Tabs_Loaded"
                  CanReorderTabs="True" CanDragTabs="True" AllowDropTabs="True" VerticalAlignment="Stretch" IsAddTabButtonVisible="False"
                  TabWidthMode="SizeToContent" CloseButtonOverlayMode="OnPointerOver"
                  SelectionChanged="Tabs_SelectionChanged" TabCloseRequested="Tabs_TabCloseRequested">

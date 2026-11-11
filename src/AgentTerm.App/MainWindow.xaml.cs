@@ -13,8 +13,6 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 using Windows.System;
 using Windows.UI.Core;
 using Windows.UI.ViewManagement;
@@ -127,6 +125,30 @@ public sealed partial class MainWindow : Window
 
     private void NewTabButton_Click(object sender, RoutedEventArgs args) => AddTab(DefaultProfile);
 
+    private void Tabs_Loaded(object sender, RoutedEventArgs args)
+    {
+        // The native template reserves 2 + 4 + 1 DIPs for connected tab corners.
+        // Detached pills need only Tabs.Padding (2) plus the item margin (2),
+        // matching TerminalTab's 4-DIP outer gutter without moving its content.
+        if (FindVisualChild<Grid>(Tabs, "TabContainerGrid") is { } container)
+            container.ColumnDefinitions[0].MinWidth = 0;
+        if (FindVisualChild<ItemsPresenter>(Tabs, "TabsItemsPresenter")?.Header is FrameworkElement header)
+            header.Width = 0;
+        if (FindVisualChild<ScrollContentPresenter>(Tabs, "ScrollContentPresenter") is { } presenter)
+            presenter.Padding = new Thickness(0);
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T element && element.Name == name) return element;
+            if (FindVisualChild<T>(child, name) is { } match) return match;
+        }
+        return null;
+    }
+
     private void AddTab(ShellProfile profile)
     {
         if (_closing) return;
@@ -154,11 +176,11 @@ public sealed partial class MainWindow : Window
         item.IconSource = new FontIconSource { Glyph = "\uE756" };
         try
         {
-            var executable = await StorageFile.GetFileFromPathAsync(profile.Executable);
-            using var thumbnail = await executable.GetThumbnailAsync(ThumbnailMode.SingleItem, 32);
-            if (thumbnail is null) return;
-            var image = new BitmapImage();
-            await image.SetSourceAsync(thumbnail);
+            var icon = await Task.Run(() => ExecutableIcon.Read(profile.Executable));
+            if (icon is null) return;
+            using var stream = new MemoryStream(icon).AsRandomAccessStream();
+            var image = new BitmapImage { DecodePixelWidth = 32 };
+            await image.SetSourceAsync(stream);
             if (tab.PrimaryProfile.Id == profile.Id)
                 item.IconSource = new ImageIconSource { ImageSource = image };
         }

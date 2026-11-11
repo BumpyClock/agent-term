@@ -19,6 +19,12 @@ On 2026-11-10, the available Windows `sky.drag` and unified CUA drag APIs expose
 
 Treat this instant synthetic gesture as an inconclusive reorder check. Use an automation API that can keep the button held across multiple moves and wait for insertion feedback, or perform a manual drag. The measured timing is evidence for that tool invocation, not a minimum drag duration requirement.
 
+## Tab icons and alignment
+
+Open PowerShell and Command Prompt tabs. Confirm each shows its shell artwork rather than a generic executable thumbnail. Check the first pill's outer left edge against the pane's 4-DIP gutter, while the icon retains internal padding. Repeat after switching themes, maximizing, and restoring the window. Recheck after Windows App SDK upgrades because the gutter adjustment uses native TabView template parts.
+
+The resource extraction probe decoded icons from PowerShell, Windows PowerShell, Command Prompt, and WSL. Independent review confirmed the PowerShell and Command Prompt artwork. The Release app build passed with zero warnings and errors. Live icon rendering and alignment remain unverified because Escape stopped desktop automation.
+
 ## Pane materials
 
 1. Record the existing appearance values. Open a separate test window over contrasting desktop content. Keep Windows transparency and theme settings unchanged.

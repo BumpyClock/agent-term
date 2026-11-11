@@ -4,7 +4,7 @@ A Windows terminal built with WinUI 3 on Windows App SDK 2.6.5, .NET 10, Win2D, 
 
 Each tab or pane owns an independent shell, terminal state, and scrollback. The profile menu discovers installed PowerShell versions, Command Prompt, and individual WSL distributions. PowerShell loads your normal shell profile. Closing a pane releases its shell; switching tabs preserves it. Stopped and exited sessions keep their history available until restarted or closed.
 
-Tabs show the installed shell icon with padded pill headers. Mixed-shell tabs follow the first remaining pane for their icon and title order. Pane headers keep split and close controls without repeating the shell name.
+Tabs read icons directly from the installed shell executable, avoiding generic Explorer thumbnails. Pill headers retain internal padding while their outer left edge aligns with the pane gutter. Mixed-shell tabs follow the first remaining pane for their icon and title order. Pane headers keep split and close controls without repeating the shell name.
 
 Child shells receive `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PROGRAM=AgentTerm`. The app removes inherited `NO_COLOR` from the child environment so launching it from automation does not suppress terminal colors. Other inherited variables remain available and the parent environment is unchanged.
 
