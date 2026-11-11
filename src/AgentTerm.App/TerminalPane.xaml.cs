@@ -7,11 +7,13 @@ namespace AgentTerm_App;
 internal sealed partial class TerminalPane : UserControl
 {
     private bool _subscribed;
+    private readonly string _profileId;
     internal event Action<bool>? SplitRequested;
     internal event Action? CloseRequested;
 
     internal TerminalPane(MainPage page)
     {
+        _profileId = page.Profile.Id;
         InitializeComponent();
         TitleText.Text = page.Profile.Name;
         TerminalContent.Content = page;
@@ -39,7 +41,7 @@ internal sealed partial class TerminalPane : UserControl
 
     private void ApplyMaterial()
     {
-        var acrylic = TerminalPreferences.Current.UseAcrylic;
+        var acrylic = TerminalPreferences.Current.ResolveAppearance(_profileId).UseAcrylic;
         SolidSurface.Visibility = acrylic ? Visibility.Collapsed : Visibility.Visible;
         AcrylicSurface.Visibility = acrylic ? Visibility.Visible : Visibility.Collapsed;
     }

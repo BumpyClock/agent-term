@@ -36,6 +36,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private int _wheelDelta;
     private int _zoomWheelDelta;
     private int _fontSize;
+    private TerminalAppearance _appearance;
     private bool _selecting;
     private bool _selectionMoved;
     private Point _selectionPointer;
@@ -55,14 +56,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     public MainPage(ShellProfile profile)
     {
         Profile = profile;
+        _appearance = TerminalPreferences.Current.ResolveAppearance(profile.Id);
         InitializeComponent();
         ShellText.Text = profile.Name;
         _refreshTimer = DispatcherQueue.CreateTimer();
         _refreshTimer.Interval = TimeSpan.FromMilliseconds(33);
         _refreshTimer.Tick += Refresh_Tick;
         Terminal.MetricsChanged += UpdateGridSize;
-        SetFontSize(TerminalPreferences.Current.FontSize);
-        Terminal.SetAcrylicBackground(TerminalPreferences.Current.UseAcrylic);
+        SetFontSize(_appearance.FontSize);
+        Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
         TerminalPreferences.Current.Changed += PreferencesChanged;
         _selectionTimer = DispatcherQueue.CreateTimer();
         _selectionTimer.Interval = TimeSpan.FromMilliseconds(50);
@@ -265,14 +267,19 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void PreferencesChanged()
     {
-        SetFontSize(TerminalPreferences.Current.FontSize);
-        Terminal.SetAcrylicBackground(TerminalPreferences.Current.UseAcrylic);
+        var previous = _appearance;
+        _appearance = TerminalPreferences.Current.ResolveAppearance(Profile.Id);
+        if (previous.FontSize != _appearance.FontSize)
+            SetFontSize(_appearance.FontSize);
+        else if (previous.FontFamily != _appearance.FontFamily)
+            SetFontSize(_fontSize);
+        Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
     }
 
     private void SetFontSize(int size)
     {
         _fontSize = Math.Clamp(size, 8, 36);
-        Terminal.SetTerminalFont(_fontSize, TerminalPreferences.Current.FontFamily);
+        Terminal.SetTerminalFont(_fontSize, _appearance.FontFamily);
     }
 
     public void ShowFind()
@@ -525,7 +532,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 }
                 if (zoomShortcut)
                 {
-                    if (keyCode is 0x30 or 0x60) SetFontSize(TerminalPreferences.Current.FontSize);
+                    if (keyCode is 0x30 or 0x60) SetFontSize(_appearance.FontSize);
                     else SetFontSize(_fontSize + (keyCode is 0xBB or 0x6B ? 1 : -1));
                     return;
                 }
