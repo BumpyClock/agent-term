@@ -7,6 +7,7 @@ using System.Text.Json;
 namespace AgentTerm_App;
 
 public sealed record TerminalAppearance(string FontFamily, int FontSize, bool UseAcrylic);
+// Null fields inherit Defaults; an empty font family explicitly selects Automatic.
 public sealed record ProfileAppearanceOverride(string? FontFamily = null, int? FontSize = null, bool? UseAcrylic = null);
 
 public sealed class TerminalPreferences

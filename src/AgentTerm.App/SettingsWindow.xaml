@@ -14,7 +14,7 @@
         <NavigationView.Resources>
             <Style x:Key="SettingCard" TargetType="Border">
                 <Setter Property="Padding" Value="16" />
-                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="CornerRadius" Value="10" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
                 <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
@@ -32,21 +32,21 @@
             <NavigationViewItem x:Name="StartupItem" Content="Startup">
                 <NavigationViewItem.Icon><SymbolIcon Symbol="Play" /></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Name="AppearanceItem" Content="Appearance">
-                <NavigationViewItem.Icon><SymbolIcon Symbol="View" /></NavigationViewItem.Icon>
-            </NavigationViewItem>
             <NavigationViewItemHeader Content="Profiles" />
             <NavigationViewItem x:Name="DefaultsItem" Content="Defaults">
                 <NavigationViewItem.Icon><SymbolIcon Symbol="Font" /></NavigationViewItem.Icon>
             </NavigationViewItem>
         </NavigationView.MenuItems>
+        <Border Margin="4,8,8,8" CornerRadius="10" BorderThickness="1" Translation="0,0,8"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Background="{ThemeResource LayerFillColorDefaultBrush}">
+        <Border.Shadow><ThemeShadow /></Border.Shadow>
         <Grid RowDefinitions="*,Auto">
             <ScrollViewer x:Name="DetailScroll" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
-                <StackPanel Padding="32,28,32,28" Spacing="16" HorizontalAlignment="Stretch">
+                <StackPanel Padding="24" Spacing="16" HorizontalAlignment="Stretch">
                     <InfoBar x:Name="SettingsNotice" IsClosable="True" />
                     <StackPanel x:Name="StartupPage" Spacing="20">
-                        <TextBlock Text="Startup" Style="{ThemeResource TitleTextBlockStyle}" />
+                        <TextBlock Text="Startup" FontSize="26" FontWeight="SemiBold" />
                         <Border Style="{StaticResource SettingCard}">
                             <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
                                 <StackPanel Spacing="4" VerticalAlignment="Center">
@@ -59,31 +59,14 @@
                             </Grid>
                         </Border>
                     </StackPanel>
-                    <StackPanel x:Name="AppearancePage" Spacing="20" Visibility="Collapsed">
-                        <TextBlock Text="Appearance" Style="{ThemeResource TitleTextBlockStyle}" />
-                        <Border Style="{StaticResource SettingCard}">
-                            <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
-                                <StackPanel Spacing="4" VerticalAlignment="Center">
-                                    <TextBlock Text="Pane background" Style="{StaticResource SettingLabel}" />
-                                    <TextBlock Text="Choose an opaque background or a translucent acrylic surface."
-                                               Style="{StaticResource SettingDescription}" />
-                                </StackPanel>
-                                <ComboBox x:Name="BackgroundBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                          AutomationProperties.Name="Pane background" SelectionChanged="DraftChanged">
-                                    <ComboBoxItem Content="Solid" />
-                                    <ComboBoxItem Content="Acrylic" />
-                                </ComboBox>
-                            </Grid>
-                        </Border>
-                    </StackPanel>
                     <StackPanel x:Name="DefaultsPage" Spacing="20" Visibility="Collapsed">
-                        <TextBlock Text="Profile defaults" Style="{ThemeResource TitleTextBlockStyle}" />
+                        <TextBlock Text="Profile defaults" FontSize="26" FontWeight="SemiBold" />
                         <StackPanel Spacing="8">
                             <Border Style="{StaticResource SettingCard}">
                                 <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
                                         <TextBlock Text="Font family" Style="{StaticResource SettingLabel}" />
-                                        <TextBlock Text="Typeface used for terminal text in all profiles."
+                                        <TextBlock Text="Default typeface, inherited by profiles unless they override it."
                                                    Style="{StaticResource SettingDescription}" />
                                     </StackPanel>
                                     <ComboBox x:Name="FontFamilyBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
@@ -101,11 +84,74 @@
                                              AutomationProperties.Name="Font size" TextChanged="DraftChanged" />
                                 </Grid>
                             </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Pane background" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Default surface for terminal panes."
+                                                   Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="BackgroundBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Default pane background" SelectionChanged="DraftChanged">
+                                        <ComboBoxItem Content="Solid" />
+                                        <ComboBoxItem Content="Acrylic" />
+                                    </ComboBox>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="ProfilePage" Spacing="20" Visibility="Collapsed">
+                        <TextBlock x:Name="ProfileTitle" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Appearance" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="Reset to defaults" Click="ResetProfile_Click" />
+                        </Grid>
+                        <StackPanel Spacing="8">
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Font family" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Inherit Defaults or choose a typeface for this profile."
+                                                   Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="ProfileFontFamilyBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Profile font family" SelectionChanged="DraftChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Font size" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Use the default size or enter a whole number from 8 to 36."
+                                                   Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <CheckBox x:Name="ProfileInheritSize" Content="Use default" Checked="DraftChanged" Unchecked="DraftChanged"
+                                                  AutomationProperties.Name="Use default font size" />
+                                        <TextBox x:Name="ProfileFontSizeBox" AutomationProperties.Name="Profile font size" TextChanged="DraftChanged" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Pane background" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Inherit Defaults or choose this profile's surface."
+                                                   Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="ProfileBackgroundBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Profile pane background" SelectionChanged="DraftChanged">
+                                        <ComboBoxItem Content="Use default" />
+                                        <ComboBoxItem Content="Solid" />
+                                        <ComboBoxItem Content="Acrylic" />
+                                    </ComboBox>
+                                </Grid>
+                            </Border>
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
-            <Border Grid.Row="1" Height="66" Padding="24,12" BorderThickness="0,1,0,0"
+            <Border Grid.Row="1" Height="66" Padding="24,12" BorderThickness="0,1,0,0" CornerRadius="0,0,9,9"
                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                     Background="{ThemeResource LayerFillColorDefaultBrush}">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
@@ -119,5 +165,6 @@
                 </Grid>
             </Border>
         </Grid>
+        </Border>
     </NavigationView>
 </Window>

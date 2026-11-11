@@ -15,9 +15,15 @@ namespace AgentTerm_App;
 internal sealed partial class SettingsWindow : Window
 {
     private readonly record struct SettingsValues(string ProfileId, string FontFamily, int FontSize, bool UseAcrylic);
+    private sealed record ProfileDraft(string? FontFamily, bool InheritFontSize, string? FontSizeText, bool? UseAcrylic);
 
     private readonly TerminalPreferences _preferences = TerminalPreferences.Current;
     private readonly IReadOnlyList<ShellProfile> _profiles;
+    private readonly Dictionary<string, NavigationViewItem> _profileItems = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ProfileDraft> _profileDrafts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ProfileDraft> _savedProfileDrafts = new(StringComparer.Ordinal);
+    private Dictionary<string, ProfileAppearanceOverride> _savedOverrides = new(StringComparer.Ordinal);
+    private string? _shownProfileId;
     private SettingsValues _saved;
     private bool _updatingControls = true;
 
@@ -29,6 +35,12 @@ internal sealed partial class SettingsWindow : Window
         SettingsNavigation.ActualThemeChanged += (_, _) => ApplyCaptionTheme();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         SetInitialBounds(owner);
+        foreach (var profile in profiles)
+        {
+            var item = new NavigationViewItem { Content = profile.Name, Tag = profile.Id, Icon = new FontIcon { Glyph = "\uE756" } };
+            _profileItems.Add(profile.Id, item);
+            SettingsNavigation.MenuItems.Add(item);
+        }
         RestoreDraft();
         SettingsNavigation.SelectedItem = StartupItem;
         if (_preferences.LoadError is { } error)
@@ -71,9 +83,12 @@ internal sealed partial class SettingsWindow : Window
 
     private void SettingsNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs e)
     {
+        CaptureProfileDraft();
+        _shownProfileId = (e.SelectedItem as NavigationViewItem)?.Tag as string;
         StartupPage.Visibility = ReferenceEquals(e.SelectedItem, StartupItem) ? Visibility.Visible : Visibility.Collapsed;
-        AppearancePage.Visibility = ReferenceEquals(e.SelectedItem, AppearanceItem) ? Visibility.Visible : Visibility.Collapsed;
         DefaultsPage.Visibility = ReferenceEquals(e.SelectedItem, DefaultsItem) ? Visibility.Visible : Visibility.Collapsed;
+        ProfilePage.Visibility = _shownProfileId is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_shownProfileId is { } id) LoadProfileDraft(id);
         DetailScroll.ChangeView(null, 0, null, true);
     }
 
@@ -82,21 +97,41 @@ internal sealed partial class SettingsWindow : Window
         _saved = new SettingsValues(_preferences.DefaultProfileId ?? "", _preferences.FontFamily,
             _preferences.FontSize, _preferences.UseAcrylic);
         _updatingControls = true;
+        _savedOverrides = _preferences.ProfileOverrides.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        _profileDrafts.Clear();
+        _savedProfileDrafts.Clear();
+        foreach (var profile in _profiles)
+        {
+            _savedOverrides.TryGetValue(profile.Id, out var value);
+            var draft = new ProfileDraft(value?.FontFamily, value?.FontSize is null,
+                value?.FontSize?.ToString(CultureInfo.InvariantCulture), value?.UseAcrylic);
+            _profileDrafts.Add(profile.Id, draft);
+            _savedProfileDrafts.Add(profile.Id, draft);
+        }
         PopulateChoices(DefaultProfileBox, _saved.ProfileId, "Automatic", _profiles.Select(profile => (profile.Id, profile.Name)));
         var fonts = TerminalSurface.FontFamilies;
         PopulateChoices(FontFamilyBox, _saved.FontFamily, $"Automatic ({fonts[0]})", fonts.Select(font => (font, font)));
         FontSizeBox.Text = _saved.FontSize.ToString(CultureInfo.InvariantCulture);
         BackgroundBox.SelectedIndex = _saved.UseAcrylic ? 1 : 0;
+        if (_shownProfileId is { } id) LoadProfileDraft(id);
         _updatingControls = false;
         UpdateActions();
     }
 
-    private static void PopulateChoices(ComboBox box, string saved, string automatic, IEnumerable<(string Id, string Label)> choices)
+    private static void PopulateChoices(ComboBox box, string? saved, string automatic,
+        IEnumerable<(string Id, string Label)> choices, string? inheritedLabel = null)
     {
         box.Items.Clear();
+        ComboBoxItem? selected = null;
+        if (inheritedLabel is not null)
+        {
+            var inherit = new ComboBoxItem { Content = inheritedLabel };
+            box.Items.Add(inherit);
+            if (saved is null) selected = inherit;
+        }
         var auto = new ComboBoxItem { Content = automatic, Tag = "" };
         box.Items.Add(auto);
-        ComboBoxItem? selected = saved.Length == 0 ? auto : null;
+        if (saved == "") selected = auto;
         foreach (var (id, label) in choices)
         {
             bool matches = string.Equals(id, saved, StringComparison.OrdinalIgnoreCase);
@@ -110,35 +145,89 @@ internal sealed partial class SettingsWindow : Window
             box.Items.Add(selected);
         }
         box.SelectedItem = selected;
+        UpdateSelectionToolTip(box);
     }
 
     private static string? SelectedValue(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Tag as string;
+    private static void UpdateSelectionToolTip(ComboBox box) =>
+        ToolTipService.SetToolTip(box, (box.SelectedItem as ComboBoxItem)?.Content);
+
+    private void LoadProfileDraft(string id)
+    {
+        bool updating = _updatingControls;
+        _updatingControls = true;
+        var draft = _profileDrafts[id];
+        ProfileTitle.Text = _profiles.First(profile => profile.Id == id).Name;
+        var fonts = TerminalSurface.FontFamilies;
+        var effectiveFamily = TerminalSurface.ResolveFontFamily(SelectedValue(FontFamilyBox));
+        PopulateChoices(ProfileFontFamilyBox, draft.FontFamily, $"Automatic ({fonts[0]})",
+            fonts.Select(font => (font, font)), inheritedLabel: $"Use default ({effectiveFamily})");
+        ProfileInheritSize.IsChecked = draft.InheritFontSize;
+        ProfileBackgroundBox.Items[0] = new ComboBoxItem
+        {
+            Content = $"Use default ({(BackgroundBox.SelectedIndex == 1 ? "Acrylic" : "Solid")})"
+        };
+        ProfileBackgroundBox.SelectedIndex = draft.UseAcrylic is null ? 0 : draft.UseAcrylic.Value ? 2 : 1;
+        UpdateSelectionToolTip(ProfileBackgroundBox);
+        DisplayProfileSize(draft);
+        _updatingControls = updating;
+    }
+
+    private void DisplayProfileSize(ProfileDraft draft)
+    {
+        ProfileFontSizeBox.IsEnabled = !draft.InheritFontSize;
+        ProfileFontSizeBox.Text = draft.InheritFontSize ? FontSizeBox.Text : draft.FontSizeText ?? FontSizeBox.Text;
+    }
+
+    private void CaptureProfileDraft()
+    {
+        if (_updatingControls || _shownProfileId is not { } id) return;
+        var previous = _profileDrafts[id];
+        bool inherit = ProfileInheritSize.IsChecked == true;
+        var rawSize = previous.FontSizeText;
+        if (!previous.InheritFontSize) rawSize = ProfileFontSizeBox.Text;
+        else if (!inherit && rawSize is null) rawSize = FontSizeBox.Text;
+        _profileDrafts[id] = new ProfileDraft(SelectedValue(ProfileFontFamilyBox), inherit, rawSize,
+            ProfileBackgroundBox.SelectedIndex switch { 1 => false, 2 => true, _ => null });
+    }
 
     private void DraftChanged(object sender, RoutedEventArgs e)
     {
         if (_updatingControls) return;
-        if (SettingsNotice.Severity == InfoBarSeverity.Error) SettingsNotice.IsOpen = false;
+        if (sender is ComboBox box) UpdateSelectionToolTip(box);
+        CaptureProfileDraft();
+        if (ReferenceEquals(sender, ProfileInheritSize) && _shownProfileId is { } id)
+        {
+            _updatingControls = true;
+            DisplayProfileSize(_profileDrafts[id]);
+            _updatingControls = false;
+        }
         UpdateActions();
     }
 
     private void UpdateActions()
     {
+        bool profilesDirty = _profileDrafts.Any(pair =>
+        {
+            var current = pair.Value;
+            var saved = _savedProfileDrafts[pair.Key];
+            return current.FontFamily != saved.FontFamily || current.UseAcrylic != saved.UseAcrylic ||
+                current.InheritFontSize != saved.InheritFontSize ||
+                (!current.InheritFontSize && current.FontSizeText != saved.FontSizeText);
+        });
         bool dirty = SelectedValue(DefaultProfileBox) != _saved.ProfileId || SelectedValue(FontFamilyBox) != _saved.FontFamily ||
             FontSizeBox.Text != _saved.FontSize.ToString(CultureInfo.InvariantCulture) ||
-            BackgroundBox.SelectedIndex != (_saved.UseAcrylic ? 1 : 0);
+            BackgroundBox.SelectedIndex != (_saved.UseAcrylic ? 1 : 0) || profilesDirty;
         SaveButton.IsEnabled = DiscardButton.IsEnabled = dirty;
         FooterStatus.Text = dirty ? "Unsaved changes. Closing this window discards them." : "";
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(FontSizeBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fontSize) ||
-            fontSize is < 8 or > 36)
+        CaptureProfileDraft();
+        if (!TryFontSize(FontSizeBox.Text, out var fontSize))
         {
-            SettingsNavigation.SelectedItem = DefaultsItem;
-            ShowNotice(InfoBarSeverity.Error, "Check the font size", "Enter a whole number from 8 to 36.");
-            FontSizeBox.Focus(FocusState.Programmatic);
-            FontSizeBox.SelectAll();
+            ShowFontSizeError(null);
             return;
         }
         if (SelectedValue(DefaultProfileBox) is not { } profile || SelectedValue(FontFamilyBox) is not { } family ||
@@ -148,7 +237,28 @@ internal sealed partial class SettingsWindow : Window
             return;
         }
 
-        try { _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family); }
+        // Begin with every saved override so undiscovered profile IDs survive unrelated settings changes.
+        var overrides = new Dictionary<string, ProfileAppearanceOverride>(_savedOverrides, StringComparer.Ordinal);
+        foreach (var shell in _profiles)
+        {
+            var draft = _profileDrafts[shell.Id];
+            int? size = null;
+            if (!draft.InheritFontSize)
+            {
+                if (!TryFontSize(draft.FontSizeText, out var profileSize))
+                {
+                    ShowFontSizeError(shell.Id);
+                    return;
+                }
+                size = profileSize;
+            }
+            var value = new ProfileAppearanceOverride(draft.FontFamily, size, draft.UseAcrylic);
+            if (value.FontFamily is null && value.FontSize is null && value.UseAcrylic is null)
+                overrides.Remove(shell.Id);
+            else
+                overrides[shell.Id] = value;
+        }
+        try { _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             ShowNotice(InfoBarSeverity.Error, "Settings could not be saved", exception.Message);
@@ -157,6 +267,27 @@ internal sealed partial class SettingsWindow : Window
         SettingsNotice.IsOpen = false;
         RestoreDraft();
         FooterStatus.Text = "Settings saved.";
+    }
+
+    private static bool TryFontSize(string? text, out int size) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out size) && size is >= 8 and <= 36;
+
+    private void ShowFontSizeError(string? profileId)
+    {
+        SettingsNavigation.SelectedItem = profileId is null ? DefaultsItem : _profileItems[profileId];
+        ShowNotice(InfoBarSeverity.Error, "Check the font size", "Enter a whole number from 8 to 36.");
+        var input = profileId is null ? FontSizeBox : ProfileFontSizeBox;
+        input.Focus(FocusState.Programmatic);
+        input.SelectAll();
+    }
+
+    private void ResetProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_shownProfileId is not { } id) return;
+        _profileDrafts[id] = new ProfileDraft(null, true, null, null);
+        LoadProfileDraft(id);
+        SettingsNotice.IsOpen = false;
+        UpdateActions();
     }
 
     private void Discard_Click(object sender, RoutedEventArgs e)

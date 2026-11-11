@@ -47,6 +47,10 @@ public sealed class TerminalSurface : UserControl
 
     internal static IReadOnlyList<string> FontFamilies => AvailableFonts.Value;
 
+    internal static string ResolveFontFamily(string? preferredFamily) =>
+        FontFamilies.FirstOrDefault(name => string.Equals(name, preferredFamily, StringComparison.OrdinalIgnoreCase))
+            ?? FontFamilies[0];
+
     private static string[] FindTerminalFonts()
     {
         var installed = CanvasTextFormat.GetSystemFontFamilies().ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -63,8 +67,7 @@ public sealed class TerminalSurface : UserControl
     public void SetTerminalFont(float size, string preferredFamily)
     {
         size = Math.Clamp(size, 8, 36);
-        var family = FontFamilies.FirstOrDefault(name => string.Equals(name, preferredFamily, StringComparison.OrdinalIgnoreCase))
-            ?? FontFamilies[0];
+        var family = ResolveFontFamily(preferredFamily);
         if (_terminalFontSize == size && _terminalFontFamily == family) return;
         _terminalFontSize = size;
         _terminalFontFamily = family;

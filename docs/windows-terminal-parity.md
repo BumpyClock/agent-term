@@ -10,7 +10,7 @@ This baseline covers local interactive shells, tabs and panes, terminal renderin
 | Scrollback | Wheel, scrollbar and keyboard navigation; retained history after stop/exit; input snaps to bottom | Native and real shell tests pass. Live wheel navigation reveals older lines; Ctrl+Shift+End returns to the latest output. |
 | Selection and clipboard | Linear, word, line, rectangular and extended selection; autoscroll; native text formatting; paste framing; viewport pinning during output | Native and pixel tests pass. Live drag, Ctrl+C/Ctrl+Shift+C copy, Ctrl+V/Shift+Insert/right-click paste, and selection retention during output pass. |
 | Search | Previous/next history matches with wrap and exact-case option | Native search tests and live match/no-match checks pass. Case-insensitive matching folds ASCII only. |
-| Zoom and settings | Per-pane zoom; saved font family/size, default profile, and solid/acrylic choice | Preference persistence tests and live zoom/font/background switching pass. Automatic Nerd Font selection renders the user's colored PowerShell prompt without the previously observed missing glyph boxes. |
+| Zoom and settings | Per-pane zoom; shared appearance defaults with independent per-shell font family/size and solid/acrylic overrides | Windows and Boat tests cover inheritance, persistence, explicit Automatic/Solid values, legacy settings, and unavailable profiles. Live checks confirm independent appearance updates in PowerShell and Command Prompt panes. |
 
 ## Known gaps
 
@@ -28,7 +28,11 @@ The user's Windows Terminal screenshots establish the compact tab-strip layout, 
 
 Live clipboard checks compared copied text with the exact selected text and pasted distinct commands through each tested shortcut. Ctrl+C without selection interrupted a 30-second sleep. A selected history region remained at the same viewport offset through 20 timed output lines and remained copyable afterward. Solid/acrylic changes and per-pane zoom were visually verified. These checks supplement automated native, ConPTY, and rendered-pixel tests.
 
-Settings now opens in a separate window with Startup, Appearance, and Profile defaults pages. Live checks confirmed terminal input while Settings was open, unchanged window bounds during page changes and validation errors, cross-page draft validation, Save without closing, Discard, unsaved draft removal on close, reuse after minimization, and settings-window cleanup when its terminal window closes.
+Settings opens in a separate window with Startup, Profile defaults, and each shell's Appearance page. Live checks confirmed terminal input while Settings was open, unchanged window bounds during page changes and validation errors, cross-page draft validation, Save without closing, Discard, unsaved draft removal on close, reuse after minimization, and settings-window cleanup when its terminal window closes.
+
+Per-profile live checks confirmed that Command Prompt overrides update existing and newly split Command Prompt panes while PowerShell panes remain unchanged. Saving an unrelated profile preserved a zoomed PowerShell pane. Changing Defaults updated inheriting panes while keeping explicit overrides; Reset restored inheritance for both panes of the same profile. The original settings file was restored and its hash checked after testing.
+
+A Command Prompt font-family override changed its live pane without changing the adjacent PowerShell font. Saving an invalid profile draft from another profile now navigates to the invalid field and keeps the error visible on the first Save. Independent 6.1-terra-high UX review accepted the main and minimum-width settings layouts and prompted full font-value tooltips and visible inherited values.
 
 ## References
 

@@ -15,13 +15,13 @@ namespace AgentTerm_App;
 
 internal sealed class TerminalTab : UserControl, IAsyncDisposable
 {
-    private const double DividerSize = 10;
+    private const double DividerSize = 4;
     private const double MinimumPaneWidth = 180;
     private const double MinimumPaneHeight = 184;
 
     private sealed record Pane(MainPage Page, TerminalPane View);
 
-    private readonly Grid _layout = new() { Margin = new Thickness(10) };
+    private readonly Grid _layout = new() { Margin = new Thickness(4) };
     private readonly Style _splitterStyle;
     private readonly List<Pane> _panes = [];
     private readonly UISettings _uiSettings = new();
