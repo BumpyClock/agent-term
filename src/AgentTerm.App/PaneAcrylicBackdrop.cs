@@ -1,12 +1,15 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
+using Microsoft.UI.Dispatching;
 using ICompositionSupportsSystemBackdrop = Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 using Windows.UI.Composition;
+using WinRT;
 
 namespace AgentTerm_App;
 
@@ -19,6 +22,8 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop, IDisposable
     private CompositionEffectFactory? _factory;
     private CompositionEffectBrush? _effect;
     private CompositionBackdropBrush? _host;
+    private CompositionColorBrush? _opaqueBrush;
+    private readonly DispatcherQueue _uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
     private bool _hasPolicyTarget;
     private bool _disposed;
     private Color _color = Color.FromArgb(255, 0, 0, 0);
@@ -68,6 +73,9 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop, IDisposable
         {
             CloseResources();
             _target = null;
+            // SystemBackdropElement has finished with its native backdrop link. Close its
+            // thread-affine ContentSite here instead of leaving that close to the RCW finalizer.
+            disconnectedTarget.As<IDisposable>().Dispose();
         }
     }
 
@@ -94,7 +102,18 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop, IDisposable
         ReleaseGraph();
     }
 
-    private void Controller_StateChanged(ISystemBackdropControllerWithTargets sender, object args) => Render();
+    private void Controller_StateChanged(ISystemBackdropControllerWithTargets sender, object args) => RequestRender();
+
+    private void RequestRender(PolicyTarget? source = null)
+    {
+        void Apply()
+        {
+            if (_disposed || (source is not null && !ReferenceEquals(_policyTarget, source))) return;
+            Render();
+        }
+        if (_uiQueue.HasThreadAccess) Apply();
+        else _uiQueue.TryEnqueue(Apply);
+    }
 
     private void Render()
     {
@@ -103,20 +122,22 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop, IDisposable
             SetBrush(null);
             return;
         }
-        if (_opacity >= 1)
-        {
-            // The opaque pane surface owns 100%; leave the backdrop target connected.
-            SetBrush(null);
-            return;
-        }
-        if (_controller.State != SystemBackdropState.Active)
-        {
-            SetBrush(native);
-            return;
-        }
         try
         {
             var compositor = native.Compositor;
+            if (_opacity >= 1)
+            {
+                // A null brush leaves the external backdrop placement showing the window's Mica.
+                _opaqueBrush ??= compositor.CreateColorBrush(_color);
+                _opaqueBrush.Color = _color;
+                SetBrush(_opaqueBrush);
+                return;
+            }
+            if (_controller.State != SystemBackdropState.Active)
+            {
+                SetBrush(native);
+                return;
+            }
             if (_effect is null || !_effect.Compositor.Equals(compositor))
             {
                 ReleaseGraph();
@@ -155,18 +176,26 @@ internal sealed class PaneAcrylicBackdrop : SystemBackdrop, IDisposable
         _effect?.Dispose();
         _factory?.Dispose();
         _host?.Dispose();
+        _opaqueBrush?.Dispose();
         _effect = null;
         _factory = null;
         _host = null;
+        _opaqueBrush = null;
     }
 
     private sealed class PolicyTarget(PaneAcrylicBackdrop owner) : ICompositionSupportsSystemBackdrop
     {
-        internal CompositionBrush? NativeBrush { get; private set; }
+        private CompositionBrush? _nativeBrush;
+        internal CompositionBrush? NativeBrush => Volatile.Read(ref _nativeBrush);
         public CompositionBrush SystemBackdrop
         {
             get => NativeBrush!;
-            set { NativeBrush = value; owner.Render(); }
+            set
+            {
+                // Native policy callbacks can arrive on a worker thread. Only publish their brush here.
+                Volatile.Write(ref _nativeBrush, value);
+                owner.RequestRender(this);
+            }
         }
     }
 }
