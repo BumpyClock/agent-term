@@ -39,7 +39,7 @@ Drag beyond the top or bottom to scroll while selecting. Copy joins soft-wrapped
 
 Mouse-enabled terminal applications receive clicks, releases, motion, and wheel events through Ghostty's native encoder. Hold **Shift** to use local selection, copy/paste, and scrollback instead. **Ctrl+wheel** still zooms. Passive mouse movement does not jump the viewport to the latest output.
 
-IME input uses a native WinUI text input host positioned at the terminal cursor. Composition text stays local until committed, and terminal shortcuts defer to the input method during composition. Automated checks cover text routing, composition state, and cursor suppression. Live keyboard, composition, candidate placement, and mouse interaction with the new input host still require verification with an installed IME.
+IME input uses a native WinUI text input host positioned at the terminal cursor. Composition text stays local until committed, and terminal shortcuts defer to the input method during composition. Automated checks cover text routing, composition state, and cursor suppression. Live ordinary text, Unicode, physical key input, and mouse selection pass. Real composition and candidate placement still require verification with an installed IME.
 
 ## Appearance and profiles
 
