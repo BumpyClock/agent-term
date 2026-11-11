@@ -247,7 +247,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_state is SessionState.Running or SessionState.Idle && _session is not null)
             {
                 _session.Resize(columns, rows);
-                if (_state == SessionState.Idle) RefreshOutput(_session);
+                // Publish the resized grid before the surface repaints at its new size.
+                RefreshOutput(_session);
             }
         }
         GridSizeText.Text = $"{_columns} x {_rows}";
@@ -904,7 +905,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Page_Unloaded(object sender, RoutedEventArgs e)
     {
-        _refreshTimer.Stop();
+        // Splits reparent visible pages. Tab visibility and session teardown own refresh lifetime.
         CancelSelectionGesture();
     }
 

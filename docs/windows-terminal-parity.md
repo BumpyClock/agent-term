@@ -19,6 +19,8 @@ IME composition/candidate positioning, a terminal UI Automation text provider, k
 
 Native tab dragging and reordering are enabled, but automated drag checks did not change tab order. The cause remains unresolved. Tab switching and creation pass; drag reordering is not verified.
 
+Resize now publishes the resized terminal frame immediately for running and stopped sessions. Refresh timers remain active across transient pane reparenting; tab visibility and session teardown own their lifetime. Native width-only resize checks pass without focus or input. Live split/resize verification remains pending while desktop automation is unavailable.
+
 The next core priorities are IME text entry and candidate positioning, accessible terminal text, then keyboard mark mode and configurable actions. These affect input and access before broader profile and session-management features.
 
 Switching primary/alternate screens clears selection. Acrylic currently identifies default backgrounds by resolved RGB, so an explicit ANSI background with the same RGB is transparent too. Settings offers installed terminal fonts; automatic selection prefers an installed CaskaydiaCove Nerd Font before Cascadia Mono and Consolas.
