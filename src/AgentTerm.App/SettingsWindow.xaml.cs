@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using AgentTerm.Terminal;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -24,6 +25,8 @@ internal sealed partial class SettingsWindow : Window
     {
         _profiles = profiles;
         InitializeComponent();
+        SettingsNavigation.Loaded += (_, _) => ApplyCaptionTheme();
+        SettingsNavigation.ActualThemeChanged += (_, _) => ApplyCaptionTheme();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         SetInitialBounds(owner);
         RestoreDraft();
@@ -31,6 +34,16 @@ internal sealed partial class SettingsWindow : Window
         if (_preferences.LoadError is { } error)
             ShowNotice(InfoBarSeverity.Warning, "Settings could not be loaded", error);
     }
+
+    private void ApplyCaptionTheme()
+    {
+        // The native caption needs its own theme setting with Windows App SDK 1.8.
+        int dark = SettingsNavigation.ActualTheme == ElementTheme.Dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(WinRT.Interop.WindowNative.GetWindowHandle(this), 20, in dark, sizeof(int));
+    }
+
+    [DllImport("dwmapi.dll", ExactSpelling = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
 
     internal void ActivateSettings()
     {
