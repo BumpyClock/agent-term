@@ -99,6 +99,19 @@ internal static class ScrollbackChecks
         live.Write("\r\neight"u8);
         Check(live.ReadFrame().Viewport.IsAtBottom, "The viewport must follow output after selection is cleared.");
 
+        using var findSelection = new GhosttyTerminal(12, 3);
+        findSelection.Write("cat dog"u8);
+        Check(findSelection.Find("cat", false), "Search must select the match before extension.");
+        findSelection.ExtendSelection(6, 0);
+        findSelection.EndSelection();
+        Check(findSelection.ReadSelectionText() == "cat dog", "Shift extension must extend a search selection without a prior pointer gesture.");
+        findSelection.BeginSelection(7, 0, rectangular: true);
+        findSelection.ExtendSelection(7, 1);
+        Check(findSelection.Find("cat", false), "Search must replace an active pointer selection.");
+        findSelection.ExtendSelection(6, 0);
+        findSelection.EndSelection();
+        Check(findSelection.ReadSelectionText() == "cat dog", "Search must replace the old gesture anchor and rectangular mode.");
+
         using var search = new GhosttyTerminal(12, 3);
         search.Write("Cat one\r\ncat two\r\nCAT three\r\nnone"u8);
         Check(search.Find("cat", false) && search.ReadSelectionText() == "CAT", "Search must find newer history matches.");
@@ -110,5 +123,6 @@ internal static class ScrollbackChecks
         var oldViewport = search.ReadFrame().Viewport;
         Check(!search.Find("cAt", false, true) && search.ReadSelectionText() == "cat" && search.ReadFrame().Viewport == oldViewport, "A failed case-sensitive search must preserve selection and viewport.");
         Check(!search.Find("absent", false), "A missing query must return false.");
-        Check(!search.Find("", false), "An empty query must not select a match.");    }
+        Check(!search.Find("", false), "An empty query must not select a match.");
+    }
 }

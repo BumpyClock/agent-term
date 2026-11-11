@@ -67,7 +67,6 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         CheckSelectionScreen();
-        if (_selectionScreen is null || _gesture is null) return;
         var point = ViewportPoint(column, row);
         if (_selecting && _selectionClickCount > 1 && !_selectionRectangle)
         {

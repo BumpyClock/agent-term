@@ -17,6 +17,7 @@ if (!OperatingSystem.IsWindows())
 
 var timeout = TimeSpan.FromSeconds(20);
 ShellProfileDiscoveryChecks.Run();
+await TerminalEnvironmentChecks.RunAsync();
 await FullScreenChecks.RunAsync();
 await ScrollbackSessionChecks.RunAsync();
 await ProfileChecks.RunAsync();

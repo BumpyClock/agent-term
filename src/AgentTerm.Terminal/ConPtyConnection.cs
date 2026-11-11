@@ -47,6 +47,7 @@ public sealed class ConPtyConnection : IAsyncDisposable
             IntPtr inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero;
             IntPtr outputRead = IntPtr.Zero, outputWrite = IntPtr.Zero;
             IntPtr attributes = IntPtr.Zero;
+            IntPtr environment = IntPtr.Zero;
             bool attributesInitialized = false;
             try
             {
@@ -62,7 +63,8 @@ public sealed class ConPtyConnection : IAsyncDisposable
                 // Explicit null standard handles prevent redirected parent handles from being duplicated into the child.
                 var startup = new StartupInfoEx { StartupInfo = new StartupInfo { cb = Marshal.SizeOf<StartupInfoEx>(), flags = 0x100 }, AttributeList = attributes };
                 var command = new StringBuilder($"\"{executable}\" {arguments}");
-                Check(Native.CreateProcess(null, command, IntPtr.Zero, IntPtr.Zero, false, 0x00080000, IntPtr.Zero, workingDirectory, ref startup, out var info));
+                environment = CreateChildEnvironment();
+                Check(Native.CreateProcess(null, command, IntPtr.Zero, IntPtr.Zero, false, 0x00080400, environment, workingDirectory, ref startup, out var info));
                 process = info.Process;
                 ProcessId = checked((int)info.ProcessId);
                 Native.CloseHandle(info.Thread);
@@ -89,12 +91,40 @@ public sealed class ConPtyConnection : IAsyncDisposable
             }
             finally
             {
+                if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
                 if (attributesInitialized) Native.DeleteProcThreadAttributeList(attributes);
                 if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
             }
         }
     }
 
+    private static IntPtr CreateChildEnvironment()
+    {
+        // Preserve the native environment, including Windows drive-current-directory
+        // entries that are not exposed by every managed environment enumeration.
+        var source = Native.GetEnvironmentStrings();
+        if (source == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var offset = 0;
+            while (true)
+            {
+                var entry = Marshal.PtrToStringUni(IntPtr.Add(source, offset))!;
+                if (entry.Length == 0) break;
+                var separator = entry.IndexOf('=', entry[0] == '=' ? 1 : 0);
+                if (separator > 0) variables[entry[..separator]] = entry;
+                offset = checked(offset + (entry.Length + 1) * sizeof(char));
+            }
+        }
+        finally { Native.FreeEnvironmentStrings(source); }
+        variables.Remove("NO_COLOR");
+        variables["TERM"] = "TERM=xterm-256color";
+        variables["COLORTERM"] = "COLORTERM=truecolor";
+        variables["TERM_PROGRAM"] = "TERM_PROGRAM=AgentTerm";
+        var block = string.Join('\0', variables.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase).Select(entry => entry.Value)) + "\0\0";
+        return Marshal.StringToHGlobalUni(block);
+    }
     public void Send(ReadOnlySpan<byte> data) => Enqueue(data, reply: false);
 
     // A final output frame can request a reply after the child has exited.
@@ -281,6 +311,8 @@ public sealed class ConPtyConnection : IAsyncDisposable
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref nuint size);
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, nuint attribute, IntPtr value, nuint size, IntPtr previous, IntPtr returnSize);
         [DllImport("kernel32.dll")] public static extern void DeleteProcThreadAttributeList(IntPtr list);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetEnvironmentStringsW")] public static extern IntPtr GetEnvironmentStrings();
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "FreeEnvironmentStringsW")] public static extern bool FreeEnvironmentStrings(IntPtr environment);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateProcessW")] public static extern bool CreateProcess(string? application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string? directory, ref StartupInfoEx startup, out ProcessInformation process);
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool ReadFile(IntPtr handle, byte[] buffer, int count, out int read, IntPtr overlapped);
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool WriteFile(IntPtr handle, byte[] buffer, int count, out int written, IntPtr overlapped);
@@ -290,3 +322,4 @@ public sealed class ConPtyConnection : IAsyncDisposable
         [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
     }
 }
+

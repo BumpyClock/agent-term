@@ -48,6 +48,11 @@ public sealed partial class GhosttyTerminal
             ThrowIfFailed(SearchNative.ghostty_search_get(_search, 5, &match), "Could not read terminal search match.");
             if (caseSensitive && !string.Equals(FormatSearchMatch(match), query, StringComparison.Ordinal)) continue;
             ThrowIfFailed(Native.ghostty_terminal_set(_handle, 22, (IntPtr)(&match)), "Could not highlight terminal search match.");
+            if (_gesture is not null) ScrollNative.ghostty_selection_gesture_reset(_gesture, _handle);
+            _anchor?.Dispose(); _anchor = null;
+            _selectionScreen = ActiveScreen();
+            _selectionRectangle = false;
+            _selecting = false;
             _viewRevision++;
             CaptureSelectedViewport();
             return true;
