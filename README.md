@@ -4,6 +4,8 @@ A Windows terminal built with WinUI 3, .NET 10, Win2D, Windows ConPTY, and libgh
 
 Each tab or pane owns an independent shell, terminal state, and scrollback. The profile menu discovers installed PowerShell versions, Command Prompt, and individual WSL distributions. PowerShell loads your normal shell profile. Closing a pane releases its shell; switching tabs preserves it. Stopped and exited sessions keep their history available until restarted or closed.
 
+Child shells receive `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PROGRAM=AgentTerm`. The app removes inherited `NO_COLOR` from the child environment so launching it from automation does not suppress terminal colors. Other inherited variables remain available and the parent environment is unchanged.
+
 The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles, cursor shapes, and alternate screens. History, search, selection, and keyboard encoding use Ghostty's native APIs. Selection pins the viewport while output continues. Typing or pasting returns to live output.
 
 ## Controls
@@ -16,6 +18,7 @@ The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles,
 | Close active pane or tab | Ctrl+Shift+W |
 | Split active pane | Ctrl+Shift+D, Alt+Shift++ or Alt+Shift+- |
 | Focus adjacent pane | Alt+arrow |
+| Resize panes | Drag a divider or Alt+Shift+arrow |
 | Scroll history | Wheel, scrollbar, Ctrl+Shift+Up/Down or PageUp/PageDown |
 | Oldest / latest output | Ctrl+Shift+Home / End |
 | Select text | Left drag; double-click word; triple-click line |
@@ -32,7 +35,11 @@ Drag beyond the top or bottom to scroll while selecting. Copy joins soft-wrapped
 
 ## Appearance and profiles
 
-Settings save the default profile, font size, and background choice to `%LOCALAPPDATA%\AgentTerm\settings.json`. Choose **Solid** for an opaque terminal or **Acrylic** for a transparent terminal surface over Windows' desktop acrylic backdrop. Selection and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
+Settings save the default profile, font family, font size, and pane background choice to `%LOCALAPPDATA%\AgentTerm\settings.json`. The window uses Windows Mica with native caption controls. Each terminal sits in a rounded card with its own header and split/close actions. Choose **Solid** for an opaque terminal or **Acrylic** for a transparent terminal surface over a separate in-app acrylic card. Selection and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
+
+Automatic font selection prefers an installed CaskaydiaCove Nerd Font, then Cascadia Mono, then Consolas. Settings lists available terminal fonts. No fonts are downloaded or installed. WinUI's in-app acrylic blurs app content; it does not sample the desktop or the Mica system backdrop. Windows controls material fallback when transparency is unavailable.
+
+New panes fade in over 200 ms. Closing panes fade out over 140 ms before removal, followed by a 190 ms expansion of the remaining panes. These transitions animate visual transforms without resizing ConPTY every animation frame. Divider dragging remains immediate. Turning off Windows animations disables these transitions.
 
 Zoom applies to the current pane. A settings font-size change applies to all panes. History is configured for 10 MiB and 10,000 physical lines; Ghostty retains whole pages, so these limits are approximate. WSL discovery is bounded and skips unavailable distributions. WSL itself is not installed by the app.
 
@@ -54,7 +61,8 @@ The app is unpackaged and self-contained. Windows App SDK 1.8 is pinned. Packagi
 ## Code map
 
 - `src/AgentTerm.App/MainWindow` owns the tab strip, profile menu, window backdrop, settings, and window shutdown.
-- `src/AgentTerm.App/TerminalTab.cs` owns nested pane layout and active-pane focus.
+- `src/AgentTerm.App/TerminalTab.cs` owns nested pane layout, resizing, transitions, and active-pane focus.
+- `src/AgentTerm.App/TerminalPane` owns each card's material, header controls, and focus outline.
 - `src/AgentTerm.App/MainPage` owns one terminal view, input, clipboard, search, and session presentation.
 - `src/AgentTerm.App/TerminalSurface.cs` draws cells, selection, and cursors with shared font metrics.
 - `src/AgentTerm.Terminal/TerminalSession.cs` serializes Ghostty state and owns one shell connection.

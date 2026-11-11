@@ -322,4 +322,3 @@ public sealed class ConPtyConnection : IAsyncDisposable
         [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
     }
 }
-

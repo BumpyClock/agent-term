@@ -32,9 +32,7 @@ public sealed partial class MainWindow : Window
         WindowRoot.Loaded += (_, _) => SetTitleBar(TabDragRegion);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         AppWindow.Resize(new SizeInt32(1040, 760));
-        ApplyAppearance();
-        TerminalPreferences.Current.Changed += ApplyAppearance;
-        Closed += (_, _) => TerminalPreferences.Current.Changed -= ApplyAppearance;
+        SystemBackdrop = new MicaBackdrop();
         BuildProfileMenu();
         AddTab(DefaultProfile);
         AppWindow.Closing += Window_Closing;
@@ -81,7 +79,9 @@ public sealed partial class MainWindow : Window
         ProfileMenu.Opening += (_, _) =>
         {
             var page = _visibleTab is { IsClosing: false } tab ? tab.ActivePage : null;
-            splitRight.IsEnabled = splitDown.IsEnabled = find.IsEnabled = page is not null;
+            splitRight.IsEnabled = _visibleTab?.CanSplit(sideBySide: true) == true;
+            splitDown.IsEnabled = _visibleTab?.CanSplit(sideBySide: false) == true;
+            find.IsEnabled = page is not null;
             stop.IsEnabled = page?.CanStopSession == true;
             restart.IsEnabled = page?.CanRestartSession == true;
         };
@@ -96,9 +96,10 @@ public sealed partial class MainWindow : Window
     private void AddTab(ShellProfile profile)
     {
         if (_closing) return;
-        var tab = new TerminalTab(profile);
+        var tab = new TerminalTab(profile, (Style)WindowRoot.Resources["PaneSplitterStyle"]);
         var item = new TabViewItem { Header = tab.Title, Content = tab };
         tab.TitleChanged += () => item.Header = tab.Title;
+        tab.CloseRequested += async () => await CloseTabAsync(item);
         Tabs.TabItems.Add(item);
         Tabs.SelectedItem = item;
     }
@@ -169,11 +170,8 @@ public sealed partial class MainWindow : Window
                 case VirtualKey.T:
                     AddTab(DefaultProfile);
                     break;
-                case VirtualKey.W when _visibleTab is { PaneCount: > 1 } tab:
+                case VirtualKey.W when _visibleTab is { } tab:
                     await tab.CloseActivePaneAsync();
-                    break;
-                case VirtualKey.W when Tabs.SelectedItem is TabViewItem item:
-                    await CloseTabAsync(item);
                     break;
                 case VirtualKey.D:
                     _visibleTab?.SplitDuplicate();
@@ -187,12 +185,17 @@ public sealed partial class MainWindow : Window
             if (e.Key == VirtualKey.D) _visibleTab?.SplitDuplicate();
             else _visibleTab?.Split(sideBySide: (uint)e.Key is 0xBB or 0x6B);
         }
-        else if (alt && !shift && !control && e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down &&
+        else if (alt && !control && e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down &&
             _visibleTab is { PaneCount: > 1 } focusedTab)
         {
-            e.Handled = true;
-            focusedTab.FocusAdjacentPane(e.Key == VirtualKey.Left ? -1 : e.Key == VirtualKey.Right ? 1 : 0,
-                e.Key == VirtualKey.Up ? -1 : e.Key == VirtualKey.Down ? 1 : 0);
+            var horizontal = e.Key == VirtualKey.Left ? -1 : e.Key == VirtualKey.Right ? 1 : 0;
+            var vertical = e.Key == VirtualKey.Up ? -1 : e.Key == VirtualKey.Down ? 1 : 0;
+            if (shift) e.Handled = focusedTab.ResizeActivePane(horizontal, vertical);
+            else
+            {
+                e.Handled = true;
+                focusedTab.FocusAdjacentPane(horizontal, vertical);
+            }
         }
         else if (control && !shift && !alt && (uint)e.Key == 0xBC)
         {
@@ -221,7 +224,16 @@ public sealed partial class MainWindow : Window
             Value = preferences.FontSize,
             SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline
         };
-        var background = new ComboBox { Header = "Background", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var fontFamily = new ComboBox { Header = "Font family", HorizontalAlignment = HorizontalAlignment.Stretch };
+        fontFamily.Items.Add($"Automatic ({TerminalSurface.FontFamilies[0]})");
+        fontFamily.SelectedIndex = 0;
+        foreach (var family in TerminalSurface.FontFamilies)
+        {
+            fontFamily.Items.Add(family);
+            if (string.Equals(family, preferences.FontFamily, StringComparison.OrdinalIgnoreCase))
+                fontFamily.SelectedItem = family;
+        }
+        var background = new ComboBox { Header = "Pane background", HorizontalAlignment = HorizontalAlignment.Stretch };
         background.Items.Add("Solid");
         background.Items.Add("Acrylic");
         background.SelectedIndex = preferences.UseAcrylic ? 1 : 0;
@@ -236,6 +248,7 @@ public sealed partial class MainWindow : Window
 
         var fields = new StackPanel { Spacing = 12 };
         fields.Children.Add(profile);
+        fields.Children.Add(fontFamily);
         fields.Children.Add(fontSize);
         fields.Children.Add(background);
         fields.Children.Add(error);
@@ -260,7 +273,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            try { preferences.Update(selected.Id, (int)fontSize.Value, background.SelectedIndex == 1); }
+            var family = fontFamily.SelectedIndex > 0 ? (string)fontFamily.SelectedItem : "";
+            try { preferences.Update(selected.Id, (int)fontSize.Value, background.SelectedIndex == 1, family); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 error.Title = "Settings could not be saved";
@@ -273,13 +287,6 @@ public sealed partial class MainWindow : Window
         _settingsDialog = dialog;
         try { await dialog.ShowAsync(); }
         finally { _settingsDialog = null; }
-    }
-
-    private void ApplyAppearance()
-    {
-        var acrylic = TerminalPreferences.Current.UseAcrylic;
-        SolidBackdrop.Visibility = acrylic ? Visibility.Collapsed : Visibility.Visible;
-        SystemBackdrop = acrylic ? SystemBackdrop ?? new DesktopAcrylicBackdrop() : null;
     }
 
     private static bool Down(VirtualKey key) =>

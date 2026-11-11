@@ -61,8 +61,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _refreshTimer.Interval = TimeSpan.FromMilliseconds(33);
         _refreshTimer.Tick += Refresh_Tick;
         Terminal.MetricsChanged += UpdateGridSize;
-        _fontSize = TerminalPreferences.Current.FontSize;
-        Terminal.SetTerminalFontSize(_fontSize);
+        SetFontSize(TerminalPreferences.Current.FontSize);
         Terminal.SetAcrylicBackground(TerminalPreferences.Current.UseAcrylic);
         TerminalPreferences.Current.Changed += PreferencesChanged;
         _selectionTimer = DispatcherQueue.CreateTimer();
@@ -273,7 +272,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void SetFontSize(int size)
     {
         _fontSize = Math.Clamp(size, 8, 36);
-        Terminal.SetTerminalFontSize(_fontSize);
+        Terminal.SetTerminalFont(_fontSize, TerminalPreferences.Current.FontFamily);
     }
 
     public void ShowFind()

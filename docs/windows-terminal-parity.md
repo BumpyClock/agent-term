@@ -5,22 +5,26 @@ This baseline covers local interactive shells, tabs and panes, terminal renderin
 | Area | Implementation | Verification |
 | --- | --- | --- |
 | ConPTY shells | Independent PowerShell and Command Prompt sessions; installed WSL distribution profiles; normal PowerShell profile loading | Native shell tests pass for launch, independent state, interrupts, resize, output draining and cleanup. WSL discovery and argument quoting pass; distro shell execution remains untested. |
-| Tabs and panes | Profile menu, tab switching, nested splits, directional focus, close active pane/tab, await-all window shutdown | Live checks confirm tab creation, retained output after switching, split creation and full-height layout. |
+| Tabs and panes | Profile menu, tab switching, nested splits, directional focus, mouse/keyboard resizing, close active pane/tab, await-all window shutdown | Live checks confirm tab creation, retained output after switching, full-height layout, both divider orientations, keyboard resizing, and nested collapse retaining the original session. |
 | Rendering | ANSI/indexed/RGB colors, Unicode cells, styles, cursor shapes, alternate screen | Native and Win2D pixel tests pass; full-screen console fixture passes. |
-| Scrollback | Wheel, scrollbar and keyboard navigation; retained history after stop/exit; input snaps to bottom | Native and real shell tests pass. Live wheel verification is in progress. |
-| Selection and clipboard | Linear, word, line, rectangular and extended selection; autoscroll; native text formatting; paste framing; viewport pinning during output | Native and pixel tests pass. Live drag selection passes; clipboard verification is in progress. |
+| Scrollback | Wheel, scrollbar and keyboard navigation; retained history after stop/exit; input snaps to bottom | Native and real shell tests pass. Live wheel navigation reveals older lines; Ctrl+Shift+End returns to the latest output. |
+| Selection and clipboard | Linear, word, line, rectangular and extended selection; autoscroll; native text formatting; paste framing; viewport pinning during output | Native and pixel tests pass. Live drag, Ctrl+C/Ctrl+Shift+C copy, Ctrl+V/Shift+Insert/right-click paste, and selection retention during output pass. |
 | Search | Previous/next history matches with wrap and exact-case option | Native search tests and live match/no-match checks pass. Case-insensitive matching folds ASCII only. |
-| Zoom and settings | Per-pane zoom; saved font size, default profile, and solid/acrylic choice | Preference persistence tests and live zoom/background switching pass. |
+| Zoom and settings | Per-pane zoom; saved font family/size, default profile, and solid/acrylic choice | Preference persistence tests and live zoom/font/background switching pass. Automatic Nerd Font selection renders the user's colored PowerShell prompt without the previously observed missing glyph boxes. |
 
 ## Known gaps
 
-Application mouse reporting, IME composition/candidate positioning, a terminal UI Automation text provider, keyboard selection/mark mode, custom key bindings, advanced profile editing, extension APIs, and complete VT compatibility testing remain outside this baseline. Pane resizing and window/session layout restoration are not yet implemented.
+Application mouse reporting, IME composition/candidate positioning, a terminal UI Automation text provider, keyboard selection/mark mode, custom key bindings, advanced profile editing, extension APIs, and complete VT compatibility testing remain outside this baseline. Window/session layout restoration is not yet implemented.
 
-Switching primary/alternate screens clears selection. Acrylic currently identifies default backgrounds by resolved RGB, so an explicit ANSI background with the same RGB is transparent too. The app uses Consolas with system font fallback.
+Switching primary/alternate screens clears selection. Acrylic currently identifies default backgrounds by resolved RGB, so an explicit ANSI background with the same RGB is transparent too. Settings offers installed terminal fonts; automatic selection prefers an installed CaskaydiaCove Nerd Font before Cascadia Mono and Consolas.
+
+The card layout follows the user's later pane reference. The window uses Mica and Windows caption controls, with solid or in-app acrylic pane surfaces. In-app acrylic does not blur the desktop or sample Mica's external compositor content. This follows the [WinUI material model](https://learn.microsoft.com/en-us/windows/apps/develop/ui/in-app-acrylic).
 
 ## Comparison evidence
 
 The user's Windows Terminal screenshots establish the compact tab-strip layout, profile dropdown, acrylic appearance, and normal PowerShell prompt behavior. Computer Use explicitly blocked Windows Terminal itself; its live behavior was not automated. AgentTerm's UI has been exercised directly for the flows listed above.
+
+Live clipboard checks compared copied text with the exact selected text and pasted distinct commands through each tested shortcut. Ctrl+C without selection interrupted a 30-second sleep. A selected history region remained at the same viewport offset through 20 timed output lines and remained copyable afterward. Solid/acrylic changes and per-pane zoom were visually verified. These checks supplement automated native, ConPTY, and rendered-pixel tests.
 
 ## References
 

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using AgentTerm.Terminal;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
@@ -14,11 +16,14 @@ namespace AgentTerm_App;
 // A single retained control draws the terminal grid. Metrics are shared with the resize calculation.
 public sealed class TerminalSurface : UserControl
 {
+    private const string FallbackFont = "Consolas";
+    private static readonly Lazy<string[]> AvailableFonts = new(FindTerminalFonts);
     private readonly CanvasControl _canvas = new();
     private TerminalFrame? _frame;
     private bool _cursorPhase = true;
     private bool _resourcesReady;
     private float _terminalFontSize = 14;
+    private string _terminalFontFamily = FallbackFont;
     private bool _acrylicBackground;
     public event Action? MetricsChanged;
     public float CellWidth { get; private set; } = 8.4f;
@@ -40,11 +45,29 @@ public sealed class TerminalSurface : UserControl
         _canvas.Invalidate();
     }
 
-    public void SetTerminalFontSize(float size)
+    internal static IReadOnlyList<string> FontFamilies => AvailableFonts.Value;
+
+    private static string[] FindTerminalFonts()
+    {
+        var installed = CanvasTextFormat.GetSystemFontFamilies().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // DirectWrite can expose either full Nerd Font family names or their legacy short names.
+        string[] candidates =
+        [
+            "CaskaydiaCove Nerd Font Mono", "CaskaydiaCove NFM", "CaskaydiaCove Nerd Font", "CaskaydiaCove NF",
+            "Cascadia Mono NF", "Cascadia Mono", FallbackFont, "Cascadia Code", "FiraCode Nerd Font Mono",
+            "FiraCode NFM", "FiraCode Nerd Font", "FiraCode NF", "Fira Code", "JetBrains Mono", "Lucida Console"
+        ];
+        return candidates.Where(installed.Contains).DefaultIfEmpty(FallbackFont).ToArray();
+    }
+
+    public void SetTerminalFont(float size, string preferredFamily)
     {
         size = Math.Clamp(size, 8, 36);
-        if (_terminalFontSize == size) return;
+        var family = FontFamilies.FirstOrDefault(name => string.Equals(name, preferredFamily, StringComparison.OrdinalIgnoreCase))
+            ?? FontFamilies[0];
+        if (_terminalFontSize == size && _terminalFontFamily == family) return;
         _terminalFontSize = size;
+        _terminalFontFamily = family;
         if (_resourcesReady) MeasureCells();
         _canvas.Invalidate();
     }
@@ -73,7 +96,7 @@ public sealed class TerminalSurface : UserControl
 
     private void MeasureCells()
     {
-        using var format = CreateFormat(false, false, _terminalFontSize);
+        using var format = CreateFormat(false, false, _terminalFontSize, _terminalFontFamily);
         using var layout = new CanvasTextLayout(_canvas, "M", format, 100, 100);
         CellWidth = (float)Math.Ceiling(layout.LayoutBounds.Width);
         CellHeight = (float)Math.Ceiling(layout.LayoutBounds.Height);
@@ -84,13 +107,14 @@ public sealed class TerminalSurface : UserControl
     {
         if (_frame is { } frame)
             DrawFrame(args.DrawingSession, frame, CellWidth, CellHeight,
-                FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground);
+                FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily);
         else
             args.DrawingSession.Clear(_acrylicBackground ? Color.FromArgb(0, 0, 0, 0) : Color.FromArgb(255, 12, 12, 12));
     }
 
     public static void DrawFrame(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
-        float cellHeight, bool focused, bool cursorPhase, float fontSize = 14, bool transparentBackground = false)
+        float cellHeight, bool focused, bool cursorPhase, float fontSize = 14, bool transparentBackground = false,
+        string fontFamily = FallbackFont)
     {
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
         for (var row = 0; row < frame.Rows; row++)
@@ -100,10 +124,10 @@ public sealed class TerminalSurface : UserControl
             if (cell.Selected || !transparentBackground || cell.Background != frame.Background)
                 drawing.FillRectangle(col * cellWidth, row * cellHeight, cellWidth, cellHeight, cell.Selected ? SelectionColor : ToColor(cell.Background));
         }
-        using var normal = CreateFormat(false, false, fontSize);
-        using var bold = CreateFormat(true, false, fontSize);
-        using var italic = CreateFormat(false, true, fontSize);
-        using var boldItalic = CreateFormat(true, true, fontSize);
+        using var normal = CreateFormat(false, false, fontSize, fontFamily);
+        using var bold = CreateFormat(true, false, fontSize, fontFamily);
+        using var italic = CreateFormat(false, true, fontSize, fontFamily);
+        using var boldItalic = CreateFormat(true, true, fontSize, fontFamily);
         for (var row = 0; row < frame.Rows; row++)
         for (var col = 0; col < frame.Columns; col++)
         {
@@ -148,9 +172,9 @@ public sealed class TerminalSurface : UserControl
 
     private static readonly Color SelectionColor = Color.FromArgb(255, 45, 92, 150);
 
-    private static CanvasTextFormat CreateFormat(bool bold, bool italic, float fontSize) => new()
+    private static CanvasTextFormat CreateFormat(bool bold, bool italic, float fontSize, string fontFamily) => new()
     {
-        FontFamily = "Consolas",
+        FontFamily = fontFamily,
         FontSize = fontSize,
         FontWeight = new FontWeight { Weight = (ushort)(bold ? 700 : 400) },
         FontStyle = italic ? FontStyle.Italic : FontStyle.Normal,
