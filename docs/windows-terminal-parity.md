@@ -20,6 +20,8 @@ Switching primary/alternate screens clears selection. Acrylic currently identifi
 
 The card layout follows the user's later pane reference. The window uses Mica and Windows caption controls, with solid or in-app acrylic pane surfaces. In-app acrylic does not blur the desktop or sample Mica's external compositor content. This follows the [WinUI material model](https://learn.microsoft.com/en-us/windows/apps/develop/ui/in-app-acrylic).
 
+Live checks observed intermediate entrance and exit frames, completed pane removal, and repeated split/close without stranded panes. Closing the window immediately after closing a pane exited the app and all six observed shell/conhost child processes. The reduced-motion branch was reviewed but not runtime-tested; no Windows animation setting was changed.
+
 ## Comparison evidence
 
 The user's Windows Terminal screenshots establish the compact tab-strip layout, profile dropdown, acrylic appearance, and normal PowerShell prompt behavior. Computer Use explicitly blocked Windows Terminal itself; its live behavior was not automated. AgentTerm's UI has been exercised directly for the flows listed above.
