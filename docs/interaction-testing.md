@@ -25,6 +25,12 @@ Open PowerShell and Command Prompt tabs. Confirm each shows its shell artwork ra
 
 The resource extraction probe decoded icons from PowerShell, Windows PowerShell, Command Prompt, and WSL. Independent review confirmed the PowerShell and Command Prompt artwork. The Release app build passed with zero warnings and errors. Live icon rendering and alignment remain unverified because Escape stopped desktop automation.
 
+## Window shutdown
+
+Close the final running tab using its close button. Repeat with a stopped session and with the final pane's close action. Confirm that the terminal window and any Settings window close, and its owned shell/conhost processes exit. Also close a window with multiple running tabs and panes to cover asynchronous cleanup.
+
+The shutdown handler queues its final native close request. The last-tab path has no remaining tabs to await, so cleanup completes synchronously. Calling Close again inside the canceled Closing callback is reentrant and can leave the empty window open. The queued request lets that callback return first. Source review covers both synchronous and asynchronous cleanup; live shutdown verification is pending after Escape stopped automation.
+
 ## Pane materials
 
 1. Record the existing appearance values. Open a separate test window over contrasting desktop content. Keep Windows transparency and theme settings unchanged.

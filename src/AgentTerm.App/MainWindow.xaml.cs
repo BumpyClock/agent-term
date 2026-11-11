@@ -326,7 +326,9 @@ public sealed partial class MainWindow : Window
         finally
         {
             _allowClose = true;
-            Close();
+            // The final tab is already gone, so WhenAll can complete inline.
+            // Let the canceled Closing callback return before requesting another close.
+            DispatcherQueue.TryEnqueue(Close);
         }
     }
 }
