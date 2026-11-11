@@ -9,6 +9,12 @@ if (args.Contains("--tui-fixture"))
     return;
 }
 
+if (args.Contains("--mouse-fixture"))
+{
+    MouseSessionChecks.RunFixture();
+    return;
+}
+
 if (!OperatingSystem.IsWindows())
 {
     Console.WriteLine("AgentTerm.ConPty smoke checks require Windows. Skipped.");
@@ -19,6 +25,7 @@ var timeout = TimeSpan.FromSeconds(20);
 ShellProfileDiscoveryChecks.Run();
 await TerminalEnvironmentChecks.RunAsync();
 await FullScreenChecks.RunAsync();
+await MouseSessionChecks.RunAsync();
 await ScrollbackSessionChecks.RunAsync();
 await ProfileChecks.RunAsync();
 var prompt = new Regex(@"(?m)^PS [^\r\n]*> ?$", RegexOptions.CultureInvariant);

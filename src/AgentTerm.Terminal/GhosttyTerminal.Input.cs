@@ -176,6 +176,8 @@ public sealed partial class GhosttyTerminal
 
     private void DisposeInput()
     {
+        _mouseEvent?.Dispose();
+        _mouseEncoder?.Dispose();
         _keyEvent?.Dispose();
         _keyEncoder?.Dispose();
     }

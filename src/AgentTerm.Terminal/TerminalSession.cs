@@ -79,6 +79,33 @@ public sealed class TerminalSession : IAsyncDisposable
         }
     }
 
+    public bool IsMouseTrackingEnabled
+    {
+        get
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+                return _terminal.IsMouseTrackingEnabled;
+            }
+        }
+    }
+
+    /// <summary>Returns true when application mouse tracking owns this event, including filtered events.</summary>
+    public bool SendMouse(TerminalMouseEvent mouse, TerminalMouseGeometry geometry)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            if ((mouse.Modifiers & TerminalModifiers.Shift) != 0 || !_terminal.IsMouseTrackingEnabled) return false;
+            var bytes = _terminal.EncodeMouse(mouse, geometry);
+            // Mouse coordinates refer to the displayed viewport. Hover and drag must not jump it to the bottom.
+            if (mouse.Action == TerminalMouseAction.Press && bytes.Length != 0) _terminal.ClearSelection();
+            if (bytes.Length != 0) _connection.Send(bytes);
+            return true;
+        }
+    }
+
     public void Paste(string text)
     {
         lock (_gate)

@@ -12,6 +12,9 @@ using Windows.ApplicationModel.DataTransfer;
 
 using Windows.UI.Core;
 using Windows.UI.ViewManagement;
+using Windows.UI.Input;
+using PointerPoint = Microsoft.UI.Input.PointerPoint;
+using PointerUpdateKind = Microsoft.UI.Input.PointerUpdateKind;
 using VirtualKey = Windows.System.VirtualKey;
 
 namespace AgentTerm_App;
@@ -35,6 +38,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool _updatingScrollBar;
     private int _wheelDelta;
     private int _zoomWheelDelta;
+    private int _applicationWheelDelta;
+    private int _applicationHorizontalWheelDelta;
+    private readonly HashSet<TerminalMouseButton> _applicationMouseButtons = [];
+    private Point _applicationMousePosition;
     private int _fontSize;
     private TerminalAppearance _appearance;
     private bool _selecting;
@@ -350,7 +357,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (_session is not { } session) return;
-            var delta = e.GetCurrentPoint(Terminal).Properties.MouseWheelDelta;
+            var point = e.GetCurrentPoint(Terminal);
+            var delta = point.Properties.MouseWheelDelta;
             if (Down(VirtualKey.Control))
             {
                 _zoomWheelDelta += delta;
@@ -360,6 +368,22 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 e.Handled = true;
                 return;
             }
+            if (_state == SessionState.Running && !Down(VirtualKey.Shift) && session.IsMouseTrackingEnabled)
+            {
+                bool horizontal = point.Properties.IsHorizontalMouseWheel;
+                ref int remainder = ref (horizontal ? ref _applicationHorizontalWheelDelta : ref _applicationWheelDelta);
+                remainder += delta;
+                var applicationNotches = remainder / 120;
+                remainder %= 120;
+                var button = horizontal
+                    ? applicationNotches > 0 ? TerminalMouseButton.WheelRight : TerminalMouseButton.WheelLeft
+                    : applicationNotches > 0 ? TerminalMouseButton.WheelUp : TerminalMouseButton.WheelDown;
+                for (var index = 0; index < Math.Abs(applicationNotches); index++)
+                    SendApplicationMouse(point, TerminalMouseAction.Press, button);
+                e.Handled = true;
+                return;
+            }
+            if (point.Properties.IsHorizontalMouseWheel) return;
             _wheelDelta += delta;
             var notches = _wheelDelta / 120;
             _wheelDelta %= 120;
@@ -378,12 +402,60 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         (Math.Clamp((int)Math.Floor(point.X / Terminal.CellWidth), 0, _columns - 1),
          Math.Clamp((int)Math.Floor(point.Y / Terminal.CellHeight), 0, _rows - 1));
 
+    private TerminalMouseGeometry MouseGeometry() => new(
+        (uint)(_columns * Terminal.CellWidth), (uint)(_rows * Terminal.CellHeight),
+        (uint)Terminal.CellWidth, (uint)Terminal.CellHeight,
+        (float)(Terminal.XamlRoot?.RasterizationScale ?? 1));
+
+    private bool SendApplicationMouse(PointerPoint point, TerminalMouseAction action, TerminalMouseButton? button)
+    {
+        if (_state != SessionState.Running || _session is not { } session) return false;
+        var position = point.Position;
+        var modifiers = Modifiers();
+        // A gesture sent to the application must end there even if Shift was pressed during the drag.
+        if (action == TerminalMouseAction.Release && button is { } released && _applicationMouseButtons.Contains(released))
+            modifiers &= ~TerminalModifiers.Shift;
+        if (!session.SendMouse(new(action, button, modifiers, (float)position.X, (float)position.Y), MouseGeometry()))
+            return false;
+        _applicationMousePosition = position;
+        return true;
+    }
+
+    private static TerminalMouseButton? ChangedMouseButton(PointerPoint point) => point.Properties.PointerUpdateKind switch
+    {
+        PointerUpdateKind.LeftButtonPressed or PointerUpdateKind.LeftButtonReleased => TerminalMouseButton.Left,
+        PointerUpdateKind.RightButtonPressed or PointerUpdateKind.RightButtonReleased => TerminalMouseButton.Right,
+        PointerUpdateKind.MiddleButtonPressed or PointerUpdateKind.MiddleButtonReleased => TerminalMouseButton.Middle,
+        PointerUpdateKind.XButton1Pressed or PointerUpdateKind.XButton1Released => TerminalMouseButton.Back,
+        PointerUpdateKind.XButton2Pressed or PointerUpdateKind.XButton2Released => TerminalMouseButton.Forward,
+        _ => null
+    };
+
+    private void ReleaseApplicationMouse()
+    {
+        if (_state == SessionState.Running && _session is { } session)
+            foreach (var button in _applicationMouseButtons)
+                session.SendMouse(new(TerminalMouseAction.Release, button, Modifiers() & ~TerminalModifiers.Shift,
+                    (float)_applicationMousePosition.X, (float)_applicationMousePosition.Y), MouseGeometry());
+        _applicationMouseButtons.Clear();
+    }
+
     private async void Terminal_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         try
         {
             if (_session is not { } session) return;
             var point = e.GetCurrentPoint(Terminal);
+            var button = ChangedMouseButton(point);
+            if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
+            if (!_selecting && button is not null && SendApplicationMouse(point, TerminalMouseAction.Press, button))
+            {
+                Terminal.Focus(FocusState.Pointer);
+                _applicationMouseButtons.Add(button.Value);
+                Terminal.CapturePointer(e.Pointer);
+                e.Handled = true;
+                return;
+            }
             if (point.Properties.IsRightButtonPressed)
             {
                 e.Handled = true;
@@ -391,7 +463,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 else await PasteAsync(session);
                 return;
             }
-            if (!point.Properties.IsLeftButtonPressed) return;
+            if (!point.Properties.IsLeftButtonPressed || (button is not null && button != TerminalMouseButton.Left)) return;
             Terminal.Focus(FocusState.Pointer);
             _selectionPointer = point.Position;
             var (column, row) = CellAt(point.Position);
@@ -424,8 +496,19 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         try
         {
-            if (!_selecting || _session is not { } session) return;
-            _selectionPointer = e.GetCurrentPoint(Terminal).Position;
+            if (_session is not { } session) return;
+            var point = e.GetCurrentPoint(Terminal);
+            if (!_selecting)
+            {
+                TerminalMouseButton? button = point.Properties.IsLeftButtonPressed ? TerminalMouseButton.Left
+                    : point.Properties.IsRightButtonPressed ? TerminalMouseButton.Right
+                    : point.Properties.IsMiddleButtonPressed ? TerminalMouseButton.Middle
+                    : point.Properties.IsXButton1Pressed ? TerminalMouseButton.Back
+                    : point.Properties.IsXButton2Pressed ? TerminalMouseButton.Forward : null;
+                if (SendApplicationMouse(point, TerminalMouseAction.Motion, button)) e.Handled = true;
+                return;
+            }
+            _selectionPointer = point.Position;
             var (column, row) = CellAt(_selectionPointer);
             if (column != _lastClickColumn || row != _lastClickRow) _selectionMoved = true;
             if (_selectionMoved)
@@ -443,7 +526,25 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         try
         {
-            if (!_selecting || _session is not { } session) return;
+            if (_session is not { } session) return;
+            var releasedPoint = e.GetCurrentPoint(Terminal);
+            if (_selecting && ChangedMouseButton(releasedPoint) is { } releasedButton && releasedButton != TerminalMouseButton.Left)
+            {
+                e.Handled = true;
+                return;
+            }
+            if (!_selecting)
+            {
+                var point = e.GetCurrentPoint(Terminal);
+                var button = ChangedMouseButton(point);
+                if (button is not null)
+                {
+                    if (SendApplicationMouse(point, TerminalMouseAction.Release, button)) e.Handled = true;
+                    _applicationMouseButtons.Remove(button.Value);
+                }
+                if (_applicationMouseButtons.Count == 0) Terminal.ReleasePointerCapture(e.Pointer);
+                return;
+            }
             _selecting = false;
             _selectionTimer.Stop();
             session.EndSelection();
@@ -460,6 +561,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         try
         {
+            ReleaseApplicationMouse();
             if (!_selecting) return;
             _selecting = false;
             _selectionTimer.Stop();
@@ -675,6 +777,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state != SessionState.Running || _session is not { } session) return;
         try
         {
+            ReleaseApplicationMouse();
             // End held keys before the focus report so Kitty applications can clear their key state.
             foreach (var key in releases)
                 session.SendKey(key.Key, key.Modifiers, key.Action);
@@ -744,6 +847,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void CancelSelectionGesture()
     {
+        ReleaseApplicationMouse();
         _selectionTimer.Stop();
         if (_selecting)
         {
@@ -753,6 +857,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
         _wheelDelta = 0;
         _zoomWheelDelta = 0;
+        _applicationWheelDelta = 0;
+        _applicationHorizontalWheelDelta = 0;
         _lastClickTime = 0;
         _lastClickColumn = _lastClickRow = -1;
         _clickCount = 0;

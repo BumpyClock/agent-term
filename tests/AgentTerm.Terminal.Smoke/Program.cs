@@ -117,6 +117,7 @@ using (var terminal = new GhosttyTerminal(20, 4))
 
 RenderChecks.Run();
 InputChecks.Run();
+MouseChecks.Run();
 ScrollbackChecks.Run();
 PreferencesChecks.Run();
 Console.WriteLine("AgentTerm.Terminal smoke checks passed.");
