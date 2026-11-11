@@ -1,0 +1,372 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="AgentTerm_App.GitHubDashboardView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:AgentTerm_App"
+>
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="GitHubDoneForegroundBrush" Color="#C297FF" />
+                    <SolidColorBrush x:Key="GitHubDoneBackgroundBrush" Color="#33A371F7" />
+                    <Color x:Key="GitHubShimmerColor">#1AFFFFFF</Color>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="GitHubDoneForegroundBrush" Color="#7531CC" />
+                    <SolidColorBrush x:Key="GitHubDoneBackgroundBrush" Color="#1F8250DF" />
+                    <Color x:Key="GitHubShimmerColor">#B3FFFFFF</Color>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <StaticResource x:Key="GitHubDoneForegroundBrush" ResourceKey="SystemColorWindowTextColorBrush" />
+                    <StaticResource x:Key="GitHubDoneBackgroundBrush" ResourceKey="SystemColorWindowColorBrush" />
+                    <Color x:Key="GitHubShimmerColor">#00FFFFFF</Color>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <Style x:Key="GitHubSecondaryText" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+            <Style x:Key="GitHubTertiaryText" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorTertiaryBrush}" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+            <Style x:Key="GitHubSkeleton" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="GitHubPillNeutral" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorNeutralBackgroundBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillSuccess" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorSuccessBackgroundBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillDanger" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorCriticalBackgroundBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillCaution" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorCautionBackgroundBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillDone" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource GitHubDoneBackgroundBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillTextNeutral" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillTextSuccess" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorSuccessBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillTextDanger" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillTextCaution" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+            </Style>
+            <Style x:Key="GitHubPillTextDone" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource GitHubDoneForegroundBrush}" />
+            </Style>
+            <Style x:Key="GitHubStatusInfo" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorSecondaryBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            </Style>
+            <Style x:Key="GitHubStatusWarning" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorCautionBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            </Style>
+            <Style x:Key="GitHubStatusError" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorCriticalBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            </Style>
+            <Style x:Key="GitHubStatusIconInfo" TargetType="FontIcon">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorAttentionBrush}" />
+            </Style>
+            <Style x:Key="GitHubStatusIconWarning" TargetType="FontIcon">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+            </Style>
+            <Style x:Key="GitHubStatusIconError" TargetType="FontIcon">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+            </Style>
+
+            <Style x:Key="GitHubTitleLink" TargetType="HyperlinkButton">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Setter Property="FocusVisualMargin" Value="-3" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="HyperlinkButton">
+                            <ContentPresenter x:Name="ContentPresenter" Padding="{TemplateBinding Padding}"
+                                              Background="Transparent" Foreground="{TemplateBinding Foreground}"
+                                              Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              AutomationProperties.AccessibilityView="Raw">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver" />
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled" />
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </ContentPresenter>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="GitHubPillButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Padding" Value="6,1,8,1" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="CornerRadius" Value="11" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="GitHubSectionTab" TargetType="RadioButton">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="VerticalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Padding" Value="2,0" />
+                <Setter Property="CornerRadius" Value="13" />
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="FocusVisualMargin" Value="1" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Grid x:Name="RootGrid" Margin="3" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="HoverFill.Opacity" Value="1" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="HoverFill.Opacity" Value="1" />
+                                                <Setter Target="HoverFill.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled" />
+                                    </VisualStateGroup>
+                                    <VisualStateGroup x:Name="CheckStates">
+                                        <VisualState x:Name="Checked">
+                                            <VisualState.Setters>
+                                                <Setter Target="ContentPresenter.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Unchecked" />
+                                        <VisualState x:Name="Indeterminate" />
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border x:Name="HoverFill" Opacity="0" Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        CornerRadius="{TemplateBinding CornerRadius}" />
+                                <ContentPresenter x:Name="ContentPresenter" Padding="{TemplateBinding Padding}"
+                                                  Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"
+                                                  AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid x:Name="Header" Margin="16,0,4,0" ColumnSpacing="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel x:Name="AccountBlock" Margin="0,6,0,0" HorizontalAlignment="Right" VerticalAlignment="Top">
+                <TextBlock x:Name="AccountText" Style="{StaticResource BodyStrongTextBlockStyle}" HorizontalAlignment="Right"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                <TextBlock x:Name="SummaryText" Style="{StaticResource GitHubSecondaryText}" HorizontalAlignment="Right" />
+            </StackPanel>
+            <Button x:Name="HeaderAvatarButton" Grid.Column="1" Width="32" Height="32" MinWidth="0" Padding="0" CornerRadius="16"
+                    VerticalAlignment="Top" Style="{StaticResource SubtleButtonStyle}" Click="HeaderAvatar_Click">
+                <Border x:Name="HeaderAvatarHost" Width="24" Height="24" />
+            </Button>
+        </Grid>
+
+        <ScrollViewer x:Name="Overflow" Grid.Row="1" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled" IsTabStop="False">
+            <Grid x:Name="Root">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel x:Name="Fixed" SizeChanged="Fixed_SizeChanged">
+                    <Border x:Name="StatusBar" Margin="16,12,16,0" Padding="10,7,8,7" CornerRadius="6" BorderThickness="1"
+                            Visibility="Collapsed" Style="{StaticResource GitHubStatusInfo}">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon x:Name="StatusIcon" FontSize="14" Margin="0,1,0,0" VerticalAlignment="Top" Glyph="&#xE946;"
+                                      AutomationProperties.AccessibilityView="Raw" />
+                            <TextBlock x:Name="StatusText" Grid.Column="1" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                       AutomationProperties.LiveSetting="Polite" />
+                            <HyperlinkButton x:Name="StatusRetry" Grid.Column="2" Padding="6,0" MinHeight="0" FontSize="12"
+                                             VerticalAlignment="Top" Margin="0,-1,0,0" Visibility="Collapsed"
+                                             Click="Retry_Click" />
+                        </Grid>
+                    </Border>
+
+                    <StackPanel x:Name="CalendarBlock" Margin="16,14,16,0">
+                        <local:GitHubHeatmap x:Name="Heatmap" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        <Grid Margin="0,6,0,0" Height="16" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid x:Name="ReadoutHost">
+                                <TextBlock x:Name="ReadoutA" Style="{StaticResource GitHubSecondaryText}" TextWrapping="NoWrap" />
+                                <TextBlock x:Name="ReadoutB" Style="{StaticResource GitHubSecondaryText}" TextWrapping="NoWrap" />
+                            </Grid>
+                            <StackPanel x:Name="Legend" Grid.Column="1" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
+                                        AutomationProperties.AccessibilityView="Raw">
+                                <TextBlock x:Name="LegendLess" Style="{StaticResource GitHubTertiaryText}" Margin="0,0,3,0" VerticalAlignment="Center" />
+                                <Rectangle x:Name="Legend0" Width="9" Height="9" RadiusX="2" RadiusY="2" />
+                                <Rectangle x:Name="Legend1" Width="9" Height="9" RadiusX="2" RadiusY="2" />
+                                <Rectangle x:Name="Legend2" Width="9" Height="9" RadiusX="2" RadiusY="2" />
+                                <Rectangle x:Name="Legend3" Width="9" Height="9" RadiusX="2" RadiusY="2" />
+                                <Rectangle x:Name="Legend4" Width="9" Height="9" RadiusX="2" RadiusY="2" />
+                                <TextBlock x:Name="LegendMore" Style="{StaticResource GitHubTertiaryText}" Margin="3,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel x:Name="UsageBlock" Margin="16,16,16,0" Spacing="8">
+                        <Grid Height="20" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="CopilotHeading" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                            <Grid Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock x:Name="PlanText" Style="{StaticResource GitHubSecondaryText}" HorizontalAlignment="Right" />
+                                <Border x:Name="PlanSkeleton" Style="{StaticResource GitHubSkeleton}" Width="72" Height="10" HorizontalAlignment="Right" />
+                            </Grid>
+                        </Grid>
+                        <Grid>
+                            <StackPanel x:Name="UsageRows" Spacing="10" />
+                            <StackPanel x:Name="UsageSkeleton" Spacing="6">
+                                <Grid Height="16">
+                                    <Border Style="{StaticResource GitHubSkeleton}" Width="112" Height="10" />
+                                    <Border Style="{StaticResource GitHubSkeleton}" Width="84" Height="10" HorizontalAlignment="Right" />
+                                </Grid>
+                                <Border Style="{StaticResource GitHubSkeleton}" Height="4" CornerRadius="2" HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+
+                    <Grid x:Name="TabsRow" Margin="16,18,16,0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="TabStrip" Height="34" CornerRadius="17" BorderThickness="1"
+                              Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
+                              BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                              SizeChanged="TabStrip_SizeChanged">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="TabPill" Margin="2" CornerRadius="14" HorizontalAlignment="Left" BorderThickness="1"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlElevationBorderBrush}" />
+                            <RadioButton x:Name="ActivityTab" Grid.Column="0" GroupName="GitHubSections" Style="{StaticResource GitHubSectionTab}" />
+                            <RadioButton x:Name="PullsTab" Grid.Column="1" GroupName="GitHubSections" Style="{StaticResource GitHubSectionTab}" />
+                            <RadioButton x:Name="ReviewsTab" Grid.Column="2" GroupName="GitHubSections" Style="{StaticResource GitHubSectionTab}" />
+                            <RadioButton x:Name="ReposTab" Grid.Column="3" GroupName="GitHubSections" Style="{StaticResource GitHubSectionTab}" />
+                        </Grid>
+                        <Button x:Name="RefreshButton" Grid.Column="1" Width="34" Height="34" MinWidth="0" Padding="0" CornerRadius="17"
+                                Style="{StaticResource SubtleButtonStyle}" Click="Refresh_Click"
+>
+                            <FontIcon x:Name="RefreshIcon" Glyph="&#xE72C;" FontSize="14" />
+                        </Button>
+                    </Grid>
+
+                    <Grid x:Name="SectionStatusHost" Margin="16,8,16,6" MinHeight="16">
+                        <TextBlock x:Name="SectionStatusA" Style="{StaticResource GitHubTertiaryText}" TextWrapping="Wrap" MaxLines="3" />
+                        <TextBlock x:Name="SectionStatusB" Style="{StaticResource GitHubTertiaryText}" TextWrapping="Wrap" MaxLines="3" />
+                    </Grid>
+                </StackPanel>
+
+                <Grid x:Name="ListArea" Grid.Row="1">
+                    <ScrollViewer x:Name="ListScroll" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto" IsTabStop="False">
+                        <StackPanel x:Name="ListPanel" Margin="8,0,8,8" Spacing="2" />
+                    </ScrollViewer>
+                    <StackPanel x:Name="ListSkeleton" Margin="16,8,16,0" Spacing="20" IsHitTestVisible="False" />
+                </Grid>
+            </Grid>
+        </ScrollViewer>
+
+        <StackPanel x:Name="Takeover" Grid.Row="1" Visibility="Collapsed" Padding="28,20,28,32" Spacing="12" HorizontalAlignment="Stretch">
+            <Border Width="48" Height="48" CornerRadius="24" HorizontalAlignment="Center"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                <FontIcon x:Name="TakeoverIcon" FontSize="22" Glyph="&#xE77B;" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Border>
+            <TextBlock x:Name="TakeoverTitle" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" HorizontalAlignment="Center"
+                       TextAlignment="Center" TextWrapping="Wrap" />
+            <TextBlock x:Name="TakeoverBody" Style="{StaticResource BodyTextBlockStyle}" HorizontalAlignment="Center" TextAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" MaxWidth="320" />
+            <Border Margin="0,4,0,0" Padding="12,4,4,4" CornerRadius="6" BorderThickness="1" HorizontalAlignment="Center"
+                    Background="{ThemeResource ControlAltFillColorSecondaryBrush}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="CommandText" FontFamily="Cascadia Mono, Consolas" FontSize="13" VerticalAlignment="Center"
+                               IsTextSelectionEnabled="True" TextWrapping="NoWrap" />
+                    <Button x:Name="CopyButton" Grid.Column="1" Width="30" Height="30" MinWidth="0" Padding="0" CornerRadius="4"
+                            Style="{StaticResource SubtleButtonStyle}" Click="Copy_Click"
+>
+                        <Grid>
+                            <FontIcon x:Name="CopyIcon" Glyph="&#xE8C8;" FontSize="14" />
+                            <FontIcon x:Name="CopiedIcon" Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                        </Grid>
+                    </Button>
+                </Grid>
+            </Border>
+            <Button x:Name="TakeoverRetry" Margin="0,8,0,0" MinWidth="120" HorizontalAlignment="Center"
+                    Style="{StaticResource AccentButtonStyle}" Click="Retry_Click" />
+        </StackPanel>
+    </Grid>
+</UserControl>

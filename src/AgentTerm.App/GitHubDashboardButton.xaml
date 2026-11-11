@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="AgentTerm_App.GitHubDashboardButton"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:AgentTerm_App">
+    <Button x:Name="DashboardButton" Width="40" Height="32" MinWidth="0" Padding="0"
+            VerticalAlignment="Center" Style="{StaticResource SubtleButtonStyle}" Click="DashboardButton_Click">
+        <Border x:Name="AvatarHost" Width="24" Height="24" />
+        <!-- Shown at an explicit point so the panel's own avatar lands on this one. The panel is a windowed popup, so
+             the part over the title bar takes input instead of the caption drag region. GitHubDashboardButton plays
+             the open and close motion. -->
+        <FlyoutBase.AttachedFlyout>
+            <Flyout x:Name="DashboardFlyout" AreOpenCloseAnimationsEnabled="False" ShouldConstrainToRootBounds="False"
+                    Opening="DashboardFlyout_Opening" Opened="DashboardFlyout_Opened" Closing="DashboardFlyout_Closing"
+                    Closed="DashboardFlyout_Closed">
+                <Flyout.FlyoutPresenterStyle>
+                    <Style TargetType="FlyoutPresenter" BasedOn="{StaticResource DefaultFlyoutPresenterStyle}">
+                        <Setter Property="Margin" Value="0" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinWidth" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                        <Setter Property="MaxWidth" Value="10000" />
+                        <Setter Property="MaxHeight" Value="10000" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                        <Setter Property="TabNavigation" Value="Cycle" />
+                        <Setter Property="ScrollViewer.HorizontalScrollMode" Value="Disabled" />
+                        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+                        <Setter Property="ScrollViewer.VerticalScrollMode" Value="Disabled" />
+                        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+                    </Style>
+                </Flyout.FlyoutPresenterStyle>
+                <local:GitHubDashboardView x:Name="Dashboard" />
+            </Flyout>
+        </FlyoutBase.AttachedFlyout>
+    </Button>
+</UserControl>

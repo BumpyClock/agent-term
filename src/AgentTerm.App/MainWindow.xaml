@@ -281,7 +281,7 @@
                 <SolidColorBrush x:Key="TabViewBorderBrush" Color="Transparent" />
             </TabView.Resources>
             <TabView.TabStripFooter>
-                <Grid ColumnDefinitions="Auto,*">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                     <StackPanel Orientation="Horizontal" Margin="4,0,0,0" VerticalAlignment="Center">
                         <StackPanel.Resources>
                             <StaticResource x:Key="SubtleButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
@@ -298,7 +298,9 @@
                             <Button.Flyout><MenuFlyout x:Name="ProfileMenu" Placement="BottomEdgeAlignedLeft" /></Button.Flyout>
                         </Button>
                     </StackPanel>
-                    <Grid x:Name="TabDragRegion" Grid.Column="1" MinWidth="188" Background="Transparent" />
+                    <Grid x:Name="TabDragRegion" Grid.Column="1" MinWidth="48" Background="Transparent" />
+                    <local:GitHubDashboardButton x:Name="GitHubButton" xmlns:local="using:AgentTerm_App" Grid.Column="2" VerticalAlignment="Center" />
+                    <Border x:Name="CaptionSpacer" Grid.Column="3" Loaded="CaptionInset_Loaded" />
                 </Grid>
             </TabView.TabStripFooter>
         </TabView>
