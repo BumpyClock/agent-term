@@ -35,6 +35,11 @@ public sealed partial class MainWindow : Window
         {
             SetTitleBar(TabDragRegion);
             ApplyCaptionTheme();
+            // DWMWA_USE_HOSTBACKDROPBRUSH enables the panes' custom Win32 host brushes.
+            // The window's own SystemBackdrop remains Mica.
+            int hostBackdropEnabled = 1;
+            _ = DwmSetWindowAttribute(WinRT.Interop.WindowNative.GetWindowHandle(this), 17,
+                in hostBackdropEnabled, sizeof(int));
         };
         WindowRoot.ActualThemeChanged += (_, _) => ApplyCaptionTheme();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));

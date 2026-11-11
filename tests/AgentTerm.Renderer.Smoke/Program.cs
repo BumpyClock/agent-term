@@ -16,6 +16,7 @@ internal static class Program
             "\x1b[7;1HUnicode: café 界 🙂 e\u0301" +
             "\x1b]12;#abcdef\x07\x1b[10;4H\x1b[2 q\x1b[?25h"));
         using var device = CanvasDevice.GetSharedDevice();
+        AcrylicRecipeChecks.Run(device);
         using var image = new CanvasRenderTarget(device, 400, 240, 96);
         Draw(image, terminal.ReadFrame(), true);
         AssertPixel(image, 1, 41, 240, 30, 40, "truecolor red background");

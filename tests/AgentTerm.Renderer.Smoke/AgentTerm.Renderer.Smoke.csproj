@@ -16,5 +16,6 @@
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <ProjectReference Include="../../src/AgentTerm.Terminal/AgentTerm.Terminal.csproj" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.cs" Link="TerminalSurface.cs" />
+    <Compile Include="../../src/AgentTerm.App/AcrylicRecipe.cs" Link="AcrylicRecipe.cs" />
   </ItemGroup>
 </Project>
