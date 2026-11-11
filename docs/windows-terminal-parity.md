@@ -28,6 +28,8 @@ The user's Windows Terminal screenshots establish the compact tab-strip layout, 
 
 Live clipboard checks compared copied text with the exact selected text and pasted distinct commands through each tested shortcut. Ctrl+C without selection interrupted a 30-second sleep. A selected history region remained at the same viewport offset through 20 timed output lines and remained copyable afterward. Solid/acrylic changes and per-pane zoom were visually verified. These checks supplement automated native, ConPTY, and rendered-pixel tests.
 
+Settings now opens in a separate window with Startup, Appearance, and Profile defaults pages. Live checks confirmed terminal input while Settings was open, unchanged window bounds during page changes and validation errors, cross-page draft validation, Save without closing, Discard, unsaved draft removal on close, reuse after minimization, and settings-window cleanup when its terminal window closes.
+
 ## References
 
 - [Windows Terminal overview](https://learn.microsoft.com/en-us/windows/terminal/).

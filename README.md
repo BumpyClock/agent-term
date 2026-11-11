@@ -35,6 +35,8 @@ Drag beyond the top or bottom to scroll while selecting. Copy joins soft-wrapped
 
 ## Appearance and profiles
 
+Settings opens in its own window from the profile menu or Ctrl+,. The terminal stays usable while settings is open. The sidebar groups the default shell under **Startup**, the pane background under **Appearance**, and font options under **Profiles > Defaults**. Changes stay in a draft across pages until **Save**. **Discard changes** restores saved values; closing the window discards unsaved edits.
+
 Settings save the default profile, font family, font size, and pane background choice to `%LOCALAPPDATA%\AgentTerm\settings.json`. The window uses Windows Mica with native caption controls. Each terminal sits in a rounded card with its own header and split/close actions. Choose **Solid** for an opaque terminal or **Acrylic** for a transparent terminal surface over a separate in-app acrylic card. Selection and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
 
 Automatic font selection prefers an installed CaskaydiaCove Nerd Font, then Cascadia Mono, then Consolas. Settings lists available terminal fonts. No fonts are downloaded or installed. WinUI's in-app acrylic blurs app content; it does not sample the desktop or the Mica system backdrop. Windows controls material fallback when transparency is unavailable.
@@ -60,7 +62,8 @@ The app is unpackaged and self-contained. Windows App SDK 1.8 is pinned. Packagi
 
 ## Code map
 
-- `src/AgentTerm.App/MainWindow` owns the tab strip, profile menu, window backdrop, settings, and window shutdown.
+- `src/AgentTerm.App/MainWindow` owns the tab strip, profile menu, window backdrop, settings window lifetime, and window shutdown.
+- `src/AgentTerm.App/SettingsWindow` owns settings navigation, draft edits, validation, and save/discard actions in a separate window.
 - `src/AgentTerm.App/TerminalTab.cs` owns nested pane layout, resizing, transitions, and active-pane focus.
 - `src/AgentTerm.App/TerminalPane` owns each card's material, header controls, and focus outline.
 - `src/AgentTerm.App/MainPage` owns one terminal view, input, clipboard, search, and session presentation.

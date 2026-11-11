@@ -20,8 +20,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly IReadOnlyList<ShellProfile> _profiles = ShellProfile.Discover();
     private TerminalTab? _visibleTab;
-    private ContentDialog? _settingsDialog;
-    private bool _settingsLoadErrorShown;
+    private SettingsWindow? _settingsWindow;
     private bool _closing;
     private bool _allowClose;
 
@@ -36,6 +35,7 @@ public sealed partial class MainWindow : Window
         BuildProfileMenu();
         AddTab(DefaultProfile);
         AppWindow.Closing += Window_Closing;
+        Closed += (_, _) => _settingsWindow?.Close();
     }
 
     private ShellProfile DefaultProfile => _profiles.FirstOrDefault(profile =>
@@ -150,7 +150,7 @@ public sealed partial class MainWindow : Window
 
     private async void WindowRoot_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_closing || _settingsDialog is not null || Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) return;
+        if (_closing || Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) return;
         var control = Down(VirtualKey.Control);
         var shift = Down(VirtualKey.Shift);
         var alt = Down(VirtualKey.Menu);
@@ -204,89 +204,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void ShowSettings()
+    private void ShowSettings()
     {
-        if (_closing || _settingsDialog is not null) return;
-        var preferences = TerminalPreferences.Current;
-        var profile = new ComboBox
+        if (_closing) return;
+        if (_settingsWindow is null)
         {
-            Header = "Default profile",
-            ItemsSource = _profiles,
-            DisplayMemberPath = nameof(ShellProfile.Name),
-            SelectedItem = DefaultProfile,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        var fontSize = new NumberBox
-        {
-            Header = "Font size",
-            Minimum = 8,
-            Maximum = 36,
-            Value = preferences.FontSize,
-            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline
-        };
-        var fontFamily = new ComboBox { Header = "Font family", HorizontalAlignment = HorizontalAlignment.Stretch };
-        fontFamily.Items.Add($"Automatic ({TerminalSurface.FontFamilies[0]})");
-        fontFamily.SelectedIndex = 0;
-        foreach (var family in TerminalSurface.FontFamilies)
-        {
-            fontFamily.Items.Add(family);
-            if (string.Equals(family, preferences.FontFamily, StringComparison.OrdinalIgnoreCase))
-                fontFamily.SelectedItem = family;
-        }
-        var background = new ComboBox { Header = "Pane background", HorizontalAlignment = HorizontalAlignment.Stretch };
-        background.Items.Add("Solid");
-        background.Items.Add("Acrylic");
-        background.SelectedIndex = preferences.UseAcrylic ? 1 : 0;
-        var error = new InfoBar { IsClosable = false, Severity = InfoBarSeverity.Warning };
-        if (!_settingsLoadErrorShown && preferences.LoadError is { } loadError)
-        {
-            error.Title = "Settings could not be loaded";
-            error.Message = loadError;
-            error.IsOpen = true;
-            _settingsLoadErrorShown = true;
-        }
-
-        var fields = new StackPanel { Spacing = 12 };
-        fields.Children.Add(profile);
-        fields.Children.Add(fontFamily);
-        fields.Children.Add(fontSize);
-        fields.Children.Add(background);
-        fields.Children.Add(error);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = WindowRoot.XamlRoot,
-            Title = "Settings",
-            Content = fields,
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary
-        };
-        dialog.PrimaryButtonClick += (_, args) =>
-        {
-            if (profile.SelectedItem is not ShellProfile selected || !double.IsFinite(fontSize.Value) ||
-                fontSize.Value < 8 || fontSize.Value > 36 || fontSize.Value != Math.Truncate(fontSize.Value))
+            var settings = new SettingsWindow(this, _profiles);
+            settings.Closed += (_, _) =>
             {
-                error.Title = "Check your settings";
-                error.Message = "Choose a default profile and a whole font size from 8 to 36.";
-                error.IsOpen = true;
-                args.Cancel = true;
-                return;
-            }
-
-            var family = fontFamily.SelectedIndex > 0 ? (string)fontFamily.SelectedItem : "";
-            try { preferences.Update(selected.Id, (int)fontSize.Value, background.SelectedIndex == 1, family); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                error.Title = "Settings could not be saved";
-                error.Message = exception.Message;
-                error.IsOpen = true;
-                args.Cancel = true;
-            }
-        };
-
-        _settingsDialog = dialog;
-        try { await dialog.ShowAsync(); }
-        finally { _settingsDialog = null; }
+                if (ReferenceEquals(_settingsWindow, settings)) _settingsWindow = null;
+            };
+            _settingsWindow = settings;
+        }
+        _settingsWindow.ActivateSettings();
     }
 
     private static bool Down(VirtualKey key) =>
@@ -300,7 +230,7 @@ public sealed partial class MainWindow : Window
         args.Cancel = true;
         if (_closing) return;
         _closing = true;
-        _settingsDialog?.Hide();
+        _settingsWindow?.Close();
         try
         {
             var tabs = Tabs.TabItems.OfType<TabViewItem>().Select(item => item.Content).OfType<TerminalTab>();
