@@ -59,6 +59,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool _loadedOnce;
     private TerminalColor? _terminalBackground;
     public ShellProfile Profile { get; }
+    internal PaneStatus.PaneStatusMonitor PaneStatus { get; } = new();
     internal TerminalColor TerminalBackground => _terminalBackground ?? (ActualTheme == ElementTheme.Light
         ? new TerminalColor(250, 250, 250) : new TerminalColor(0, 0, 0));
     internal event Action? TerminalBackgroundChanged;
@@ -114,6 +115,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (!visible)
         {
             _refreshTimer.Stop();
+            PaneStatus.Refresh(PaneStatus.Directory, false, DateTimeOffset.UtcNow);
             CancelSelectionGesture();
             return;
         }
@@ -229,6 +231,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         var frame = session.ReadFrame();
         Terminal.SetFrame(frame);
+        PaneStatus.Refresh(session.ReadWorkingDirectory(), _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
         if (_terminalBackground != frame.Background)
         {
             _terminalBackground = frame.Background;
@@ -906,6 +909,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void SetState(SessionState state)
     {
         _state = state;
+        if (state != SessionState.Running)
+            PaneStatus.Refresh(state == SessionState.Starting ? null : PaneStatus.Directory, false, DateTimeOffset.UtcNow);
         Terminal.IsEnabled = state == SessionState.Running || (state == SessionState.Idle && _session is not null);
         SessionHeader.Visibility = state == SessionState.Idle ? Visibility.Visible : Visibility.Collapsed;
         SessionFooter.Visibility = state == SessionState.Running ? Visibility.Collapsed : Visibility.Visible;
@@ -966,6 +971,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private async Task DisposeCoreAsync()
     {
         SetState(SessionState.Disposed);
+        PaneStatus.Dispose();
         _refreshTimer.Stop();
         _selectionTimer.Stop();
         await ReleaseSessionAsync();

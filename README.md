@@ -4,7 +4,7 @@ A Windows terminal built with WinUI 3 on Windows App SDK 2.6.5, .NET 10, Win2D, 
 
 Each tab or pane owns an independent shell, terminal state, and scrollback. The profile menu discovers installed PowerShell versions, Command Prompt, and individual WSL distributions. PowerShell loads your normal shell profile. Closing a pane releases its shell; switching tabs preserves it. Stopped and exited sessions keep their history available until restarted or closed.
 
-Tabs read icons directly from the installed shell executable, avoiding generic Explorer thumbnails. Store-installed PowerShell launch aliases resolve to their executable before icon extraction. Pill headers retain internal padding while their outer left edge aligns with the pane gutter. Mixed-shell tabs follow the first remaining pane for their icon and title order. Pane headers keep split and close controls without repeating the shell name.
+Tabs read icons directly from the installed shell executable, avoiding generic Explorer thumbnails. Store-installed PowerShell launch aliases resolve to their executable before icon extraction. Pill headers retain internal padding while their outer left edge aligns with the pane gutter. Mixed-shell tabs follow the first remaining pane for their icon and title order. Pane headers show the shell, current directory, and per-pane Git context alongside split and close controls.
 
 Child shells receive `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PROGRAM=AgentTerm`. The app removes inherited `NO_COLOR` from the child environment so launching it from automation does not suppress terminal colors. Other inherited variables remain available and the parent environment is unchanged.
 
@@ -59,6 +59,18 @@ Zoom applies to the current pane; Ctrl+0 restores that profile's font size. A sa
 
 This is a base terminal experience, not complete Windows Terminal compatibility. Live IME compatibility validation, a terminal UI Automation text provider, advanced profile editing, and custom themes/key bindings remain open. See [the parity tracker](docs/windows-terminal-parity.md).
 
+## Pane directory and Git status
+
+Each pane's existing top row groups its shell, last shell-reported filesystem directory, and Git status on the left. Split and close controls stay on the right. Windows home paths shorten to `~`. Git repositories add the branch, local upstream ahead/behind counts, tracked-line additions and deletions, and indicators for staged (`●`), unstaged (`±`), untracked (`?`), and conflicted (`!`) changes. Narrow panes hide counts first, then the branch. Hover the header for the full path and Git summary. No bottom row is added.
+
+Line totals cover the whole containing worktree and compare working content with HEAD, or the empty tree before the first commit. Staged and unstaged edits are not added together. Untracked files do not contribute line totals. Binary changes have no numeric totals. Conflicts suppress aggregate line counts. Detached HEAD shows a short commit; an unborn branch shows `(new)`. Nested repositories select their own branch.
+
+Recognized direct interactive PowerShell launches install a session-only prompt wrapper after loading your usual profile. It preserves the prompt output and reports directory changes without editing profile files or execution policy. Command Prompt uses a session-only path prompt with directory reporting. Command-payload launches remain unchanged. Existing raw or quoted Windows reports from prompt tools such as Oh My Posh are accepted too. Non-filesystem PowerShell locations clear the directory and Git content.
+
+Git 2.45 or newer must be on `PATH`. Queries run asynchronously at most once every five seconds per visible, running pane. Hidden tabs and stopped panes do not poll. Directory changes cancel obsolete queries and clear old repository content immediately. Queries share a five-second deadline and bounded output. They do not fetch or change repositories, invoke external diff/text-conversion helpers, bypass repository ownership checks, or refresh the index on disk. Missing or older Git and failed queries leave Git content empty; the header tooltip names unavailable or failed queries.
+
+WSL launch commands are unchanged. A WSL shell must already emit OSC 7 file URLs for directory reporting; automatic Bash/Zsh hook installation is not included. Accepted WSL reports retain the named distribution and Git runs inside it, with a Linux-side timeout. Remote-host URLs and unsupported reports clear context rather than querying Windows Git against a remote path. WSL execution has not been verified live.
+
 ## Build and run
 
 Use Windows x64, Windows 10 version 2004 or newer, a .NET 10 SDK, and PowerShell. Windows SDK/XAML tools restore through NuGet. Internet access is needed for the first build.
@@ -77,7 +89,8 @@ The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packa
 - `src/AgentTerm.App/MainWindow` owns the tab strip, profile menu, window backdrop, settings window lifetime, and window shutdown.
 - `src/AgentTerm.App/SettingsWindow` owns settings navigation, draft edits, validation, and save/discard actions in a separate window.
 - `src/AgentTerm.App/TerminalTab.cs` owns nested pane layout, resizing, transitions, and active-pane focus.
-- `src/AgentTerm.App/TerminalPane` owns each card's material, header controls, and focus outline.
+- `src/AgentTerm.App/TerminalPane` owns each card's material, directory/Git header, controls, and focus outline.
+- `src/AgentTerm.App/PaneStatus/` owns Git query execution, parsing, summaries, and one-query-per-pane scheduling. `ShellDirectory.cs` and `ShellIntegration.cs` in the terminal project own reported filesystem context and session-only Windows prompt integration.
 - `src/AgentTerm.App/MainPage` owns one terminal view, input, clipboard, search, and session presentation.
 - `src/AgentTerm.App/TerminalSurface.cs` draws cells, selection, and cursors with shared font metrics.
 - `src/AgentTerm.Terminal/TerminalSession.cs` serializes Ghostty state and owns one shell connection.

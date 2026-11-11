@@ -28,6 +28,7 @@ await FullScreenChecks.RunAsync();
 await MouseSessionChecks.RunAsync();
 await ScrollbackSessionChecks.RunAsync();
 await ProfileChecks.RunAsync();
+await DirectoryChecks.RunAsync();
 var prompt = new Regex(@"(?m)^PS [^\r\n]*> ?$", RegexOptions.CultureInvariant);
 var id = Guid.NewGuid().ToString("N")[..8];
 

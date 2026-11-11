@@ -13,16 +13,22 @@
                     <x:Double x:Key="PaneActionIconOpacity">0.5</x:Double>
                     <x:Double x:Key="PaneActiveStrokeOpacity">0.55</x:Double>
                     <SolidColorBrush x:Key="PaneBoundaryBrush" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="PaneGitAddedBrush" Color="#6CCB8D" />
+                    <SolidColorBrush x:Key="PaneGitDeletedBrush" Color="#FF99A4" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <x:Double x:Key="PaneActionIconOpacity">0.5</x:Double>
                     <x:Double x:Key="PaneActiveStrokeOpacity">0.55</x:Double>
                     <SolidColorBrush x:Key="PaneBoundaryBrush" Color="#22000000" />
+                    <SolidColorBrush x:Key="PaneGitAddedBrush" Color="#0F7B0F" />
+                    <SolidColorBrush x:Key="PaneGitDeletedBrush" Color="#C42B1C" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <x:Double x:Key="PaneActionIconOpacity">1</x:Double>
                     <x:Double x:Key="PaneActiveStrokeOpacity">1</x:Double>
                     <SolidColorBrush x:Key="PaneBoundaryBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="PaneGitAddedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="PaneGitDeletedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
             <Style x:Key="PaneActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
@@ -82,7 +88,38 @@
         </Border>
         <Border x:Name="SolidSurface" Margin="1" CornerRadius="9" Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}" />
         <Grid Margin="1" RowDefinitions="28,*">
-            <Grid Padding="0,0,4,0" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
+            <Grid Padding="10,0,4,0" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
+                <Grid x:Name="HeaderContext" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8"
+                      VerticalAlignment="Center" SizeChanged="HeaderContext_SizeChanged">
+                    <Path Width="13" Height="12" Data="M 1,2 L 5,6 L 1,10 M 7,10 L 12,10"
+                          Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.4" VerticalAlignment="Center" />
+                    <TextBlock x:Name="PaneShell" Grid.Column="1" MaxWidth="110" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <Grid Grid.Column="2" ColumnDefinitions="*,Auto" ColumnSpacing="8" HorizontalAlignment="Left">
+                        <TextBlock x:Name="PaneDirectory" FontSize="12" TextTrimming="CharacterEllipsis"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <StackPanel x:Name="GitSummary" Grid.Column="1" Orientation="Horizontal" Spacing="6" MaxWidth="280" Visibility="Collapsed">
+                            <Grid Width="12" Height="12" VerticalAlignment="Center">
+                                <Path Data="M 3,3 L 3,9 M 3,7 C 3,4 9,7 9,3" StrokeThickness="1"
+                                      Stroke="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Ellipse Width="3" Height="3" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="1.5,0,0,0"
+                                         Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1" />
+                                <Ellipse Width="3" Height="3" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="1.5,0,0,0"
+                                         Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1" />
+                                <Ellipse Width="3" Height="3" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,1.5,0"
+                                         Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1" />
+                            </Grid>
+                            <TextBlock x:Name="GitBranch" MaxWidth="130" FontSize="12" TextTrimming="CharacterEllipsis"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <StackPanel x:Name="GitDetails" Orientation="Horizontal" Spacing="6">
+                                <TextBlock x:Name="GitTracking" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="GitAdded" FontSize="11" Foreground="{ThemeResource PaneGitAddedBrush}" />
+                                <TextBlock x:Name="GitDeleted" FontSize="11" Foreground="{ThemeResource PaneGitDeletedBrush}" />
+                                <TextBlock x:Name="GitChanges" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
                 <Button x:Name="SplitRightButton" Grid.Column="1" Width="28" MinWidth="0" Height="28" Padding="0"
                         Style="{StaticResource PaneActionButtonStyle}"
                         Click="SplitRight_Click" AutomationProperties.Name="Split pane right" ToolTipService.ToolTip="Split pane right">

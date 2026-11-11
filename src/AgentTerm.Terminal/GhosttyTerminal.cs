@@ -68,6 +68,15 @@ public sealed partial class GhosttyTerminal : IDisposable
         _callbackError?.Throw();
     }
 
+    /// <summary>Reads the last OSC 7 report. The returned string owns its memory.</summary>
+    public unsafe string ReadWorkingDirectory()
+    {
+        ThrowIfDisposed();
+        Native.Utf8String value = default;
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 13, &value), "Could not read terminal directory.");
+        return value.Length == 0 ? string.Empty : Marshal.PtrToStringUTF8(value.Data, checked((int)value.Length))!;
+    }
+
     /// <summary>Drains terminal query replies for delivery to the PTY input. Call after each Write.</summary>
     public byte[][] TakeResponses()
     {
@@ -195,6 +204,13 @@ public sealed partial class GhosttyTerminal : IDisposable
         internal static extern int ghostty_terminal_set(TerminalHandle terminal, int option, IntPtr value);
 
         internal enum FormatterOption { Selection = 4 }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Utf8String
+        {
+            internal IntPtr Data;
+            internal nuint Length;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Point

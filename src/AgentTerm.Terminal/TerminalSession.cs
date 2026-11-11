@@ -33,7 +33,7 @@ public sealed class TerminalSession : IAsyncDisposable
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_started) throw new InvalidOperationException("This session has already started.");
-            _connection.Start(_profile.Executable, _profile.Arguments, _profile.StartingDirectory);
+            _connection.Start(_profile.Executable, ShellIntegration.Arguments(_profile), _profile.StartingDirectory);
             _started = true;
         }
     }
@@ -55,6 +55,15 @@ public sealed class TerminalSession : IAsyncDisposable
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             return _terminal.ReadText();
+        }
+    }
+
+    public ShellDirectory? ReadWorkingDirectory()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            return ShellDirectory.FromReport(_terminal.ReadWorkingDirectory(), _profile);
         }
     }
 

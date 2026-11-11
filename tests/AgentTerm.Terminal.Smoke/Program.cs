@@ -121,4 +121,5 @@ InputChecks.Run();
 MouseChecks.Run();
 ScrollbackChecks.Run();
 PreferencesChecks.Run();
+await PaneStatusChecks.RunAsync();
 Console.WriteLine("AgentTerm.Terminal smoke checks passed.");
