@@ -29,7 +29,6 @@ internal static class ExecutableIcon
             if (count == 0 || group.Length < 6 + count * 14) return null;
 
             // PE group entries use resource IDs where ICO entries use file offsets.
-            // Keep every size and the original encoded pixels, including alpha and masks.
             var images = new byte[count][];
             for (var index = 0; index < count; index++)
             {
@@ -61,8 +60,6 @@ internal static class ExecutableIcon
 
     private static string? ReadAppExecutionAliasTarget(string executable)
     {
-        // Store-installed shells can be discovered through zero-byte launch aliases.
-        // Inspect the alias metadata itself without starting a process.
         using var file = CreateFile(executable, 0, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
         if (file.IsInvalid) return null;
         var data = new byte[16 * 1024]; // MAXIMUM_REPARSE_DATA_BUFFER_SIZE

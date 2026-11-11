@@ -187,7 +187,7 @@ public sealed class ConPtyConnection : IAsyncDisposable
     private async Task AwaitCompletion()
     {
         try { await completion.Task.ConfigureAwait(false); }
-        catch { /* Completion retains the session error for its observer. */ }
+        catch { }
     }
 
     private void Finish(Task<Exception?> reader, Task<Exception?> writer, IntPtr outputRead, IntPtr inputWrite)

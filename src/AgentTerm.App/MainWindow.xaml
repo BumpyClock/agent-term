@@ -7,7 +7,6 @@
     Title="AgentTerm">
     <Grid x:Name="WindowRoot" PreviewKeyDown="WindowRoot_PreviewKeyDown">
         <Grid.Resources>
-            <!-- Native TabViewItem parts and interaction states, with detached pill geometry. -->
             <Style x:Key="PillTabStyle" TargetType="TabViewItem">
                 <Setter Property="Margin" Value="2,4,2,4" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />

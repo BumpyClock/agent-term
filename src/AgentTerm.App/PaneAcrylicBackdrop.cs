@@ -13,7 +13,6 @@ using WinRT;
 
 namespace AgentTerm_App;
 
-// The controller owns policy. Its proxy prevents native updates from replacing our active recipe.
 internal sealed class PaneAcrylicBackdrop : SystemBackdrop, IDisposable
 {
     private DesktopAcrylicController? _controller;

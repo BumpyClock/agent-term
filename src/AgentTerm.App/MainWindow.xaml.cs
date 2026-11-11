@@ -191,7 +191,6 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
         {
-            // The installed executable's icon is optional. Keep the terminal glyph if Windows cannot read it.
         }
     }
 
@@ -213,7 +212,6 @@ public sealed partial class MainWindow : Window
     {
         if (_closing || !item.IsClosable || item.Content is not TerminalTab tab) return;
 
-        // Keep a closing tab in the collection until cleanup completes. Window close awaits it too.
         item.IsClosable = false;
         item.IsEnabled = false;
         await tab.DisposeAsync();
@@ -318,7 +316,6 @@ public sealed partial class MainWindow : Window
     {
         if (_allowClose) return;
 
-        // Keep the window alive until every pane has released its shell and ConPTY.
         args.Cancel = true;
         if (_closing) return;
         _closing = true;

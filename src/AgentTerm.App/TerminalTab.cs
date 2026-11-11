@@ -227,7 +227,6 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         var children = PaneChildren(branch).ToArray();
         var minFirst = MinimumExtent(children[0], sideBySide);
         var minSecond = MinimumExtent(children[1], sideBySide);
-        // When the window is narrower than the combined minimums, share the available space.
         var scale = Math.Min(1, available / (minFirst + minSecond));
         var lower = minFirst * scale;
         var upper = Math.Max(lower, available - minSecond * scale);
@@ -352,7 +351,6 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private async Task DisposeCoreAsync()
     {
         SetVisible(false);
-        // A closing pane may still be attached while fading. Finish that operation before enumerating survivors.
         try { await _paneClose; }
         finally
         {

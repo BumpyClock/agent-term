@@ -57,7 +57,6 @@ public sealed partial class GhosttyTerminal
         ThrowIfFailed(Native.ghostty_terminal_grid_ref(_handle, point, out var gridRef), "Could not find selection cell.");
         using var ev = NewGestureEvent(0);
         SetEvent(ev, 1, &gridRef);
-        // Configure the single press behavior from the UI's already-counted clicks.
         var behavior = new GestureBehaviors { Single = clickCount >= 3 ? 2 : clickCount == 2 ? 1 : 0, Double = 1, Triple = 2 };
         SetEvent(ev, 7, &behavior);
         ApplyGesture(ev);
@@ -168,8 +167,6 @@ public sealed partial class GhosttyTerminal
         ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 9, &bar), "Could not read terminal scrollbar.");
         return new TerminalViewport(checked((long)bar.Total), checked((long)bar.Offset), checked((int)bar.Length), ActiveScreen() != 0);
     }
-    // Keep the top visible row tracked while selected content is being read.
-    // The terminal continues to process output; only its viewport is restored.
     private void CaptureSelectedViewport()
     {
         _viewportAnchor?.Dispose();

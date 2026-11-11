@@ -9,7 +9,6 @@ using Windows.Foundation;
 
 namespace AgentTerm_App;
 
-// Only opacity and render transforms are animated. The pane's terminal keeps its final layout.
 internal sealed class PaneMotion
 {
     private readonly record struct Pose(double Opacity, double X, double Y, double ScaleX, double ScaleY);

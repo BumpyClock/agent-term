@@ -154,7 +154,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var session = new TerminalSession(_columns, _rows, Profile);
             _session = session;
             session.SetLightTheme(ActualTheme == ElementTheme.Light);
-            // Publish ownership before starting. Closing the window can then await startup and release it.
             _startup = Task.Run(session.Start);
             await _startup;
             if (_session != session || _state != SessionState.Starting)
@@ -270,7 +269,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_state is SessionState.Running or SessionState.Idle && _session is not null)
             {
                 _session.Resize(columns, rows);
-                // Publish the resized grid before the surface repaints at its new size.
                 RefreshOutput(_session);
             }
         }
@@ -450,7 +448,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state != SessionState.Running || _session is not { } session) return false;
         var position = point.Position;
         var modifiers = Modifiers();
-        // A gesture sent to the application must end there even if Shift was pressed during the drag.
         if (action == TerminalMouseAction.Release && button is { } released && _applicationMouseButtons.Contains(released))
             modifiers &= ~TerminalModifiers.Shift;
         if (!session.SendMouse(new(action, button, modifiers, (float)position.X, (float)position.Y), MouseGeometry()))
@@ -949,7 +946,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private async Task ReleaseCoreAsync(TerminalSession session, Task startup)
     {
         try { await startup; }
-        catch { /* Startup failures are shown by StartSessionAsync. Ownership still needs release. */ }
+        catch { }
 
         try { await session.DisposeAsync(); }
         catch (Exception exception)
@@ -961,7 +958,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Page_Unloaded(object sender, RoutedEventArgs e)
     {
-        // Splits reparent visible pages. Tab visibility and session teardown own refresh lifetime.
         CancelSelectionGesture();
     }
 

@@ -20,10 +20,8 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
         _backdrop.AttachmentChanged += UpdateSolidFallback;
         TerminalContent.Content = page;
         ActualThemeChanged += Pane_ActualThemeChanged;
-        // Splits can deliver a late Unloaded after this pane is reparented and visible again.
         TerminalPreferences.Current.Changed += ApplyMaterial;
         _page.TerminalBackgroundChanged += ApplyMaterial;
-        // Keep the native backdrop link stable across material and opacity changes.
         PaneBackdrop.SystemBackdrop = _backdrop;
         ApplyMaterial();
     }

@@ -282,7 +282,6 @@ internal sealed partial class SettingsWindow : Window
             return;
         }
 
-        // Begin with every saved override so undiscovered profile IDs survive unrelated settings changes.
         var overrides = new Dictionary<string, ProfileAppearanceOverride>(_savedOverrides, StringComparer.Ordinal);
         foreach (var shell in _profiles)
         {

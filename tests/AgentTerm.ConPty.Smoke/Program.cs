@@ -66,7 +66,6 @@ async Task ExpectCommand(TerminalSession session, string command, string expecte
 async Task DisposeSession(TerminalSession session)
 {
     var screen = "Snapshot unavailable while cleanup is waiting for the terminal.";
-    // Keep the timeout effective even if a synchronous resize/read holds the session lock.
     var cleanup = Task.Run(async () =>
     {
         try { screen = session.ReadText(); }
@@ -89,7 +88,6 @@ static void AssertExited(Process process, string screen)
         throw new InvalidOperationException($"Owned PowerShell process {process.Id} is still running after session disposal.\nLast screen:\n{screen}");
 }
 
-// Split each marker in the input. An echoed command cannot satisfy an output check.
 var session = new TerminalSession(120, 30, TestShell.Profile);
 try
 {
@@ -138,7 +136,6 @@ finally
     await DisposeSession(session);
 }
 
-// Closing a running shell must finish, and repeated open/close must not retain it.
 for (var cycle = 0; cycle < 2; cycle++)
 {
     var active = new TerminalSession(profile: TestShell.Profile);
@@ -160,7 +157,6 @@ for (var cycle = 0; cycle < 2; cycle++)
     }
 }
 
-// Output, terminal snapshots, and ConPTY resize cross native and managed threads.
 var stress = new TerminalSession(120, 30, TestShell.Profile);
 try
 {

@@ -13,7 +13,6 @@ using Windows.UI.Text;
 
 namespace AgentTerm_App;
 
-// A single retained control draws the terminal grid. Metrics are shared with the resize calculation.
 public sealed class TerminalSurface : UserControl
 {
     private const string FallbackFont = "Consolas";
@@ -159,7 +158,6 @@ public sealed class TerminalSurface : UserControl
                 _input.FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily, _compositionVisible);
         else
         {
-            // Match the native palette while the first frame is being prepared.
             var shade = ActualTheme == ElementTheme.Light ? (byte)250 : (byte)0;
             args.DrawingSession.Clear(_acrylicBackground ? Color.FromArgb(0, 0, 0, 0) : Color.FromArgb(255, shade, shade, shade));
         }
