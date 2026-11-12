@@ -37,6 +37,8 @@ internal static class ThemeChecks
             restored.Cells.SequenceEqual(dark.Cells), "Returning to dark mode must restore existing cells even during synchronized output.");
         terminal.Write("\x1b[?2026l"u8);
 
+        BrandedThemeChecks.Run();
+        CheckPairedSlots();
         CheckNamedThemes();
         CheckApplicationOverrides();
         CheckHistoryAndAlternateScreen();
@@ -44,10 +46,51 @@ internal static class ThemeChecks
         CheckSchemeReports();
     }
 
+    private static void CheckPairedSlots()
+    {
+        var families = TerminalThemes.All.GroupBy(theme => theme.Id[..theme.Id.LastIndexOf('-')]);
+        Check(families.Count() == 7 && families.All(family => family.Count() == 2 &&
+            family.Count(theme => theme.IsLight) == 1), "Every theme family must provide one light and one dark variant.");
+        Check(TerminalThemes.All.Select(theme => theme.Id).Distinct().Count() == TerminalThemes.All.Count,
+            "Theme IDs must be unique for persistent slot choices.");
+        Check(TerminalThemes.Resolve(TerminalColorScheme.Auto, "ocean-light", "forest-dark", true).Id == "ocean-light" &&
+            TerminalThemes.Resolve(TerminalColorScheme.Auto, "ocean-light", "forest-dark", false).Id == "forest-dark",
+            "Auto must select independently saved light and dark themes from the system appearance.");
+        Check(TerminalThemes.Resolve(TerminalColorScheme.Light, "paper-light", "midnight-dark", false).Id == "paper-light" &&
+            TerminalThemes.Resolve(TerminalColorScheme.Dark, "paper-light", "midnight-dark", true).Id == "midnight-dark",
+            "Forced Light and Dark must ignore the system appearance without replacing either slot.");
+        Check(TerminalThemes.NormalizeId("ocean-dark", true) == "agent-light" &&
+            TerminalThemes.NormalizeId("paper-light", false) == "agent-dark" &&
+            TerminalThemes.NormalizeId("missing", true) == "agent-light" &&
+            TerminalThemes.NormalizeId(" OCEAN-LIGHT ", true) == "ocean-light",
+            "Stored slots must reject opposite appearances and unknown IDs, and normalize case and whitespace.");
+        using var terminal = new GhosttyTerminal(24, 3);
+        terminal.Write("default\x1b[31m red\x1b[0m\r\nhistory\r\nlast\r\n"u8);
+        terminal.ScrollTo(0);
+        var original = terminal.ReadFrame();
+        foreach (var systemLight in new[] { true, false, true })
+        {
+            var theme = TerminalThemes.Resolve(TerminalColorScheme.Auto, "ocean-light", "forest-dark", systemLight);
+            terminal.SetTheme(theme);
+            var frame = terminal.ReadFrame();
+            Check(frame.Cells.Select(cell => cell.Text).SequenceEqual(original.Cells.Select(cell => cell.Text)) &&
+                frame.Viewport == original.Viewport && frame.Background == theme.Background,
+                "System appearance transitions must switch the saved slot without changing retained content or viewport.");
+            terminal.Write("\x1b[?996n"u8);
+            Check(Encoding.UTF8.GetString(terminal.TakeResponses().Single()) ==
+                (systemLight ? "\x1b[?997;2n" : "\x1b[?997;1n"), "Scheme reports must follow the active slot.");
+        }
+        foreach (var theme in TerminalThemes.All.Where(theme => theme.IsLight &&
+            theme.Id is not ("flexoki-light" or "catppuccin-latte")))
+        for (var index = 0; index < 16; index++)
+            Check((Luminance(theme.Background) + 0.05) / (Luminance(theme.Ansi[index]) + 0.05) >= 4.5,
+                $"{theme.Name} ANSI {index} must remain readable on its light background.");
+    }
+
     private static void CheckNamedThemes()
     {
         using var terminal = new GhosttyTerminal(32, 2);
-        terminal.SetTheme(TerminalThemes.Resolve("midnight", false));
+        terminal.SetTheme(TerminalThemes.Resolve("midnight-dark", false));
         terminal.Write("D\x1b[31;44mI\x1b[0;38;2;10;20;30mR\x1b[0;38;5;196mE\x1b[0m"u8);
         var midnight = terminal.ReadFrame();
         Check(midnight.Background == new TerminalColor(0x17, 0x19, 0x23) &&
@@ -56,7 +99,7 @@ internal static class ThemeChecks
         terminal.BeginSelection(0, 0);
         terminal.ExtendSelection(1, 0);
         terminal.EndSelection();
-        terminal.SetTheme(TerminalThemes.Resolve("paper", false));
+        terminal.SetTheme(TerminalThemes.Resolve("paper-light", true));
         var paper = terminal.ReadFrame();
         Check(paper.Background == new TerminalColor(0xf5, 0xf0, 0xe6) &&
             paper.Foreground == new TerminalColor(0x34, 0x30, 0x2a) &&
@@ -87,7 +130,7 @@ internal static class ThemeChecks
                 "Named themes must retain foreground and background query replies.");
         }
         terminal.Write("\x1b]10;#112233\x07\x1b]4;1;#abcdef\x07"u8);
-        terminal.SetTheme(TerminalThemes.Resolve("ocean", false));
+        terminal.SetTheme(TerminalThemes.Resolve("ocean-dark", false));
         Check(terminal.ReadFrame().Foreground == new TerminalColor(0x11, 0x22, 0x33) &&
             terminal.ReadFrame().Cells[1].Foreground == new TerminalColor(0xab, 0xcd, 0xef),
             "Named theme changes must preserve OSC overrides.");

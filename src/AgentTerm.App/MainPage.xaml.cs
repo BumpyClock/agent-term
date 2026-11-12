@@ -64,7 +64,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     public ShellProfile Profile { get; }
     internal PaneStatus.PaneStatusMonitor PaneStatus { get; } = new();
     internal TerminalColor TerminalBackground => _terminalBackground ?? CurrentTheme.Background;
-    private TerminalTheme CurrentTheme => TerminalThemes.Resolve(_appearance.ThemeId, ActualTheme == ElementTheme.Light);
+    private TerminalTheme CurrentTheme => TerminalThemes.Resolve(_appearance.ColorScheme, _appearance.LightThemeId, _appearance.DarkThemeId,
+        ActualTheme == ElementTheme.Light);
     internal event Action? TerminalBackgroundChanged;
     public event Action? SessionReady;
     public bool CanStopSession => _state is SessionState.Starting or SessionState.Running;

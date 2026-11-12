@@ -106,10 +106,13 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     private void ApplyMaterial()
     {
         var appearance = TerminalPreferences.Current.ResolveAppearance(_page.Profile.Id);
-        // Theme the pane controls too, but leave window chrome on the Windows appearance.
-        // Automatic must inherit again rather than resolve against a previous fixed theme.
-        RequestedTheme = appearance.ThemeId.Length == 0 ? ElementTheme.Default
-            : TerminalThemes.Resolve(appearance.ThemeId, false).IsLight ? ElementTheme.Light : ElementTheme.Dark;
+        // Auto inherits Windows again after leaving a forced light or dark appearance.
+        RequestedTheme = appearance.ColorScheme switch
+        {
+            TerminalColorScheme.Light => ElementTheme.Light,
+            TerminalColorScheme.Dark => ElementTheme.Dark,
+            _ => ElementTheme.Default,
+        };
         var background = _page.TerminalBackground;
         var color = Color.FromArgb(255, background.R, background.G, background.B);
         SolidSurface.Background = new SolidColorBrush(color);

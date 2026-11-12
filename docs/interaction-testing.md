@@ -217,10 +217,11 @@ Set `Read-Host 'review input'` in the composer through UI Automation and clicked
 
 ## Terminal color themes
 
-1. Open Settings, then Profiles > Defaults. Change Color theme to Midnight. Confirm Save becomes enabled. Discard must restore the saved theme. Closing with an unsaved choice must not apply it.
-2. Save Midnight with two shell tabs and a split open. Existing default and ANSI output must recolor without changing shell PIDs, scroll position, selection, or text. Truecolor output must retain its RGB values.
-3. On one profile's Appearance page, save Paper. Only that profile's panes must change. Reset to defaults must restore Midnight after Save. An explicit Automatic choice must follow Windows instead of the shared named theme.
-4. Restart a test window. Confirm global and profile theme choices persist. Switch Windows appearance while using Automatic and while using a named theme. Only Automatic should change terminal colors.
-5. Check solid and acrylic panes, selection text, and block/bar/underline cursors in all six themes. Keyboard navigation must reach both color selectors and the Save and Discard buttons.
+1. In Settings > Profiles > Defaults, select Auto, Ocean Light, and Forest Dark. Save. In a test window, change Windows appearance. Only the active palette must change; both saved slots must remain selected. Output, shell PIDs, scroll position, and selection must remain intact.
+2. Select forced Light and forced Dark against the opposite Windows appearance. Verify the corresponding slot is used and the composer, IME text, pane labels, and selection remain readable. Return to Auto. Verify system tracking resumes instead of remaining stuck in the previously forced appearance.
+3. Change each inactive slot, then switch appearance. The saved inactive choice must be used. Open split panes and inactive tabs before changing slots; activate them afterwards and verify the current palette appears without a shell restart.
+4. On one profile, override only the light theme and inherit its scheme and dark theme. Change Defaults. Verify inherited fields update while the override stays fixed. Explicit profile Auto must override forced Defaults. Reset to defaults restores all three fields to inheritance after Save.
+5. Change each field and Discard. Verify saved values return. Close Settings with unsaved edits; no edits should apply. Restart a test window and verify both slots and the mode persist.
+6. Check solid and acrylic panes, selected text, and block/bar/underline cursors for every variant. Keyboard navigation must reach all scheme and palette selectors and the Save and Discard buttons.
 
-Automated coverage checks native live recoloring, ANSI and truecolor resolution, selection retention, history and alternate-screen retention, OSC overrides/resets, scheme query replies, preference persistence/inheritance, and actual renderer pixels for every built-in palette and selection. Theme-specific snapshots are produced by the renderer smoke suite. Native settings selector interaction remains a manual check.
+Automated coverage checks slot resolution against system appearance, forced modes, scheme reports, live recoloring, ANSI and truecolor resolution, selection retention, history and alternate-screen retention, OSC overrides/resets, preference persistence/migration/inheritance, and actual renderer pixels for every built-in palette and selection. Theme-specific snapshots are produced by the renderer smoke suite. Native Settings selector interaction and real Windows appearance switching remain manual checks.

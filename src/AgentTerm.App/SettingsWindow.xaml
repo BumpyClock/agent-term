@@ -85,12 +85,31 @@
                             <Border Style="{StaticResource SettingCard}">
                                 <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
-                                        <TextBlock Text="Color theme" Style="{StaticResource SettingLabel}" />
-                                        <TextBlock Text="Terminal colors. Automatic follows the system's light or dark appearance."
-                                                   Style="{StaticResource SettingDescription}" />
+                                        <TextBlock Text="Color scheme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Auto follows Windows. Light and Dark use their selected themes." Style="{StaticResource SettingDescription}" />
                                     </StackPanel>
-                                    <ComboBox x:Name="ThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                              AutomationProperties.Name="Default color theme" SelectionChanged="DraftChanged" />
+                                    <ComboBox x:Name="ColorSchemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Default color scheme" SelectionChanged="DraftChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Light theme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Colors used in light mode." Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="LightThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Default light theme" SelectionChanged="DraftChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Dark theme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Colors used in dark mode." Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="DarkThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Default dark theme" SelectionChanged="DraftChanged" />
                                 </Grid>
                             </Border>
                             <Border Style="{StaticResource SettingCard}">
@@ -155,12 +174,31 @@
                             <Border Style="{StaticResource SettingCard}">
                                 <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
-                                        <TextBlock Text="Color theme" Style="{StaticResource SettingLabel}" />
-                                        <TextBlock Text="Use the default theme or choose colors for this profile."
-                                                   Style="{StaticResource SettingDescription}" />
+                                        <TextBlock Text="Color scheme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Use the default or choose this profile's color scheme." Style="{StaticResource SettingDescription}" />
                                     </StackPanel>
-                                    <ComboBox x:Name="ProfileThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                                              AutomationProperties.Name="Profile color theme" SelectionChanged="DraftChanged" />
+                                    <ComboBox x:Name="ProfileColorSchemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Profile color scheme" SelectionChanged="DraftChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Light theme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Use the default or choose this profile's light theme." Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="ProfileLightThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Profile light theme" SelectionChanged="DraftChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Dark theme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Use the default or choose this profile's dark theme." Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="ProfileDarkThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Profile dark theme" SelectionChanged="DraftChanged" />
                                 </Grid>
                             </Border>
                             <Border Style="{StaticResource SettingCard}">

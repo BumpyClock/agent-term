@@ -17,9 +17,9 @@ namespace AgentTerm_App;
 internal sealed partial class SettingsWindow : Window
 {
     private readonly record struct SettingsValues(string ProfileId, string FontFamily, int FontSize, bool UseAcrylic,
-        double BackgroundOpacity, TabPosition TabPosition, string ThemeId);
+        double BackgroundOpacity, TabPosition TabPosition, TerminalColorScheme ColorScheme, string LightThemeId, string DarkThemeId);
     private sealed record ProfileDraft(string? FontFamily, bool InheritFontSize, string? FontSizeText, bool? UseAcrylic,
-        bool InheritOpacity, double? BackgroundOpacity, string? ThemeId);
+        bool InheritOpacity, double? BackgroundOpacity, TerminalColorScheme? ColorScheme, string? LightThemeId, string? DarkThemeId);
 
     private readonly TerminalPreferences _preferences = TerminalPreferences.Current;
     private readonly IReadOnlyList<ShellProfile> _profiles;
@@ -101,7 +101,7 @@ internal sealed partial class SettingsWindow : Window
     {
         _saved = new SettingsValues(_preferences.DefaultProfileId ?? "", _preferences.FontFamily,
             _preferences.FontSize, _preferences.UseAcrylic, _preferences.BackgroundOpacity, _preferences.TabPosition,
-            _preferences.ThemeId);
+            _preferences.ColorScheme, _preferences.LightThemeId, _preferences.DarkThemeId);
         _updatingControls = true;
         _savedOverrides = _preferences.ProfileOverrides.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         _profileDrafts.Clear();
@@ -111,14 +111,16 @@ internal sealed partial class SettingsWindow : Window
             _savedOverrides.TryGetValue(profile.Id, out var value);
             var draft = new ProfileDraft(value?.FontFamily, value?.FontSize is null,
                 value?.FontSize?.ToString(CultureInfo.InvariantCulture), value?.UseAcrylic,
-                value?.BackgroundOpacity is null, value?.BackgroundOpacity, value?.ThemeId);
+                value?.BackgroundOpacity is null, value?.BackgroundOpacity, value?.ColorScheme, value?.LightThemeId, value?.DarkThemeId);
             _profileDrafts.Add(profile.Id, draft);
             _savedProfileDrafts.Add(profile.Id, draft);
         }
         PopulateChoices(DefaultProfileBox, _saved.ProfileId, "Automatic", _profiles.Select(profile => (profile.Id, profile.Name)));
         var fonts = TerminalSurface.FontFamilies;
         PopulateChoices(FontFamilyBox, _saved.FontFamily, $"Automatic ({fonts[0]})", fonts.Select(font => (font, font)));
-        PopulateChoices(ThemeBox, _saved.ThemeId, "Automatic (system)", TerminalThemes.All.Select(theme => (theme.Id, theme.Name)));
+        PopulateChoices(ColorSchemeBox, _saved.ColorScheme.ToString(), null, SchemeChoices);
+        PopulateChoices(LightThemeBox, _saved.LightThemeId, null, ThemeChoices(true));
+        PopulateChoices(DarkThemeBox, _saved.DarkThemeId, null, ThemeChoices(false));
         FontSizeBox.Text = _saved.FontSize.ToString(CultureInfo.InvariantCulture);
         BackgroundBox.SelectedIndex = _saved.UseAcrylic ? 1 : 0;
         TabPositionBox.SelectedIndex = (int)_saved.TabPosition;
@@ -130,7 +132,7 @@ internal sealed partial class SettingsWindow : Window
         UpdateActions();
     }
 
-    private static void PopulateChoices(ComboBox box, string? saved, string automatic,
+    private static void PopulateChoices(ComboBox box, string? saved, string? automatic,
         IEnumerable<(string Id, string Label)> choices, string? inheritedLabel = null)
     {
         box.Items.Clear();
@@ -141,9 +143,12 @@ internal sealed partial class SettingsWindow : Window
             box.Items.Add(inherit);
             if (saved is null) selected = inherit;
         }
-        var auto = new ComboBoxItem { Content = automatic, Tag = "" };
-        box.Items.Add(auto);
-        if (saved == "") selected = auto;
+        if (automatic is not null)
+        {
+            var auto = new ComboBoxItem { Content = automatic, Tag = "" };
+            box.Items.Add(auto);
+            if (saved == "") selected = auto;
+        }
         foreach (var (id, label) in choices)
         {
             bool matches = string.Equals(id, saved, StringComparison.OrdinalIgnoreCase);
@@ -160,6 +165,15 @@ internal sealed partial class SettingsWindow : Window
         UpdateSelectionToolTip(box);
     }
 
+    private static IEnumerable<(string Id, string Label)> SchemeChoices =>
+        Enum.GetValues<TerminalColorScheme>().Select(scheme => (scheme.ToString(), scheme == TerminalColorScheme.Auto ? "Auto (system)" : scheme.ToString()));
+
+    private static IEnumerable<(string Id, string Label)> ThemeChoices(bool light) =>
+        TerminalThemes.All.Where(theme => theme.IsLight == light).Select(theme => (theme.Id, theme.Name));
+
+    private static TerminalColorScheme? SelectedScheme(ComboBox box) =>
+        Enum.TryParse<TerminalColorScheme>(SelectedValue(box), out var scheme) ? scheme : null;
+
     private static string? SelectedValue(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Tag as string;
     private static void UpdateSelectionToolTip(ComboBox box) =>
         ToolTipService.SetToolTip(box, (box.SelectedItem as ComboBoxItem)?.Content);
@@ -174,9 +188,12 @@ internal sealed partial class SettingsWindow : Window
         var effectiveFamily = TerminalSurface.ResolveFontFamily(SelectedValue(FontFamilyBox));
         PopulateChoices(ProfileFontFamilyBox, draft.FontFamily, $"Automatic ({fonts[0]})",
             fonts.Select(font => (font, font)), inheritedLabel: $"Use default ({effectiveFamily})");
-        PopulateChoices(ProfileThemeBox, draft.ThemeId, "Automatic (system)",
-            TerminalThemes.All.Select(theme => (theme.Id, theme.Name)),
-            inheritedLabel: $"Use default ({(ThemeBox.SelectedItem as ComboBoxItem)?.Content})");
+        PopulateChoices(ProfileColorSchemeBox, draft.ColorScheme?.ToString(), null, SchemeChoices,
+            inheritedLabel: $"Use default ({(ColorSchemeBox.SelectedItem as ComboBoxItem)?.Content})");
+        PopulateChoices(ProfileLightThemeBox, draft.LightThemeId, null, ThemeChoices(true),
+            inheritedLabel: $"Use default ({(LightThemeBox.SelectedItem as ComboBoxItem)?.Content})");
+        PopulateChoices(ProfileDarkThemeBox, draft.DarkThemeId, null, ThemeChoices(false),
+            inheritedLabel: $"Use default ({(DarkThemeBox.SelectedItem as ComboBoxItem)?.Content})");
         ProfileInheritSize.IsChecked = draft.InheritFontSize;
         ProfileBackgroundBox.Items[0] = new ComboBoxItem
         {
@@ -233,7 +250,7 @@ internal sealed partial class SettingsWindow : Window
         else if (!inheritOpacity && opacity is null) opacity = OpacitySlider.Value / 100;
         _profileDrafts[id] = new ProfileDraft(SelectedValue(ProfileFontFamilyBox), inherit, rawSize,
             ProfileBackgroundBox.SelectedIndex switch { 1 => false, 2 => true, _ => null }, inheritOpacity, opacity,
-            SelectedValue(ProfileThemeBox));
+            SelectedScheme(ProfileColorSchemeBox), SelectedValue(ProfileLightThemeBox), SelectedValue(ProfileDarkThemeBox));
     }
 
     private void OpacityChanged(object sender, RangeBaseValueChangedEventArgs e) => DraftChanged(sender, e);
@@ -262,14 +279,16 @@ internal sealed partial class SettingsWindow : Window
         {
             var current = pair.Value;
             var saved = _savedProfileDrafts[pair.Key];
-            return current.FontFamily != saved.FontFamily || current.ThemeId != saved.ThemeId || current.UseAcrylic != saved.UseAcrylic ||
+            return current.FontFamily != saved.FontFamily || current.ColorScheme != saved.ColorScheme ||
+                current.LightThemeId != saved.LightThemeId || current.DarkThemeId != saved.DarkThemeId || current.UseAcrylic != saved.UseAcrylic ||
                 current.InheritFontSize != saved.InheritFontSize ||
                 (!current.InheritFontSize && current.FontSizeText != saved.FontSizeText) ||
                 current.InheritOpacity != saved.InheritOpacity ||
                 (!current.InheritOpacity && current.BackgroundOpacity != saved.BackgroundOpacity);
         });
         bool dirty = SelectedValue(DefaultProfileBox) != _saved.ProfileId || SelectedValue(FontFamilyBox) != _saved.FontFamily ||
-            SelectedValue(ThemeBox) != _saved.ThemeId ||
+            SelectedScheme(ColorSchemeBox) != _saved.ColorScheme ||
+            SelectedValue(LightThemeBox) != _saved.LightThemeId || SelectedValue(DarkThemeBox) != _saved.DarkThemeId ||
             FontSizeBox.Text != _saved.FontSize.ToString(CultureInfo.InvariantCulture) ||
             BackgroundBox.SelectedIndex != (_saved.UseAcrylic ? 1 : 0) ||
             OpacitySlider.Value != _saved.BackgroundOpacity * 100 || SelectedTabPosition != _saved.TabPosition || profilesDirty;
@@ -286,7 +305,8 @@ internal sealed partial class SettingsWindow : Window
             return;
         }
         if (SelectedValue(DefaultProfileBox) is not { } profile || SelectedValue(FontFamilyBox) is not { } family ||
-            SelectedValue(ThemeBox) is not { } themeId || BackgroundBox.SelectedIndex is < 0 or > 1)
+            SelectedScheme(ColorSchemeBox) is not { } colorScheme || SelectedValue(LightThemeBox) is not { } lightThemeId ||
+            SelectedValue(DarkThemeBox) is not { } darkThemeId || BackgroundBox.SelectedIndex is < 0 or > 1)
         {
             ShowNotice(InfoBarSeverity.Error, "Check your settings", "Choose a profile, font family, color theme, and pane background.");
             return;
@@ -307,9 +327,9 @@ internal sealed partial class SettingsWindow : Window
                 size = profileSize;
             }
             var value = new ProfileAppearanceOverride(draft.FontFamily, size, draft.UseAcrylic,
-                draft.InheritOpacity ? null : draft.BackgroundOpacity, draft.ThemeId);
+                draft.InheritOpacity ? null : draft.BackgroundOpacity, draft.ColorScheme, draft.LightThemeId, draft.DarkThemeId);
             if (value.FontFamily is null && value.FontSize is null && value.UseAcrylic is null && value.BackgroundOpacity is null &&
-                value.ThemeId is null)
+                value.ColorScheme is null && value.LightThemeId is null && value.DarkThemeId is null)
                 overrides.Remove(shell.Id);
             else
                 overrides[shell.Id] = value;
@@ -317,7 +337,7 @@ internal sealed partial class SettingsWindow : Window
         try
         {
             _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides, OpacitySlider.Value / 100,
-                SelectedTabPosition, themeId);
+                SelectedTabPosition, colorScheme, lightThemeId, darkThemeId);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -346,7 +366,7 @@ internal sealed partial class SettingsWindow : Window
     private void ResetProfile_Click(object sender, RoutedEventArgs e)
     {
         if (_shownProfileId is not { } id) return;
-        _profileDrafts[id] = new ProfileDraft(null, true, null, null, true, null, null);
+        _profileDrafts[id] = new ProfileDraft(null, true, null, null, true, null, null, null, null);
         LoadProfileDraft(id);
         SettingsNotice.IsOpen = false;
         UpdateActions();

@@ -124,44 +124,100 @@ internal static class PreferencesChecks
 
     private static void CheckThemes()
     {
+        static void Check(bool condition, string message)
+        {
+            if (!condition) throw new Exception(message);
+        }
         var path = Path.Combine(Path.GetTempPath(), "agent-term-themes-" + Guid.NewGuid().ToString("N") + ".json");
-        var first = TerminalThemes.All[0].Id;
-        var second = TerminalThemes.All[1].Id;
         try
         {
+            var missing = new TerminalPreferences(path);
+            Check(missing.ColorScheme == TerminalColorScheme.Auto && missing.LightThemeId == "agent-light" &&
+                missing.DarkThemeId == "agent-dark", "Missing theme settings must follow Windows with the original light and dark defaults.");
             File.WriteAllText(path, """{"FontSize":17}""");
             var preferences = new TerminalPreferences(path);
-            if (preferences.ThemeId != "" || preferences.ResolveAppearance("inherited").ThemeId != "")
-                throw new Exception("Legacy settings must keep automatic system colors.");
-            preferences.Update("cmd", 17, themeId: first.ToUpperInvariant(),
+            Check(preferences.ResolveAppearance("inherited").ColorScheme == TerminalColorScheme.Auto && preferences.FontSize == 17,
+                "Pre-theme settings must preserve appearance and use Auto.");
+            preferences.Update("cmd", 17, colorScheme: TerminalColorScheme.Light,
+                lightThemeId: " PAPER-LIGHT ", darkThemeId: "MIDNIGHT-DARK",
                 profileOverrides: new Dictionary<string, ProfileAppearanceOverride>
                 {
-                    ["automatic"] = new(ThemeId: ""),
-                    ["custom"] = new(ThemeId: second),
-                    ["inherit"] = new(ThemeId: null)
+                    ["auto"] = new(ColorScheme: TerminalColorScheme.Auto),
+                    ["mixed"] = new(LightThemeId: "ocean-light"),
+                    ["dark-only"] = new(DarkThemeId: "forest-dark"),
+                    ["inherit"] = new()
                 });
             var saved = new TerminalPreferences(path);
-            if (saved.ThemeId != first || saved.ResolveAppearance("inherited").ThemeId != first ||
-                saved.ResolveAppearance("automatic").ThemeId != "" || saved.ResolveAppearance("custom").ThemeId != second ||
-                saved.ProfileOverrides.ContainsKey("inherit"))
-                throw new Exception("Theme choices must survive restart, distinguish automatic from inheritance, and normalize IDs.");
+            Check(saved.ColorScheme == TerminalColorScheme.Light && saved.LightThemeId == "paper-light" &&
+                saved.DarkThemeId == "midnight-dark", "The scheme and both normalized theme slots must survive restart.");
+            Check(saved.ResolveAppearance("auto").ColorScheme == TerminalColorScheme.Auto &&
+                saved.ResolveAppearance("auto").LightThemeId == "paper-light" && saved.ResolveAppearance("auto").DarkThemeId == "midnight-dark" &&
+                !saved.ProfileOverrides.ContainsKey("inherit"), "Explicit Auto must inherit both slots without becoming an inherited scheme.");
+            Check(saved.ResolveAppearance("mixed").ColorScheme == TerminalColorScheme.Light &&
+                saved.ResolveAppearance("mixed").LightThemeId == "ocean-light" && saved.ResolveAppearance("mixed").DarkThemeId == "midnight-dark" &&
+                saved.ResolveAppearance("dark-only").LightThemeId == "paper-light" && saved.ResolveAppearance("dark-only").DarkThemeId == "forest-dark",
+                "Profile scheme, light slot and dark slot must inherit independently.");
             saved.Update("cmd", 18);
-            if (new TerminalPreferences(path).ThemeId != first)
-                throw new Exception("Unrelated settings changes must retain the selected color theme.");
-            saved.Update("cmd", 18, themeId: second);
-            if (saved.ResolveAppearance("inherited").ThemeId != second || saved.ResolveAppearance("automatic").ThemeId != "")
-                throw new Exception("Changing the default theme must affect inherited profiles but preserve automatic overrides.");
+            Check(new TerminalPreferences(path).LightThemeId == "paper-light" && saved.ColorScheme == TerminalColorScheme.Light &&
+                saved.DarkThemeId == "midnight-dark", "Unrelated settings changes must retain all theme settings.");
+            saved.Update("cmd", 18, colorScheme: TerminalColorScheme.Dark, lightThemeId: "forest-light", darkThemeId: "ocean-dark");
+            Check(saved.ResolveAppearance("auto").ColorScheme == TerminalColorScheme.Auto &&
+                saved.ResolveAppearance("auto").LightThemeId == "forest-light" &&
+                saved.ResolveAppearance("mixed").ColorScheme == TerminalColorScheme.Dark &&
+                saved.ResolveAppearance("mixed").LightThemeId == "ocean-light" && saved.ResolveAppearance("mixed").DarkThemeId == "ocean-dark",
+                "Changing defaults must affect each inherited field while retaining explicit profile choices.");
             saved.Update("cmd", 18, profileOverrides: new Dictionary<string, ProfileAppearanceOverride>());
-            if (new TerminalPreferences(path).ResolveAppearance("automatic").ThemeId != second)
-                throw new Exception("Resetting profile appearance must restore theme inheritance.");
-            saved.Update("cmd", 18, themeId: "");
-            if (new TerminalPreferences(path).ThemeId != "")
-                throw new Exception("Selecting automatic must persist across restarts.");
-            File.WriteAllText(path, """{"ThemeId":"missing-theme","FontSize":19,"Profiles":{"unknown":{"ThemeId":"missing-theme"},"null":{"ThemeId":null}}}""");
-            var unknown = new TerminalPreferences(path);
-            if (unknown.ThemeId != "" || unknown.ResolveAppearance("unknown").ThemeId != "" || unknown.FontSize != 19 ||
-                unknown.LoadError is not null || unknown.ProfileOverrides.ContainsKey("null"))
-                throw new Exception("Unknown theme IDs must fall back to automatic without discarding other settings.");
+            Check(new TerminalPreferences(path).ResolveAppearance("auto").ColorScheme == TerminalColorScheme.Dark,
+                "Resetting a profile must restore scheme inheritance.");
+            saved.Update("cmd", 18, colorScheme: TerminalColorScheme.Auto, lightThemeId: "midnight-dark", darkThemeId: "missing");
+            var normalized = new TerminalPreferences(path);
+            Check(normalized.ColorScheme == TerminalColorScheme.Auto && normalized.LightThemeId == "agent-light" &&
+                normalized.DarkThemeId == "agent-dark", "Wrong-slot and unknown theme IDs must fall back to the appropriate default.");
+            Check(File.ReadAllText(path).Contains("\"ColorScheme\": \"Auto\"") && !File.ReadAllText(path).Contains("\"ThemeId\""),
+                "New settings must persist named schemes and separate theme slots, not the legacy single-theme field.");
+
+            foreach (var (legacy, expectedScheme, light, dark) in new[]
+            {
+                ("midnight", TerminalColorScheme.Dark, "agent-light", "midnight-dark"),
+                ("ocean", TerminalColorScheme.Dark, "agent-light", "ocean-dark"),
+                ("forest", TerminalColorScheme.Dark, "agent-light", "forest-dark"),
+                ("paper", TerminalColorScheme.Light, "paper-light", "agent-dark"),
+                ("agent-light", TerminalColorScheme.Light, "agent-light", "agent-dark"),
+                ("agent-dark", TerminalColorScheme.Dark, "agent-light", "agent-dark"),
+                (" AGENT-LIGHT ", TerminalColorScheme.Light, "agent-light", "agent-dark"),
+                (" AGENT-DARK ", TerminalColorScheme.Dark, "agent-light", "agent-dark"),
+                ("", TerminalColorScheme.Auto, "agent-light", "agent-dark"),
+                ("missing", TerminalColorScheme.Auto, "agent-light", "agent-dark")
+            })
+            {
+                File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ThemeId = legacy, FontSize = 19, Profiles = new { legacy = new { ThemeId = legacy } }
+                }));
+                var migrated = new TerminalPreferences(path);
+                var profile = migrated.ResolveAppearance("legacy");
+                Check(migrated.LoadError is null && migrated.ColorScheme == expectedScheme && migrated.LightThemeId == light &&
+                    migrated.DarkThemeId == dark && migrated.FontSize == 19 && profile.ColorScheme == expectedScheme &&
+                    profile.LightThemeId == light && profile.DarkThemeId == dark,
+                    $"Legacy theme '{legacy}' must migrate global and profile choices without losing other preferences.");
+            }
+            File.WriteAllText(path, """{"ThemeId":"paper","ColorScheme":"Auto","LightThemeId":"ocean-light","DarkThemeId":"forest-dark","Profiles":{"mixed":{"ThemeId":"midnight","ColorScheme":"Light","DarkThemeId":"ocean-dark"},"auto":{"ThemeId":""},"inherit":{"ThemeId":null}}}""");
+            var precedence = new TerminalPreferences(path);
+            Check(precedence.LoadError is null && precedence.ColorScheme == TerminalColorScheme.Auto &&
+                precedence.LightThemeId == "ocean-light" && precedence.DarkThemeId == "forest-dark" &&
+                precedence.ResolveAppearance("mixed").ColorScheme == TerminalColorScheme.Light &&
+                precedence.ResolveAppearance("mixed").DarkThemeId == "ocean-dark",
+                "Explicit new scheme and slot values must take precedence over legacy single-theme values.");
+            Check(precedence.ResolveAppearance("auto").ColorScheme == TerminalColorScheme.Auto &&
+                precedence.ResolveAppearance("auto").LightThemeId == "agent-light" && precedence.ResolveAppearance("auto").DarkThemeId == "agent-dark" &&
+                !precedence.ProfileOverrides.ContainsKey("inherit"),
+                "Legacy explicit automatic must retain original system defaults; legacy null must inherit.");
+            File.WriteAllText(path, """{"LightThemeId":"missing","DarkThemeId":"paper-light","Profiles":{"wrong":{"LightThemeId":"forest-dark","DarkThemeId":"missing"},"partial":{"LightThemeId":"paper-light"}}}""");
+            var wrongSlots = new TerminalPreferences(path);
+            Check(wrongSlots.LoadError is null && wrongSlots.LightThemeId == "agent-light" && wrongSlots.DarkThemeId == "agent-dark" &&
+                wrongSlots.ResolveAppearance("wrong").LightThemeId == "agent-light" && wrongSlots.ResolveAppearance("wrong").DarkThemeId == "agent-dark" &&
+                wrongSlots.ProfileOverrides["partial"].ColorScheme is null && wrongSlots.ProfileOverrides["partial"].DarkThemeId is null,
+                "Wrong-slot overrides must normalize without converting independent inherited fields to explicit values.");
         }
         finally { File.Delete(path); File.Delete(path + ".tmp"); }
     }

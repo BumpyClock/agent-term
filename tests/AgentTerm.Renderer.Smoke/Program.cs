@@ -103,7 +103,7 @@ internal static class Program
         terminal.Write("Theme preview\r\n"u8);
         for (var i = 0; i < 16; i++)
             terminal.Write(Encoding.UTF8.GetBytes($"\x1b[48;5;{i}m  "));
-        terminal.Write("\x1b[0m\r\nSelected text\r\n\x1b[38;2;240;120;80mTruecolor text\x1b[0m\r\nCursor\x1b[2 q"u8);
+        terminal.Write("\x1b[0m\r\nSelected text\r\n\x1b[38;2;240;120;80mTruecolor text\x1b[0m\r\nCursor\x1b[2 q\x1b[5;1H"u8);
         terminal.BeginSelection(0, 2);
         terminal.ExtendSelection(12, 2);
         terminal.EndSelection();
@@ -124,6 +124,10 @@ internal static class Program
             if (!image.GetPixelColors(0, 40, 130, 20).Any(c =>
                 c.R == theme.SelectionForeground.R && c.G == theme.SelectionForeground.G && c.B == theme.SelectionForeground.B))
                 throw new Exception($"{theme.Name} must render selection text with its foreground.");
+            var cursorPixels = image.GetPixelColors(0, 80, 10, 20);
+            if (!cursorPixels.Any(c => c.R == theme.Cursor.R && c.G == theme.Cursor.G && c.B == theme.Cursor.B) ||
+                !cursorPixels.Any(c => c.R == theme.CursorText.R && c.G == theme.CursorText.G && c.B == theme.CursorText.B))
+                throw new Exception($"{theme.Name} must render the block cursor and its text using the theme colors.");
             image.SaveAsync(Path.Combine(outputDirectory, $"theme-{theme.Id}.png"), CanvasBitmapFileFormat.Png)
                 .AsTask().GetAwaiter().GetResult();
         }
