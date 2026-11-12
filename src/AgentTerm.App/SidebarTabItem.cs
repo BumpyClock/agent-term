@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -108,7 +109,10 @@ internal sealed class SidebarTabItem : ListViewItem
     {
         e.Handled = true;
         if (ToolTipService.GetToolTip(this) is ToolTip tooltip) tooltip.IsOpen = false;
-        ((MenuFlyoutItem)_menu.Items[0]).Text = $"Close {Title}";
+        var list = ItemsControl.ItemsControlFromItemContainer(this);
+        var duplicateTitle = list?.Items.OfType<SidebarTabItem>().Count(row => row.Title == Title) > 1;
+        var target = duplicateTitle ? $"{Title} (tab {list!.IndexFromContainer(this) + 1})" : Title;
+        ((MenuFlyoutItem)_menu.Items[0]).Text = $"Close {target}";
         var options = new FlyoutShowOptions
         {
             ShowMode = FlyoutShowMode.Standard,
@@ -125,7 +129,7 @@ internal sealed class SidebarTabItem : ListViewItem
     private void UpdateToolTip()
     {
         var title = Title;
-        const string actions = "Right-click or Shift+F10 for tab actions. Ctrl+F4 closes this tab.";
+        const string actions = "Right-click for the close menu. With this tab focused, Shift+F10 opens the menu and Ctrl+F4 closes the tab.";
         AutomationProperties.SetHelpText(this, actions);
         object? tip = string.IsNullOrEmpty(title) ? null
             : _compact ? new StackPanel

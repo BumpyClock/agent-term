@@ -284,14 +284,17 @@
                                             <ResourceDictionary x:Key="Default">
                                                 <SolidColorBrush x:Key="SidebarTabSelectionIndicatorBrush" Color="{ThemeResource SystemAccentColorLight2}" />
                                                 <SolidColorBrush x:Key="SidebarTabSelectedBackground" Color="{ThemeResource ControlFillColorSecondary}" />
+                                                <StaticResource x:Key="SidebarTabSelectedBorderBrush" ResourceKey="CardStrokeColorDefaultBrush" />
                                             </ResourceDictionary>
                                             <ResourceDictionary x:Key="Light">
                                                 <SolidColorBrush x:Key="SidebarTabSelectionIndicatorBrush" Color="{ThemeResource SystemAccentColorDark1}" />
                                                 <StaticResource x:Key="SidebarTabSelectedBackground" ResourceKey="TabViewItemHeaderBackgroundSelected" />
+                                                <StaticResource x:Key="SidebarTabSelectedBorderBrush" ResourceKey="CardStrokeColorDefaultBrush" />
                                             </ResourceDictionary>
                                             <ResourceDictionary x:Key="HighContrast">
                                                 <SolidColorBrush x:Key="SidebarTabSelectionIndicatorBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                                                 <StaticResource x:Key="SidebarTabSelectedBackground" ResourceKey="TabViewItemHeaderBackgroundSelected" />
+                                                <SolidColorBrush x:Key="SidebarTabSelectedBorderBrush" Color="Transparent" />
                                             </ResourceDictionary>
                                         </ResourceDictionary.ThemeDictionaries>
                                     </ResourceDictionary>
@@ -321,7 +324,7 @@
                                             <VisualState.Setters>
                                                 <Setter Target="SelectionIndicator.Opacity" Value="1" />
                                                 <Setter Target="TabContainer.Background" Value="{ThemeResource SidebarTabSelectedBackground}" />
-                                                <Setter Target="TabContainer.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                                <Setter Target="TabContainer.BorderBrush" Value="{ThemeResource SidebarTabSelectedBorderBrush}" />
                                                 <Setter Target="TitleText.Foreground" Value="{ThemeResource TabViewItemHeaderForegroundSelected}" />
                                                 <Setter Target="TitleText.FontWeight" Value="SemiBold" />
                                                 <Setter Target="IconElement.Foreground" Value="{ThemeResource TabViewItemIconForegroundSelected}" />
@@ -333,7 +336,7 @@
                                             <VisualState.Setters>
                                                 <Setter Target="SelectionIndicator.Opacity" Value="1" />
                                                 <Setter Target="TabContainer.Background" Value="{ThemeResource SidebarTabSelectedBackground}" />
-                                                <Setter Target="TabContainer.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                                <Setter Target="TabContainer.BorderBrush" Value="{ThemeResource SidebarTabSelectedBorderBrush}" />
                                                 <Setter Target="TitleText.Foreground" Value="{ThemeResource TabViewItemHeaderForegroundSelected}" />
                                                 <Setter Target="TitleText.FontWeight" Value="SemiBold" />
                                                 <Setter Target="IconElement.Foreground" Value="{ThemeResource TabViewItemIconForegroundSelected}" />
@@ -345,7 +348,7 @@
                                             <VisualState.Setters>
                                                 <Setter Target="SelectionIndicator.Opacity" Value="1" />
                                                 <Setter Target="TabContainer.Background" Value="{ThemeResource SidebarTabSelectedBackground}" />
-                                                <Setter Target="TabContainer.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                                <Setter Target="TabContainer.BorderBrush" Value="{ThemeResource SidebarTabSelectedBorderBrush}" />
                                                 <Setter Target="TitleText.Foreground" Value="{ThemeResource TabViewItemHeaderForegroundSelected}" />
                                                 <Setter Target="TitleText.FontWeight" Value="SemiBold" />
                                                 <Setter Target="IconElement.Foreground" Value="{ThemeResource TabViewItemIconForegroundSelected}" />
