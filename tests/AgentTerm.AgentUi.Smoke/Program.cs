@@ -12,25 +12,27 @@ using Windows.UI.ViewManagement;
 
 internal static class Program
 {
+    private static int _result;
     [STAThread]
-    private static void Main()
+    private static int Main()
     {
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>
         {
             var app = new AgentUiSmoke.App();
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
-            RunAsync(app);
         });
+        return _result;
     }
 
-    private static async void RunAsync(Application app)
+    internal static async void RunAsync(Application app)
     {
         var window = new Window();
         try
         {
             ProgramStatusUiChecks.Run();
             await ProgramStatusUiChecks.CheckDetailsAsync(window);
+            await ProgramStatusUiChecks.CheckIconsAsync(window);
             var fixture = new Harness();
             await using var controller = new AgentSessionController(fixture);
             var view = new AgentTimelineView { Width = 480, HorizontalAlignment = HorizontalAlignment.Left };
@@ -55,11 +57,11 @@ internal static class Program
             if (await SampleAsync(view, 3) != 1) throw new Exception("Completed activity kept animating.");
             Console.WriteLine($"Native single-tool timeline rendered {activeFrames} active frames; waiting and completed frames stayed static. Motion enabled={moving}.");
         }
-        catch (Exception error) { Console.Error.WriteLine(error); Environment.ExitCode = 1; }
+        catch (Exception error) { Console.Error.WriteLine(error); _result = 1; }
         finally { window.Close(); app.Exit(); }
     }
 
-    private static async Task<int> SampleAsync(FrameworkElement element, int count)
+    internal static async Task<int> SampleAsync(FrameworkElement element, int count)
     {
         await Task.Delay(200);
         var frames = new HashSet<string>();

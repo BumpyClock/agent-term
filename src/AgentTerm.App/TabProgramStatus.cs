@@ -1,8 +1,18 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks;
+using AgentTerm.Terminal;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.System;
 
 namespace AgentTerm_App;
 
@@ -10,32 +20,171 @@ internal sealed class TabProgramStatus
 {
     private readonly TabViewItem item;
     private readonly Flyout _details = new();
-    private readonly TextBox _detailsText = new()
-    {
-        IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
-        Width = 480, MaxHeight = 480
-    };
+    private readonly ToolTip _suppressedTitleTip = new() { IsEnabled = false, Visibility = Visibility.Collapsed };
+    private readonly ProgramStatusCard _card = new();
+    private readonly DispatcherTimer _openTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly DispatcherTimer _closeTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private FrameworkElement? _hoveredTarget;
+    private FrameworkElement? _target;
+    private bool _inCard;
+    private bool _pinned;
+    private XamlRoot? _root;
+    private static TabProgramStatus? _openStatus;
+    internal ProgramStatus? Primary => _records.OrderBy(r => ProgramStatusPresentation.Priority(r.Status.State)).FirstOrDefault()?.Status;
+    private string? _app;
+    private ImageIconSource? _programIcon;
 
     internal TabProgramStatus(TabViewItem item)
     {
         this.item = item;
-        _details.Content = _detailsText;
-        AutomationProperties.SetName(_detailsText, "Program status details");
-        _details.Opened += (_, _) => _detailsText.Focus(FocusState.Programmatic);
+        _details.Content = _card;
+        _details.FlyoutPresenterStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("""
+            <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter">
+                <Setter Property="Background" Value="{ThemeResource AcrylicInAppFillColorDefaultBrush}"/>
+                <Setter Property="Padding" Value="16"/>
+                <Setter Property="CornerRadius" Value="8"/>
+            </Style>
+            """);
+        _details.Opened += (_, _) =>
+        {
+            _card.Scroll.ChangeView(null, 0, null, true);
+            if (_pinned) _card.Scroll.Focus(FocusState.Programmatic);
+        };
+        _details.Closed += (_, _) =>
+        {
+            _closeTimer.Stop();
+            _inCard = false;
+            if (_root is { } root)
+            {
+                root.Content.RemoveHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(RootKeyDown));
+                root.Changed -= RootChanged;
+                _root = null;
+            }
+            if (_openStatus == this) _openStatus = null;
+        };
+        _card.KeepOpen += () => { if (_target is { } target) ShowDetails(target); };
+        _card.Dismiss += Hide;
+        _card.PointerEntered += (_, _) => { _inCard = true; _closeTimer.Stop(); };
+        _card.PointerExited += (_, _) => { _inCard = false; ScheduleClose(); };
+        _card.KeyDown += (_, e) => { if (e.Key == VirtualKey.Escape) { Hide(); e.Handled = true; } };
+        _openTimer.Tick += (_, _) =>
+        {
+            _openTimer.Stop();
+            if (_hoveredTarget is { } target && _records.Count > 0) Show(target, false);
+        };
+        _closeTimer.Tick += (_, _) => { _closeTimer.Stop(); if (!_inCard && _hoveredTarget is null && !_pinned) Hide(); };
+        Attach(item);
         item.ContextFlyout = new MenuFlyout { Items = { CreateDetailsMenuItem(item) } };
+    }
+
+    internal void Attach(FrameworkElement target)
+    {
+        target.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(PointerEntered), true);
+        target.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(PointerExited), true);
+        target.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PointerPressed), true);
+        target.KeyDown += KeyDown;
+        target.Unloaded += TargetUnloaded;
+    }
+
+    internal void Detach(FrameworkElement target)
+    {
+        target.RemoveHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(PointerEntered));
+        target.RemoveHandler(UIElement.PointerExitedEvent, new PointerEventHandler(PointerExited));
+        target.RemoveHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PointerPressed));
+        target.KeyDown -= KeyDown;
+        target.Unloaded -= TargetUnloaded;
+        if (_hoveredTarget == target) { _hoveredTarget = null; _openTimer.Stop(); }
+        if (_target == target) Hide();
+    }
+
+    private void TargetUnloaded(object sender, RoutedEventArgs e)
+    {
+        _openTimer.Stop();
+        _hoveredTarget = null;
+        if (ReferenceEquals(_target, sender)) Hide();
+    }
+
+    private void PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        _hoveredTarget = (FrameworkElement)sender;
+        _closeTimer.Stop();
+        if (!_details.IsOpen && _records.Count > 0) _openTimer.Start();
+    }
+
+    private void PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        _hoveredTarget = null;
+        _openTimer.Stop();
+        ScheduleClose();
+    }
+
+    private void PointerPressed(object sender, PointerRoutedEventArgs e) => Hide();
+    private void ScheduleClose() { if (!_pinned) _closeTimer.Start(); }
+    private void KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Escape && _details.IsOpen) { Hide(); e.Handled = true; }
+        else if (e.Key == VirtualKey.Down && Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+        {
+            ShowDetails((FrameworkElement)sender);
+            e.Handled = true;
+        }
     }
 
     internal MenuFlyoutItem CreateDetailsMenuItem(FrameworkElement target)
     {
-        var entry = new MenuFlyoutItem { Text = "Program status details" };
+        var entry = new MenuFlyoutItem { Text = "Program status", KeyboardAcceleratorTextOverride = "Alt+↓" };
         entry.Click += (_, _) => ShowDetails(target);
         return entry;
     }
 
-    internal void ShowDetails(FrameworkElement target)
+    internal void ShowDetails(FrameworkElement target) => Show(target, true);
+
+    private void RootKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        _detailsText.Text = _title + "\n\n" + (_presentation.Details.Length == 0 ? "No program status reported." : _presentation.Details);
-        _details.ShowAt(target);
+        if (e.Key != VirtualKey.Escape) return;
+        Hide();
+        e.Handled = _pinned;
+    }
+
+    private void RootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => SizeCard();
+
+    private void SizeCard()
+    {
+        if (_target is not { } target) return;
+        _card.RequestedTheme = target.ActualTheme;
+        _card.Width = Math.Max(180, Math.Min(_records.Count <= 1 ? 320 : 360, target.XamlRoot.Size.Width - 48));
+        _card.MaxHeight = Math.Max(120, Math.Min(480, target.XamlRoot.Size.Height - 80));
+    }
+
+    private void Show(FrameworkElement target, bool pinned)
+    {
+        _openTimer.Stop();
+        _closeTimer.Stop();
+        if (_openStatus is { } previous && previous != this) previous.Hide();
+        _openStatus = this;
+        _target = target;
+        _pinned = pinned;
+        if (_root is null)
+        {
+            _root = target.XamlRoot;
+            _root.Content.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(RootKeyDown), true);
+            _root.Changed += RootChanged;
+        }
+        SizeCard();
+        _card.Update(_title, _records, pinned);
+        _details.ShowAt(target, new FlyoutShowOptions
+        {
+            Placement = target is SidebarTabItem ? FlyoutPlacementMode.RightEdgeAlignedTop : FlyoutPlacementMode.BottomEdgeAlignedLeft,
+            ShowMode = pinned ? FlyoutShowMode.Standard : FlyoutShowMode.Transient
+        });
+        if (pinned && _details.IsOpen) _card.Scroll.Focus(FocusState.Programmatic);
+    }
+
+    internal void Hide()
+    {
+        _openTimer.Stop();
+        _closeTimer.Stop();
+        _details.Hide();
     }
 
     internal static readonly DependencyProperty DetailsProperty = DependencyProperty.RegisterAttached(
@@ -57,20 +206,54 @@ internal sealed class TabProgramStatus
         if (_title == title && _records.SequenceEqual(records)) return;
         _title = title;
         _records = records;
-        var presentation = ProgramStatusPresentation.Create(records);
-        _presentation = presentation;
-        if (_details.IsOpen) _detailsText.Text = title + "\n\n" + (presentation.Details.Length == 0 ? "No program status reported." : presentation.Details);
-        item.IconSource = presentation.Glyph.Length == 0 ? _shellIcon : new FontIconSource { Glyph = presentation.Glyph };
-        item.SetValue(DetailsProperty, presentation.Details);
-        AutomationProperties.SetHelpText(item, presentation.Summary);
-        ToolTipService.SetToolTip(item, presentation.Details.Length == 0 ? null : CreateToolTip(item.Header as string ?? "", presentation.Details));
+        _presentation = ProgramStatusPresentation.Create(records);
+        if (_details.IsOpen)
+        {
+            if (records.Count == 0) Hide();
+            else _card.Update(title, records, _pinned);
+        }
+        var app = Primary?.EffectiveApp;
+        if (_app != app)
+        {
+            _app = app;
+            _programIcon = null;
+            _ = LoadProgramIconAsync(app);
+        }
+        RefreshIcon();
+        item.SetValue(DetailsProperty, _presentation.Details);
+        AutomationProperties.SetHelpText(item, records.Count == 0 ? "" : _presentation.Details + "\nAlt+Down opens program status. Escape dismisses it.");
+        // A null tip lets TabViewItem recreate its automatic title tooltip when its template reloads.
+        ToolTipService.SetToolTip(item, records.Count == 0 ? null : _suppressedTitleTip);
     }
 
-    internal static TextBlock CreateToolTip(string title, string details) => new()
+    private void RefreshIcon() => item.IconSource = _presentation.Glyph.Length == 0 ? _shellIcon
+        : _programIcon is not null && Primary?.State is ProgramState.Working or ProgramState.Idle ? _programIcon
+        : new FontIconSource { Glyph = _presentation.Glyph };
+
+    private async Task LoadProgramIconAsync(string? app)
     {
-        MaxWidth = 420,
-        TextWrapping = TextWrapping.Wrap,
-        Text = title + "\n\n" + string.Join("\n", details.Split('\n').Take(10).Select(line => line.Length > 160 ? line[..160] + "…" : line))
-            + "\n\nRight-click or Shift+F10 for program status details."
-    };
+        // The protocol reports a command name. Resolve only local PATH executables, never URLs or remote paths.
+        if (app is null) return;
+        try
+        {
+            var bytes = await Task.Run(() =>
+            {
+                foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+                {
+                    if (!Path.IsPathFullyQualified(directory) || directory.StartsWith(@"\\", StringComparison.Ordinal)) continue;
+                    var path = Path.Combine(directory, app.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? app : app + ".exe");
+                    if (File.Exists(path)) return ExecutableIcon.Read(path);
+                }
+                return null;
+            });
+            if (bytes is null || _app != app) return;
+            using var stream = new MemoryStream(bytes).AsRandomAccessStream();
+            var image = new BitmapImage { DecodePixelWidth = 32 };
+            await image.SetSourceAsync(stream);
+            if (_app != app) return;
+            _programIcon = new ImageIconSource { ImageSource = image };
+            RefreshIcon();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException or ArgumentException) { }
+    }
 }

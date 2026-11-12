@@ -218,13 +218,27 @@ A moving text highlight marks current activity. Windows animation preferences an
 
 Top tabs and Left sidebar tabs show status reported by terminal programs through
 [OSC 7501](https://www.superlogical.com/rex/docs/build/program-status.md).
-The status symbol temporarily replaces the shell icon. Hover either layout,
-including compact sidebar rows, for a concise status preview. Right-click a tab
-or focus it and press Shift+F10, then choose **Program status details** for all
-panes, applications, tasks, states, progress, messages, and update times. The
-read-only details flyout supports scrolling, selection, copying, and Ctrl+End. Child task IDs are indented under their parent.
-Blocked work takes priority over errors, working, done, and idle reports.
-Background tabs continue updating. Clearing all reports restores the shell icon.
+Hover a tab in either layout, including compact sidebar rows, to see a live status
+card with a native acrylic background. Windows high contrast and transparency
+preferences provide the solid fallback. Move into the card to read, scroll, select, and copy text. It stays open
+while you use it and closes when you leave. Escape dismisses it without moving
+terminal focus. **Keep open**, or **Alt+Down** on a focused tab, opens the same
+card for keyboard use. Home and End reach the first and last reports. The context
+menu retains **Program status** as an alternative.
+
+The card groups split panes and nested tasks, labels states and progress, and
+shows messages and update times. Urgent panes appear first. Every report remains
+reachable by scrolling. Live updates preserve the reading position. Reopening
+starts at the top. Clearing all reports restores the shell icon.
+
+Working tabs show an animated activity ring, or determinate progress when the
+program reports a percentage. Programs with a matching local PATH executable
+keep that executable's icon inside the activity ring. No executable is launched
+to obtain its icon. Unresolved commands use the activity indicator alone. Blocked,
+error, and completed work retain distinct status symbols. With Windows animations
+off or high contrast on, indeterminate work uses a static dotted ring; known
+percentages retain the determinate ring. The card also shows the state and exact
+percentage. Background tabs continue updating.
 
 No hooks, log scanning, or process-name guessing are used. Programs must emit the
 protocol themselves. AgentTerm answers capability queries and supports all five

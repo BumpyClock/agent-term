@@ -44,7 +44,7 @@ internal sealed record ProgramStatusPresentation(string Glyph, string Summary, s
         return new(glyph, Label(primary), details.ToString().TrimEnd());
     }
 
-    private static int CompareIds(string left, string right)
+    internal static int CompareIds(string left, string right)
     {
         var a = left.Split('/');
         var b = right.Split('/');
@@ -56,13 +56,13 @@ internal sealed record ProgramStatusPresentation(string Glyph, string Summary, s
         return a.Length.CompareTo(b.Length);
     }
 
-    private static int Priority(ProgramState state) => state switch
+    internal static int Priority(ProgramState state) => state switch
     {
         ProgramState.Blocked => 0, ProgramState.Error => 1, ProgramState.Working => 2,
         ProgramState.Done => 3, _ => 4
     };
 
-    private static string Label(ProgramStatus status)
+    internal static string Label(ProgramStatus status)
     {
         var label = status.State == ProgramState.Blocked ? status.Kind switch
         {
@@ -71,5 +71,5 @@ internal sealed record ProgramStatusPresentation(string Glyph, string Summary, s
         return status.Progress is { } progress ? $"{label} · {progress}%" : label;
     }
 
-    private static string Clean(string text) => string.Concat(text.Where(c => char.GetUnicodeCategory(c) != UnicodeCategory.Format));
+    internal static string Clean(string text) => string.Concat(text.Where(c => char.GetUnicodeCategory(c) != UnicodeCategory.Format));
 }

@@ -217,8 +217,16 @@ Set `Read-Host 'review input'` in the composer through UI Automation and clicked
 3. Emit a root working report and child blocked reports with slash-separated IDs and base64 titles. Hover must retain the root and children, with blocked taking icon priority. Clear one parent ID and confirm only that subtree disappears.
 4. Split the tab and emit different reports in both panes. Hover must label each pane and retain both even when one pane is inactive. Closing a pane removes its reports.
 5. Emit working, blocked, done, and error reports. A new prompt removes working and blocked but retains done and error. Emit `ESC c` to reset, or `OSC 7501;state=clear ST` to clear. Confirm the shell icon returns in both layouts.
-6. Report enough children to overflow the preview. Right-click each tab layout and choose **Program status details**. Reach the last report with the scrollbar. Focus the tab, press Shift+F10, invoke the same entry, and press Ctrl+End. The final report must be visible and selectable. Escape closes the flyout.
+6. Report enough children to overflow the card. Hover each tab layout and move into the card. It must stay open for scrolling and text selection. Escape must dismiss it while terminal focus stays unchanged. Focus a tab and press Alt+Down. End and Ctrl+End must reach the final report. Escape closes the card and restores focus to the tab. Keep open and the Program status context-menu action use the same card. Reopening starts at the first report; updates while reading preserve the scroll offset.
 7. Repeat with keyboard focus, high contrast, and large text. Status text must remain readable without interpreting terminal messages as markup.
+
+### Program status hover verification, 2026-11-11
+
+The native AgentUi smoke run exercises pointer hover, crossing into the card, leaving it, and updates while open. Hover preserves input focus, and Escape reaches the terminal input while dismissing the card. Clicking Keep open pins the card after the pointer leaves and focuses its reports. Alt+Down focuses the shared card; Escape restores tab focus. Tests cover 256 reports, end-of-list navigation, selectable text, Shift+Home, and insertion, removal, and urgency reordering while preserving the selected text and visible report.
+
+Native captures cover dark, light, and Windows high-contrast cards, nested reports across panes, long unbroken text at a narrow width, and production top, expanded sidebar, and compact sidebar tabs. The native check asserts the acrylic brush outside high contrast. A real local executable supplies the tab icon. The activity control produced six distinct rendered frames while working, showed 62% determinate progress, and stayed static on completion. With Windows animations disabled it produced one frame and retained the visible determinate ring. Windows appearance and app settings were restored after capture.
+
+The full `scripts/check.ps1` suite passed before the final presentation refinements. The release app build and native UI checks passed after those refinements. Native accessibility-tree checks confirm urgent-first reading order, nested report text, state, and percentage. Screen-reader speech and enlarged system text were not exercised in this pass. Production screenshots establish tab and card appearance; their terminal canvas is blank in the screen capture, so they do not establish terminal rendering. The separate renderer smoke suite checks terminal pixels.
 
 ## Terminal color themes
 
