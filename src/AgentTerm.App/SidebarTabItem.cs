@@ -103,14 +103,18 @@ internal sealed class SidebarTabItem : ListViewItem
         _ => null
     };
 
-    // Keyboard requests carry no pointer position; anchor them under the row instead of the list origin.
+    // Keep the target visible for both pointer and keyboard requests.
     private void ShowMenu(UIElement sender, ContextRequestedEventArgs e)
     {
         e.Handled = true;
-        var options = new FlyoutShowOptions { ShowMode = FlyoutShowMode.Standard };
-        _menuFromKeyboard = !e.TryGetPosition(this, out var point);
-        if (_menuFromKeyboard) options.Placement = FlyoutPlacementMode.RightEdgeAlignedTop;
-        else options.Position = point;
+        if (ToolTipService.GetToolTip(this) is ToolTip tooltip) tooltip.IsOpen = false;
+        ((MenuFlyoutItem)_menu.Items[0]).Text = $"Close {Title}";
+        var options = new FlyoutShowOptions
+        {
+            ShowMode = FlyoutShowMode.Standard,
+            Placement = FlyoutPlacementMode.RightEdgeAlignedTop
+        };
+        _menuFromKeyboard = !e.TryGetPosition(this, out _);
         _menu.ShowAt(this, options);
     }
 
@@ -122,7 +126,7 @@ internal sealed class SidebarTabItem : ListViewItem
     {
         var title = Title;
         const string actions = "Right-click or Shift+F10 for tab actions. Ctrl+F4 closes this tab.";
-        AutomationProperties.SetHelpText(this, _compact ? actions : "");
+        AutomationProperties.SetHelpText(this, actions);
         object? tip = string.IsNullOrEmpty(title) ? null
             : _compact ? new StackPanel
             {
