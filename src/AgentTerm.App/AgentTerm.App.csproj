@@ -21,6 +21,8 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
     <ProjectReference Include="../AgentTerm.Terminal/AgentTerm.Terminal.csproj" />
     <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../docs/theme-licenses/*.txt" Link="ThirdPartyNotices/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <AppxManifest Remove="Package.appxmanifest" />
   </ItemGroup>
   <ItemGroup>

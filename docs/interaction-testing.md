@@ -219,3 +219,14 @@ Set `Read-Host 'review input'` in the composer through UI Automation and clicked
 5. Emit working, blocked, done, and error reports. A new prompt removes working and blocked but retains done and error. Emit `ESC c` to reset, or `OSC 7501;state=clear ST` to clear. Confirm the shell icon returns in both layouts.
 6. Report enough children to overflow the preview. Right-click each tab layout and choose **Program status details**. Reach the last report with the scrollbar. Focus the tab, press Shift+F10, invoke the same entry, and press Ctrl+End. The final report must be visible and selectable. Escape closes the flyout.
 7. Repeat with keyboard focus, high contrast, and large text. Status text must remain readable without interpreting terminal messages as markup.
+
+## Terminal color themes
+
+1. In Settings > Profiles > Defaults, select Auto, Ocean Light, and Forest Dark. Save. In a test window, change Windows appearance. Only the active palette must change; both saved slots must remain selected. Output, shell PIDs, scroll position, and selection must remain intact.
+2. Select forced Light and forced Dark against the opposite Windows appearance. Verify the corresponding slot is used and the composer, IME text, pane labels, and selection remain readable. Return to Auto. Verify system tracking resumes instead of remaining stuck in the previously forced appearance.
+3. Change each inactive slot, then switch appearance. The saved inactive choice must be used. Open split panes and inactive tabs before changing slots; activate them afterwards and verify the current palette appears without a shell restart.
+4. On one profile, override only the light theme and inherit its scheme and dark theme. Change Defaults. Verify inherited fields update while the override stays fixed. Explicit profile Auto must override forced Defaults. Reset to defaults restores all three fields to inheritance after Save.
+5. Change each field and Discard. Verify saved values return. Close Settings with unsaved edits; no edits should apply. Restart a test window and verify both slots and the mode persist.
+6. Check solid and acrylic panes, selected text, and block/bar/underline cursors for every variant. Keyboard navigation must reach all scheme and palette selectors and the Save and Discard buttons.
+
+Automated coverage checks slot resolution against system appearance, forced modes, scheme reports, live recoloring, ANSI and truecolor resolution, selection retention, history and alternate-screen retention, OSC overrides/resets, preference persistence/migration/inheritance, and actual renderer pixels for every built-in palette and selection. Theme-specific snapshots are produced by the renderer smoke suite. Native Settings selector interaction and real Windows appearance switching remain manual checks.

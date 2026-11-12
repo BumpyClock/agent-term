@@ -63,8 +63,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     public ShellProfile Profile { get; }
     internal PaneStatus.PaneStatusMonitor PaneStatus { get; } = new();
-    internal TerminalColor TerminalBackground => _terminalBackground ?? (ActualTheme == ElementTheme.Light
-        ? new TerminalColor(250, 250, 250) : new TerminalColor(0, 0, 0));
+    internal TerminalColor TerminalBackground => _terminalBackground ?? CurrentTheme.Background;
+    private TerminalTheme CurrentTheme => TerminalThemes.Resolve(_appearance.ColorScheme, _appearance.LightThemeId, _appearance.DarkThemeId,
+        ActualTheme == ElementTheme.Light);
     internal event Action? TerminalBackgroundChanged;
     public event Action? SessionReady;
     public bool CanStopSession => _state is SessionState.Starting or SessionState.Running;
@@ -127,7 +128,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
-            session.SetLightTheme(ActualTheme == ElementTheme.Light);
+            session.SetTheme(CurrentTheme);
             UpdateGridSize();
             RefreshOutput(session);
             if (_state == SessionState.Running) _refreshTimer.Start();
@@ -164,7 +165,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             UpdateGridSize();
             var session = new TerminalSession(_columns, _rows, Profile);
             _session = session;
-            session.SetLightTheme(ActualTheme == ElementTheme.Light);
+            session.SetTheme(CurrentTheme);
             _startup = Task.Run(session.Start);
             await _startup;
             if (_session != session || _state != SessionState.Starting)
@@ -320,6 +321,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         else if (previous.FontFamily != _appearance.FontFamily)
             SetFontSize(_fontSize);
         Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
+        Page_ActualThemeChanged(this, EventArgs.Empty);
     }
 
     private void Page_ActualThemeChanged(FrameworkElement sender, object args)
@@ -327,7 +329,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state == SessionState.Disposed || _session is not { } session) return;
         try
         {
-            session.SetLightTheme(ActualTheme == ElementTheme.Light);
+            session.SetTheme(CurrentTheme);
             if (_viewActive) RefreshOutput(session);
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }

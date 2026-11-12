@@ -286,7 +286,9 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         }
     }
 
-    public void SetLightTheme(bool light) => MutateView(() => _terminal.SetLightTheme(light));
+    public void SetLightTheme(bool light) => SetTheme(TerminalThemes.Resolve("", light));
+
+    public void SetTheme(TerminalTheme theme) => MutateView(() => _terminal.SetTheme(theme));
 
     public void Resize(ushort columns, ushort rows)
     {

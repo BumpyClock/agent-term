@@ -1,4 +1,5 @@
 using System;
+using AgentTerm.Terminal;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Automation;
@@ -105,6 +106,13 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     private void ApplyMaterial()
     {
         var appearance = TerminalPreferences.Current.ResolveAppearance(_page.Profile.Id);
+        // Auto inherits Windows again after leaving a forced light or dark appearance.
+        RequestedTheme = appearance.ColorScheme switch
+        {
+            TerminalColorScheme.Light => ElementTheme.Light,
+            TerminalColorScheme.Dark => ElementTheme.Dark,
+            _ => ElementTheme.Default,
+        };
         var background = _page.TerminalBackground;
         var color = Color.FromArgb(255, background.R, background.G, background.B);
         SolidSurface.Background = new SolidColorBrush(color);
