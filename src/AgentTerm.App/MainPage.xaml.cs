@@ -58,6 +58,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool _viewActive = true;
     private bool _loadedOnce;
     private TerminalColor? _terminalBackground;
+    internal System.Collections.Generic.IReadOnlyList<ProgramStatus> ReadProgramStatuses() =>
+        _session?.ReadProgramStatuses() ?? [];
+
     public ShellProfile Profile { get; }
     internal PaneStatus.PaneStatusMonitor PaneStatus { get; } = new();
     internal TerminalColor TerminalBackground => _terminalBackground ?? (ActualTheme == ElementTheme.Light

@@ -29,6 +29,7 @@ internal sealed class SidebarTabItem : ListViewItem
         _hintStyle = (Style)resources["SidebarTabHintStyle"];
         _callbacks =
         [
+            (TabProgramStatus.DetailsProperty, tab.RegisterPropertyChangedCallback(TabProgramStatus.DetailsProperty, (_, _) => Refresh())),
             (TabViewItem.HeaderProperty, tab.RegisterPropertyChangedCallback(TabViewItem.HeaderProperty, (_, _) => Refresh())),
             (TabViewItem.IconSourceProperty, tab.RegisterPropertyChangedCallback(TabViewItem.IconSourceProperty, (_, _) => Refresh())),
             (IsEnabledProperty, tab.RegisterPropertyChangedCallback(IsEnabledProperty, (_, _) => Refresh()))
@@ -41,6 +42,7 @@ internal sealed class SidebarTabItem : ListViewItem
         };
         close.Click += (_, _) => CloseRequested?.Invoke(this, _menuFromKeyboard);
         _menu = new MenuFlyout { Items = { close } };
+        if (tab.Tag is TabProgramStatus status) _menu.Items.Add(status.CreateDetailsMenuItem(this));
         SizeChanged += (_, _) => UpdateToolTip();
         ContextRequested += ShowMenu;
         Refresh();
@@ -124,23 +126,36 @@ internal sealed class SidebarTabItem : ListViewItem
 
     private void Title_IsTextTrimmedChanged(TextBlock sender, IsTextTrimmedChangedEventArgs args) => UpdateToolTip();
 
-    // A full-title tooltip only helps when the row hides part or all of the title.
-    // Compact rows also hide the close button, so their tooltip points at the context menu.
-    private void UpdateToolTip()
+    private const string TabActions = "Right-click for the close menu. With this tab focused, Shift+F10 opens the menu and Ctrl+F4 closes the tab.";
+
+    private object? ToolTipContent(string details)
     {
-        var title = Title;
-        const string actions = "Right-click for the close menu. With this tab focused, Shift+F10 opens the menu and Ctrl+F4 closes the tab.";
-        AutomationProperties.SetHelpText(this, actions);
-        object? tip = string.IsNullOrEmpty(title) ? null
-            : _compact ? new StackPanel
+        if (details.Length > 0)
+            return new StackPanel
             {
                 Children =
                 {
-                    new TextBlock { Text = title },
-                    new TextBlock { Text = actions, Style = _hintStyle, MaxWidth = 260, TextWrapping = TextWrapping.Wrap }
+                    TabProgramStatus.CreateToolTip(Title, details),
+                    new TextBlock { Text = _compact ? TabActions : "", MaxWidth = 420, TextWrapping = TextWrapping.Wrap }
                 }
+            };
+        if (string.IsNullOrEmpty(Title)) return null;
+        if (!_compact) return _title?.IsTextTrimmed == true ? Title : null;
+        return new StackPanel
+        {
+            Children =
+            {
+                new TextBlock { Text = Title },
+                new TextBlock { Text = TabActions, Style = _hintStyle, MaxWidth = 260, TextWrapping = TextWrapping.Wrap }
             }
-            : _title?.IsTextTrimmed == true ? title : null;
+        };
+    }
+
+    private void UpdateToolTip()
+    {
+        var details = (string)Tab.GetValue(TabProgramStatus.DetailsProperty);
+        AutomationProperties.SetHelpText(this, details.Length == 0 ? TabActions : details + "\n\n" + TabActions);
+        var tip = ToolTipContent(details);
         ToolTipService.SetToolTip(this, tip is null ? null : new ToolTip
         {
             Content = tip,

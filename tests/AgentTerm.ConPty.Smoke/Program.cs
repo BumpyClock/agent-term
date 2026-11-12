@@ -3,6 +3,12 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using AgentTerm.Terminal;
 
+if (args.Contains("--status-fixture"))
+{
+    ProgramStatusSessionChecks.RunFixture();
+    return;
+}
+
 if (args.Contains("--tui-fixture"))
 {
     FullScreenFixture.Run();
@@ -22,6 +28,7 @@ if (!OperatingSystem.IsWindows())
 }
 
 var timeout = TimeSpan.FromSeconds(20);
+await ProgramStatusSessionChecks.RunAsync();
 ShellProfileDiscoveryChecks.Run();
 await TerminalEnvironmentChecks.RunAsync();
 await FullScreenChecks.RunAsync();

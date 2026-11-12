@@ -45,6 +45,17 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         AppWindow.Resize(new SizeInt32(1040, 760));
         SystemBackdrop = new MicaBackdrop();
+        var statusTimer = DispatcherQueue.CreateTimer();
+        statusTimer.Interval = TimeSpan.FromMilliseconds(250);
+        statusTimer.Tick += (_, _) =>
+        {
+            if (_closing) return;
+            foreach (var item in Tabs.TabItems.OfType<TabViewItem>())
+                if (item.Content is TerminalTab { IsClosing: false } tab && item.Tag is TabProgramStatus status)
+                    status.Update(tab.ReadProgramStatuses());
+        };
+        statusTimer.Start();
+        Closed += (_, _) => statusTimer.Stop();
         BuildProfileMenu();
         AddTab(DefaultProfile);
         AppWindow.Closing += Window_Closing;
@@ -165,6 +176,7 @@ public sealed partial class MainWindow : Window
             Content = tab,
             Style = (Style)WindowRoot.Resources["PillTabStyle"]
         };
+        item.Tag = new TabProgramStatus(item);
         _ = SetShellIconAsync(item, tab);
         tab.TitleChanged += () =>
         {
@@ -180,7 +192,8 @@ public sealed partial class MainWindow : Window
     private static async Task SetShellIconAsync(TabViewItem item, TerminalTab tab)
     {
         var profile = tab.PrimaryProfile;
-        item.IconSource = new FontIconSource { Glyph = "\uE756" };
+        var status = (TabProgramStatus)item.Tag;
+        status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
         try
         {
             var icon = await Task.Run(() => ExecutableIcon.Read(profile.Executable));
@@ -189,7 +202,7 @@ public sealed partial class MainWindow : Window
             var image = new BitmapImage { DecodePixelWidth = 32 };
             await image.SetSourceAsync(stream);
             if (tab.PrimaryProfile.Id == profile.Id)
-                item.IconSource = new ImageIconSource { ImageSource = image };
+                status.SetShellIcon(new ImageIconSource { ImageSource = image });
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
         {
