@@ -88,7 +88,7 @@ internal static class PaneStatusChecks
             await File.WriteAllTextAsync(file, "one\ntwo\n");
             await Git(root, "add", "tracked.txt");
             var unborn = await provider.QueryAsync(new(root), default);
-            Check(unborn.Snapshot is { Kind: GitBranchKind.Unborn, Staged: true, Lines.Added: 2, Lines.Deleted: 0 }, "Unborn branches must compare staged content with the empty tree.");
+            Check(unborn.Snapshot is { Kind: GitBranchKind.Unborn, Staged: true, Lines.Added: 2, Lines.Deleted: 0 },  $"Unborn branches must compare staged content with the empty tree. Actual: {unborn}");
             await Git(root, "commit", "-qm", "initial");
             Check((await provider.QueryAsync(new(root), default)).Snapshot is { Branch: "main", Staged: false, Unstaged: false, Untracked: false, Lines.Added: 0 }, "A committed worktree must show a clean branch.");
             await File.WriteAllTextAsync(file, "one\nchanged\nextra\n");

@@ -168,7 +168,6 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
             await _session.RespondAsync(response, _lifetime.Token);
             if (Request == pending)
             {
-                // Pending requests render beside the prompt. An approval's outcome shows on its tool call; an answer is recorded here.
                 if (pending is QuestionRequest question) Timeline.Message(question.Turn, MessageRole.Notice, question.Question + "\n" + response.Answer);
                 _requests.Dequeue();
                 UpdateRequestState();
@@ -214,7 +213,6 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
         try { await session.InterruptAsync(turn, _lifetime.Token); }
         catch (Exception ex)
         {
-            // An old Stop must never recover a session after its turn has finished.
             if (_turn != turn || State == AgentState.Disposed) return;
             await session.DisposeAsync();
             if (_reader is not null) await _reader;

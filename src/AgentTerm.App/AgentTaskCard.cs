@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace AgentTerm_App;
 
-/// <summary>A collapsed agent task in terminal history. It reopens the same conversation.</summary>
 internal sealed class AgentTaskCard : Button
 {
     private readonly TextBlock _title = AgentUi.Text("AgentCommandText");
@@ -34,7 +33,6 @@ internal sealed class AgentTaskCard : Button
     public void Update(AgentSessionController controller, bool animate)
     {
         var running = controller.RunningTask == Task;
-        // Ctrl+Shift+Y in the terminal opens the running task, else the current one. Only that card advertises it.
         var latest = (controller.RunningTask ?? controller.CurrentTask) == Task;
         if (_latest != latest)
         {

@@ -9,11 +9,6 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using VirtualKey = Windows.System.VirtualKey;
 
-/// <summary>
-/// Drives the production request panel through approve-then-run with focus inside it, the path of the live
-/// Escape failure. A real Escape is injected, and the window root records whether it tunnels from a visible owner.
-/// MainWindow's Escape guards and MainPage.TryLeaveAgentSurface are not hosted here; the live sequence covers them.
-/// </summary>
 internal static class RequestFocusChecks
 {
     internal const int Inconclusive = 2;
@@ -39,7 +34,6 @@ internal static class RequestFocusChecks
         window.Content = root;
         window.Activate();
         await Program.WaitAsync(() => root.XamlRoot is not null && root.IsLoaded);
-        // Focus in an inactive window is not what the live failure measured. Without the foreground nothing below is evidence.
         if (!await probe.TakeForegroundAsync(window))
         {
             Console.WriteLine("Request focus checks inconclusive: the fixture window could not take the foreground.");
@@ -51,14 +45,24 @@ internal static class RequestFocusChecks
         await left.StartAsync();
         await right.StartAsync();
 
-        // A refresh for the same request must not move focus. MainPage updates on every agent event.
+        foreach (var button in new[] { left.Approve, left.Reject })
+        {
+            await left.AskApprovalAsync("Write-Output reject");
+            var request = (ApprovalRequest)left.Panel.Shown!;
+            Require(button.Focus(FocusState.Keyboard) && ReferenceEquals(Focused(root), button), "Setup: approval button did not accept focus.");
+            if (!await probe.CtrlCAsync(window)) return Inconclusive;
+            await left.WaitDismissedAsync("Ctrl+C rejection");
+            Require(left.Harness.Session.LastResponse is { Approved: false } response && response.Request == request.Request,
+                "Ctrl+C did not reject the focused approval request.");
+        }
+        Console.WriteLine("Ctrl+C rejected approval from focused Run and Reject buttons.");
+
         await left.AskApprovalAsync("Write-Output refresh");
         Require(left.Approve.Focus(FocusState.Keyboard) && ReferenceEquals(Focused(root), left.Approve), "Setup: Run button did not accept keyboard focus.");
         left.Harness.Session.Emit(new TextDelta(left.Harness.Session.Turn, "progress while approval waits"));
         await Settle();
         if (!ReferenceEquals(Focused(root), left.Approve)) failures.Add($"Same-request refresh moved focus to {Describe(Focused(root))}.");
 
-        // Live path: Run once clicked, request dismissed, approved command running.
         await ApproveFromInsideAsync("keyboard-focused Run button", FocusState.Keyboard);
         await left.AskApprovalAsync("Write-Output clicked");
         Require(left.Approve.Focus(FocusState.Pointer) && ReferenceEquals(Focused(root), left.Approve), "Setup: Run button did not accept pointer focus.");
@@ -67,7 +71,6 @@ internal static class RequestFocusChecks
         Require(left.RequestText.Focus(FocusState.Pointer) && ReferenceEquals(Focused(root), left.RequestText), "Setup: selectable request text did not accept focus.");
         await ApproveFromInsideAsync("focused selectable request text", FocusState.Programmatic);
 
-        // A question's choice buttons are removed rather than collapsed.
         var question = new QuestionRequest(left.Harness.Session.Turn, Guid.NewGuid(), "Pick a target", ["alpha", "beta"], false);
         left.Harness.Session.Emit(question);
         await Program.WaitAsync(() => left.Panel.Shown == question && left.Panel.Visibility == Visibility.Visible);
@@ -77,14 +80,12 @@ internal static class RequestFocusChecks
         await left.WaitDismissedAsync("choice");
         await CheckOwnerAsync("removed choice button", left.Reply, FocusState.Keyboard);
 
-        // Focus the user moved elsewhere stays there.
         await left.AskApprovalAsync("Write-Output elsewhere");
         Require(elsewhere.Focus(FocusState.Keyboard) && ReferenceEquals(Focused(root), elsewhere), "Setup: unrelated field did not accept focus.");
         await left.Panel.ApproveAsync();
         await left.WaitDismissedAsync("approval with focus elsewhere");
         if (!ReferenceEquals(Focused(root), elsewhere)) failures.Add($"Dismissal took focus from an unrelated field to {Describe(Focused(root))}.");
 
-        // Another pane's request keeps its focus while this pane's request is dismissed.
         await left.AskApprovalAsync("Write-Output left");
         await right.AskApprovalAsync("Write-Output right");
         Require(right.Approve.Focus(FocusState.Keyboard) && ReferenceEquals(Focused(root), right.Approve), "Setup: other pane's Run button did not accept focus.");
@@ -110,10 +111,8 @@ internal static class RequestFocusChecks
             var focused = Focused(root);
             var focusState = reply.FocusState;
             var beforeEscape = Describe(focused);
-            // Programmatic requests may retain XAML's prior input modality. Keyboard requests must retain keyboard focus.
             var modalityMatches = expected == FocusState.Programmatic ? focusState != FocusState.Unfocused : focusState == expected;
             var ok = ReferenceEquals(focused, reply) && IsShown(reply) && modalityMatches;
-            // A real key can change focus modality. Measure the handoff before injecting Escape.
             var escape = await probe.PressAsync(window);
             if (!escape.Foreground) inconclusive = true;
             else if (!escape.Reached || !ReferenceEquals(escape.Source, reply)) ok = false;
@@ -130,7 +129,6 @@ internal static class RequestFocusChecks
 
     private static object? Focused(UIElement root) => FocusManager.GetFocusedElement(root.XamlRoot);
 
-    // Lets queued agent changes reach the dispatcher and the framework finish any focus move of its own.
     private static Task Settle() => Task.Delay(200);
 
     private static bool IsShown(DependencyObject element)
@@ -157,7 +155,6 @@ internal static class RequestFocusChecks
             Panel.Visibility = Visibility.Collapsed;
             Panel.Attach(Agent, Reply);
             View = new StackPanel { Spacing = 8, Children = { Panel, Reply } };
-            // MainPage order: the change is queued to the UI thread, the panel updates, then the reply's read-only state.
             Agent.Changed += () => dispatcher.TryEnqueue(() =>
             {
                 Panel.Update();
@@ -171,6 +168,7 @@ internal static class RequestFocusChecks
         public TextBox Reply { get; }
         public StackPanel View { get; }
         public Button Approve => (Button)Panel.FindName("ApproveRequest");
+        public Button Reject => (Button)Panel.FindName("DenyRequest");
         public TextBlock RequestText => (TextBlock)Panel.FindName("RequestText");
         public StackPanel Choices => (StackPanel)Panel.FindName("RequestChoices");
 
@@ -202,7 +200,6 @@ internal static class RequestFocusChecks
 
     private readonly record struct EscapeResult(bool Foreground, bool Reached, object? Source);
 
-    /// <summary>Records whether a real Escape tunnels through the window root, and from which focused element.</summary>
     private sealed class EscapeProbe
     {
         private bool _armed;
@@ -236,6 +233,14 @@ internal static class RequestFocusChecks
             return new(true, _reached, _source);
         }
 
+        public async Task<bool> CtrlCAsync(Window window)
+        {
+            if (!await TakeForegroundAsync(window)) return false;
+            INPUT[] keys = [KeyCode(0x11, 0), KeyCode(0x43, 0), KeyCode(0x43, KeyUp), KeyCode(0x11, KeyUp)];
+            return SendInput((uint)keys.Length, keys, Marshal.SizeOf<INPUT>()) == keys.Length;
+        }
+
+        private static INPUT KeyCode(ushort code, uint flags) => new() { Type = 1, Union = new() { Keyboard = new() { VirtualKey = code, Flags = flags } } };
         private const uint KeyUp = 0x0002;
         private static INPUT Key(uint flags) => new() { Type = 1, Union = new() { Keyboard = new() { VirtualKey = 0x1B, Flags = flags } } };
 

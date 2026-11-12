@@ -62,11 +62,12 @@ public sealed class TimelineWorkGroup(Guid turn) : TimelineEntry(turn)
     internal void Add(TimelineTool tool) { _tools.Add(tool); }
 }
 
-/// <summary>One /agent invocation and its follow-ups: a view over timeline turns. The app pairs it with a history anchor.</summary>
 public sealed class AgentTask
 {
     private readonly List<Guid> _turns = [];
     public Guid Id { get; } = Guid.NewGuid();
+    /// <summary>Unsent conversation reply, retained when another task is opened.</summary>
+    public string ReplyDraft { get; set; } = "";
     /// <summary>The first request's first line. Empty until a request is sent.</summary>
     public string Title { get; private set; } = "";
     public IReadOnlyList<Guid> Turns => _turns;
@@ -89,12 +90,23 @@ public sealed class AgentTimeline
     private readonly List<TimelineEntry> _entries = [];
     public IReadOnlyList<TimelineEntry> Entries => _entries;
     public bool HasTrimmed { get; private set; }
+    private (Guid Turn, string Text)? _blankPrefix;
     private const string Omission = "[Earlier text omitted]\n";
     internal static string Bound(string text) => text.Length <= TextLimit ? text : Omission + text[^(TextLimit - Omission.Length)..];
     public void Message(Guid turn, MessageRole role, string text)
     {
+        if (role == MessageRole.Assistant)
+        {
+            if (_blankPrefix is { } prefix && prefix.Turn == turn) text = prefix.Text + text;
+            _blankPrefix = null;
+            if (string.IsNullOrWhiteSpace(text) && !(_entries.LastOrDefault() is TimelineMessage { Role: MessageRole.Assistant } previous && previous.Turn == turn))
+            {
+                _blankPrefix = (turn, text.Length <= TextLimit ? text : text[^TextLimit..]);
+                return;
+            }
+        }
+        else _blankPrefix = null;
         if (role == MessageRole.Assistant && _entries.LastOrDefault() is TimelineMessage last && last.Turn == turn && last.Role == role) last.Append(text);
-        // Harnesses send empty or blank assistant messages around tool calls. They are not replies and get no row.
         else if (role != MessageRole.Assistant || !string.IsNullOrWhiteSpace(text)) Add(new TimelineMessage(turn, role, text));
     }
     private void Add(TimelineEntry entry)
@@ -104,6 +116,7 @@ public sealed class AgentTimeline
     }
     public void Apply(AgentEvent item)
     {
+        if (item is ToolStarted or ReasoningSummary) _blankPrefix = null;
         switch (item)
         {
             case TextDelta text: Message(text.Turn, MessageRole.Assistant, text.Text); break;
@@ -143,6 +156,7 @@ public sealed class AgentTimeline
     }
     public void Settle(Guid turn)
     {
+        _blankPrefix = null;
         foreach (var group in _entries.OfType<TimelineWorkGroup>().Where(g => g.Turn == turn))
         { foreach (var tool in group.Tools.Where(t => t.Status == WorkStatus.Running)) tool.Status = WorkStatus.Cancelled; }
     }

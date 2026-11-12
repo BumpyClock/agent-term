@@ -4,8 +4,6 @@ internal static class PromptFocusChecks
 {
     internal static void Run()
     {
-        // Expected owners come from the user's interaction. Shell state and display mode never move input:
-        // the terminal owns typing in Smart and Legacy, and only the open agent surface owns its reply field.
         Check(PromptFocusPolicy.Owner(agentSurfaceOpen: false) == PromptInputOwner.Terminal,
             "With the agent surface closed, keystrokes belong to the shell's own prompt.");
         Check(PromptFocusPolicy.Owner(agentSurfaceOpen: true) == PromptInputOwner.Composer,

@@ -1,0 +1,109 @@
+<UserControl
+    x:Class="AgentTerm_App.PaneHeader"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <x:Double x:Key="PaneActionIconOpacity">0.5</x:Double>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <x:Double x:Key="PaneActionIconOpacity">0.5</x:Double>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <x:Double x:Key="PaneActionIconOpacity">1</x:Double>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <Style x:Key="PaneActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="FocusVisualMargin" Value="-2" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="ActionRoot" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="ActionContent.Opacity" Value="1" />
+                                                <Setter Target="ActionRoot.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="ActionContent.Opacity" Value="1" />
+                                                <Setter Target="ActionRoot.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters><Setter Target="ActionContent.Opacity" Value="0.25" /></VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                    <VisualStateGroup x:Name="FocusStates">
+                                        <VisualState x:Name="Unfocused" />
+                                        <VisualState x:Name="PointerFocused">
+                                            <VisualState.Setters><Setter Target="ActionContent.Opacity" Value="1" /></VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Focused">
+                                            <VisualState.Setters><Setter Target="ActionContent.Opacity" Value="1" /></VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="ActionContent" Content="{TemplateBinding Content}"
+                                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                  Foreground="{TemplateBinding Foreground}" Opacity="{ThemeResource PaneActionIconOpacity}"
+                                                  Padding="{TemplateBinding Padding}"
+                                                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                                  AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Grid x:Name="Root" Padding="10,0,4,0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4" SizeChanged="Root_SizeChanged">
+        <ContentPresenter x:Name="ContextHost" VerticalAlignment="Center" HorizontalContentAlignment="Stretch" />
+        <ContentPresenter x:Name="ModeHost" Grid.Column="1" VerticalAlignment="Center" />
+        <StackPanel x:Name="PaneActions" Grid.Column="2" Orientation="Horizontal" Spacing="4">
+            <Button x:Name="SplitRightButton" Width="28" MinWidth="0" Height="28" Padding="0"
+                    Style="{StaticResource PaneActionButtonStyle}"
+                    Click="SplitRight_Click" AutomationProperties.Name="Split pane right" ToolTipService.ToolTip="Split pane right">
+                <Border Width="13" Height="12" CornerRadius="1" BorderThickness="1" BorderBrush="{Binding Foreground, ElementName=SplitRightButton}">
+                    <Rectangle Width="1" Height="10" Fill="{Binding Foreground, ElementName=SplitRightButton}" />
+                </Border>
+            </Button>
+            <Button x:Name="SplitDownButton" Width="28" MinWidth="0" Height="28" Padding="0"
+                    Style="{StaticResource PaneActionButtonStyle}"
+                    Click="SplitDown_Click" AutomationProperties.Name="Split pane down" ToolTipService.ToolTip="Split pane down">
+                <Border Width="13" Height="12" CornerRadius="1" BorderThickness="1" BorderBrush="{Binding Foreground, ElementName=SplitDownButton}">
+                    <Rectangle Width="11" Height="1" Fill="{Binding Foreground, ElementName=SplitDownButton}" />
+                </Border>
+            </Button>
+            <Button x:Name="CloseButton" Width="28" MinWidth="0" Height="28" Padding="0"
+                    Style="{StaticResource PaneActionButtonStyle}"
+                    Click="Close_Click" AutomationProperties.Name="Close pane" ToolTipService.ToolTip="Close pane">
+                <FontIcon Glyph="&#xE8BB;" FontSize="11" />
+            </Button>
+        </StackPanel>
+        <Button x:Name="PaneMenuButton" Grid.Column="2" Width="28" MinWidth="0" Height="28" Padding="0" Visibility="Collapsed"
+                Style="{StaticResource PaneActionButtonStyle}"
+                AutomationProperties.Name="Pane actions" ToolTipService.ToolTip="Pane actions">
+            <FontIcon Glyph="&#xE712;" FontSize="12" />
+            <Button.Flyout>
+                <MenuFlyout x:Name="PaneMenu" Placement="BottomEdgeAlignedRight">
+                    <MenuFlyoutItem Text="Split pane right" Click="SplitRight_Click" />
+                    <MenuFlyoutItem Text="Split pane down" Click="SplitDown_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Close pane" Click="Close_Click">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8BB;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                </MenuFlyout>
+            </Button.Flyout>
+        </Button>
+    </Grid>
+</UserControl>

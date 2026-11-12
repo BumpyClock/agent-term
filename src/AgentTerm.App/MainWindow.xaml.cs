@@ -35,8 +35,6 @@ public sealed partial class MainWindow : Window
         {
             SetTitleBar(TabDragRegion);
             ApplyCaptionTheme();
-            // DWMWA_USE_HOSTBACKDROPBRUSH enables the panes' custom Win32 host brushes.
-            // The window's own SystemBackdrop remains Mica.
             int hostBackdropEnabled = 1;
             _ = DwmSetWindowAttribute(WinRT.Interop.WindowNative.GetWindowHandle(this), 17,
                 in hostBackdropEnabled, sizeof(int));
@@ -67,7 +65,6 @@ public sealed partial class MainWindow : Window
         int dark = WindowRoot.ActualTheme == ElementTheme.Dark ? 1 : 0;
         _ = DwmSetWindowAttribute(WinRT.Interop.WindowNative.GetWindowHandle(this), 20, in dark, sizeof(int));
 
-        // Extended captions keep the OS theme unless their button colors are set explicitly.
         var highContrast = new AccessibilitySettings().HighContrast;
         var titleBar = AppWindow.TitleBar;
         Windows.UI.Color? foreground = highContrast ? null : dark != 0 ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
@@ -143,9 +140,6 @@ public sealed partial class MainWindow : Window
 
     private void Tabs_Loaded(object sender, RoutedEventArgs args)
     {
-        // The native template reserves 2 + 4 + 1 DIPs for connected tab corners.
-        // Detached pills need only Tabs.Padding (2) plus the item margin (2),
-        // matching TerminalTab's 4-DIP outer gutter without moving its content.
         if (FindVisualChild<Grid>(Tabs, "TabContainerGrid") is { } container)
             container.ColumnDefinitions[0].MinWidth = 0;
         if (FindVisualChild<ItemsPresenter>(Tabs, "TabsItemsPresenter")?.Header is FrameworkElement header)
@@ -234,7 +228,6 @@ public sealed partial class MainWindow : Window
         await tab.DisposeAsync();
         if (_closing) return;
 
-        // Disabling the row can move focus. Preserve later user moves, before removal moves it again.
         var restoreHeaderFocus = keyboard &&
             ReferenceEquals(FocusManager.GetFocusedElement(WindowRoot.XamlRoot), focusAfterDisable);
         var index = Tabs.TabItems.IndexOf(item);
@@ -380,8 +373,6 @@ public sealed partial class MainWindow : Window
         finally
         {
             _allowClose = true;
-            // The final tab is already gone, so WhenAll can complete inline.
-            // Let the canceled Closing callback return before requesting another close.
             DispatcherQueue.TryEnqueue(Close);
         }
     }

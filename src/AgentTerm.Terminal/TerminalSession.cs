@@ -13,6 +13,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     private readonly ShellProfile _profile;
     private readonly string _promptToken = Guid.NewGuid().ToString("N");
     private readonly string _commandPath = Path.Combine(Path.GetTempPath(), "agent-term-" + Guid.NewGuid().ToString("N") + ".input");
+    private FileStream? _commandMailbox;
     private readonly ShellPromptProtocol _prompt;
     private readonly ProgramStatusProtocol _programStatus = new();
     private readonly OscScanner _osc = new();
@@ -82,7 +83,19 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_started) throw new InvalidOperationException("This session has already started.");
-            _connection.Start(_profile.Executable, ShellIntegration.Arguments(_profile, _promptToken, _commandPath), _profile.StartingDirectory);
+            try
+            {
+                if (ShellIntegration.SupportsIntegration(_profile))
+                    _commandMailbox = new FileStream(_commandPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read,
+                        4096, FileOptions.DeleteOnClose);
+                _connection.Start(_profile.Executable, ShellIntegration.Arguments(_profile, _promptToken, _commandPath), _profile.StartingDirectory);
+            }
+            catch (Exception error)
+            {
+                _commandMailbox?.Dispose();
+                _commandMailbox = null;
+                throw new InvalidOperationException("Could not start shell with a protected command mailbox. No command was submitted.", error);
+            }
             _started = true;
         }
     }
@@ -113,10 +126,22 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             if (_owned is not null && _owned.Id != id) throw new InvalidOperationException("Agent using terminal.");
             if (_prompt.State != ShellPromptState.Ready) throw new InvalidOperationException("Wait for shell readiness or use terminal input.");
-            // Publish before waking the editor. Readiness serializes submissions; the shell
-            // consumes and deletes this session's mailbox before accepting the real command.
             if (_mailboxPending is not null) throw new InvalidOperationException("Mailbox restoration is pending.");
-            File.WriteAllText(_commandPath, id + "\n" + command, new UTF8Encoding(false));
+            var mailbox = _commandMailbox ?? throw new InvalidOperationException("Protected command mailbox is unavailable. No command was submitted.");
+            try
+            {
+                var bytes = Encoding.UTF8.GetBytes(id + "\n" + command);
+                mailbox.Position = 0;
+                mailbox.Write(bytes);
+                mailbox.SetLength(bytes.Length);
+                mailbox.Flush();
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                _commandMailbox = null;
+                mailbox.Dispose();
+                throw new InvalidOperationException("Could not write protected command mailbox. No command was submitted. Close and reopen this pane.", error);
+            }
             _mailboxPending = id;
             _prompt.State = ShellPromptState.Executing;
             _connection.Send(Encoding.UTF8.GetBytes("\u001b[24;5~"));
@@ -190,7 +215,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         try { return await owned.Completion.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
         catch (TimeoutException)
         {
-            // Ownership deliberately remains held until the shell actually reports ready.
             return new(TerminalExecutionStatus.InterruptionFailed, Message: "PowerShell did not report readiness after Ctrl+C. Terminal remains agent-owned; use interactive input or close the pane.");
         }
     }
@@ -262,9 +286,12 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             if ((mouse.Modifiers & TerminalModifiers.Shift) != 0 || !_terminal.IsMouseTrackingEnabled) return false;
             var viewport = _terminal.ReadFrame().Viewport;
             var activeY = mouse.Y - (_terminal.ActiveTop - viewport.Offset) * geometry.CellHeight;
-            if (activeY < 0 || activeY >= viewport.Rows * geometry.CellHeight) return true;
+            if (mouse.Action == TerminalMouseAction.Release ||
+                mouse.Action == TerminalMouseAction.Motion && mouse.Button is (TerminalMouseButton.Left or TerminalMouseButton.Right or
+                    TerminalMouseButton.Middle or TerminalMouseButton.Back or TerminalMouseButton.Forward))
+                activeY = Math.Clamp(activeY, 0, viewport.Rows * geometry.CellHeight - 1);
+            else if (activeY < 0 || activeY >= viewport.Rows * geometry.CellHeight) return true;
             var bytes = _terminal.EncodeMouse(mouse with { Y = activeY }, geometry);
-            // Mouse coordinates refer to the displayed viewport. Hover and drag must not jump it to the bottom.
             if (mouse.Action == TerminalMouseAction.Press && bytes.Length != 0) _terminal.ClearSelection();
             if (bytes.Length != 0) _connection.Send(bytes);
             return true;
@@ -307,8 +334,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             widthChanged = columns != _columns;
             _columns = columns;
         }
-        // ConPTY resize can block while it emits a redraw. Keep the output reader
-        // free to enter ProcessOutput and drain that redraw at the new dimensions.
         if (stopped) return;
         _connection.Resize(columns, rows);
         if (!widthChanged) return;
@@ -321,9 +346,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         }
     }
 
-    // Ghostty reflows the prompt, but PSReadLine moves its input origin to X mod width. The shell's Ctrl+Shift+F12
-    // handler re-anchors it from the reflowed cursor. Input order puts the chord ahead of later keys, but not ahead of
-    // ConPTY's separate resize signal, so the handler reports the width it saw and a stale width earns one more chord.
     private const int ReanchorAttemptLimit = 4;
     private static readonly byte[] ReanchorChord = Encoding.ASCII.GetBytes("\u001b[24;6~");
     private ushort _columns;
@@ -333,7 +355,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     private void SendReanchor()
     {
-        // Only PSReadLine at an idle prompt may read the chord. Anything else would receive a stray F12.
         if (_reanchorColumns is null || _reanchorAttempts >= ReanchorAttemptLimit || _stopTask is not null || _owned is not null ||
             _mailboxPending is not null || _prompt.State != ShellPromptState.Ready)
         {
@@ -350,7 +371,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     {
         if (message.StartsWith("start", StringComparison.Ordinal) || message.StartsWith("ready", StringComparison.Ordinal))
         {
-            // A new or finished read line owns fresh geometry. A chord still queued reports into an idle state.
             _reanchorInFlight = false;
             _reanchorColumns = null;
             return;
@@ -430,7 +450,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             }
             foreach (var reply in _terminal.TakeResponses())
             {
-                // During teardown keep draining output, but the input channel is closing.
                 if (_disposeTask is null) _connection.SendReply(reply);
             }
         }
@@ -438,14 +457,12 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public ValueTask DisposeAsync()
     {
-        // Native close must not wait for the reader while we hold its terminal lock.
         lock (_gate) return new ValueTask(_disposeTask ??= Task.Run(CloseAsync));
     }
 
     /// <summary>Stops the owned shell while retaining its screen and history for inspection.</summary>
     public ValueTask StopAsync()
     {
-        // Closing ConPTY can wait for output. Its reader must remain free to enter the terminal lock.
         lock (_gate) return new ValueTask(_stopTask ??= Task.Run(async () =>
             await _connection.DisposeAsync().ConfigureAwait(false)));
     }
@@ -459,7 +476,8 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             {
                 _connection.OutputReceived -= ProcessOutput;
                 _terminal.Dispose();
-                File.Delete(_commandPath);
+                _commandMailbox?.Dispose();
+                _commandMailbox = null;
             }
         }
     }

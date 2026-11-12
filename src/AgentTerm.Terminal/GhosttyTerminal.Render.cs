@@ -33,7 +33,6 @@ public sealed partial class GhosttyTerminal
             _renderCells = new RenderCellsHandle(cells);
         }
 
-        // A held update must not consume terminal dirty state. Resize ends the hold.
         if (!_preparingPresentation && ReadMode(2026))
         {
             _holdStarted ??= Environment.TickCount64;
@@ -98,7 +97,6 @@ public sealed partial class GhosttyTerminal
                 else
                 {
                     if (result != -3) ThrowIfFailed(result, "Could not read cell text.");
-                    // The native API reports the exact size when the cluster exceeds the stack buffer.
                     var bytes = new byte[checked((int)buffer.Length)];
                     fixed (byte* ptr = bytes)
                     {

@@ -1,10 +1,11 @@
 using System.Threading.Channels;
+using System.Text;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using AgentTerm.Agents;
 using GitHub.Copilot;
 using GitHub.Copilot.Rpc;
-#pragma warning disable GHCP001 // Published SDK permission decisions and managed policy are experimental.
+#pragma warning disable GHCP001
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("AgentTerm.Copilot.Smoke")]
 namespace AgentTerm.Copilot;
 
@@ -70,7 +71,7 @@ public sealed class CopilotHarness : IAgentHarness
             public TaskCompletionSource Idle { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public Task? Stop;
             public string? Failure;
-            public Dictionary<string, string> Messages { get; } = [];
+            public Dictionary<string, StringBuilder> Messages { get; } = [];
         }
         private IHostTerminal? _terminal;
         private readonly HashSet<Task<TerminalExecutionResult>> _executions = [];
@@ -92,7 +93,6 @@ public sealed class CopilotHarness : IAgentHarness
                         if (_terminal is null) return new TerminalExecutionResult(TerminalExecutionStatus.Unsupported);
                         var id = Guid.NewGuid();
                         var turn = _turn ?? Guid.Empty;
-                        // The SDK binds ToolInvocation outside the model's schema. Its call id matches ToolExecutionStartEvent.
                         var reply = await RequestAsync(id, new ApprovalRequest(turn, id, command, invocation.ToolCallId));
                         if (!reply.Approved) return new TerminalExecutionResult(TerminalExecutionStatus.Denied);
                         Task<TerminalExecutionResult> execution;
@@ -120,7 +120,6 @@ public sealed class CopilotHarness : IAgentHarness
                         PermissionRequestCustomTool tool => ($"{tool.ToolName}\n{tool.ToolDescription}\n{tool.Args}", tool.ToolCallId),
                         _ => ($"{request.Kind} permission. Review this tool activity before approving.", null),
                     };
-                    // The runtime executes after approval without reporting a start, so such a row stays "pending", never "running".
                     var reply = await RequestAsync(id, new ApprovalRequest(_turn ?? Guid.Empty, id, gate.Detail, gate.CallId));
                     return reply.Approved ? PermissionDecision.ApproveOnce() : PermissionDecision.Reject("User declined.");
                 },
@@ -167,7 +166,6 @@ public sealed class CopilotHarness : IAgentHarness
             if (item is SessionErrorEvent error)
             {
                 owner.Failure ??= error.Data.Message;
-                // Error is not native idle. Drain before exposing a retry to the controller.
                 owner.Stop ??= Task.Run(() => StopAsync(owner, default));
                 return;
             }
@@ -175,7 +173,8 @@ public sealed class CopilotHarness : IAgentHarness
             {
                 var id = delta.Data.MessageId;
                 owner.Messages.TryGetValue(id, out var prior);
-                owner.Messages[id] = (prior ?? "") + delta.Data.DeltaContent;
+                if (prior is null) owner.Messages[id] = prior = new StringBuilder();
+                prior.Append(delta.Data.DeltaContent);
                 _events.Writer.TryWrite(new TextDelta(turn, delta.Data.DeltaContent));
                 return;
             }
@@ -185,9 +184,12 @@ public sealed class CopilotHarness : IAgentHarness
                 var content = message.Data.Content;
                 owner.Messages.TryGetValue(id, out var prior);
                 if (prior is null) _events.Writer.TryWrite(new TextDelta(turn, content));
-                else if (content.StartsWith(prior, StringComparison.Ordinal) && content.Length > prior.Length)
-                    _events.Writer.TryWrite(new TextDelta(turn, content[prior.Length..]));
-                owner.Messages[id] = content;
+                else if (content.StartsWith(prior.ToString(), StringComparison.Ordinal))
+                {
+                    if (content.Length > prior.Length) _events.Writer.TryWrite(new TextDelta(turn, content[prior.Length..]));
+                }
+                else _events.Writer.TryWrite(new TextDelta(turn, "\n[Final response differs from streamed text]\n" + content));
+                owner.Messages[id] = new StringBuilder(content);
                 return;
             }
             AgentEvent? normalized = item switch
@@ -221,7 +223,6 @@ public sealed class CopilotHarness : IAgentHarness
             }
             catch
             {
-                // A failed send can have reached the provider. Do not reuse an ambiguous session.
                 lock (_gate) _unusable = true;
                 _events.Writer.TryComplete(new IOException("Copilot submission failed. Reopen the session."));
                 throw;
@@ -271,7 +272,6 @@ public sealed class CopilotHarness : IAgentHarness
                 {
                     if (!ReferenceEquals(_active, owner)) return;
                     _unusable = true;
-                    // Closing the stream makes the controller discard this unusable session before retry.
                     var message = owner.Failure is { } failure
                         ? $"Copilot failed. {failure} Native idle was not confirmed. Reopen the session."
                         : "Copilot did not become idle. Reopen the session.";

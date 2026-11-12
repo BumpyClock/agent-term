@@ -6,12 +6,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace AgentTerm_App;
 
-/// <summary>
-/// The agent's pending approval or question, shown directly above the reply field. It owns its own focus: when the
-/// shown request changes, a focused control inside the panel is about to be hidden or removed, so focus moves to the
-/// reply field first. Left to the framework, that focus can land on a collapsed element where no visible control
-/// owns the keyboard.
-/// </summary>
 public sealed partial class AgentRequestPanel : UserControl
 {
     private AgentSessionController? _agent;
@@ -33,7 +27,6 @@ public sealed partial class AgentRequestPanel : UserControl
         var request = _agent?.Request;
         if (request != Shown)
         {
-            // Hand off before any control below is collapsed or removed, so the framework never picks a successor.
             if (_reply is not null && XamlRoot is { } root && FocusManager.GetFocusedElement(root) is DependencyObject focused && Contains(focused))
                 _reply.Focus(focused is Control { FocusState: FocusState.Keyboard } ? FocusState.Keyboard : FocusState.Programmatic);
             Shown = request;
@@ -65,6 +58,16 @@ public sealed partial class AgentRequestPanel : UserControl
         for (var node = element; node is not null; node = VisualTreeHelper.GetParent(node))
             if (ReferenceEquals(node, this)) return true;
         return false;
+    }
+
+    private async void Approval_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+        var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+        if (e.Key != Windows.System.VirtualKey.C || !ctrl.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)
+            || shift.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down)) return;
+        e.Handled = true;
+        await DenyAsync();
     }
 
     private async void ApproveRequest_Click(object sender, RoutedEventArgs e) => await ApproveAsync();

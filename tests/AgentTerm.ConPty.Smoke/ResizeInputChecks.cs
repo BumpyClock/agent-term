@@ -20,8 +20,6 @@ internal static class ResizeInputChecks
         string Text() => session.ReadText().Replace("\r", "");
 
         await Ready();
-        // The former encoded envelope exceeded both a row and an entire viewport.
-        // The command itself is also multiline, so transport cleanup cannot assume one row.
         var longCommand = "# " + new string('x', 6000) + "\nWrite-Output ('long-' + 'transport-done')";
         session.SubmitCommand(longCommand);
         await Ready();
@@ -53,7 +51,7 @@ internal static class ResizeInputChecks
         foreach (var width in new ushort[] { 72, 40, 120 })
         {
             session.Resize(width, 30);
-            CheckHistory(); // Check native reflow before ConPTY can repaint it.
+            CheckHistory();
             await Task.Delay(350);
             CheckHistory();
         }

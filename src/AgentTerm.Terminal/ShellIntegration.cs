@@ -18,12 +18,6 @@ internal static class ShellIntegration
         var flags = profile.Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (SupportsIntegration(profile))
         {
-            // Inline startup leaves execution policy and the user's profile unchanged.
-            // Ctrl+Shift+F12 re-anchors PSReadLine after a width change. PSReadLine 2.x recomputes its input origin as
-            // X mod width (Render.cs RecomputeInitialCoords), which is wrong once the terminal reflows a wrapped prompt.
-            // The handler derives the origin from the reflowed cursor, validates it with PSReadLine's own geometry, and
-            // abstains when the cursor is on a later logical line or parked past an exactly full row. It never reruns or
-            // rewrites the prompt. Keep script comments out: the encoded script shares CreateProcess's 32767-char limit.
             var script = """
                 if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') {
                     $global:__AgentTermPrompt = $function:prompt
@@ -50,22 +44,29 @@ internal static class ShellIntegration
                             } else { Set-PSReadLineKeyHandler -Chord $chord -ScriptBlock $handler }
                         }
                         __AgentTermBindMailbox 'Ctrl+F12' {
-                            if (-not [IO.File]::Exists($global:__AgentTermCommandPath)) { return }
+                            $reader = $null
+                            try {
+                                $stream = [IO.File]::Open($global:__AgentTermCommandPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]'ReadWrite,Delete')
+                                $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8)
+                                $mail = $reader.ReadToEnd()
+                            } catch { Write-Error 'Protected command mailbox could not be read. No command was accepted.'; return }
+                            finally { if ($reader) { $reader.Dispose() } }
+                            $split = $mail.IndexOf("`n")
+                            if ($split -lt 1) { Write-Error 'Invalid command mailbox. No command was accepted.'; return }
+                            $mailId = $mail.Substring(0, $split)
+                            if ($mailId -eq $global:__AgentTermConsumedId) { return }
+                            $global:__AgentTermConsumedId = $mailId
                             $line = ''; $cursor = 0
                             [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
                             $global:__AgentTermDraft = $line
                             $global:__AgentTermDraftCursor = $cursor
-                            $mail = [IO.File]::ReadAllText($global:__AgentTermCommandPath, [Text.Encoding]::UTF8)
-                            [IO.File]::Delete($global:__AgentTermCommandPath)
-                            $split = $mail.IndexOf("`n")
-                            $global:__AgentTermCommandId = $mail.Substring(0, $split)
+                            $global:__AgentTermCommandId = $mailId
                             $global:__AgentTermRestoreId = $global:__AgentTermCommandId
                             if ($line.Length -gt 0) { __AgentTermReport ('draft;' + $global:__AgentTermRestoreId) }
                             $command = $mail.Substring($split + 1)
                             if ($global:__AgentTermCommandId.StartsWith('c:')) {
                                 [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, '')
                                 [Console]::Write(([char]27 + '[J'))
-                                # Erase only the prompt and editor, never prior user output.
                                 for ($row = 1; $row -lt $global:__AgentTermPromptRows; $row++) { [Console]::Write(([char]27 + '[1A' + [char]13 + [char]27 + '[2K')) }
                                 [Console]::Write(([char]13 + [char]27 + '[J'))
                                 if ($global:__AgentTermPromptRows -gt 1) { [Console]::Write(([char]27 + '[' + ($global:__AgentTermPromptRows - 1) + 'B')) }

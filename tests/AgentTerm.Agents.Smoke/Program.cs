@@ -79,7 +79,6 @@ UiContext.Run(async () =>
     await Wait(() => Display(controller).Contains("after tools"));
     Check(!group.Expanded, "Collapsed user choice survives unrelated stream append");
 
-    // Two parallel calls each wait on their own approval. The second approval is queued behind the shown one.
     session.Emit(new ToolStarted(turn, "gated", "terminal", ToolCategory.Command, "gated", "gated"));
     session.Emit(new ToolStarted(turn, "parallel", "terminal", ToolCategory.Command, "parallel", "parallel"));
     var shownApproval = Guid.NewGuid(); var queuedApproval = Guid.NewGuid();

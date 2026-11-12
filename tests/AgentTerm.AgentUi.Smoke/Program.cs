@@ -32,7 +32,12 @@ internal static class Program
         {
             if (Environment.GetCommandLineArgs().Contains("--request-focus-only"))
             {
-                Environment.ExitCode = await RequestFocusChecks.RunAsync(window);
+                _result = await RequestFocusChecks.RunAsync(window);
+                return;
+            }
+            if (Environment.GetCommandLineArgs().Contains("--pane-header"))
+            {
+                await PaneHeaderChecks.RunAsync(window);
                 return;
             }
             ProgramStatusUiChecks.Run();
@@ -45,6 +50,7 @@ internal static class Program
             {
                 await ProgramStatusUiChecks.CheckDetailsAsync(window);
                 await ProgramStatusUiChecks.CheckIconsAsync(window);
+                await PaneHeaderChecks.RunAsync(window);
             }
             var fixture = new Harness();
             await using var controller = new AgentSessionController(fixture);
@@ -65,24 +71,23 @@ internal static class Program
                 while (!Descendants(view).OfType<TextBlock>().Any(t => t.Text.StartsWith("Working · 0:")))
                     await Task.Delay(100, elapsedTimeout.Token);
             fixture.Session.Emit(new ToolStarted(fixture.Session.Turn, "one", "terminal", ToolCategory.Command, "fixture", "fixture command"));
-            // Copilot sends an empty assistant message beside a tool call. After the work group it would start a new, blank reply row.
             fixture.Session.Emit(new TextDelta(fixture.Session.Turn, ""));
             await WaitAsync(() => controller.Timeline.Entries.OfType<TimelineWorkGroup>().Any());
             await WaitAsync(() => ShowsText(view, "pending"));
             if (ShowsText(view, "running")) throw new Exception("A requested call with no reported execution must not say running.");
 
             var moving = new UISettings().AnimationsEnabled && !new AccessibilitySettings().HighContrast;
-            var activeFrames = await SampleAsync(view, 8);
+            var activity = Descendants(view).OfType<Border>().First(b => Descendants(b).OfType<ActivityLabel>().Any(label => HasText(label, "pending")));
+            var activeFrames = await SampleAsync(activity, 8);
             if (moving ? activeFrames < 2 : activeFrames != 1) throw new Exception($"Single-tool activity rendered {activeFrames} distinct frames; motion enabled={moving}.");
             var approval = Guid.NewGuid();
             fixture.Session.Emit(new ApprovalRequest(fixture.Session.Turn, approval, "Fixture approval", "one"));
             await WaitAsync(() => controller.State == AgentState.WaitingForApproval);
             await WaitAsync(() => ShowsText(view, "awaiting approval"));
-            // The approval was emitted after the empty delta, so that delta has been applied by now.
             if (Descendants(view).OfType<TextBlock>().Any(t => t.Style == AgentUi.Style("AgentBodyText") && t.Text.Length == 0 && IsVisible(t)))
                 throw new Exception("An empty assistant message rendered a blank reply row.");
             if (ShowsText(view, "running") || ShowsText(view, "pending")) throw new Exception("The gated call must say awaiting approval, not running or pending.");
-            if (await SampleAsync(view, 3) != 1) throw new Exception("Waiting-for-approval activity kept animating.");
+            if (await SampleAsync(activity, 3) != 1) throw new Exception("Waiting-for-approval activity kept animating.");
             await controller.RespondAsync(new(approval, true));
             fixture.Session.Emit(new ToolExecuting(fixture.Session.Turn, "one"));
             await WaitAsync(() => ShowsText(view, "running"));
@@ -91,7 +96,7 @@ internal static class Program
             fixture.Session.Emit(new TurnCompleted(fixture.Session.Turn));
             await WaitAsync(() => controller.State == AgentState.Idle);
             await WaitAsync(() => HasText(view, "Done"));
-            if (await SampleAsync(view, 3) != 1) throw new Exception("Completed activity kept animating.");
+            if (await SampleAsync(activity, 3) != 1) throw new Exception("Completed activity kept animating.");
             await controller.SubmitAsync("Stop fixture", new(Environment.CurrentDirectory));
             await controller.InterruptAsync();
             await WaitAsync(() => HasText(view, "Stopped before any reply."));
@@ -105,7 +110,7 @@ internal static class Program
             await controller.SubmitAsync("Fail fixture", new(Environment.CurrentDirectory));
             fixture.Session.Emit(new TurnFailed(fixture.Session.Turn, "Safe fixture failure"));
             await WaitAsync(() => HasText(view, "Failed") && HasText(view, "Safe fixture failure"));
-            if (!Environment.GetCommandLineArgs().Contains("--timeline-only")) Environment.ExitCode = await RequestFocusChecks.RunAsync(window);
+            if (!Environment.GetCommandLineArgs().Contains("--timeline-only")) _result = await RequestFocusChecks.RunAsync(window);
             Console.WriteLine($"Native single-tool timeline rendered {activeFrames} active frames; waiting and completed frames stayed static. Motion enabled={moving}.");
         }
         catch (Exception error) { Console.Error.WriteLine(error); _result = 1; }
@@ -165,7 +170,8 @@ internal static class Program
         public void Emit(AgentEvent item) => _events.Writer.TryWrite(item);
         public IAsyncEnumerable<AgentEvent> Events(CancellationToken cancellationToken) => _events.Reader.ReadAllAsync(cancellationToken);
         public Task SubmitAsync(AgentPrompt prompt, CancellationToken cancellationToken) { Turn = prompt.Turn; return Task.CompletedTask; }
-        public Task RespondAsync(AgentResponse response, CancellationToken cancellationToken) => Task.CompletedTask;
+        public AgentResponse? LastResponse { get; private set; }
+        public Task RespondAsync(AgentResponse response, CancellationToken cancellationToken) { LastResponse = response; return Task.CompletedTask; }
         public Task InterruptAsync(Guid turn, CancellationToken cancellationToken) { Emit(new TurnInterrupted(turn)); return Task.CompletedTask; }
         public ValueTask DisposeAsync() { _events.Writer.TryComplete(); return ValueTask.CompletedTask; }
     }

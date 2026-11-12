@@ -1,0 +1,27 @@
+<UserControl
+    x:Class="AgentTerm_App.PromptModeBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Orientation="Horizontal" Spacing="4">
+        <TextBlock x:Name="PromptModeStatus" Style="{StaticResource AgentHintText}" VerticalAlignment="Center" MaxWidth="220"
+                   TextTrimming="CharacterEllipsis" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+        <Button x:Name="TaskStatusButton" Style="{StaticResource AgentQuietButtonStyle}" FontSize="12" Padding="6,0" MinHeight="22" Visibility="Collapsed"
+                HorizontalContentAlignment="Center" Click="Task_Click" AutomationProperties.AcceleratorKey="Control+Shift+Y">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <FontIcon Glyph="&#xE99A;" FontSize="11" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <Grid x:Name="TaskStatusLabelHost" VerticalAlignment="Center" />
+            </StackPanel>
+        </Button>
+        <Button x:Name="InteractButton" Style="{StaticResource AgentQuietButtonStyle}" FontSize="12" Padding="6,0" MinHeight="22" Visibility="Collapsed"
+                HorizontalContentAlignment="Center" Click="Interact_Click" AutomationProperties.Name="Type into the agent's running command"
+                ToolTipService.ToolTip="Send your keystrokes to the command the agent is running, for example to answer Read-Host. Until you choose this, typing does not reach it. Agent replies stay paused until the turn finishes.">
+            <Grid>
+                <TextBlock x:Name="InteractLabel" Text="Type into command" />
+                <FontIcon x:Name="InteractIcon" Glyph="&#xE765;" FontSize="12" Visibility="Collapsed" />
+            </Grid>
+        </Button>
+        <Button x:Name="RawTerminalButton" FontSize="12" Padding="8,2" MinHeight="24" MinWidth="0" Click="Mode_Click" AutomationProperties.Name="Switch display mode">
+            <TextBlock x:Name="ModeLabel" TextTrimming="CharacterEllipsis" />
+        </Button>
+    </StackPanel>
+</UserControl>

@@ -83,11 +83,13 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _agent = new(App.AgentHarness, () => _session);
         InitializeComponent();
         RequestPanel.Attach(_agent, AgentReply);
+        _modeBar.ModeRequested += ToggleDisplayMode;
+        _modeBar.TaskRequested += () => OpenLatestTask();
+        _modeBar.InteractRequested += AllowAgentInput;
         _agent.Changed += AgentChanged;
         Terminal.Input.TextCompositionStarted += Input_CompositionStarted;
         Terminal.Input.TextCompositionEnded += Input_CompositionEnded;
         Terminal.Input.TextChanging += Input_TextChanging;
-        // The native editor may handle pointer events before they bubble to the terminal.
         Terminal.AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(Terminal_KeyUp), true);
         Terminal.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(Terminal_PointerPressed), true);
         Terminal.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(Terminal_PointerMoved), true);
@@ -144,7 +146,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void FocusTerminal(FocusState focusState)
     {
-        // Pointer navigation can activate another visible pane; automatic handoffs cannot.
         if (!_viewActive || (focusState != FocusState.Pointer && !_inputActive) ||
             _state is not (SessionState.Starting or SessionState.Running or SessionState.Idle)) return;
         if (_inputOwner == PromptInputOwner.Composer) AgentReply.Focus(focusState);
@@ -178,7 +179,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             UpdateGridSize();
             var session = new TerminalSession(_columns, _rows, Profile);
             _session = session;
-            // Sessions start top-anchored. Each new session, including a restart, takes this pane's display mode.
             session.SetBottomAnchored(!_legacy);
             session.SetTheme(CurrentTheme);
             _startup = Task.Run(session.Start);
@@ -254,7 +254,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void RefreshOutput(TerminalSession session)
     {
-        // A /agent line the shell accepted. Taken only at Ready, so the shell is idle at its own prompt while the app anchors.
         if (!_startingTask && session.PromptState == ShellPromptState.Ready && session.TakeAgentRequest() is { } request)
             _ = StartTaskAsync(request, explicitHandoff: false);
         RefreshAgentChrome();
@@ -476,8 +475,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool SendApplicationMouse(PointerPoint point, TerminalMouseAction action, TerminalMouseButton? button)
     {
         if (_state != SessionState.Running || _session is not { } session) return false;
-        // Application mouse coordinates are relative to frame row 0. A press in the inset or the remainder has no cell;
-        // wheel, motion and release keep the nearest cell so a held button is always released.
         var geometry = Terminal.Geometry;
         var position = action == TerminalMouseAction.Press && button is not (TerminalMouseButton.WheelUp or TerminalMouseButton.WheelDown
             or TerminalMouseButton.WheelLeft or TerminalMouseButton.WheelRight)
@@ -521,7 +518,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (!_selecting && button is not null && SendApplicationMouse(point, TerminalMouseAction.Press, button))
             {
                 FocusTerminal(FocusState.Pointer);
-                // A press outside the drawn rows never reached the program, so it has no release to deliver.
                 var grid = Terminal.Geometry;
                 if (point.Position.Y >= grid.Top && point.Position.Y < grid.Bottom)
                 {
@@ -533,6 +529,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             }
             if (point.Properties.IsRightButtonPressed)
             {
+                FocusTerminal(FocusState.Pointer);
                 e.Handled = true;
                 if (session.ReadFrame().HasSelection) CopySelection(session);
                 else await PasteAsync(session);
@@ -540,7 +537,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             }
             if (!point.Properties.IsLeftButtonPressed || (button is not null && button != TerminalMouseButton.Left)) return;
             FocusTerminal(FocusState.Pointer);
-            // The inset above a short document and the sub-cell remainder are not cells. Nothing is selected there.
             if (!Terminal.Geometry.TryCellAt(point.Position, out var column, out var row))
             {
                 if (!Down(VirtualKey.Shift) && session.ReadFrame().HasSelection) { session.ClearSelection(); RefreshOutput(session); }
@@ -658,7 +654,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (!_selecting || _session is not { } session) return;
-            // Edges are the drawn grid's top and the surface bottom, so a drag into the inset or remainder keeps selecting.
             var direction = _selectionPointer.Y < Terminal.Geometry.Top ? -1 : _selectionPointer.Y >= Terminal.ActualHeight ? 1 : 0;
             if (direction == 0) return;
             session.ScrollLines(direction);
@@ -697,7 +692,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             (key == VirtualKey.Insert && mods == TerminalModifiers.Control && hasSelection) ||
             (key == VirtualKey.Enter && mods == TerminalModifiers.None && hasSelection);
         var findShortcut = ctrlShift && key == VirtualKey.F;
-        // Reopens the latest agent task. Only claimed while a task exists, so the shell keeps the chord otherwise.
         var taskShortcut = ctrlShift && key == VirtualKey.Y && (_agent.RunningTask ?? _agent.CurrentTask) is not null;
         var keyCode = (uint)key;
         var zoomShortcut = (mods & TerminalModifiers.Control) != 0 && (mods & (TerminalModifiers.Alt | TerminalModifiers.Super)) == 0 &&
@@ -767,7 +761,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_state != SessionState.Running) return;
 
             var virtualKey = (uint)key;
-            // The keypad separator uses the layout's text. Ghostty does not assign it a legacy sequence.
             var special = virtualKey is < 0x20 or (>= 0x21 and <= 0x2F) or (>= 0x60 and <= 0x87 and not 0x6C)
                 or 0x5D or 0x90 or 0x91 || IsSidedModifier(key);
             var direct = special || (mods & TerminalModifiers.Super) != 0 || (!altGr && (mods & ctrlAlt) != 0);
@@ -901,7 +894,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             ReleaseApplicationMouse();
-            // End held keys before the focus report so Kitty applications can clear their key state.
             foreach (var key in releases)
                 session.SendKey(key.Key, key.Modifiers, key.Action);
             session.SetFocus(false);

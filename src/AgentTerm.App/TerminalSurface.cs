@@ -42,8 +42,6 @@ public sealed class TerminalSurface : UserControl
 
     internal string TerminalFontFamily => _terminalFontFamily;
 
-    // Smart draws the grid against the bottom edge. Legacy draws it from the top like a conventional terminal.
-    // Presentation only: the grid size, and therefore the PTY size, is identical in both.
     private bool _bottomAligned;
     public void SetBottomAligned(bool aligned)
     {
@@ -53,7 +51,6 @@ public sealed class TerminalSurface : UserControl
         _canvas.Invalidate();
     }
 
-    /// <summary>The one mapping from frame cells to surface pixels. Draw, IME, hit testing, mouse and cards all use it.</summary>
     internal TerminalGridGeometry Geometry => _frame is { } frame ? GeometryFor(frame) : new(0, 0, 0, CellWidth, CellHeight);
     internal TerminalGridGeometry GeometryFor(TerminalFrame frame) =>
         TerminalGridGeometry.For(frame, ActualHeight, CellWidth, CellHeight, _bottomAligned);
@@ -84,7 +81,6 @@ public sealed class TerminalSurface : UserControl
         _canvas.Draw += Draw;
         _canvas.CreateResources += (_, _) => { _resourcesReady = true; MeasureCells(); };
         ActualThemeChanged += (_, _) => _canvas.Invalidate();
-        // A bottom-aligned grid moves with the surface height even when the row count does not change.
         SizeChanged += (_, _) => { PositionInput(); _canvas.Invalidate(); };
     }
 
@@ -104,7 +100,6 @@ public sealed class TerminalSurface : UserControl
     private static string[] FindTerminalFonts()
     {
         var installed = CanvasTextFormat.GetSystemFontFamilies().ToHashSet(StringComparer.OrdinalIgnoreCase);
-        // DirectWrite can expose either full Nerd Font family names or their legacy short names.
         string[] candidates =
         [
             "CaskaydiaCove Nerd Font Mono", "CaskaydiaCove NFM", "CaskaydiaCove Nerd Font", "CaskaydiaCove NF",
@@ -163,7 +158,6 @@ public sealed class TerminalSurface : UserControl
     private void PositionInput()
     {
         if (_frame is not { } frame) return;
-        // The IME editor and its candidate window follow the drawn caret.
         var caret = Geometry.Caret(frame.Cursor);
         _input.Margin = new Thickness(caret.X, caret.Y, 0, 0);
         _input.Width = Math.Max(CellWidth, (frame.Columns * CellWidth) - caret.X);
@@ -188,10 +182,8 @@ public sealed class TerminalSurface : UserControl
         string fontFamily = FallbackFont, bool hideCursor = false, float gridTop = 0)
     {
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
-        // Frame rows past the presented document are blank by contract. The view clips them.
         var rows = TerminalGridGeometry.VisibleRows(frame);
         var antialiasing = drawing.Antialiasing;
-        // Adjacent cell fills must meet without blending their shared edges into the backdrop.
         drawing.Antialiasing = CanvasAntialiasing.Aliased;
         for (var row = 0; row < rows; row++)
         for (var col = 0; col < frame.Columns; col++)
@@ -259,11 +251,6 @@ public sealed class TerminalSurface : UserControl
     private static Color ToColor(TerminalColor color) => Color.FromArgb(255, color.R, color.G, color.B);
 }
 
-/// <summary>
-/// Where frame cells sit on the surface. Frame row r shows screen row Offset + r and is drawn at Top + r * CellHeight.
-/// Top is the sub-cell remainder of a bottom-aligned grid plus the frame's TopInset rows. The inset and the
-/// remainder are background, never cells. Rows counts only the drawn frame rows.
-/// </summary>
 internal readonly record struct TerminalGridGeometry(double Top, int Columns, int Rows, float CellWidth, float CellHeight)
 {
     internal double Bottom => Top + Rows * CellHeight;
@@ -278,7 +265,6 @@ internal readonly record struct TerminalGridGeometry(double Top, int Columns, in
 
     internal double RowTop(long frameRow) => Top + frameRow * CellHeight;
 
-    /// <summary>The drawn cell under a point. False in the inset, the remainder, or outside the drawn rows.</summary>
     internal bool TryCellAt(Point point, out int column, out int row)
     {
         column = row = -1;
@@ -288,22 +274,15 @@ internal readonly record struct TerminalGridGeometry(double Top, int Columns, in
         return true;
     }
 
-    /// <summary>The nearest drawn cell. A drag that leaves the grid keeps extending from its edge.</summary>
     internal (int Column, int Row) ClampedCellAt(Point point) =>
         (Math.Clamp((int)Math.Floor(point.X / CellWidth), 0, Math.Max(0, Columns - 1)),
          Math.Clamp((int)Math.Floor((point.Y - Top) / CellHeight), 0, Math.Max(0, Rows - 1)));
 
-    /// <summary>A surface point relative to frame row 0, the space application mouse encoding expects.</summary>
     internal Point ToFrame(Point point) => new(point.X, point.Y - Top);
 
-    /// <summary>Like ToFrame, but held-button motion and release stay inside the drawn rows so they are never dropped.</summary>
     internal Point ToFrameClamped(Point point) =>
         new(Math.Clamp(point.X, 0, Math.Max(0, Columns * CellWidth - 1)), Math.Clamp(point.Y - Top, 0, Math.Max(0, Rows * CellHeight - 1)));
 
-    /// <summary>
-    /// True when the drawn frame rows in [firstRow, firstRow + count) are blank: no text, default background,
-    /// no underline or strikethrough. Rows outside the drawn frame are not judged.
-    /// </summary>
     internal bool RowsBlank(TerminalFrame frame, long firstRow, int count)
     {
         for (var row = Math.Max(0, firstRow); row < Math.Min(firstRow + count, Rows); row++)

@@ -64,12 +64,10 @@ internal static class SmartPromptChecks
         finally { await session.DisposeAsync(); try { Directory.Delete(fixture); } catch (IOException) { Console.WriteLine("Fixture still held by closing shell: " + fixture); } }
         Console.WriteLine("Host capture > viewport, UTF-8, truncation, cwd/state/alias, exit 7, busy/input exclusion, cancellation recovery, pane isolation and raw fallback passed.");
     }
-    // A window resize makes ConPTY repaint the screen, replaying earlier commands and the start fence.
     private static async Task ResizeDuringCaptureAsync(TerminalSession session)
     {
         session.SubmitCommand("Write-Output ('resize-' + 'earlier')");
         using (var ready = new CancellationTokenSource(TimeSpan.FromSeconds(25))) while (session.PromptState != ShellPromptState.Ready) await Task.Delay(25, ready.Token);
-        // Known limit: once the fence scrolls off screen, a resize replay duplicates visible tail lines. The pane never resizes while the agent owns the terminal.
         var running = session.ExecuteAsync(new("1..1 | ForEach-Object { 'resize-' + 'line-' + $_ }; Start-Sleep -Milliseconds 1500; Write-Output ('resize-' + 'after')"));
         using (var seen = new CancellationTokenSource(TimeSpan.FromSeconds(25))) while (!session.ReadText().Contains("resize-line-1")) await Task.Delay(25, seen.Token);
         session.Resize(80, 20); await Task.Delay(300); session.Resize(100, 35);
@@ -80,7 +78,6 @@ internal static class SmartPromptChecks
             throw new Exception("Resize replay leaked into capture: " + System.Text.Json.JsonSerializer.Serialize(output));
         Console.WriteLine("Host resize-during-capture passed.");
     }
-    // An agent task card sits in two reserved blank history rows that move with output, reflow and trimming.
     private static async Task CardAnchorAsync(TerminalSession session, int pid)
     {
         async Task Ready() { using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25)); while (session.PromptState != ShellPromptState.Ready) await Task.Delay(25, timeout.Token); }

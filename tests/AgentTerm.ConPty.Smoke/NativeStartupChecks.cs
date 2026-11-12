@@ -6,8 +6,6 @@ internal static class NativeStartupChecks
 {
     internal static async Task RunAsync()
     {
-        // Launch the actual generated integration after an isolated, in-memory profile.
-        // This must not write or replace the user's PowerShell profile.
         var profile = TestShell.Profile;
         var integration = typeof(TerminalSession).Assembly.GetType("AgentTerm.Terminal.ShellIntegration")!;
         var arguments = (string)integration.GetMethod("Arguments", BindingFlags.Static | BindingFlags.NonPublic)!

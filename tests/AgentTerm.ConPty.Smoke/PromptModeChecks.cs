@@ -8,14 +8,20 @@ internal static class PromptModeChecks
         await using var session = new TerminalSession(120, 30, TestShell.Profile);
         await TestShell.StartLegacyAsync(session);
         await Ready(session);
+        var prompt = session.ReadText().Replace("\r", "").TrimEnd().Split('\n')[^1] + " ";
         session.Send("echo transition-probe\r");
         await Wait(session, () => session.PromptState == ShellPromptState.Ready && session.ReadText().Replace("\r", "").Contains("echo transition-probe\ntransition-probe"));
         foreach (var width in new ushort[] { 72, 40, 120 })
         {
             session.Resize(width, 30);
-            await Task.Delay(350);
+            var marker = "resize-ready-" + width;
+            session.Send("echo " + marker + "\r");
+            await Wait(session, () => session.PromptState == ShellPromptState.Ready && session.ReadText().Contains("\n" + marker));
+            var echo = prompt + "echo transition-probe";
+            var rows = string.Join("\n", Enumerable.Range(0, (echo.Length + width - 1) / width)
+                .Select(i => echo.Substring(i * width, Math.Min(width, echo.Length - i * width))));
             var screen = session.ReadText().Replace("\r", "");
-            Check(session, screen.Contains("echo transition-probe\ntransition-probe") || screen.Contains("echo transitio\nn-probe\ntransition-probe"), "Native echo and output stay adjacent after resize, including the 40-column wrap.");
+            Check(session, screen.Contains(rows + "\ntransition-probe"), "Native echo and output stay adjacent after resize at the observed prompt width.");
         }
     }
     private static async Task Wait(TerminalSession session, Func<bool> condition)
@@ -49,8 +55,6 @@ internal static class PromptModeChecks
         {
             await session.ExecuteAsync(new("Set-Location -LiteralPath '" + fixture.Replace("'", "''") + "'"));
             session.Send("Get-Item ./completion-dir\t");
-            // Screen rows can split the completed path. Check reflow separately from the
-            // command outcome, which proves what PSReadLine actually accepted.
             await Wait(session, () => session.ReadText().Replace("\r", "").Replace("\n", "").Contains("completion-directory"));
             session.Send(" | ForEach-Object { 'COMPLETION_OK:' + $_.Name.Length }\r");
             await Wait(session, () => session.ReadText().Contains("COMPLETION_OK:20") && session.PromptState == ShellPromptState.Ready);
@@ -108,7 +112,6 @@ internal static class PromptModeChecks
                 await Wait(session, () => (request ??= session.TakeAgentRequest()) is not null);
                 session.Resize(width, 30); await Task.Delay(350);
                 session.Send("echo " + nativeToken + "\r");
-                // The prompt's own "> " must touch the echo. A stale PSReadLine origin leaves a pad or paints into the prompt.
                 await Wait(session, () => session.ReadText().Replace("\r", "").Contains("> echo " + nativeToken + "\n" + nativeToken) && session.PromptState == ShellPromptState.Ready);
                 session.Send("echo " + new string('d', 360)); await Task.Delay(250);
                 var replacement = await session.ExecuteAsync(new("echo " + replacementToken));

@@ -39,7 +39,9 @@ public sealed partial class GhosttyTerminal
     public void ScrollToBottom()
     {
         _following = true;
-        ScrollTo(ReadFrame().Viewport.MaximumOffset);
+        ThrowIfDisposed();
+        EnsurePresentation();
+        ScrollTo(ReadViewport().MaximumOffset);
     }
 
     public unsafe void BeginSelection(int column, int row, int clickCount = 1, bool rectangular = false)

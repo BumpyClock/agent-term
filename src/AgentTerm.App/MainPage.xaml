@@ -21,24 +21,6 @@
                 <Button x:Name="NewSessionButton" Content="New session" Click="NewSession_Click" IsEnabled="False" ToolTipService.ToolTip="Start a new session with this shell profile" />
             </StackPanel>
         </Grid>
-        <!-- Pane header controls. Attached to the pane header on load, so a status change never changes the terminal height or the PTY size. -->
-        <Grid Grid.Row="0">
-                <StackPanel x:Name="PromptModeControls" Orientation="Horizontal" Spacing="4">
-                    <TextBlock x:Name="PromptModeStatus" Style="{StaticResource AgentHintText}" VerticalAlignment="Center" MaxWidth="220"
-                               TextTrimming="CharacterEllipsis" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
-                    <Button x:Name="TaskStatusButton" Style="{StaticResource AgentQuietButtonStyle}" FontSize="12" Padding="6,0" MinHeight="22" Visibility="Collapsed"
-                            Click="TaskStatus_Click" ToolTipService.ToolTip="Open the agent task (Ctrl+Shift+Y)" AutomationProperties.AcceleratorKey="Control+Shift+Y">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="TaskStatusIcon" Glyph="&#xE99A;" FontSize="11" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                            <Grid x:Name="TaskStatusLabelHost" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="InteractButton" Style="{StaticResource AgentQuietButtonStyle}" FontSize="12" Padding="6,0" MinHeight="22" Visibility="Collapsed"
-                            Content="Type into command" Click="Interact_Click" AutomationProperties.Name="Type into the agent's running command"
-                            ToolTipService.ToolTip="Send your keystrokes to the command the agent is running, for example to answer Read-Host. Until you choose this, typing does not reach it. Agent replies stay paused until the turn finishes." />
-                    <Button x:Name="RawTerminalButton" FontSize="12" Padding="8,2" MinHeight="24" Click="RawTerminal_Click" AutomationProperties.Name="Switch display mode" />
-                </StackPanel>
-        </Grid>
         <InfoBar x:Name="ErrorBanner" Grid.Row="1" IsOpen="False" IsClosable="True" Severity="Error" Title="Shell session unavailable" />
         <Grid Grid.Row="2" ColumnSpacing="0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /></Grid.ColumnDefinitions>
@@ -77,13 +59,11 @@
             <local:TerminalSurface Grid.Row="1" x:Name="Terminal" MinHeight="0" SizeChanged="Output_SizeChanged"
              PreviewKeyDown="Terminal_KeyDown" GotFocus="Terminal_GotFocus" LostFocus="Terminal_LostFocus"
              AutomationProperties.Name="Terminal" AutomationProperties.HelpText="Drag to select. Ctrl+Shift+C copies selection. Ctrl+Shift+V pastes. Ctrl+Shift+Tab switches to the previous tab." />
-            <!-- Agent task cards sit on two blank history rows reserved at invocation and scroll with that history. -->
             <Canvas x:Name="TaskCardLayer" Grid.Row="1" SizeChanged="TaskCardLayer_SizeChanged"
                     PointerWheelChanged="TaskCardLayer_PointerWheelChanged" AutomationProperties.Name="Agent tasks in terminal history" />
             <ScrollBar x:Name="HistoryScrollBar" Grid.Row="1" Grid.Column="1" Orientation="Vertical" Minimum="0" Maximum="0"
                        ValueChanged="HistoryScrollBar_ValueChanged" AutomationProperties.Name="Terminal scrollback" />
         </Grid>
-        <!-- The agent surface replaces the terminal view in place. The shell keeps running underneath at the same size. -->
         <Grid x:Name="AgentSurface" Grid.Row="2" Visibility="Collapsed" RowDefinitions="Auto,*,Auto,Auto" RowSpacing="8">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" MinHeight="32">
                 <Button x:Name="LeaveSurfaceButton" Style="{StaticResource AgentQuietButtonStyle}" Padding="6,2" Click="LeaveSurface_Click"
@@ -110,9 +90,7 @@
             <ScrollViewer x:Name="AgentOutput" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="4,0,16,0">
                 <Grid x:Name="AgentTimelineHost" VerticalAlignment="Bottom" />
             </ScrollViewer>
-            <!-- Approvals and questions sit where the next action happens: directly above the input. -->
             <local:AgentRequestPanel x:Name="RequestPanel" Grid.Row="2" Visibility="Collapsed" />
-            <!-- The agent reply field exists only inside the agent surface. Shell commands and /agent are typed at the shell's own prompt. -->
             <Grid x:Name="ReplyArea" Grid.Row="3" RowDefinitions="Auto,Auto" RowSpacing="2" Padding="0,8,0,0" BorderThickness="0,1,0,0"
                   BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" MinHeight="32">
@@ -120,7 +98,7 @@
                                AutomationProperties.AccessibilityView="Raw" />
                     <TextBox x:Name="AgentReply" Grid.Column="1" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="0" MaxHeight="132" Padding="0,4,0,4"
                              FontSize="14" Background="Transparent" BorderThickness="0" IsSpellCheckEnabled="False"
-                             TextChanged="AgentReply_Changed" PreviewKeyDown="AgentReply_KeyDown" GotFocus="AgentReply_FocusChanged" LostFocus="AgentReply_FocusChanged"
+                             TextChanging="AgentReply_Changing" TextChanged="AgentReply_Changed" PreviewKeyDown="AgentReply_KeyDown" GotFocus="AgentReply_FocusChanged" LostFocus="AgentReply_FocusChanged"
                              AutomationProperties.Name="Reply to the agent" TextCompositionStarted="AgentReply_CompositionStarted" TextCompositionEnded="AgentReply_CompositionEnded">
                         <TextBox.Resources>
                             <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />

@@ -11,7 +11,6 @@ using Windows.UI.ViewManagement;
 
 namespace AgentTerm_App;
 
-/// <summary>Shared building blocks for the agent surface. Styles live in AgentStyles.xaml.</summary>
 internal static class AgentUi
 {
     public const double Gutter = 22;
@@ -69,7 +68,6 @@ internal static class AgentUi
     }
 }
 
-/// <summary>A quiet row button that exposes ExpandCollapse to assistive technology and owns its chevron.</summary>
 internal sealed class DisclosureButton : Button
 {
     private bool _expanded;
@@ -106,10 +104,6 @@ internal sealed class DisclosureButton : Button
     }
 }
 
-/// <summary>
-/// One task's conversation: requests, streamed answers, grouped tool calls and outcomes. Rows are retained per
-/// timeline entry, so disclosure state and focus survive incoming events. Expansion state lives on the model.
-/// </summary>
 internal sealed class AgentTimelineView : StackPanel
 {
     private readonly Dictionary<Guid, IRow> _rows = [];
@@ -183,7 +177,6 @@ internal sealed class AgentTimelineView : StackPanel
         if (ownsTurn && controller.TurnElapsed.TotalSeconds >= 3)
             status += " · " + controller.TurnElapsed.ToString(@"m\:ss");
         if (ownsTurn && active && IsLoaded && controller.State is AgentState.Starting or AgentState.Running or AgentState.Interrupting) _elapsedTimer.Start(); else _elapsedTimer.Stop();
-        // A cancellation already has its own outcome row. Keep that detail, not a second status label.
         var cancellationShown = task?.LastOutcome == WorkStatus.Cancelled && controller.RunningTask != task
             && entries.OfType<TimelineMessage>().Any(m => m.Role == MessageRole.Cancelled);
         _activityRow.Visibility = status.Length > 0 && !cancellationShown ? Visibility.Visible : Visibility.Collapsed;
@@ -195,10 +188,6 @@ internal sealed class AgentTimelineView : StackPanel
 
     private bool AwaitsApproval(TimelineTool tool) => _controller?.AwaitsApproval(tool.CallId) == true;
 
-    /// <summary>
-    /// An in-flight call is "running" only after the harness reports execution. Before that it is "pending", or
-    /// "awaiting approval" while a queued approval names it, so an approval gate never reads as a started command.
-    /// </summary>
     internal static string ToolPhase(TimelineTool tool, bool awaitingApproval) => tool.Status switch
     {
         WorkStatus.Running when awaitingApproval => "awaiting approval",
@@ -211,8 +200,6 @@ internal sealed class AgentTimelineView : StackPanel
     private interface IRow
     {
         FrameworkElement Element { get; }
-        /// <param name="live">The pane is visible and this task's turn is running.</param>
-        /// <param name="last">The entry is the newest in the task.</param>
         void Update(bool live, bool last);
     }
 
@@ -253,7 +240,6 @@ internal sealed class AgentTimelineView : StackPanel
         }
     }
 
-    /// <summary>Failures, cancellations, decisions and notices. A failure stays outside any collapsed group.</summary>
     private sealed class OutcomeRow(TimelineMessage message, FontFamily font) : IRow
     {
         private readonly TextBlock _label = AgentUi.Text("AgentLabelText");
@@ -288,10 +274,6 @@ internal sealed class AgentTimelineView : StackPanel
         }
     }
 
-    /// <summary>
-    /// A run of tool calls. One call renders as its card directly. Several collapse behind a summary that keeps
-    /// failures visible. Live reasoning shows as Thinking only when the harness sent a summary.
-    /// </summary>
     private sealed class WorkRow(TimelineWorkGroup group, FontFamily font, Func<TimelineTool, bool> awaitsApproval) : IRow
     {
         private readonly StackPanel _root = new() { Spacing = 4 };
@@ -346,7 +328,6 @@ internal sealed class AgentTimelineView : StackPanel
         }
     }
 
-    /// <summary>One call as a card: status, the command on one line, then the full command and output on demand.</summary>
     private sealed class ToolCard
     {
         private readonly TimelineTool _tool;

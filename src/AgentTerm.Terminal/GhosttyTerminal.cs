@@ -33,7 +33,6 @@ public sealed partial class GhosttyTerminal : IDisposable
         _rows = rows;
         _writePty = (_, _, data, length) =>
         {
-            // Never unwind managed exceptions through Ghostty's C stack.
             try
             {
                 var response = new byte[checked((int)length)];
@@ -98,7 +97,6 @@ public sealed partial class GhosttyTerminal : IDisposable
         {
             using var formatterHandle = new FormatterHandle(formatter);
 
-            // The formatter's default includes scrollback. Select only the active grid.
             var selection = new Native.Selection();
             result = Native.ghostty_terminal_grid_ref(_handle, new Native.Point(), out selection.Start);
             ThrowIfFailed(result, "Could not find the first active terminal cell.");
@@ -129,7 +127,6 @@ public sealed partial class GhosttyTerminal : IDisposable
         }
         finally
         {
-            // The formatter borrows the terminal until formatter disposal finishes.
             GC.KeepAlive(_handle);
         }
     }
@@ -220,7 +217,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         [StructLayout(LayoutKind.Sequential)]
         internal struct Point
         {
-            internal int Tag; // GHOSTTY_POINT_TAG_ACTIVE = 0.
+            internal int Tag;
             internal PointValue Value;
         }
 

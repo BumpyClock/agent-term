@@ -10,14 +10,14 @@
                 <TextBlock x:Name="RequestTitle" Grid.Column="1" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center"
                            AutomationProperties.LiveSetting="Assertive" />
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                    <Button x:Name="DenyRequest" Style="{StaticResource AgentQuietButtonStyle}" Padding="8,2" Click="DenyRequest_Click"
+                    <Button x:Name="DenyRequest" Style="{StaticResource AgentQuietButtonStyle}" Padding="8,2" Click="DenyRequest_Click" KeyDown="Approval_KeyDown"
                             AutomationProperties.Name="Reject" ToolTipService.ToolTip="Reject (Ctrl+C)">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Text="Reject" VerticalAlignment="Center" />
                             <Border Style="{StaticResource AgentKeyChip}"><TextBlock Text="Ctrl+C" FontSize="11" /></Border>
                         </StackPanel>
                     </Button>
-                    <Button x:Name="ApproveRequest" Style="{StaticResource AccentButtonStyle}" Padding="10,3" MinHeight="0" Click="ApproveRequest_Click"
+                    <Button x:Name="ApproveRequest" Style="{StaticResource AccentButtonStyle}" Padding="10,3" MinHeight="0" Click="ApproveRequest_Click" KeyDown="Approval_KeyDown"
                             AutomationProperties.Name="Run once" ToolTipService.ToolTip="Allow this once (Enter)">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Text="Run" VerticalAlignment="Center" />

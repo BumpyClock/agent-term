@@ -50,7 +50,6 @@ try
     }
     if (assistantText.Length == 0) throw new Exception("Real Copilot produced no assistant text.");
     Console.WriteLine("Real Copilot produced assistant text (content omitted).");
-    // The UI labels a row "awaiting approval" and later "running" by these ids. ToolInvocation binding must yield the SDK's own call id.
     if (startedCall is null || approvedCall != startedCall || executedCall != startedCall)
         throw new Exception($"Approval and execution must name the started call. started={startedCall} approval={approvedCall} executing={executedCall}");
     if (!invoked || !returned || proof.Calls != 1 || proof.Result is not { Status: TerminalExecutionStatus.Completed } result || !result.Output.Contains(secretMarker) || !result.Output.Contains(fixture) || !result.Output.Contains(pid.ToString()) || terminal.ProcessId != pid) throw new Exception("Actual tool proof missing. Calls=" + proof.Calls + " result=" + System.Text.Json.JsonSerializer.Serialize(proof.Result));

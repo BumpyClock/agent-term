@@ -27,6 +27,18 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
+if (args.Contains("--mailbox-only"))
+{
+    await MailboxChecks.RunAsync();
+    return;
+}
+
+if (args.Contains("--mouse-only"))
+{
+    await MouseSessionChecks.RunAsync();
+    return;
+}
+
 if (args.Contains("--resize-input-only"))
 {
     await ResizeInputChecks.RunAsync();
@@ -61,6 +73,7 @@ if (args.Contains("--prompt-mode-only"))
 }
 
 var timeout = TimeSpan.FromSeconds(20);
+await MailboxChecks.RunAsync();
 await ProgramStatusSessionChecks.RunAsync();
 ShellProfileDiscoveryChecks.Run();
 await TerminalEnvironmentChecks.RunAsync();

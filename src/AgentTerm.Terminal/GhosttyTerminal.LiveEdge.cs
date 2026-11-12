@@ -41,8 +41,6 @@ public sealed partial class GhosttyTerminal
             _presentedTotal = null;
             if (_bottomAnchored && !original.IsAlternateScreen)
             {
-                // Render state only exposes viewport cells. Inspect the active grid without
-                // publishing the temporary frame or moving any PTY cursor.
                 NativeScroll(original.MaximumOffset);
                 var active = ReadFrame();
                 var last = ReadActiveCursorRow();

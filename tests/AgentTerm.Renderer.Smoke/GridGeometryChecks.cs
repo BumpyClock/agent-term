@@ -4,10 +4,6 @@ using Microsoft.Graphics.Canvas;
 using Windows.Foundation;
 using Windows.UI;
 
-/// <summary>
-/// The view's one cell mapping. Expected positions are computed by hand from the contract: frame row r is drawn at
-/// remainder + (TopInset + r) * cellHeight when bottom-aligned, and at r * cellHeight when top-aligned.
-/// </summary>
 internal static class GridGeometryChecks
 {
     private const float CellWidth = 10, CellHeight = 20;
@@ -25,7 +21,6 @@ internal static class GridGeometryChecks
         Console.WriteLine("Grid geometry checks passed.");
     }
 
-    // Launch-like state: two presented rows in a six-row grid. The surface is 127 DIPs, so the remainder is 7.
     private static void InsetDocument(CanvasDevice device)
     {
         var frame = Frame(rows: 6, columns: 4, new TerminalViewport(TotalRows: 2, Offset: 0, Rows: 6, IsAlternateScreen: false),
@@ -66,7 +61,6 @@ internal static class GridGeometryChecks
         Expect(geometry.RowTop(-1) == 67, "Card rows above the frame keep the same mapping.");
     }
 
-    // Scrollback fills the view: no inset, only the sub-cell remainder above the grid.
     private static void ScrollbackDocument(CanvasDevice device)
     {
         var frame = Frame(rows: 6, columns: 4, new TerminalViewport(TotalRows: 50, Offset: 44, Rows: 6, IsAlternateScreen: false),
@@ -94,7 +88,6 @@ internal static class GridGeometryChecks
         Expect(geometry.Caret(frame.Cursor) == new Point(20, 60), "Legacy caret.");
     }
 
-    // A task card may only cover rows that hold nothing. Prompt residue must hide the card, not sit under it.
     private static void CardRows()
     {
         var frame = Frame(rows: 6, columns: 4, new TerminalViewport(50, 44, 6, false), _ => Background,
@@ -115,12 +108,10 @@ internal static class GridGeometryChecks
             "Clipped rows beyond the presented document are never judged as card content.");
     }
 
-    // A fresh prompt in a bottom-anchored terminal is drawn on the bottom row. Depends on the terminal's live edge model.
     private static void LiveTerminalLaunch(CanvasDevice device)
     {
         using var terminal = new GhosttyTerminal(20, 6);
         terminal.SetBottomAnchored(true);
-        // Coloured blanks keep glyph pixels out of the probed area.
         terminal.Write("\x1b[48;2;240;30;40m   \x1b[0mPS> "u8);
         var frame = terminal.ReadFrame();
         Expect(frame.Viewport.TopInset == 5, $"A one-line document in six rows needs a five-row inset, got {frame.Viewport.TopInset}.");

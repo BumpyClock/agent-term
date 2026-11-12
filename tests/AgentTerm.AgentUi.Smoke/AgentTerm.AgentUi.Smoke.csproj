@@ -28,5 +28,9 @@
     <Page Include="../../src/AgentTerm.App/AgentStyles.xaml" Link="AgentStyles.xaml" />
     <Compile Include="../../src/AgentTerm.App/AgentRequestPanel.xaml.cs" Link="AgentRequestPanel.xaml.cs" DependentUpon="AgentRequestPanel.xaml" />
     <Page Include="../../src/AgentTerm.App/AgentRequestPanel.xaml" Link="AgentRequestPanel.xaml" />
+    <Compile Include="../../src/AgentTerm.App/PromptModeBar.xaml.cs" Link="PromptModeBar.xaml.cs" DependentUpon="PromptModeBar.xaml" />
+    <Page Include="../../src/AgentTerm.App/PromptModeBar.xaml" Link="PromptModeBar.xaml" />
+    <Compile Include="../../src/AgentTerm.App/PaneHeader.xaml.cs" Link="PaneHeader.xaml.cs" DependentUpon="PaneHeader.xaml" />
+    <Page Include="../../src/AgentTerm.App/PaneHeader.xaml" Link="PaneHeader.xaml" />
   </ItemGroup>
 </Project>
