@@ -31,6 +31,11 @@ internal static class Program
         try
         {
             ProgramStatusUiChecks.Run();
+            if (Environment.GetCommandLineArgs().Contains("--status-layout"))
+            {
+                await ProgramStatusUiChecks.CheckLayoutAsync(window);
+                return;
+            }
             await ProgramStatusUiChecks.CheckDetailsAsync(window);
             await ProgramStatusUiChecks.CheckIconsAsync(window);
             var fixture = new Harness();

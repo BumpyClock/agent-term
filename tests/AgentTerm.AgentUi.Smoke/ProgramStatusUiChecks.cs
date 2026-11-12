@@ -65,6 +65,7 @@ internal static class ProgramStatusUiChecks
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         ShowWindow(hwnd, 9);
         Foreground(hwnd);
+        RequireForeground(window);
 
         status.Update([Report("", ProgramState.Done, "pi", "Quiver Git Pull")]);
         await Task.Delay(300);
@@ -83,7 +84,7 @@ internal static class ProgramStatusUiChecks
         Check(OpenCard(tab) == card, "Moving from tab to card must keep it open.");
         status.Update([Report("", ProgramState.Working, "pi", "Pulling changes", progress: 35)]);
         Check(OpenCard(tab) == card && Text(card!).Contains("Pulling changes"), "Live reports must update the open card in place.");
-        Press(0x1B);
+        Press(window, 0x1B);
         await Task.Delay(150);
         Check(OpenCard(tab) is null && ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), input), "Escape must dismiss hover without stealing terminal focus.");
         Check(terminalEscapeCount == 1, "Hover dismissal must let Escape reach the terminal input.");
@@ -108,21 +109,20 @@ internal static class ProgramStatusUiChecks
         Check(new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast || presenter.Background is AcrylicBrush, "The status card must use the native acrylic brush.");
         var pin = Descendants(card).OfType<Button>().Single(button => AutomationProperties.GetName(button) == "Keep program status open");
         Move(window, pin, 30, 12);
-        Mouse(0x0002, 0, 0, 0, 0);
-        Mouse(0x0004, 0, 0, 0, 0);
+        Inject(window, PointerInput(0x0002), PointerInput(0x0004));
         await Task.Delay(300);
         Move(window, input, 500, 180);
         await Task.Delay(600);
         Check(OpenCard(tab) == card && pin.Visibility == Visibility.Collapsed, "Clicking Keep open must pin the same card after the pointer leaves.");
         Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), card.Scroll), "Keep open must focus reports for keyboard use.");
         await CaptureAsync(card, "pinned-pointer");
-        Press(0x1B);
+        Press(window, 0x1B);
         await Task.Delay(200);
         Check(OpenCard(tab) is null, "Escape must dismiss a pointer-pinned card.");
         Console.WriteLine("Keep open pointer click, persistence after pointer exit, keyboard focus and Escape passed.");
 
         tab.Focus(FocusState.Keyboard);
-        Press(0x12, 0x28);
+        Press(window, 0x12, 0x28);
         await Task.Delay(300);
         card = OpenCard(tab);
         Check(card is not null, "Alt+Down must open status directly from a focused tab.");
@@ -132,7 +132,7 @@ internal static class ProgramStatusUiChecks
         status.Update(reports);
         await Task.Delay(300);
         Check(Text(card).Contains("Detail 255"), "Every report must remain available.");
-        Press(0x11, 0x23);
+        Press(window, 0x11, 0x23);
         await Task.Delay(200);
         Check(card.Scroll.VerticalOffset >= card.Scroll.ScrollableHeight - 1 && card.Scroll.VerticalOffset > 0, "Ctrl+End must reach the last report.");
         var offset = card.Scroll.VerticalOffset;
@@ -158,11 +158,12 @@ internal static class ProgramStatusUiChecks
         await Task.Delay(300);
         Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), selectedMessage), "Selectable report text must accept keyboard focus.");
         var readingOffset = card.Scroll.VerticalOffset;
-        Press(0x10, 0x24);
+        Press(window, 0x10, 0x24);
         await Task.Delay(100);
         Check(Math.Abs(card.Scroll.VerticalOffset - readingOffset) < 1, "Shift+Home in selectable text must not jump the report scroller.");
         Console.WriteLine("Structural insertion/removal preserve selected text, row identity and the visible report.");
-        Press(0x1B);
+        await CheckReadingUpdatesAsync(status, card);
+        Press(window, 0x1B);
         await Task.Delay(200);
         Check(OpenCard(tab) is null, "Escape must dismiss keyboard status.");
         Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), tab), "Keyboard dismissal must restore tab focus.");
@@ -236,6 +237,59 @@ internal static class ProgramStatusUiChecks
         Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% progress and static completion passed. Motion enabled={moving}.");
     }
 
+    internal static async Task CheckLayoutAsync(Window window)
+    {
+        var tab = new TabViewItem { Header = "PowerShell" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var tabs = new TabView();
+        tabs.TabItems.Add(tab);
+        window.Content = tabs;
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1100, 850));
+        window.Activate();
+        await Task.Delay(300);
+        status.Update([Report("", ProgramState.Working, "Build", "Layout fixture")]);
+        status.ShowDetails(tab);
+        await Task.Delay(300);
+        var card = OpenCard(tab);
+        Check(card is not null && card.ActualHeight > 0, "The native layout fixture must render a status card.");
+        try { await CheckReadingUpdatesAsync(status, card!); }
+        finally { status.Hide(); await Task.Delay(150); }
+        Console.WriteLine("Native status layout checks passed without global input injection.");
+    }
+
+    private static async Task CheckReadingUpdatesAsync(TabProgramStatus status, ProgramStatusCard card)
+    {
+        var reports = Enumerable.Range(0, 20).Select(index => Report($"task{index:D2}", ProgramState.Working, $"Task {index}", "Reading detail " + index)).ToArray();
+        status.Update(reports);
+        await Task.Delay(150);
+        var reading = Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Reading detail 10");
+        card.Scroll.ChangeView(null, card.Scroll.VerticalOffset + reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - 30, null, true);
+        await Task.Delay(150);
+        var before = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y;
+        reading.Select(reading.ContentStart, reading.ContentEnd);
+        status.Update(reports.Select((report, index) => index == 0 ? report with { Status = report.Status with { Message = string.Join("\n", Enumerable.Repeat("Growing report", 12)) } } : report).ToArray());
+        await Task.Delay(150);
+        var growthShift = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - before;
+        var selectionKept = reading.SelectedText == "Reading detail 10";
+
+        var older = Report("old", ProgramState.Working, "Older row", "Created first, below the viewport");
+        status.Update([older]);
+        await Task.Delay(100);
+        var urgent = Enumerable.Range(0, 8).Select(index => Report($"a{index}", ProgramState.Blocked, $"Urgent {index}", "Urgent detail " + index, pane: 2)).ToArray();
+        status.Update([older, .. urgent]);
+        await Task.Delay(150);
+        card.Scroll.ChangeView(null, 0, null, true);
+        await Task.Delay(150);
+        reading = Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Urgent detail 0");
+        before = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y;
+        status.Update([older, .. urgent, Report("z", ProgramState.Blocked, "Inserted later", "After the visible row, before the older row", pane: 2)]);
+        await Task.Delay(150);
+        var insertionShift = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - before;
+        Console.WriteLine($"Reading-position regression: in-place growth shift={growthShift:F2}px, insertion below visible row shift={insertionShift:F2}px, selection retained={selectionKept}.");
+        Check(Math.Abs(growthShift) < 2 && Math.Abs(insertionShift) < 2 && selectionKept, "In-place growth and insertion below the visible report must preserve reading position and selection.");
+    }
+
     private static PaneProgramStatus Report(string id, ProgramState state, string title, string message, int pane = 1, int? progress = null, string? kind = null) =>
         new(pane, "PowerShell", new(id, state, kind, progress, title, title, title, message, DateTimeOffset.Now));
 
@@ -283,19 +337,36 @@ internal static class ProgramStatusUiChecks
         ClientToScreen(WinRT.Interop.WindowNative.GetWindowHandle(window), ref origin);
         var scale = target.XamlRoot.RasterizationScale;
 
-        Mouse(0xC001, (uint)((origin.X + point.X * scale - GetSystemMetrics(76)) * 65535 / GetSystemMetrics(78)), (uint)((origin.Y + point.Y * scale - GetSystemMetrics(77)) * 65535 / GetSystemMetrics(79)), 0, 0);
+        Inject(window, PointerInput(0xC001, (int)((origin.X + point.X * scale - GetSystemMetrics(76)) * 65535 / GetSystemMetrics(78)), (int)((origin.Y + point.Y * scale - GetSystemMetrics(77)) * 65535 / GetSystemMetrics(79))));
     }
-    private static void Press(params byte[] keys)
+    private static void Press(Window window, params byte[] keys)
     {
-        foreach (var key in keys) Key(key, 0, 0, 0);
-        foreach (var key in keys.Reverse()) Key(key, 0, 2, 0);
+        var down = keys.Select(key => new Input { Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = key } } });
+        var up = keys.Reverse().Select(key => new Input { Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = key, Flags = 2 } } });
+        Inject(window, down.Concat(up).ToArray());
     }
+    private static Input PointerInput(uint flags, int x = 0, int y = 0) => new() { Data = new InputData { Mouse = new MouseInput { X = x, Y = y, Flags = flags } } };
+    private static void RequireForeground(Window window)
+    {
+        var expected = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        var actual = GetForegroundWindow();
+        Check(actual == expected, $"Smoke window lost foreground ownership (expected {expected:X}, actual {actual:X}); input injection stopped.");
+    }
+    private static void Inject(Window window, params Input[] inputs)
+    {
+        RequireForeground(window);
+        Check(SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) == inputs.Length, "Windows rejected smoke input injection.");
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct Input { public uint Type; public InputData Data; }
+    [StructLayout(LayoutKind.Explicit)] private struct InputData { [FieldOffset(0)] public MouseInput Mouse; [FieldOffset(0)] public KeyboardInput Keyboard; }
+    [StructLayout(LayoutKind.Sequential)] private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public nuint Extra; }
+    [StructLayout(LayoutKind.Sequential)] private struct KeyboardInput { public ushort Key, Scan; public uint Flags, Time; public nuint Extra; }
+    [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int X; public int Y; }
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int show);
     [DllImport("user32.dll")] private static extern bool ClientToScreen(nint hwnd, ref Point point);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
-    [DllImport("user32.dll", EntryPoint="mouse_event")] private static extern void Mouse(uint flags, uint x, uint y, uint data, nuint extra);
     [DllImport("user32.dll", EntryPoint = "SetForegroundWindow")] private static extern bool Foreground(nint hwnd);
-    [DllImport("user32.dll", EntryPoint = "keybd_event")] private static extern void Key(byte key, byte scan, uint flags, nuint extra);
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }

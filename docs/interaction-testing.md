@@ -228,6 +228,8 @@ Native captures cover dark, light, and Windows high-contrast cards, nested repor
 
 The full `scripts/check.ps1` suite passed before the final presentation refinements. The release app build and native UI checks passed after those refinements. Native accessibility-tree checks confirm urgent-first reading order, nested report text, state, and percentage. Screen-reader speech and enlarged system text were not exercised in this pass. Production screenshots establish tab and card appearance; their terminal canvas is blank in the screen capture, so they do not establish terminal rendering. The separate renderer smoke suite checks terminal pixels.
 
+The native layout regressions also cover an earlier report growing without reordering, and insertion below the visible report when creation order differs from display order. Run them without global input using `dotnet run --project tests/AgentTerm.AgentUi.Smoke -c Release -- --status-layout`. The full interactive suite requires the smoke window to own the foreground before every injected input batch; it fails without sending input if ownership is lost.
+
 ## Terminal color themes
 
 1. In Settings > Profiles > Defaults, select Auto, Ocean Light, and Forest Dark. Save. In a test window, change Windows appearance. Only the active palette must change; both saved slots must remain selected. Output, shell PIDs, scroll position, and selection must remain intact.

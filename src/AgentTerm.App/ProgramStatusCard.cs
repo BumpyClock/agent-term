@@ -94,13 +94,14 @@ internal sealed partial class ProgramStatusCard : Grid
             .OrderBy(g => g.Min(r => ProgramStatusPresentation.Priority(r.Status.State))).ThenBy(g => g.Key.Pane);
         var ordered = groups.SelectMany(g => g.OrderBy(r => r.Status.Id, Comparer<string>.Create(ProgramStatusPresentation.CompareIds))).ToArray();
         var order = ordered.Select(r => (r.Pane, r.Shell, r.Status.Id)).ToArray();
-        Grid? anchor = null;
-        double anchorTop = 0;
+        var retainedRows = ordered.Select(record => _entries.GetValueOrDefault((record.Pane, record.Status.Id))).OfType<Grid>().ToHashSet();
+        var anchor = _rows.Children.OfType<Grid>().FirstOrDefault(row => retainedRows.Contains(row) && row.ActualHeight > 0 &&
+            row.TransformToVisual(Scroll).TransformPoint(new(0, 0)).Y < Scroll.ViewportHeight &&
+            row.TransformToVisual(Scroll).TransformPoint(new(0, row.ActualHeight)).Y > 0);
+        var anchorTop = anchor?.TransformToVisual(Scroll).TransformPoint(new(0, 0)).Y ?? 0;
         if (!_order.SequenceEqual(order))
         {
             _order = order;
-            anchor = _entries.Values.FirstOrDefault(row => row.ActualHeight > 0 && row.TransformToVisual(Scroll).TransformPoint(new(0, row.ActualHeight)).Y > 0);
-            anchorTop = anchor?.TransformToVisual(Scroll).TransformPoint(new(0, 0)).Y ?? 0;
             var desired = new List<UIElement>();
             int? previousPane = null;
             foreach (var record in ordered)
@@ -182,7 +183,7 @@ internal sealed partial class ProgramStatusCard : Grid
         {
             UpdateLayout();
             var shift = anchor.TransformToVisual(Scroll).TransformPoint(new(0, 0)).Y - anchorTop;
-            Scroll.ChangeView(null, Scroll.VerticalOffset + shift, null, true);
+            if (shift != 0) Scroll.ChangeView(null, Scroll.VerticalOffset + shift, null, true);
         }
     }
     private static string DisplayName(ProgramStatus status) => ProgramStatusPresentation.Clean(status.Title ?? status.EffectiveApp ?? (status.Id.Length == 0 ? "Program" : status.Id));
