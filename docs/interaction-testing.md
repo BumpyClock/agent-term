@@ -49,6 +49,8 @@ A second pass on 2026-11-11 used the scripts in `artifacts/left-tabs/round-2`, w
 - High contrast was not switched on, because it re-themes the whole desktop. The indicator's high-contrast brush is the system highlight color on the selected tab's window-color background.
 - Compact rows hide the close button, so UI Automation exposes no close button there. Ctrl+F4 and the Shift+F10 menu still close the tab.
 
+The fourth pass captured the production build in Windows High Contrast #2. WinRT reported high contrast enabled. Expanded and compact sidebar selection indicators and keyboard focus remained visible. The harness restored the original high-contrast flags and app settings. This checks navigation appearance in one contrast theme, not terminal text contrast, Narrator speech, or all contrast themes. Expanded and compact rows exposed the same action HelpText. Pointer and keyboard menus named their target tab and opened beside it.
+
 ## Automation limitation
 
 On 2026-11-10, the available Windows `sky.drag` and unified CUA drag APIs exposed no duration or held-button controls. A measured `sky.drag` gesture pressed, moved once, and released in about 22 ms. WinUI raised `TabDragStarting`, then completed with `None` and preserved the order. A manual held drag in the same window completed with `Move`, moved Command Prompt before PowerShell, and retained both tab object identities.
