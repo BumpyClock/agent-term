@@ -29,6 +29,8 @@ internal static class Program
         var window = new Window();
         try
         {
+            ProgramStatusUiChecks.Run();
+            await ProgramStatusUiChecks.CheckDetailsAsync(window);
             var fixture = new Harness();
             await using var controller = new AgentSessionController(fixture);
             var view = new AgentTimelineView { Width = 480, HorizontalAlignment = HorizontalAlignment.Left };

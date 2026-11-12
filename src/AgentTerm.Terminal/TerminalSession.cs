@@ -9,9 +9,12 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     private readonly object _gate = new();
     private readonly GhosttyTerminal _terminal;
     private readonly ConPtyConnection _connection;
+    private readonly Task<int> _completion;
     private readonly ShellProfile _profile;
     private readonly string _promptToken = Guid.NewGuid().ToString("N");
     private readonly ShellPromptProtocol _prompt;
+    private readonly ProgramStatusProtocol _programStatus = new();
+    private readonly OscScanner _osc = new();
     private sealed class OwnedCommand
     {
         public readonly string Id = "a:" + Guid.NewGuid().ToString("N")[..8];
@@ -33,17 +36,37 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("ConPTY requires Windows.");
         _profile = profile ?? ShellProfile.Default;
         _prompt = new(_promptToken);
-        _prompt.OutputByte += b => _owned?.Capture.Feed(b);
+        _osc.Sequence += _prompt.Accept;
+        _osc.Sequence += _programStatus.Accept;
+        _osc.Reset += _programStatus.Reset;
+        _prompt.PromptStarted += _programStatus.EndCommand;
+        _osc.OutputByte += b => _owned?.Capture.Feed(b);
         _prompt.Marker += message => _owned?.Capture.Marker(message);
         _connection = new ConPtyConnection(columns, rows);
+        _programStatus.SupportRequested += () =>
+        {
+            if (_disposeTask is null) _connection.SendReply(ProgramStatusProtocol.SupportReply);
+        };
         _terminal = new GhosttyTerminal(columns, rows);
         _connection.OutputReceived += ProcessOutput;
+        _completion = CompleteAsync();
     }
 
     public string ShellName => _profile.Name;
     public ShellProfile Profile => _profile;
-    public Task<int> Completion => _connection.Completion;
+    public Task<int> Completion => _completion;
     public int ProcessId => _connection.ProcessId;
+
+    public IReadOnlyList<ProgramStatus> ReadProgramStatuses()
+    {
+        lock (_gate) return _programStatus.ReadStatuses();
+    }
+
+    private async Task<int> CompleteAsync()
+    {
+        try { return await _connection.Completion.ConfigureAwait(false); }
+        finally { lock (_gate) _programStatus.EndCommand(); }
+    }
 
     public void Start()
     {
@@ -326,7 +349,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_gate)
         {
             _terminal.Write(bytes.Span);
-            _prompt.Feed(bytes.Span);
+            _osc.Feed(bytes.Span);
             if (_owned is { } owned && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == owned.Id && owned.Capture.Ended)
             {
                 _owned = null;

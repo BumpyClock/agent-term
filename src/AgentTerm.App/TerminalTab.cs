@@ -52,6 +52,11 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         };
     }
 
+    internal IReadOnlyList<PaneProgramStatus> ReadProgramStatuses() => _panes
+        .Where(pane => !ReferenceEquals(pane, _retiring))
+        .SelectMany((pane, index) => pane.Page.ReadProgramStatuses()
+            .Select(status => new PaneProgramStatus(index + 1, pane.Page.Profile.Name, status))).ToArray();
+
     internal string Title => string.Join(" · ", _panes.Select(pane => pane.Page.Profile.Name).Distinct().Take(2));
     internal ShellProfile PrimaryProfile => _panes[0].Page.Profile;
     internal int PaneCount => _panes.Count;

@@ -15,6 +15,10 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
     <ProjectReference Include="../../src/AgentTerm.Agents/AgentTerm.Agents.csproj" />
+    <ProjectReference Include="../../src/AgentTerm.Terminal/AgentTerm.Terminal.csproj" />
+    <Compile Include="../../src/AgentTerm.App/ProgramStatusPresentation.cs" Link="ProgramStatusPresentation.cs" />
+    <Compile Include="../../src/AgentTerm.App/TabProgramStatus.cs" Link="TabProgramStatus.cs" />
+    <Compile Include="../../src/AgentTerm.App/SidebarTabItem.cs" Link="SidebarTabItem.cs" />
     <Compile Include="../../src/AgentTerm.App/ActivityLabel.cs" Link="ActivityLabel.cs" />
     <Compile Include="../../src/AgentTerm.App/AgentTimelineView.cs" Link="AgentTimelineView.cs" />
     <Page Include="../../src/AgentTerm.App/AgentStyles.xaml" Link="AgentStyles.xaml" />

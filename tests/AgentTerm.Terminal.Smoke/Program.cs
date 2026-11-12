@@ -116,6 +116,8 @@ using (var terminal = new GhosttyTerminal(20, 4))
 
 
 RenderChecks.Run();
+ProgramStatusChecks.Run();
+ProgramStatusPresentationChecks.Run();
 ThemeChecks.Run();
 InputChecks.Run();
 MouseChecks.Run();

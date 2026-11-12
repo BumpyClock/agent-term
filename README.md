@@ -211,3 +211,42 @@ Run deterministic behavior checks with `dotnet run --project tests/AgentTerm.Age
 Agent activity uses compact inline rows. Consecutive calls share a collapsed summary such as **Ran 2 commands**. A running row names the latest operation. Click or keyboard-toggle the row to inspect commands. Expand **Output** separately to select and copy bounded output. Expansion survives streaming and pane switches. Failures and pending approvals remain visible outside collapsed groups. Counts come from typed tool categories, not guesses about shell syntax. The current adapter counts terminal commands only.
 
 A moving text highlight marks current activity. Windows animation preferences and high contrast disable it. Inactive panes and completed, interrupted, or waiting turns stop motion. **Working** is the fallback while no tool is active. **Thinking** requires a harness-provided summary. Copilot reasoning payloads are not exposed. Tool protocol envelopes and schemas are not displayed. Retention is bounded to 128 timeline entries, 256 calls, 64 calls per group, and 8,192 characters per message or output. Earlier activity is marked when trimmed. Scrolling older activity disables automatic following.
+
+## Program status in tabs
+
+Top tabs and Left sidebar tabs show status reported by terminal programs through
+[OSC 7501](https://www.superlogical.com/rex/docs/build/program-status.md).
+The status symbol temporarily replaces the shell icon. Hover either layout,
+including compact sidebar rows, for a concise status preview. Right-click a tab
+or focus it and press Shift+F10, then choose **Program status details** for all
+panes, applications, tasks, states, progress, messages, and update times. The
+read-only details flyout supports scrolling, selection, copying, and Ctrl+End. Child task IDs are indented under their parent.
+Blocked work takes priority over errors, working, done, and idle reports.
+Background tabs continue updating. Clearing all reports restores the shell icon.
+
+No hooks, log scanning, or process-name guessing are used. Programs must emit the
+protocol themselves. AgentTerm answers capability queries and supports all five
+states and permission, question, and auth blocking reasons. Each pane owns its
+records. New shell prompts and shell exit remove working and blocked reports;
+done and error remain until cleared, reset, or the session is replaced. Foreground
+process owner metadata and individual child-process exit detection are not
+implemented. Native PowerShell prompt markers and OSC 133 prompt markers both
+trigger cleanup.
+
+Windows builds bundle Microsoft's `Microsoft.Windows.Console.ConPTY` package.
+The older system ConPTY dropped OSC capability replies in the integration test;
+the bundled host passes the reply before the following device-attributes reply.
+This is app-local and does not update Windows. Windows executables consuming the
+terminal library must build with a Windows RID (the app and ConPTY smoke harness
+use `win-x64`) so the DLL and its console host resolve from the shipping layout.
+
+For a quick PowerShell check, run this command. The blocked report remains during
+the pause; the done report survives the prompt that follows.
+
+```powershell
+[Console]::Write("`e]7501;state=blocked:kind=permission:app=demo:msg=QXBwcm92YWwgbmVlZGVk`a"); Start-Sleep 15; [Console]::Write("`e]7501;state=done:app=demo:msg=Q29tcGxldGU=`a")
+```
+
+Protocol regression checks live in `ProgramStatusChecks` in the terminal smoke
+suite. They cover chunked input, detection, validation, replacement, inheritance,
+clearing, reset, lifecycle, and record eviction.

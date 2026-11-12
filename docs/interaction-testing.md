@@ -204,3 +204,13 @@ Set `Read-Host 'review input'` in the composer through UI Automation and clicked
 - A follow-up requested ask_user with four verbose choices. The question appeared. Scrolled the choices, selected the fourth, and the conversation recorded and acknowledged that choice. Screenshot: `artifacts/smart-prompt-evidence/pr3-question.png`. These choices fit on single lines at this width, so multiline wrapping was not verified.
 - Rapid Enter startup admission was not tested. This pass does not establish race coverage. No implementation changes made.
 - Closed the test window. `Get-Process AgentTerm.App` returned no process.
+
+## Program status hover
+
+1. In a separate test window, run the README program-status example. While it sleeps, switch to another tab. The background tab must show approval needed, then done. Hover for the message.
+2. Switch between Top and Left while the report is present. Both must show the same state and details without restarting the shell. Resize Left below 680 DIPs and hover the compact icon.
+3. Emit a root working report and child blocked reports with slash-separated IDs and base64 titles. Hover must retain the root and children, with blocked taking icon priority. Clear one parent ID and confirm only that subtree disappears.
+4. Split the tab and emit different reports in both panes. Hover must label each pane and retain both even when one pane is inactive. Closing a pane removes its reports.
+5. Emit working, blocked, done, and error reports. A new prompt removes working and blocked but retains done and error. Emit `ESC c` to reset, or `OSC 7501;state=clear ST` to clear. Confirm the shell icon returns in both layouts.
+6. Report enough children to overflow the preview. Right-click each tab layout and choose **Program status details**. Reach the last report with the scrollbar. Focus the tab, press Shift+F10, invoke the same entry, and press Ctrl+End. The final report must be visible and selectable. Escape closes the flyout.
+7. Repeat with keyboard focus, high contrast, and large text. Status text must remain readable without interpreting terminal messages as markup.

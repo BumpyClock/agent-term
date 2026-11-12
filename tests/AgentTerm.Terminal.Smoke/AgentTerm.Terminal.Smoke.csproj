@@ -10,6 +10,7 @@
     <Compile Include="../../src/AgentTerm.App/TerminalKeyboardInput.cs" Link="TerminalKeyboardInput.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalCompositionInput.cs" Link="TerminalCompositionInput.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalPreferences.cs" Link="TerminalPreferences.cs" />
+    <Compile Include="../../src/AgentTerm.App/ProgramStatusPresentation.cs" Link="ProgramStatusPresentation.cs" />
     <Compile Include="../../src/AgentTerm.App/TabSidebarLayout.cs" Link="TabSidebarLayout.cs" />
     <Compile Include="../../src/AgentTerm.App/GitHub/*.cs" LinkBase="GitHub" />
     <Compile Include="../../src/AgentTerm.App/PaneStatus/*.cs" LinkBase="PaneStatus" />

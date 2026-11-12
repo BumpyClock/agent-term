@@ -305,9 +305,10 @@ public sealed class ConPtyConnection : IAsyncDisposable
     private static class Native
     {
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool CreatePipe(out IntPtr read, out IntPtr write, IntPtr attributes, int size);
-        [DllImport("kernel32.dll")] public static extern int CreatePseudoConsole(Coord size, IntPtr input, IntPtr output, uint flags, out IntPtr console);
-        [DllImport("kernel32.dll")] public static extern int ResizePseudoConsole(IntPtr console, Coord size);
-        [DllImport("kernel32.dll")] public static extern void ClosePseudoConsole(IntPtr console);
+        // The bundled host forwards OSC replies that older inbox ConPTY versions discard.
+        [DllImport("conpty.dll", EntryPoint = "ConptyCreatePseudoConsole")] public static extern int CreatePseudoConsole(Coord size, IntPtr input, IntPtr output, uint flags, out IntPtr console);
+        [DllImport("conpty.dll", EntryPoint = "ConptyResizePseudoConsole")] public static extern int ResizePseudoConsole(IntPtr console, Coord size);
+        [DllImport("conpty.dll", EntryPoint = "ConptyClosePseudoConsole")] public static extern void ClosePseudoConsole(IntPtr console);
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref nuint size);
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, nuint attribute, IntPtr value, nuint size, IntPtr previous, IntPtr returnSize);
         [DllImport("kernel32.dll")] public static extern void DeleteProcThreadAttributeList(IntPtr list);
