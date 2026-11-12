@@ -9,6 +9,7 @@ static class LifecycleChecks
     private static SessionErrorEvent Error() => new() { Data = new() { Message = "fixture error", ErrorType = "fixture" } };
     public static async Task RunAsync()
     {
+        await ApprovalOwnershipAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var abortEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseAbort = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -85,4 +86,97 @@ static class LifecycleChecks
         }
         Console.WriteLine("Copilot native error/idle, concurrent Stop and bounded drain checks passed.");
     }
+    private sealed class Terminal : IHostTerminal
+    {
+        public List<string> Commands { get; } = [];
+        public Func<CancellationToken, Task<TerminalExecutionResult>>? Execute;
+        public Task<TerminalExecutionResult> ExecuteAsync(TerminalExecutionRequest request, CancellationToken cancellationToken = default)
+        {
+            Commands.Add(request.Command);
+            return Execute?.Invoke(cancellationToken) ?? Task.FromResult(new TerminalExecutionResult(TerminalExecutionStatus.Completed));
+        }
+    }
+    private static async Task ApprovalOwnershipAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        foreach (var transition in new[] { "stop", "new-turn", "dispose" })
+        {
+            var paused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var terminal = new Terminal();
+            CopilotHarness.Session? session = null;
+            await using (session = new(null, (_, _) => Task.CompletedTask, _ =>
+            {
+                session!.OnEvent(Idle());
+                return Task.CompletedTask;
+            }, terminal: terminal, approvalContinuation: async () => { paused.TrySetResult(); await resume.Task; }))
+            {
+                var turn = Guid.NewGuid();
+                await session.SubmitAsync(new(turn, "old turn"));
+                var command = session.RunInTerminalAsync("old command", "old-call");
+                await using var events = session.Events(timeout.Token).GetAsyncEnumerator();
+                Check(await events.MoveNextAsync() && events.Current is ApprovalRequest, "Command requests approval before execution.");
+                await session.RespondAsync(new(((ApprovalRequest)events.Current).Request, true));
+                await paused.Task.WaitAsync(timeout.Token);
+                if (transition == "dispose") await session.DisposeAsync();
+                else
+                {
+                    await session.InterruptAsync(turn).WaitAsync(timeout.Token);
+                    if (transition == "new-turn") await session.SubmitAsync(new(Guid.NewGuid(), "new turn"));
+                }
+                resume.SetResult();
+                Check((await command.WaitAsync(timeout.Token)).Status == TerminalExecutionStatus.Denied && terminal.Commands.Count == 0,
+                    "An approved old command cannot start after " + transition + ".");
+                if (transition == "new-turn")
+                {
+                    var fresh = session.RunInTerminalAsync("fresh command", "fresh-call");
+                    while (await events.MoveNextAsync() && events.Current is not ApprovalRequest) { }
+                    await session.RespondAsync(new(((ApprovalRequest)events.Current).Request, true));
+                    Check((await fresh.WaitAsync(timeout.Token)).Status == TerminalExecutionStatus.Completed && terminal.Commands.SequenceEqual(new[] { "fresh command" }),
+                        "Rejecting a stale approval must not disable the new turn.");
+                }
+            }
+        }
+        {
+            var terminal = new Terminal();
+            CopilotHarness.Session? session = null;
+            await using (session = new(null, (_, _) => Task.CompletedTask, _ => { session!.OnEvent(Idle()); return Task.CompletedTask; }, terminal: terminal))
+            {
+                var turn = Guid.NewGuid();
+                await session.SubmitAsync(new(turn, "unapproved"));
+                var command = session.RunInTerminalAsync("must not execute", "call");
+                await using var events = session.Events(timeout.Token).GetAsyncEnumerator();
+                Check(await events.MoveNextAsync() && events.Current is ApprovalRequest, "Approval is pending.");
+                var request = (ApprovalRequest)events.Current;
+                await session.InterruptAsync(turn).WaitAsync(timeout.Token);
+                await session.RespondAsync(new(request.Request, true));
+                Check((await command.WaitAsync(timeout.Token)).Status == TerminalExecutionStatus.Denied && terminal.Commands.Count == 0,
+                    "Stop before approval rejects a later response.");
+            }
+        }
+        {
+            var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var drained = new TaskCompletionSource<TerminalExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var terminal = new Terminal { Execute = token => { token.Register(() => canceled.TrySetResult()); return drained.Task; } };
+            var abortEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            CopilotHarness.Session? session = null;
+            await using (session = new(null, (_, _) => Task.CompletedTask, _ => { abortEntered.SetResult(); session!.OnEvent(Idle()); return Task.CompletedTask; }, terminal: terminal))
+            {
+                var turn = Guid.NewGuid();
+                await session.SubmitAsync(new(turn, "executing"));
+                var command = session.RunInTerminalAsync("running command", "call");
+                await using var events = session.Events(timeout.Token).GetAsyncEnumerator();
+                await events.MoveNextAsync();
+                await session.RespondAsync(new(((ApprovalRequest)events.Current).Request, true));
+                Check(await events.MoveNextAsync() && events.Current is ToolExecuting, "Approved command starts on its owning turn.");
+                var stopping = session.InterruptAsync(turn);
+                await canceled.Task.WaitAsync(timeout.Token);
+                Check(!stopping.IsCompleted && !abortEntered.Task.IsCompleted, "Stop cancels and drains registered execution before native abort.");
+                drained.SetResult(new(TerminalExecutionStatus.Interrupted));
+                await stopping.WaitAsync(timeout.Token);
+                Check((await command).Status == TerminalExecutionStatus.Interrupted && terminal.Commands.Count == 1, "Stop preserves the terminal drain result.");
+            }
+        }
+    }
+
 }

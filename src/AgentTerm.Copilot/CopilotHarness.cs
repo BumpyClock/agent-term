@@ -53,7 +53,9 @@ public sealed class CopilotHarness : IAgentHarness
     internal sealed class Session(CopilotClient? client,
         Func<AgentPrompt, CancellationToken, Task>? send = null,
         Func<CancellationToken, Task>? abort = null,
-        TimeSpan? drainTimeout = null) : IAgentSession
+        TimeSpan? drainTimeout = null,
+        IHostTerminal? terminal = null,
+        Func<Task>? approvalContinuation = null) : IAgentSession
     {
         private readonly Channel<AgentEvent> _events = Channel.CreateUnbounded<AgentEvent>();
         private readonly Dictionary<Guid, TaskCompletionSource<AgentResponse>> _requests = [];
@@ -73,7 +75,7 @@ public sealed class CopilotHarness : IAgentHarness
             public string? Failure;
             public Dictionary<string, StringBuilder> Messages { get; } = [];
         }
-        private IHostTerminal? _terminal;
+        private IHostTerminal? _terminal = terminal;
         private readonly HashSet<Task<TerminalExecutionResult>> _executions = [];
         private IDisposable? _subscription;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _toolNames = new();
@@ -88,23 +90,7 @@ public sealed class CopilotHarness : IAgentHarness
                 EnableManagedSettings = true,
                 AvailableTools = ["run_in_terminal", "ask_user"],
                 Tools = [CopilotTool.DefineTool(
-                    async ([Description("Exact PowerShell command to execute in the invoking pane, preserving shell state.")] string command, ToolInvocation invocation) =>
-                    {
-                        if (_terminal is null) return new TerminalExecutionResult(TerminalExecutionStatus.Unsupported);
-                        var id = Guid.NewGuid();
-                        var turn = _turn ?? Guid.Empty;
-                        var reply = await RequestAsync(id, new ApprovalRequest(turn, id, command, invocation.ToolCallId));
-                        if (!reply.Approved) return new TerminalExecutionResult(TerminalExecutionStatus.Denied);
-                        Task<TerminalExecutionResult> execution;
-                        lock (_executions)
-                        {
-                            execution = _terminal.ExecuteAsync(new(command), _active?.Cancellation.Token ?? _lifetime.Token);
-                            _executions.Add(execution);
-                        }
-                        _events.Writer.TryWrite(new ToolExecuting(turn, invocation.ToolCallId));
-                        try { return await execution; }
-                        finally { lock (_executions) _executions.Remove(execution); }
-                    },
+                    ([Description("Exact PowerShell command to execute in the invoking pane, preserving shell state.")] string command, ToolInvocation invocation) => RunInTerminalAsync(command, invocation.ToolCallId),
                     toolOptions: new CopilotToolOptions { SkipPermission = true, Defer = CopilotToolDefer.Never },
                     factoryOptions: new AIFunctionFactoryOptions { Name = "run_in_terminal", Description = "Execute in the user's EXISTING pane PowerShell. Cwd returned by this tool is authoritative. Output is bounded ConPTY terminal text with ANSI stripped; cursor redraws are not reconstructed. Use this tool for all shell and file operations. No independent shell or native file tools are available. Interactive programs require deliberate user input handoff." })],
                 OnPermissionRequest = async (request, invocation) =>
@@ -132,6 +118,34 @@ public sealed class CopilotHarness : IAgentHarness
                 },
             }, cancellationToken);
             _subscription = _native.On<SessionEvent>(OnEvent);
+        }
+        internal async Task<TerminalExecutionResult> RunInTerminalAsync(string command, string callId)
+        {
+            Turn owner;
+            Task<AgentResponse> approval;
+            lock (_gate)
+            {
+                if (_terminal is null) return new(TerminalExecutionStatus.Unsupported);
+                if (_dispose is not null || _unusable || _active is not { } active || active.Stop is not null || active.Cancellation.IsCancellationRequested)
+                    return new(TerminalExecutionStatus.Denied);
+                owner = active;
+                var id = Guid.NewGuid();
+                approval = RequestAsync(id, new ApprovalRequest(owner.Id, id, command, callId));
+            }
+            var reply = await approval;
+            if (!reply.Approved) return new(TerminalExecutionStatus.Denied);
+            if (approvalContinuation is not null) await approvalContinuation();
+            Task<TerminalExecutionResult> execution;
+            lock (_gate)
+            {
+                if (_dispose is not null || _unusable || !ReferenceEquals(_active, owner) || owner.Stop is not null || owner.Cancellation.IsCancellationRequested)
+                    return new(TerminalExecutionStatus.Denied);
+                execution = _terminal.ExecuteAsync(new(command), owner.Cancellation.Token);
+                _executions.Add(execution);
+                _events.Writer.TryWrite(new ToolExecuting(owner.Id, callId));
+            }
+            try { return await execution; }
+            finally { lock (_gate) _executions.Remove(execution); }
         }
         private async Task<AgentResponse> RequestAsync(Guid id, AgentEvent item)
         {
@@ -247,14 +261,14 @@ public sealed class CopilotHarness : IAgentHarness
             timeout.CancelAfter(drainTimeout ?? TimeSpan.FromSeconds(30));
             try
             {
+                Task<TerminalExecutionResult>[] executions;
                 lock (_gate)
                 {
                     if (!ReferenceEquals(_active, owner)) return;
                     lock (_requests) foreach (var request in _requests.Values) request.TrySetResult(new(Guid.Empty));
                     owner.Cancellation.Cancel();
+                    executions = _executions.ToArray();
                 }
-                Task<TerminalExecutionResult>[] executions;
-                lock (_executions) executions = _executions.ToArray();
                 if ((await Task.WhenAll(executions).WaitAsync(timeout.Token)).Any(result => result.Status == TerminalExecutionStatus.InterruptionFailed))
                     throw new InvalidOperationException("Terminal interruption failed. Ownership retained until shell readiness.");
                 Task aborting;
@@ -294,7 +308,7 @@ public sealed class CopilotHarness : IAgentHarness
             }
             _lifetime.Cancel(); _subscription?.Dispose();
             Task<TerminalExecutionResult>[] executions;
-            lock (_executions) executions = _executions.ToArray();
+            lock (_gate) executions = _executions.ToArray();
             try { await Task.WhenAll(executions); } catch (OperationCanceledException) { }
             if (_native is not null) await _native.DisposeAsync();
             if (client is not null) await client.DisposeAsync();

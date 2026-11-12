@@ -42,6 +42,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         _osc.Sequence += _prompt.Accept;
         _prompt.Marker += message => { if (_restoringDraft && message == "restored;" + _mailboxPending) _draftRestored = true; };
         _prompt.Marker += ReanchorMarker;
+        _prompt.Marker += MailboxMarker;
         _osc.Sequence += _programStatus.Accept;
         _osc.Reset += _programStatus.Reset;
         _prompt.PromptStarted += _programStatus.EndCommand;
@@ -117,6 +118,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     public string? TakeAgentRequest() { lock (_gate) return _prompt.TakeAgentRequest(); }
     private bool ReservationPending => _mailboxPending?.StartsWith("c:", StringComparison.Ordinal) == true;
     private string? _mailboxPending;
+    private bool _mailboxArmed;
     private bool _restoringDraft;
     private bool _draftRestored;
     public void SubmitCommand(string command) => SubmitCommand(command, Guid.NewGuid().ToString("N"));
@@ -143,8 +145,9 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
                 throw new InvalidOperationException("Could not write protected command mailbox. No command was submitted. Close and reopen this pane.", error);
             }
             _mailboxPending = id;
+            _mailboxArmed = false;
             _prompt.State = ShellPromptState.Executing;
-            _connection.Send(Encoding.UTF8.GetBytes("\u001b[24;5~"));
+            _connection.Send(Encoding.UTF8.GetBytes("\u001b[24;7~\u001b[24;5~"));
         }
     }
 
@@ -365,6 +368,22 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         catch (InvalidOperationException) { _reanchorColumns = null; return; }
         _reanchorInFlight = true;
         _reanchorAttempts++;
+    }
+
+    private void MailboxMarker(string message)
+    {
+        if (message == "mailbox-armed") { _mailboxArmed = _mailboxPending is not null; return; }
+        if (!_mailboxArmed || _mailboxPending is not { } pending ||
+            message is not ("mailbox-rejected;read" or "mailbox-rejected;format")) return;
+        _mailboxArmed = false;
+        _mailboxPending = null;
+        _prompt.State = ShellPromptState.Ready;
+        if (_owned is not { } owned || owned.Id != pending) return;
+        _owned = null;
+        owned.Completion.TrySetResult(new(TerminalExecutionStatus.Completed, owned.Capture.Text, false,
+            Message: message.EndsWith(";read", StringComparison.Ordinal)
+                ? "Protected command mailbox could not be read. No command was accepted."
+                : "Invalid command mailbox. No command was accepted."));
     }
 
     private void ReanchorMarker(string message)

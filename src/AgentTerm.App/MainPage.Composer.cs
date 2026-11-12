@@ -264,7 +264,11 @@ public sealed partial class MainPage
                 catch (OperationCanceledException) { }
             }
             OpenSurface(task, explicitHandoff);
-            if (request.Length > 0) await SendToAgentAsync(request);
+            if (request.Length > 0)
+            {
+                AgentReply.Text = request;
+                await SendToAgentAsync(request);
+            }
         }
         finally { _startingTask = false; RefreshAgentChrome(); }
     }

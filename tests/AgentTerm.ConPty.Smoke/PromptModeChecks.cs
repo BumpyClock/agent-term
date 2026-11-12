@@ -5,10 +5,19 @@ internal static class PromptModeChecks
 {
     internal static async Task ProbeAsync()
     {
-        await using var session = new TerminalSession(120, 30, TestShell.Profile);
+        var directory = Path.Combine(Path.GetTempPath(), "agent-transition-界-🙂-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try { await ProbeDirectoryAsync(directory); }
+        finally { Directory.Delete(directory, true); }
+    }
+    private static async Task ProbeDirectoryAsync(string directory)
+    {
+        await using var session = new TerminalSession(120, 30, TestShell.Profile with { StartingDirectory = directory });
         await TestShell.StartLegacyAsync(session);
         await Ready(session);
-        var prompt = session.ReadText().Replace("\r", "").TrimEnd().Split('\n')[^1] + " ";
+        var prompt = "PS " + new string('p', 85) + "> ";
+        var setup = await session.ExecuteAsync(new("$global:__AgentTermPrompt = { '" + prompt + "' }; Set-PSReadLineOption -PredictionSource None -HistorySaveStyle SaveNothing"));
+        Check(session, setup.Succeeded == true, "Transition fixture installs a deterministic ASCII prompt in a Unicode directory.");
         session.Send("echo transition-probe\r");
         await Wait(session, () => session.PromptState == ShellPromptState.Ready && session.ReadText().Replace("\r", "").Contains("echo transition-probe\ntransition-probe"));
         foreach (var width in new ushort[] { 72, 40, 120 })
@@ -21,7 +30,7 @@ internal static class PromptModeChecks
             var rows = string.Join("\n", Enumerable.Range(0, (echo.Length + width - 1) / width)
                 .Select(i => echo.Substring(i * width, Math.Min(width, echo.Length - i * width))));
             var screen = session.ReadText().Replace("\r", "");
-            Check(session, screen.Contains(rows + "\ntransition-probe"), "Native echo and output stay adjacent after resize at the observed prompt width.");
+            Check(session, screen.Contains(rows + "\ntransition-probe"), "Native echo and output stay adjacent after resize with an ASCII cell-width fixture.");
         }
     }
     private static async Task Wait(TerminalSession session, Func<bool> condition)

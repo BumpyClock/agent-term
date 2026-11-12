@@ -43,16 +43,21 @@ internal static class ShellIntegration
                                 Set-PSReadLineKeyHandler -Chord $chord -ViMode Command -ScriptBlock $handler
                             } else { Set-PSReadLineKeyHandler -Chord $chord -ScriptBlock $handler }
                         }
-                        __AgentTermBindMailbox 'Ctrl+F12' {
+                        __AgentTermBindMailbox 'Ctrl+Alt+F12' {
+                            $global:__AgentTermMailboxRejected = $false
+                            __AgentTermReport 'mailbox-armed'
+                        }
+                        function global:__AgentTermAcceptMailbox {
+                            if ($global:__AgentTermMailboxRejected) { return }
                             $reader = $null
                             try {
                                 $stream = [IO.File]::Open($global:__AgentTermCommandPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]'ReadWrite,Delete')
                                 $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8)
                                 $mail = $reader.ReadToEnd()
-                            } catch { Write-Error 'Protected command mailbox could not be read. No command was accepted.'; return }
+                            } catch { $global:__AgentTermMailboxRejected = $true; __AgentTermReport 'mailbox-rejected;read'; return }
                             finally { if ($reader) { $reader.Dispose() } }
                             $split = $mail.IndexOf("`n")
-                            if ($split -lt 1) { Write-Error 'Invalid command mailbox. No command was accepted.'; return }
+                            if ($split -lt 1) { $global:__AgentTermMailboxRejected = $true; __AgentTermReport 'mailbox-rejected;format'; return }
                             $mailId = $mail.Substring(0, $split)
                             if ($mailId -eq $global:__AgentTermConsumedId) { return }
                             $global:__AgentTermConsumedId = $mailId
@@ -86,6 +91,7 @@ internal static class ShellIntegration
                             if ($global:__AgentTermCommandId.StartsWith('a:')) { [Console]::WriteLine(('Command started [' + $global:__AgentTermCommandId + ']')) }
                             __AgentTermReport ('start;' + $global:__AgentTermCommandId)
                         }
+                        __AgentTermBindMailbox 'Ctrl+F12' { __AgentTermAcceptMailbox }
                         __AgentTermBindMailbox 'Alt+Shift+F12' {
                             if ($global:__AgentTermDraft.Length -gt 0) { [Microsoft.PowerShell.PSConsoleReadLine]::Insert($global:__AgentTermDraft) }
                             [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($global:__AgentTermDraftCursor)

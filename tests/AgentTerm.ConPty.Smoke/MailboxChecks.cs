@@ -38,6 +38,47 @@ internal static class MailboxChecks
             var count = await session.ExecuteAsync(new("Write-Output ('COUNT:' + $global:mailboxCount)"));
             if (!count.Output.Contains("COUNT:2")) throw new Exception("Consumed mailbox was replayed.");
             if (session.AgentOwnsTerminal) throw new Exception("Mailbox did not release ownership after restoring draft.");
+            var delayedReport = await session.ExecuteAsync(new(
+                "__AgentTermBindMailbox 'Ctrl+Alt+F12' { " +
+                "__AgentTermBindMailbox 'Ctrl+Alt+F12' { $global:__AgentTermMailboxRejected = $false; __AgentTermReport 'mailbox-armed' }; " +
+                "__AgentTermReport 'mailbox-rejected;format'; " +
+                "$global:__AgentTermMailboxRejected = $false; __AgentTermReport 'mailbox-armed' }"));
+            if (delayedReport.Succeeded != true) throw new Exception("Could not install delayed mailbox report fixture.");
+            var afterDelayedReport = await session.ExecuteAsync(new("Write-Output ('DELAYED:' + $global:mailboxCount)"));
+            if (afterDelayedReport.Succeeded != true || !afterDelayedReport.Output.Contains("DELAYED:2"))
+                throw new Exception("A rejection preceding the dispatch arm settled the new command.");
+            foreach (var failure in new[] { "read", "format", "empty-id" })
+            {
+                var faultPath = path + "." + failure;
+                if (failure != "read") File.WriteAllText(faultPath, failure == "format" ? "no-separator" : "\nno-id");
+                try
+                {
+                    var install = await session.ExecuteAsync(new(
+                        "$global:mailboxFaultPath = '" + faultPath.Replace("'", "''") + "'; " +
+                        "__AgentTermBindMailbox 'Ctrl+F12' { " +
+                        "__AgentTermBindMailbox 'Ctrl+F12' { __AgentTermAcceptMailbox }; " +
+                        "$saved = $global:__AgentTermCommandPath; " +
+                        "try { $global:__AgentTermCommandPath = $global:mailboxFaultPath; __AgentTermAcceptMailbox } " +
+                        "finally { $global:__AgentTermCommandPath = $saved } }"));
+                    if (install.Succeeded != true) throw new Exception("Could not install mailbox fault fixture.");
+                    var draft = "Write-Output ('DRAFT-" + failure + ":' + 'AC')";
+                    session.Send(draft);
+                    await Wait(session, () => session.ReadText().Contains(draft));
+                    session.Send("\u001b[D\u001b[D\u001b[D");
+                    var failed = await session.ExecuteAsync(new("Write-Output ('STALE:' + (++$global:mailboxCount))")).WaitAsync(TimeSpan.FromSeconds(25));
+                    var expected = failure == "read" ? "could not be read" : "Invalid command mailbox";
+                    if (failed.Succeeded != false || failed.Message?.Contains(expected, StringComparison.Ordinal) != true ||
+                        session.AgentOwnsTerminal || session.PromptState != ShellPromptState.Ready)
+                        throw new Exception("Mailbox " + failure + " rejection did not settle its owner. " + failed);
+                    session.Send("\u001b[24;5~B\r");
+                    await Wait(session, () => session.PromptState == ShellPromptState.Ready && session.ReadText().Replace("\r", "").Contains("\nDRAFT-" + failure + ":ABC\n"));
+                    var recovered = await session.ExecuteAsync(new("Write-Output ('RECOVERED:' + $global:mailboxCount)"));
+                    if (recovered.Succeeded != true || !recovered.Output.Contains("RECOVERED:2") || recovered.Output.Contains("STALE:"))
+                        throw new Exception("Rejected mailbox replayed or blocked recovery after " + failure + ". " + recovered);
+                }
+                finally { File.Delete(faultPath); }
+            }
+
         }
         finally
         {

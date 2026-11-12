@@ -50,7 +50,8 @@ public sealed class TimelineWorkGroup(Guid turn) : TimelineEntry(turn)
                 });
             }
             var settled = counts.Count > 1 ? string.Join(", ", counts[..^1]) + " and " + char.ToLowerInvariant(counts[^1][0]) + counts[^1][1..] : counts.FirstOrDefault() ?? "";
-            var active = _tools.LastOrDefault(t => t.Status == WorkStatus.Running);
+            var active = _tools.LastOrDefault(t => t.Status == WorkStatus.Running && t.Executing)
+                ?? _tools.LastOrDefault(t => t.Status == WorkStatus.Running);
             var label = active is null ? settled : active.Executing ? $"Running {active.Action}" : $"Pending {active.Action}";
             var failed = _tools.Count(t => t.Status == WorkStatus.Failed);
             var cancelled = _tools.Count(t => t.Status == WorkStatus.Cancelled);

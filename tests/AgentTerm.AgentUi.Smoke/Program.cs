@@ -35,6 +35,11 @@ internal static class Program
                 _result = await RequestFocusChecks.RunAsync(window);
                 return;
             }
+            if (Environment.GetCommandLineArgs().Contains("--request-layout"))
+            {
+                await RequestLayoutChecks.RunAsync(window);
+                return;
+            }
             if (Environment.GetCommandLineArgs().Contains("--pane-header"))
             {
                 await PaneHeaderChecks.RunAsync(window);
@@ -110,7 +115,11 @@ internal static class Program
             await controller.SubmitAsync("Fail fixture", new(Environment.CurrentDirectory));
             fixture.Session.Emit(new TurnFailed(fixture.Session.Turn, "Safe fixture failure"));
             await WaitAsync(() => HasText(view, "Failed") && HasText(view, "Safe fixture failure"));
-            if (!Environment.GetCommandLineArgs().Contains("--timeline-only")) _result = await RequestFocusChecks.RunAsync(window);
+            if (!Environment.GetCommandLineArgs().Contains("--timeline-only"))
+            {
+                await RequestLayoutChecks.RunAsync(window);
+                _result = await RequestFocusChecks.RunAsync(window);
+            }
             Console.WriteLine($"Native single-tool timeline rendered {activeFrames} active frames; waiting and completed frames stayed static. Motion enabled={moving}.");
         }
         catch (Exception error) { Console.Error.WriteLine(error); _result = 1; }

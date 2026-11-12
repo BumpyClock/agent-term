@@ -1,31 +1,29 @@
 <UserControl
     x:Class="AgentTerm_App.AgentRequestPanel"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:AgentTerm_App">
     <Border Padding="12,10" CornerRadius="6" BorderThickness="1"
             BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
         <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
-            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                <FontIcon Glyph="&#xEA18;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
-                <TextBlock x:Name="RequestTitle" Grid.Column="1" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center"
-                           AutomationProperties.LiveSetting="Assertive" />
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                    <Button x:Name="DenyRequest" Style="{StaticResource AgentQuietButtonStyle}" Padding="8,2" Click="DenyRequest_Click" KeyDown="Approval_KeyDown"
-                            AutomationProperties.Name="Reject" ToolTipService.ToolTip="Reject (Ctrl+C)">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Reject" VerticalAlignment="Center" />
-                            <Border Style="{StaticResource AgentKeyChip}"><TextBlock Text="Ctrl+C" FontSize="11" /></Border>
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="ApproveRequest" Style="{StaticResource AccentButtonStyle}" Padding="10,3" MinHeight="0" Click="ApproveRequest_Click" KeyDown="Approval_KeyDown"
-                            AutomationProperties.Name="Run once" ToolTipService.ToolTip="Allow this once (Enter)">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Run" VerticalAlignment="Center" />
-                            <TextBlock Text="&#x21B5;" VerticalAlignment="Center" Opacity="0.8" />
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
-            </Grid>
+            <local:RequestHeaderLayout>
+                <FontIcon Glyph="&#xEA18;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="RequestTitle" FontSize="13" TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive" />
+                <Button x:Name="DenyRequest" Style="{StaticResource AgentQuietButtonStyle}" Padding="8,2" Click="DenyRequest_Click" KeyDown="Approval_KeyDown"
+                        AutomationProperties.Name="Reject" ToolTipService.ToolTip="Reject (Ctrl+C)">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Reject" VerticalAlignment="Center" />
+                        <Border Style="{StaticResource AgentKeyChip}"><TextBlock Text="Ctrl+C" FontSize="11" /></Border>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ApproveRequest" Style="{StaticResource AccentButtonStyle}" Padding="10,3" MinHeight="0" Click="ApproveRequest_Click" KeyDown="Approval_KeyDown"
+                        AutomationProperties.Name="Run once" ToolTipService.ToolTip="Allow this once (Enter)">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Run" VerticalAlignment="Center" />
+                        <TextBlock Text="&#x21B5;" VerticalAlignment="Center" Opacity="0.8" />
+                    </StackPanel>
+                </Button>
+            </local:RequestHeaderLayout>
             <Border x:Name="RequestDetail" Grid.Row="1" Padding="10,6" CornerRadius="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
                 <ScrollViewer MaxHeight="120" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                     <TextBlock x:Name="RequestText" Style="{StaticResource AgentBodyText}" />

@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
 
 namespace AgentTerm_App;
 
@@ -72,4 +73,85 @@ public sealed partial class AgentRequestPanel : UserControl
 
     private async void ApproveRequest_Click(object sender, RoutedEventArgs e) => await ApproveAsync();
     private async void DenyRequest_Click(object sender, RoutedEventArgs e) => await DenyAsync();
+}
+
+public sealed partial class RequestHeaderLayout : Panel
+{
+    private const double MinimumTitleWidth = 120;
+    private const double ColumnSpacing = 10;
+    private const double ActionSpacing = 6;
+    private const double RowSpacing = 8;
+
+    private enum Arrangement { Inline, ActionRow, Stacked }
+
+    private double _actionsWidth;
+
+    private Arrangement Current { get; set; }
+
+    protected override Size MeasureOverride(Size available)
+    {
+        var (icon, title, actions) = Parts();
+        var unbounded = new Size(double.PositiveInfinity, double.PositiveInfinity);
+        icon.Measure(unbounded);
+        foreach (var action in actions) action.Measure(unbounded);
+        _actionsWidth = actions.Sum(action => action.DesiredSize.Width) + ActionSpacing * Math.Max(0, actions.Length - 1);
+        var lead = icon.DesiredSize.Width + ColumnSpacing;
+        var inlineActions = actions.Length == 0 ? 0 : ColumnSpacing + _actionsWidth;
+        if (double.IsPositiveInfinity(available.Width))
+        {
+            title.Measure(unbounded);
+            Current = Arrangement.Inline;
+            return new(lead + title.DesiredSize.Width + inlineActions, Math.Max(Math.Max(icon.DesiredSize.Height, title.DesiredSize.Height), Tallest(actions)));
+        }
+
+        var width = available.Width;
+        Current = actions.Length == 0 || width - lead - inlineActions >= MinimumTitleWidth ? Arrangement.Inline
+            : _actionsWidth <= width ? Arrangement.ActionRow
+            : Arrangement.Stacked;
+        title.Measure(new(Math.Max(0, width - lead - (Current == Arrangement.Inline ? inlineActions : 0)), double.PositiveInfinity));
+        var head = Math.Max(icon.DesiredSize.Height, title.DesiredSize.Height);
+        return Current switch
+        {
+            Arrangement.Inline => new(width, Math.Max(head, Tallest(actions))),
+            Arrangement.ActionRow => new(width, head + RowSpacing + Tallest(actions)),
+            _ => new(width, head + actions.Sum(action => RowSpacing + action.DesiredSize.Height)),
+        };
+    }
+
+    protected override Size ArrangeOverride(Size final)
+    {
+        var (icon, title, actions) = Parts();
+        var lead = icon.DesiredSize.Width + ColumnSpacing;
+        var inline = Current == Arrangement.Inline;
+        var head = inline ? final.Height : Math.Max(icon.DesiredSize.Height, title.DesiredSize.Height);
+        var titleWidth = Math.Max(0, final.Width - lead - (inline && actions.Length > 0 ? ColumnSpacing + _actionsWidth : 0));
+        icon.Arrange(new(0, (head - icon.DesiredSize.Height) / 2, icon.DesiredSize.Width, icon.DesiredSize.Height));
+        title.Arrange(new(lead, (head - title.DesiredSize.Height) / 2, titleWidth, title.DesiredSize.Height));
+
+        var x = final.Width - _actionsWidth;
+        var y = inline ? 0 : head + RowSpacing;
+        foreach (var action in actions)
+        {
+            var size = action.DesiredSize;
+            switch (Current)
+            {
+                case Arrangement.Stacked:
+                    var width = Math.Min(size.Width, final.Width);
+                    action.Arrange(new(final.Width - width, y, width, size.Height));
+                    y += size.Height + RowSpacing;
+                    break;
+                default:
+                    var row = inline ? final.Height : Tallest(actions);
+                    action.Arrange(new(x, y + (row - size.Height) / 2, size.Width, size.Height));
+                    x += size.Width + ActionSpacing;
+                    break;
+            }
+        }
+        return final;
+    }
+
+    private (UIElement Icon, UIElement Title, UIElement[] Actions) Parts() =>
+        (Children[0], Children[1], Children.Skip(2).Where(child => child.Visibility == Visibility.Visible).ToArray());
+
+    private static double Tallest(UIElement[] elements) => elements.Length == 0 ? 0 : elements.Max(element => element.DesiredSize.Height);
 }

@@ -146,7 +146,7 @@ internal static class RequestFocusChecks
         _ => element.GetType().Name,
     };
 
-    private sealed class Pane : IAsyncDisposable
+    internal sealed class Pane : IAsyncDisposable
     {
         public Pane(DispatcherQueue dispatcher, string name)
         {
@@ -170,6 +170,8 @@ internal static class RequestFocusChecks
         public Button Approve => (Button)Panel.FindName("ApproveRequest");
         public Button Reject => (Button)Panel.FindName("DenyRequest");
         public TextBlock RequestText => (TextBlock)Panel.FindName("RequestText");
+        public TextBlock Title => (TextBlock)Panel.FindName("RequestTitle");
+        public FrameworkElement Detail => (FrameworkElement)Panel.FindName("RequestDetail");
         public StackPanel Choices => (StackPanel)Panel.FindName("RequestChoices");
 
         public async Task StartAsync()
