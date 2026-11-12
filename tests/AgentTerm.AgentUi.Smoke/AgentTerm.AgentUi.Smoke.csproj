@@ -18,7 +18,11 @@
     <ProjectReference Include="../../src/AgentTerm.Terminal/AgentTerm.Terminal.csproj" />
     <Compile Include="../../src/AgentTerm.App/ProgramStatusPresentation.cs" Link="ProgramStatusPresentation.cs" />
     <Compile Include="../../src/AgentTerm.App/TabProgramStatus.cs" Link="TabProgramStatus.cs" />
+    <Compile Include="../../src/AgentTerm.App/ProgramStatusIcon.cs" Link="ProgramStatusIcon.cs" />
+    <Compile Include="../../src/AgentTerm.App/ExecutableIcon.cs" Link="ExecutableIcon.cs" />
+    <Compile Include="../../src/AgentTerm.App/ProgramStatusCard.cs" Link="ProgramStatusCard.cs" />
     <Compile Include="../../src/AgentTerm.App/SidebarTabItem.cs" Link="SidebarTabItem.cs" />
+    <Compile Include="../../src/AgentTerm.App/TabSidebarLayout.cs" Link="TabSidebarLayout.cs" />
     <Compile Include="../../src/AgentTerm.App/ActivityLabel.cs" Link="ActivityLabel.cs" />
     <Compile Include="../../src/AgentTerm.App/AgentTimelineView.cs" Link="AgentTimelineView.cs" />
     <Page Include="../../src/AgentTerm.App/AgentStyles.xaml" Link="AgentStyles.xaml" />

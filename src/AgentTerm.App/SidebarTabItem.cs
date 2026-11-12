@@ -42,7 +42,7 @@ internal sealed class SidebarTabItem : ListViewItem
         };
         close.Click += (_, _) => CloseRequested?.Invoke(this, _menuFromKeyboard);
         _menu = new MenuFlyout { Items = { close } };
-        if (tab.Tag is TabProgramStatus status) _menu.Items.Add(status.CreateDetailsMenuItem(this));
+        if (tab.Tag is TabProgramStatus status) status.Attach(this);
         SizeChanged += (_, _) => UpdateToolTip();
         ContextRequested += ShowMenu;
         Refresh();
@@ -56,6 +56,7 @@ internal sealed class SidebarTabItem : ListViewItem
     // Rows are rebuilt on every switch to Left; detached rows must stop following their tab.
     internal void Detach()
     {
+        if (Tab.Tag is TabProgramStatus status) status.Detach(this);
         foreach (var (property, token) in _callbacks) Tab.UnregisterPropertyChangedCallback(property, token);
     }
 
@@ -98,18 +99,11 @@ internal sealed class SidebarTabItem : ListViewItem
         base.OnPointerPressed(e);
     }
 
-    // IconSource instances already back the hidden TabViewItem; each row builds its own element from the same source.
-    private static IconElement? CreateIcon(IconSource? source) => source switch
-    {
-        ImageIconSource image => new ImageIcon { Source = image.ImageSource },
-        FontIconSource font => new FontIcon { Glyph = font.Glyph, FontSize = 16 },
-        _ => null
-    };
-
     // Keep the target visible for both pointer and keyboard requests.
     private void ShowMenu(UIElement sender, ContextRequestedEventArgs e)
     {
         e.Handled = true;
+        if (Tab.Tag is TabProgramStatus status) status.Hide();
         if (ToolTipService.GetToolTip(this) is ToolTip tooltip) tooltip.IsOpen = false;
         var list = ItemsControl.ItemsControlFromItemContainer(this);
         var duplicateTitle = list?.Items.OfType<SidebarTabItem>().Count(row => row.Title == Title) > 1;
@@ -130,15 +124,7 @@ internal sealed class SidebarTabItem : ListViewItem
 
     private object? ToolTipContent(string details)
     {
-        if (details.Length > 0)
-            return new StackPanel
-            {
-                Children =
-                {
-                    TabProgramStatus.CreateToolTip(Title, details),
-                    new TextBlock { Text = _compact ? TabActions : "", MaxWidth = 420, TextWrapping = TextWrapping.Wrap }
-                }
-            };
+        if (details.Length > 0) return null;
         if (string.IsNullOrEmpty(Title)) return null;
         if (!_compact) return _title?.IsTextTrimmed == true ? Title : null;
         return new StackPanel
@@ -154,7 +140,7 @@ internal sealed class SidebarTabItem : ListViewItem
     private void UpdateToolTip()
     {
         var details = (string)Tab.GetValue(TabProgramStatus.DetailsProperty);
-        AutomationProperties.SetHelpText(this, details.Length == 0 ? TabActions : details + "\n\n" + TabActions);
+        AutomationProperties.SetHelpText(this, details.Length == 0 ? TabActions : details + "\nAlt+Down opens program status. Escape dismisses it.\n" + TabActions);
         var tip = ToolTipContent(details);
         ToolTipService.SetToolTip(this, tip is null ? null : new ToolTip
         {
@@ -174,7 +160,7 @@ internal sealed class SidebarTabItem : ListViewItem
         IsEnabled = Tab.IsEnabled;
         AutomationProperties.SetName(this, title);
         UpdateToolTip();
-        if (_icon is not null) _icon.Content = CreateIcon(Tab.IconSource);
+        if (_icon is not null && _icon.Content is not ProgramStatusIcon) _icon.Content = new ProgramStatusIcon { Tab = Tab };
         if (_closeButton is not null)
         {
             AutomationProperties.SetName(_closeButton, $"Close {title}");

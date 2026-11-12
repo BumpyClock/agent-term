@@ -271,6 +271,13 @@ public sealed partial class MainWindow : Window
         {
             e.Handled = true;
         }
+        else if (alt && !control && !shift && e.Key == VirtualKey.Down && IsTabHeader(e.OriginalSource))
+        {
+            var header = (FrameworkElement)e.OriginalSource;
+            var tabItem = header is SidebarTabItem row ? row.Tab : (TabViewItem)header;
+            if (tabItem.Tag is TabProgramStatus status) status.ShowDetails(header);
+            e.Handled = true;
+        }
         else if (!control && !shift && !alt && e.Key == VirtualKey.Escape && !IsTabHeader(e.OriginalSource) && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
         {
             e.Handled = true;
