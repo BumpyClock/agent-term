@@ -17,7 +17,7 @@ namespace AgentTerm_App;
 internal sealed partial class SettingsWindow : Window
 {
     private readonly record struct SettingsValues(string ProfileId, string FontFamily, int FontSize, bool UseAcrylic,
-        double BackgroundOpacity);
+        double BackgroundOpacity, TabPosition TabPosition);
     private sealed record ProfileDraft(string? FontFamily, bool InheritFontSize, string? FontSizeText, bool? UseAcrylic,
         bool InheritOpacity, double? BackgroundOpacity);
 
@@ -90,6 +90,7 @@ internal sealed partial class SettingsWindow : Window
         CaptureProfileDraft();
         _shownProfileId = (e.SelectedItem as NavigationViewItem)?.Tag as string;
         StartupPage.Visibility = ReferenceEquals(e.SelectedItem, StartupItem) ? Visibility.Visible : Visibility.Collapsed;
+        TabsPage.Visibility = ReferenceEquals(e.SelectedItem, TabsItem) ? Visibility.Visible : Visibility.Collapsed;
         DefaultsPage.Visibility = ReferenceEquals(e.SelectedItem, DefaultsItem) ? Visibility.Visible : Visibility.Collapsed;
         ProfilePage.Visibility = _shownProfileId is null ? Visibility.Collapsed : Visibility.Visible;
         if (_shownProfileId is { } id) LoadProfileDraft(id);
@@ -99,7 +100,7 @@ internal sealed partial class SettingsWindow : Window
     private void RestoreDraft()
     {
         _saved = new SettingsValues(_preferences.DefaultProfileId ?? "", _preferences.FontFamily,
-            _preferences.FontSize, _preferences.UseAcrylic, _preferences.BackgroundOpacity);
+            _preferences.FontSize, _preferences.UseAcrylic, _preferences.BackgroundOpacity, _preferences.TabPosition);
         _updatingControls = true;
         _savedOverrides = _preferences.ProfileOverrides.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         _profileDrafts.Clear();
@@ -118,6 +119,8 @@ internal sealed partial class SettingsWindow : Window
         PopulateChoices(FontFamilyBox, _saved.FontFamily, $"Automatic ({fonts[0]})", fonts.Select(font => (font, font)));
         FontSizeBox.Text = _saved.FontSize.ToString(CultureInfo.InvariantCulture);
         BackgroundBox.SelectedIndex = _saved.UseAcrylic ? 1 : 0;
+        TabPositionBox.SelectedIndex = (int)_saved.TabPosition;
+        UpdateSelectionToolTip(TabPositionBox);
         OpacitySlider.Value = _saved.BackgroundOpacity * 100;
         DisplayOpacity();
         if (_shownProfileId is { } id) LoadProfileDraft(id);
@@ -262,7 +265,7 @@ internal sealed partial class SettingsWindow : Window
         bool dirty = SelectedValue(DefaultProfileBox) != _saved.ProfileId || SelectedValue(FontFamilyBox) != _saved.FontFamily ||
             FontSizeBox.Text != _saved.FontSize.ToString(CultureInfo.InvariantCulture) ||
             BackgroundBox.SelectedIndex != (_saved.UseAcrylic ? 1 : 0) ||
-            OpacitySlider.Value != _saved.BackgroundOpacity * 100 || profilesDirty;
+            OpacitySlider.Value != _saved.BackgroundOpacity * 100 || SelectedTabPosition != _saved.TabPosition || profilesDirty;
         SaveButton.IsEnabled = DiscardButton.IsEnabled = dirty;
         FooterStatus.Text = dirty ? "Unsaved changes. Closing this window discards them." : "";
     }
@@ -303,7 +306,11 @@ internal sealed partial class SettingsWindow : Window
             else
                 overrides[shell.Id] = value;
         }
-        try { _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides, OpacitySlider.Value / 100); }
+        try
+        {
+            _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides, OpacitySlider.Value / 100,
+                SelectedTabPosition);
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             ShowNotice(InfoBarSeverity.Error, "Settings could not be saved", exception.Message);
@@ -313,6 +320,8 @@ internal sealed partial class SettingsWindow : Window
         RestoreDraft();
         FooterStatus.Text = "Settings saved.";
     }
+
+    private TabPosition SelectedTabPosition => TabPositionBox.SelectedIndex == 1 ? TabPosition.Left : TabPosition.Top;
 
     private static bool TryFontSize(string? text, out int size) =>
         int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out size) && size is >= 8 and <= 36;

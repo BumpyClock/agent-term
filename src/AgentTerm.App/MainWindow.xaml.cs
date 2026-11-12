@@ -141,6 +141,7 @@ public sealed partial class MainWindow : Window
             header.Width = 0;
         if (FindVisualChild<ScrollContentPresenter>(Tabs, "ScrollContentPresenter") is { } presenter)
             presenter.Padding = new Thickness(0);
+        if (_tabStrip is null) InitializeTabSidebar();
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
@@ -169,6 +170,7 @@ public sealed partial class MainWindow : Window
         {
             item.Header = tab.Title;
             _ = SetShellIconAsync(item, tab);
+            if (ReferenceEquals(Tabs.SelectedItem, item)) UpdateWindowTitle();
         };
         tab.CloseRequested += async () => await CloseTabAsync(item);
         Tabs.TabItems.Add(item);
@@ -196,6 +198,7 @@ public sealed partial class MainWindow : Window
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        SyncSidebarSelection();
         var next = (Tabs.SelectedItem as TabViewItem)?.Content as TerminalTab;
         if (ReferenceEquals(next, _visibleTab)) return;
         _visibleTab?.SetVisible(false);
@@ -208,19 +211,24 @@ public sealed partial class MainWindow : Window
     private async void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args) =>
         await CloseTabAsync(args.Tab);
 
-    private async Task CloseTabAsync(TabViewItem item)
+    private async Task CloseTabAsync(TabViewItem item, bool keyboard = false)
     {
         if (_closing || !item.IsClosable || item.Content is not TerminalTab tab) return;
 
         item.IsClosable = false;
         item.IsEnabled = false;
+        var focusAfterDisable = keyboard ? FocusManager.GetFocusedElement(WindowRoot.XamlRoot) : null;
         await tab.DisposeAsync();
         if (_closing) return;
 
+        // Disabling the row can move focus. Preserve later user moves, before removal moves it again.
+        var restoreHeaderFocus = keyboard &&
+            ReferenceEquals(FocusManager.GetFocusedElement(WindowRoot.XamlRoot), focusAfterDisable);
         var index = Tabs.TabItems.IndexOf(item);
         Tabs.TabItems.Remove(item);
         if (Tabs.TabItems.Count == 0) Close();
         else if (Tabs.SelectedItem is null) Tabs.SelectedIndex = Math.Min(index, Tabs.TabItems.Count - 1);
+        if (restoreHeaderFocus && !_closing) FocusSelectedTab();
     }
 
     private void SwitchTab(int direction)
@@ -246,7 +254,7 @@ public sealed partial class MainWindow : Window
         var alt = Down(VirtualKey.Menu);
         var firstPress = !e.KeyStatus.WasKeyDown;
 
-        if (!control && !shift && !alt && e.Key == VirtualKey.Escape && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
+        if (!control && !shift && !alt && e.Key == VirtualKey.Escape && !IsTabHeader(e.OriginalSource) && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
         {
             e.Handled = true;
         }
@@ -271,6 +279,22 @@ public sealed partial class MainWindow : Window
                     _visibleTab?.SplitDuplicate();
                     break;
             }
+        }
+        else if (control && !shift && !alt && e.Key == VirtualKey.F4 && e.OriginalSource is SidebarTabItem focusedRow)
+        {
+            // TabView's own Ctrl+F4 only sees focus inside the TabView; a focused sidebar row closes itself.
+            e.Handled = true;
+            if (firstPress) await CloseTabAsync(focusedRow.Tab, keyboard: true);
+        }
+        else if (control && shift && !alt && e.Key == VirtualKey.E)
+        {
+            e.Handled = true;
+            if (firstPress) FocusSelectedTab();
+        }
+        else if (!control && !shift && !alt && e.Key == VirtualKey.Escape && IsTabHeader(e.OriginalSource))
+        {
+            e.Handled = true;
+            _visibleTab?.FocusActivePane();
         }
         else if (alt && shift && !control && (uint)e.Key is 0xBB or 0x6B or 0xBD or 0x6D or 0x44)
         {

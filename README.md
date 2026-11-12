@@ -23,6 +23,9 @@ An avatar button at the right end of the title bar opens a GitHub dashboard with
 | New default-profile tab | Plus button or Ctrl+Shift+T |
 | New profile tab | Profile dropdown |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Move focus to the tabs | Ctrl+Shift+E; Escape returns to the terminal |
+| Close tab | Close button, middle-click, or Ctrl+F4; the left sidebar also has a context menu |
+| Reorder tabs | Drag a tab |
 | Close active pane or tab | Ctrl+Shift+W |
 | Split active pane | Ctrl+Shift+D, Alt+Shift++ or Alt+Shift+- |
 | Focus adjacent pane | Alt+arrow |
@@ -52,11 +55,11 @@ IME input uses a native WinUI text input host positioned at the terminal cursor.
 
 ## Appearance and profiles
 
-Settings opens in its own window from the profile menu or Ctrl+,. The terminal stays usable while settings is open. **Startup** selects the default shell. **Profiles > Defaults** sets the shared font family, font size, pane background, and acrylic opacity. Each discovered shell has its own **Appearance** page under Profiles. Changes stay in a draft across pages until **Save**. **Discard changes** restores saved values; closing the window discards unsaved edits.
+Settings opens in its own window from the profile menu or Ctrl+,. The terminal stays usable while settings is open. **Startup** selects the default shell. **Tabs** places tabs on the top or the left. **Profiles > Defaults** sets the shared font family, font size, pane background, and acrylic opacity. Each discovered shell has its own **Appearance** page under Profiles. Changes stay in a draft across pages until **Save**. **Discard changes** restores saved values; closing the window discards unsaved edits.
 
 Each profile inherits Defaults unless a setting is overridden. Choose **Use default** to restore inheritance for a field, or reset the profile to remove all its overrides. An explicit **Automatic** font uses the app's installed-font selection independently of the font chosen in Defaults. Saving updates existing panes for that profile and applies to future tabs and splits. Overrides for temporarily unavailable profiles remain saved.
 
-Settings save the default profile, shared appearance defaults, and profile overrides to `%LOCALAPPDATA%\AgentTerm\settings.json`. The window uses Windows Mica with native caption controls and rounded tabs. Each terminal sits in a rounded card with quiet header actions, 4-DIP outer spacing and gutters, and a subtle native shadow. Every pane has a faint theme-aware boundary, light in dark mode and dark in light mode. Split panes add a restrained active-pane outline. Pane actions brighten on hover or keyboard focus. Settings uses the same rounded surfaces. Choose **Solid** for an opaque terminal or **Acrylic** for a separate desktop acrylic backdrop inside the pane. The main window and Settings keep Mica. The **Background opacity** slider adjusts acrylic tint using the terminal's actual background color, independently for each profile or inherited from Defaults. Tint and luminosity follow the automatic acrylic color calculation used by Windows Terminal's UWP brush. The current pane effect omits its 2% grain texture; equal percentage values are not yet verified to produce identical pixels. At 100%, the pane switches to an opaque surface. The slider is disabled for Solid. Text, selection, and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
+Settings save the default profile, tab position, shared appearance defaults, and profile overrides to `%LOCALAPPDATA%\AgentTerm\settings.json`. The window uses Windows Mica with native caption controls and rounded tabs. Each terminal sits in a rounded card with quiet header actions, 4-DIP outer spacing and gutters, and a subtle native shadow. Every pane has a faint theme-aware boundary, light in dark mode and dark in light mode. Split panes add a restrained active-pane outline. Pane actions brighten on hover or keyboard focus. Settings uses the same rounded surfaces. Choose **Solid** for an opaque terminal or **Acrylic** for a separate desktop acrylic backdrop inside the pane. The main window and Settings keep Mica. The **Background opacity** slider adjusts acrylic tint using the terminal's actual background color, independently for each profile or inherited from Defaults. Tint and luminosity follow the automatic acrylic color calculation used by Windows Terminal's UWP brush. The current pane effect omits its 2% grain texture; equal percentage values are not yet verified to produce identical pixels. At 100%, the pane switches to an opaque surface. The slider is disabled for Solid. Text, selection, and differently colored ANSI backgrounds remain opaque. Explicit ANSI backgrounds equal to the default background currently share its transparency behavior.
 
 Automatic font selection prefers an installed CaskaydiaCove Nerd Font, then Cascadia Mono, then Consolas. Settings lists available terminal fonts. No fonts are downloaded or installed. Acrylic panes use `SystemBackdropElement`; at low opacity they reveal a blurred desktop backdrop, not a clear view through the window. Windows controls material fallback when transparency is unavailable or the window is inactive. Mica is an opaque wallpaper-based material, so the window chrome itself does not reveal other windows.
 
@@ -65,6 +68,14 @@ New panes fade in over 200 ms. Closing panes fade out over 140 ms before removal
 Zoom applies to the current pane; Ctrl+0 restores that profile's font size. A saved font-size change updates panes whose resolved profile size changed. Saving another profile's settings preserves unrelated pane zoom. History is configured for 10 MiB and 10,000 physical lines; Ghostty retains whole pages, so these limits are approximate. WSL discovery is bounded and skips unavailable distributions. WSL itself is not installed by the app.
 
 This is a base terminal experience, not complete Windows Terminal compatibility. Live IME compatibility validation, a terminal UI Automation text provider, advanced profile editing, and custom themes/key bindings remain open. See [the parity tracker](docs/windows-terminal-parity.md).
+
+### Left tabs
+
+Choose **Settings > Tabs > Tab position > Left**, then **Save**, to show tabs in a sidebar. Open tabs, their shells, split panes, and the selected tab stay as they are. The change applies to the open window immediately and persists for future launches. Choose **Top** to return to the original tab strip. Settings without a saved position, or with an unknown value, keep tabs on top.
+
+The sidebar uses the top strip's pill shape and native theme resources for selection, hover, and pressed colors. The selected tab is bold and carries the accent selection indicator used by Windows navigation lists. Standard themes also fill and outline it. In high contrast the indicator uses the system highlight color, and the row outline is reserved for keyboard focus. Long titles end with an ellipsis; hovering a shortened title shows it in full. The title bar keeps the new-tab button, profile menu, window drag area, GitHub avatar, and caption buttons, and it shows the selected tab's full title. The new-tab button lines up with the sidebar icons. When the window is narrower than 680 DIPs, the sidebar collapses to shell icons. Each icon's tooltip shows the tab title and names the right-click and Shift+F10 tab actions and Ctrl+F4 close shortcut, and the title bar still names the selected tab. Many tabs scroll inside the sidebar between the pane card's top and bottom edges. The sidebar scrolls to the selected tab when the selection changes, when Ctrl+Shift+E focuses it, and when Left is applied. Title changes, closing other tabs, and reordering leave the scroll position alone. UI Automation reports the sidebar as a tab control with tab items, the same roles as the top strip.
+
+Ctrl+Shift+E is reserved by the window in both tab positions and is not sent to terminal programs. In the sidebar, it focuses the selected tab. Up and Down move focus without switching. Enter or Space opens the focused tab and returns focus to its terminal. Ctrl+F4 closes the focused tab. Shift+F10 or a right-click opens a close action labeled with the target tab title. Duplicate titles also include the tab position. After a keyboard close, focus returns to the selected tab in the sidebar. Escape returns to the terminal.
 
 ## Pane directory and Git status
 
@@ -112,7 +123,7 @@ The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packa
 
 ## Code map
 
-- `src/AgentTerm.App/MainWindow` owns the tab strip, profile menu, window backdrop, settings window lifetime, and window shutdown.
+- `src/AgentTerm.App/MainWindow` owns the tab strip, profile menu, window backdrop, settings window lifetime, and window shutdown. `MainWindow.TabSidebar.cs` applies the saved tab position and mirrors the TabView into the left sidebar. The TabView remains the only owner of tab order, selection, and terminal content. `SidebarTabItem.cs` renders one sidebar row, and `TabSidebarLayout.cs` holds the compact-width rule and the reorder that never detaches the selected tab.
 - `src/AgentTerm.App/SettingsWindow` owns settings navigation, draft edits, validation, and save/discard actions in a separate window.
 - `src/AgentTerm.App/TerminalTab.cs` owns nested pane layout, resizing, transitions, and active-pane focus.
 - `src/AgentTerm.App/TerminalPane` owns each card's material, directory/Git header, controls, and focus outline.

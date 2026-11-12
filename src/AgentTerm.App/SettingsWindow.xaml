@@ -32,6 +32,9 @@
             <NavigationViewItem x:Name="StartupItem" Content="Startup">
                 <NavigationViewItem.Icon><SymbolIcon Symbol="Play" /></NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Name="TabsItem" Content="Tabs">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE737;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItemHeader Content="Profiles" />
             <NavigationViewItem x:Name="DefaultsItem" Content="Defaults">
                 <NavigationViewItem.Icon><SymbolIcon Symbol="Font" /></NavigationViewItem.Icon>
@@ -56,6 +59,23 @@
                                 </StackPanel>
                                 <ComboBox x:Name="DefaultProfileBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                           AutomationProperties.Name="Default profile" SelectionChanged="DraftChanged" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel x:Name="TabsPage" Spacing="20" Visibility="Collapsed">
+                        <TextBlock Text="Tabs" FontSize="26" FontWeight="SemiBold" />
+                        <Border Style="{StaticResource SettingCard}">
+                            <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                <StackPanel Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock Text="Tab position" Style="{StaticResource SettingLabel}" />
+                                    <TextBlock Text="Show tabs above the panes or in a sidebar. Open tabs and panes keep running when you switch."
+                                               Style="{StaticResource SettingDescription}" />
+                                </StackPanel>
+                                <ComboBox x:Name="TabPositionBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                          AutomationProperties.Name="Tab position" SelectionChanged="DraftChanged">
+                                    <ComboBoxItem Content="Top" />
+                                    <ComboBoxItem Content="Left" />
+                                </ComboBox>
                             </Grid>
                         </Border>
                     </StackPanel>
