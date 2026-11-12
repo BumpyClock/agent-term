@@ -27,7 +27,12 @@ Pass when order changes, each tab retains its shell and history, the dragged tab
 8. Resize below 680 DIPs. The sidebar shows centered shell icons whose tooltips name the tab and mention right-click tab actions, and the title bar names the selected tab. The new-tab button stays centered over the icon column.
 9. Open more tabs than fit. Scroll the sidebar away from the selected tab, then change the selected tab's title by splitting it with another profile, and close an unselected tab. The scroll position must not move. Ctrl+Shift+Tab to an off-screen tab, Ctrl+Shift+E, and switching to Left with the last tab selected must each bring the selected tab into view.
 10. In an automation inspector, the sidebar is a `Tab` control with `TabItem` children. Each item exposes its title, selection state, and Invoke. Expanded rows contain a `Close <title>` button.
-11. Repeat the visual checks in light mode and high contrast, with Windows animations off, and at a larger Windows text size.
+11. With Windows animations enabled, record the sidebar while adding several tabs using the plus button and Ctrl+Shift+T. Existing rows must stay visible throughout each insertion. Repeat below 680 DIPs in compact mode. Check selection, close, and held drag reorder afterwards.
+12. Repeat the visual checks in light mode and high contrast, with Windows animations off, and at a larger Windows text size.
+
+The sidebar explicitly disables `ItemContainerTransitions`. The native ListView defaults can hide existing rows and fade them back in when a tab is added. Setting the property to `{x:Null}` prevents that replay without changing selection, scrolling, or drag handling. An empty XAML property element did not prevent the flash in the diagnostic recording. Keep this check when changing sidebar templates or upgrading Windows App SDK.
+
+On 2026-11-11, recordings of the Release build reproduced the disappearing rows before the fix and showed existing labels staying visible across three plus-button insertions afterwards. A compact-mode recording showed existing icons staying visible across three Ctrl+Shift+T insertions. UI Automation and held pointer input also verified selection, closing an unselected tab without changing selection, and moving Command Prompt before the PowerShell tabs. Windows animations remained enabled. The app's settings file was unchanged.
 
 On 2026-11-11, a Release build on Windows 11 at 150% scaling was checked in dark mode through UI Automation and synthetic input:
 

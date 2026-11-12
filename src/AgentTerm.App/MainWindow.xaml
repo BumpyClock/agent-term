@@ -517,9 +517,11 @@
                 </Grid>
             </TabView.TabStripFooter>
         </TabView>
+        <!-- Native collection transitions replay on existing rows when tabs are added. Keep tab navigation visible throughout. -->
         <local:SidebarTabList x:Name="TabList" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Stretch"
                   Padding="0" SelectionMode="Single" SingleSelectionFollowsFocus="False" IsItemClickEnabled="True"
                   CanReorderItems="True" CanDragItems="True" AllowDrop="True" TabNavigation="Once"
+                  ItemContainerTransitions="{x:Null}"
                   AutomationProperties.Name="Tabs" ItemClick="TabList_ItemClick"
                   SelectionChanged="TabList_SelectionChanged" DragItemsCompleted="TabList_DragItemsCompleted" />
     </Grid>
