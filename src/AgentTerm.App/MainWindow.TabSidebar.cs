@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -103,7 +102,7 @@ public sealed partial class MainWindow
                 if (!_sidebarItems.TryGetValue(tab, out var row))
                 {
                     row = new SidebarTabItem(tab, WindowRoot.Resources) { IsCompact = compact };
-                    row.CloseRequested += (item, keyboard) => _ = CloseSidebarTabAsync(item, keyboard);
+                    row.CloseRequested += (item, keyboard) => _ = CloseTabAsync(item.Tab, keyboard);
                     _sidebarItems.Add(tab, row);
                     TabList.Items.Add(row);
                 }
@@ -139,12 +138,6 @@ public sealed partial class MainWindow
         if (reveal && row is not null) TabList.ScrollIntoView(row);
     }
 
-    private async Task CloseSidebarTabAsync(SidebarTabItem row, bool keyboard)
-    {
-        await CloseTabAsync(row.Tab);
-        if (keyboard && !_closing) FocusSelectedTab();
-    }
-
     private void FocusSelectedTab()
     {
         Control? header = _tabPosition == TabPosition.Left
@@ -159,8 +152,9 @@ public sealed partial class MainWindow
 
     private void TabList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_syncingSidebar || TabList.SelectedItem is not SidebarTabItem row) return;
-        Tabs.SelectedItem = row.Tab;
+        if (_syncingSidebar) return;
+        if (TabList.SelectedItem is SidebarTabItem row) Tabs.SelectedItem = row.Tab;
+        else SyncSidebarSelection();
     }
 
     private void TabList_ItemClick(object sender, ItemClickEventArgs e)

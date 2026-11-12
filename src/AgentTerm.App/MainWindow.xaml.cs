@@ -211,19 +211,24 @@ public sealed partial class MainWindow : Window
     private async void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args) =>
         await CloseTabAsync(args.Tab);
 
-    private async Task CloseTabAsync(TabViewItem item)
+    private async Task CloseTabAsync(TabViewItem item, bool keyboard = false)
     {
         if (_closing || !item.IsClosable || item.Content is not TerminalTab tab) return;
 
         item.IsClosable = false;
         item.IsEnabled = false;
+        var focusAfterDisable = keyboard ? FocusManager.GetFocusedElement(WindowRoot.XamlRoot) : null;
         await tab.DisposeAsync();
         if (_closing) return;
 
+        // Disabling the row can move focus. Preserve later user moves, before removal moves it again.
+        var restoreHeaderFocus = keyboard &&
+            ReferenceEquals(FocusManager.GetFocusedElement(WindowRoot.XamlRoot), focusAfterDisable);
         var index = Tabs.TabItems.IndexOf(item);
         Tabs.TabItems.Remove(item);
         if (Tabs.TabItems.Count == 0) Close();
         else if (Tabs.SelectedItem is null) Tabs.SelectedIndex = Math.Min(index, Tabs.TabItems.Count - 1);
+        if (restoreHeaderFocus && !_closing) FocusSelectedTab();
     }
 
     private void SwitchTab(int direction)
@@ -279,7 +284,7 @@ public sealed partial class MainWindow : Window
         {
             // TabView's own Ctrl+F4 only sees focus inside the TabView; a focused sidebar row closes itself.
             e.Handled = true;
-            if (firstPress) await CloseSidebarTabAsync(focusedRow, keyboard: true);
+            if (firstPress) await CloseTabAsync(focusedRow.Tab, keyboard: true);
         }
         else if (control && shift && !alt && e.Key == VirtualKey.E)
         {
