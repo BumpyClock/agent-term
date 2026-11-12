@@ -66,7 +66,7 @@ internal sealed partial class ProgramStatusIcon : ContentControl
             _icon.Content = _source switch
             {
                 ImageIconSource image => new ImageIcon { Source = image.ImageSource },
-                FontIconSource font => new FontIcon { Glyph = font.Glyph, FontSize = 16 },
+                FontIconSource font => new FontIcon { Glyph = font.Glyph, FontFamily = font.FontFamily, FontSize = 16 },
                 _ => null
             };
         }
@@ -75,7 +75,7 @@ internal sealed partial class ProgramStatusIcon : ContentControl
         var showProgress = working && (primary?.Progress is not null || (_settings.AnimationsEnabled && !_accessibility.HighContrast));
         // The fixed footprint keeps labels stationary as work starts, finishes, or resolves an icon.
         _icon.Width = _icon.Height = working ? 12 : 16;
-        _icon.Visibility = working && _source is not ImageIconSource ? Visibility.Collapsed : Visibility.Visible;
+        if (_icon.Content is FontIcon fontIcon) fontIcon.FontSize = working ? 12 : 16;
         _activity.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
         _activity.IsIndeterminate = primary?.Progress is null;
         _activity.Value = primary?.Progress ?? 0;

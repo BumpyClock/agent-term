@@ -242,13 +242,17 @@ the tab. There is no **Program status** context-menu action.
 The card groups split panes and nested tasks, labels states and progress, and
 shows messages and update times. Urgent panes appear first. Every report remains
 reachable by scrolling. Live updates preserve the reading position. Reopening
-starts at the top. Clearing all reports restores the shell icon.
+starts at the top. Clearing all reports restores the shell icon. Returning to a
+shell prompt or exiting the shell also restores its icon, while retained reports
+remain available in the card.
 
 Working tabs show an animated activity ring, or determinate progress when the
 program reports a percentage. Programs with a matching local PATH executable
-keep that executable's icon inside the activity ring. No executable is launched
-to obtain its icon. Unresolved commands use the activity indicator alone. Blocked,
-error, and completed work retain distinct status symbols. With Windows animations
+keep that executable's icon inside the activity ring and when idle or done. Pi
+uses a built-in π mark because script-based CLI installs need not contain an
+executable icon. Other unresolved commands keep the shell icon. No executable is
+launched to obtain its icon. Blocked and error reports use distinct attention
+symbols while their command is active. With Windows animations
 off or high contrast on, indeterminate work uses a static dotted ring; known
 percentages retain the determinate ring. The card also shows the state and exact
 percentage. Background tabs continue updating.
@@ -257,7 +261,9 @@ No hooks, log scanning, or process-name guessing are used. Programs must emit th
 protocol themselves. AgentTerm answers capability queries and supports all five
 states and permission, question, and auth blocking reasons. Each pane owns its
 records. New shell prompts and shell exit remove working and blocked reports;
-done and error remain until cleared, reset, or the session is replaced. Foreground
+idle, done, and error remain as inactive details until cleared, reset, or the
+session is replaced. Retained reports do not override a running program in
+another pane. Foreground
 process owner metadata and individual child-process exit detection are not
 implemented. Native PowerShell prompt markers and OSC 133 prompt markers both
 trigger cleanup.

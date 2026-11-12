@@ -46,6 +46,12 @@ internal static class Program
                 return;
             }
             ProgramStatusUiChecks.Run();
+            if (Environment.GetCommandLineArgs().Contains("--status-icons"))
+            {
+                window.Activate();
+                await ProgramStatusUiChecks.CheckIconsAsync(window);
+                return;
+            }
             if (Environment.GetCommandLineArgs().Contains("--status-layout"))
             {
                 await ProgramStatusUiChecks.CheckLayoutAsync(window);

@@ -14,14 +14,15 @@ internal sealed record ProgramStatusPresentation(string Glyph, string Summary, s
     internal static ProgramStatusPresentation Create(IReadOnlyList<PaneProgramStatus> records)
     {
         if (records.Count == 0) return new("", "", "");
-        var primary = records.OrderBy(record => Priority(record.Status.State)).First().Status;
-        var glyph = primary.State switch
+        var primary = ActivePrimary(records);
+        var glyph = primary?.State switch
         {
-            ProgramState.Blocked => primary.Kind switch { "permission" => "\uE72E", "auth" => "\uE72E", _ => "\uE9CE" },
+            ProgramState.Blocked => primary!.Kind switch { "permission" => "\uE72E", "auth" => "\uE72E", _ => "\uE9CE" },
             ProgramState.Error => "\uEA39",
             ProgramState.Working => "\uE916",
             ProgramState.Done => "\uE73E",
-            _ => "\uECCA"
+            ProgramState.Idle => "\uECCA",
+            _ => ""
         };
         var details = new StringBuilder();
         foreach (var pane in records.GroupBy(record => (record.Pane, record.Shell)))
@@ -41,8 +42,12 @@ internal sealed record ProgramStatusPresentation(string Glyph, string Summary, s
                 if (status.Message is { Length: > 0 } message) details.AppendLine($"{indent}  {Clean(message)}");
             }
         }
-        return new(glyph, Label(primary), details.ToString().TrimEnd());
+        return new(glyph, Label(primary ?? records.OrderBy(record => Priority(record.Status.State)).First().Status), details.ToString().TrimEnd());
     }
+
+    internal static ProgramStatus? ActivePrimary(IReadOnlyList<PaneProgramStatus> records) => records
+        .Where(record => record.Status.IsActive)
+        .OrderBy(record => Priority(record.Status.State)).FirstOrDefault()?.Status;
 
     internal static int CompareIds(string left, string right)
     {
