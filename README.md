@@ -223,8 +223,9 @@ card with a native acrylic background. Windows high contrast and transparency
 preferences provide the solid fallback. Move into the card to read, scroll, select, and copy text. It stays open
 while you use it and closes when you leave. Escape dismisses it without moving
 terminal focus. **Keep open**, or **Alt+Down** on a focused tab, opens the same
-card for keyboard use. Home and End reach the first and last reports. The context
-menu retains **Program status** as an alternative.
+card for keyboard use. Home and End reach the first and last reports. Status opens
+automatically, including when a report arrives while the pointer is already over
+the tab. There is no **Program status** context-menu action.
 
 The card groups split panes and nested tasks, labels states and progress, and
 shows messages and update times. Urgent panes appear first. Every report remains

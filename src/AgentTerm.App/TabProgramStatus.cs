@@ -74,7 +74,6 @@ internal sealed class TabProgramStatus
         };
         _closeTimer.Tick += (_, _) => { _closeTimer.Stop(); if (!_inCard && _hoveredTarget is null && !_pinned) Hide(); };
         Attach(item);
-        item.ContextFlyout = new MenuFlyout { Items = { CreateDetailsMenuItem(item) } };
     }
 
     internal void Attach(FrameworkElement target)
@@ -128,13 +127,6 @@ internal sealed class TabProgramStatus
             ShowDetails((FrameworkElement)sender);
             e.Handled = true;
         }
-    }
-
-    internal MenuFlyoutItem CreateDetailsMenuItem(FrameworkElement target)
-    {
-        var entry = new MenuFlyoutItem { Text = "Program status", KeyboardAcceleratorTextOverride = "Alt+↓" };
-        entry.Click += (_, _) => ShowDetails(target);
-        return entry;
     }
 
     internal void ShowDetails(FrameworkElement target) => Show(target, true);
@@ -204,9 +196,11 @@ internal sealed class TabProgramStatus
     {
         var title = item.Header as string ?? "";
         if (_title == title && _records.SequenceEqual(records)) return;
+        var hadRecords = _records.Count > 0;
         _title = title;
         _records = records;
         _presentation = ProgramStatusPresentation.Create(records);
+        if (!hadRecords && records.Count > 0 && _hoveredTarget is not null) _openTimer.Start();
         if (_details.IsOpen)
         {
             if (records.Count == 0) Hide();

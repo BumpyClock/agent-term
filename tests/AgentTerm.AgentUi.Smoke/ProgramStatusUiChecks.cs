@@ -17,6 +17,7 @@ internal static class ProgramStatusUiChecks
         var tab = new TabViewItem { Header = "PowerShell" };
         var status = new TabProgramStatus(tab);
         tab.Tag = status;
+        Check(tab.ContextFlyout is null, "Top tabs must not offer a Program status context-menu action.");
         var shell = new FontIconSource { Glyph = "\uE756" };
         status.SetShellIcon(shell);
         var resources = new ResourceDictionary
@@ -67,12 +68,14 @@ internal static class ProgramStatusUiChecks
         Foreground(hwnd);
         RequireForeground(window);
 
-        status.Update([Report("", ProgramState.Done, "pi", "Quiver Git Pull")]);
         await Task.Delay(300);
         input.Focus(FocusState.Programmatic);
         Move(window, input, 100, 15);
         await Task.Delay(100);
         Move(window, tab, 70, 16);
+        await Task.Delay(600);
+        Check(OpenCard(tab) is null, "Tabs without reports must not show an empty status card.");
+        status.Update([Report("", ProgramState.Done, "pi", "Quiver Git Pull")]);
         await Task.Delay(800);
         var card = OpenCard(tab);
         if (card is null) await CaptureAsync(root, "hover-failure");
@@ -208,6 +211,59 @@ internal static class ProgramStatusUiChecks
         await Task.Delay(150);
         Check(OpenCard(tab) is null, "Clearing the final report must close the card.");
         Console.WriteLine("Urgent pane ordering, nested content, dark/light native captures, narrow long text and clearing passed.");
+        await CheckSidebarHoverAsync(window);
+    }
+
+    private static async Task CheckSidebarHoverAsync(Window window)
+    {
+        var tab = new TabViewItem { Header = "PowerShell" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var resources = new ResourceDictionary
+        {
+            ["SidebarTabStyle"] = new Style { TargetType = typeof(ListViewItem) },
+            ["SidebarTabHintStyle"] = new Style { TargetType = typeof(TextBlock) }
+        };
+        var sidebar = new SidebarTabItem(tab, resources) { Content = tab.Header, Width = 220, Height = 40 };
+        var list = new ListView { Width = 220, VerticalAlignment = VerticalAlignment.Top, Items = { sidebar } };
+        var input = new TextBox { Text = "Sidebar terminal focus fixture", Margin = new Thickness(24) };
+        var root = new Grid { ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(220) }, new ColumnDefinition() }, Children = { list, input } };
+        Grid.SetColumn(input, 1);
+        window.Content = root;
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1100, 850));
+        await Task.Delay(300);
+        input.Focus(FocusState.Programmatic);
+        foreach (var compact in new[] { false, true })
+        {
+            sidebar.IsCompact = compact;
+            sidebar.Width = compact ? 48 : 220;
+            Move(window, input, 100, 50);
+            await Task.Delay(100);
+            Move(window, sidebar, 20, 20);
+            await Task.Delay(600);
+            Check(OpenCard(sidebar) is null, "An empty sidebar tab must not show status.");
+            status.Update([Report("", ProgramState.Done, "Build", "Sidebar hover report")]);
+            await Task.Delay(800);
+            var card = OpenCard(sidebar);
+            Check(card is not null && Text(card).Contains("Sidebar hover report"), "New reports must automatically open for an already-hovered sidebar tab in both widths.");
+            Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(sidebar.XamlRoot), input), "Sidebar hover must preserve terminal focus.");
+            Move(window, input, 100, 50);
+            await Task.Delay(600);
+            Check(OpenCard(sidebar) is null, "Leaving a sidebar tab must dismiss its status card.");
+            status.Update([]);
+        }
+        sidebar.IsCompact = false;
+        sidebar.Width = 220;
+        status.Update([Report("", ProgramState.Done, "Build", "Context menu fixture")]);
+        Move(window, sidebar, 20, 20);
+        Inject(window, PointerInput(0x0008), PointerInput(0x0010));
+        await Task.Delay(300);
+        var actions = VisualTreeHelper.GetOpenPopupsForXamlRoot(sidebar.XamlRoot)
+            .SelectMany(popup => Descendants(popup.Child)).OfType<MenuFlyoutItem>().Select(action => action.Text).ToArray();
+        Check(actions.Length == 1 && actions[0] == "Close PowerShell", "Sidebar context menus must retain Close without a Program status action.");
+        Press(window, 0x1B);
+        sidebar.Detach();
+        Console.WriteLine("Expanded and compact sidebar hover, reports arriving under the pointer, focus preservation, dismissal and close-only context menu passed.");
     }
 
     internal static async Task CheckIconsAsync(Window window)

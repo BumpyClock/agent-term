@@ -42,11 +42,7 @@ internal sealed class SidebarTabItem : ListViewItem
         };
         close.Click += (_, _) => CloseRequested?.Invoke(this, _menuFromKeyboard);
         _menu = new MenuFlyout { Items = { close } };
-        if (tab.Tag is TabProgramStatus status)
-        {
-            status.Attach(this);
-            _menu.Items.Add(status.CreateDetailsMenuItem(this));
-        }
+        if (tab.Tag is TabProgramStatus status) status.Attach(this);
         SizeChanged += (_, _) => UpdateToolTip();
         ContextRequested += ShowMenu;
         Refresh();
