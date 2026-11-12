@@ -3,20 +3,22 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
+using AgentTerm.Terminal;
 
 namespace AgentTerm_App;
 
-public sealed record TerminalAppearance(string FontFamily, int FontSize, bool UseAcrylic, double BackgroundOpacity = 0.8);
-// Null fields inherit Defaults; an empty font family explicitly selects Automatic.
+public sealed record TerminalAppearance(string FontFamily, int FontSize, bool UseAcrylic, double BackgroundOpacity = 0.8,
+    string ThemeId = "");
+// Null fields inherit Defaults; empty font and theme IDs explicitly select Automatic.
 public sealed record ProfileAppearanceOverride(string? FontFamily = null, int? FontSize = null, bool? UseAcrylic = null,
-    double? BackgroundOpacity = null);
+    double? BackgroundOpacity = null, string? ThemeId = null);
 public enum TabPosition { Top, Left }
 
 public sealed class TerminalPreferences
 {
     private sealed record Settings(string DefaultProfileId = "", int FontSize = 14, bool UseAcrylic = false,
         string FontFamily = "", IReadOnlyDictionary<string, ProfileAppearanceOverride>? Profiles = null,
-        double BackgroundOpacity = 0.8, string? TabPosition = null);
+        double BackgroundOpacity = 0.8, string? TabPosition = null, string ThemeId = "");
     private Settings _settings = new();
     private IReadOnlyDictionary<string, ProfileAppearanceOverride> _profiles = NormalizeProfiles(null);
     private readonly string _path;
@@ -27,6 +29,7 @@ public sealed class TerminalPreferences
     public bool UseAcrylic => _settings.UseAcrylic;
     public string FontFamily => _settings.FontFamily;
     public double BackgroundOpacity => _settings.BackgroundOpacity;
+    public string ThemeId => _settings.ThemeId;
     public TabPosition TabPosition => ParseTabPosition(_settings.TabPosition);
     public IReadOnlyDictionary<string, ProfileAppearanceOverride> ProfileOverrides => _profiles;
     public string? LoadError { get; }
@@ -50,6 +53,7 @@ public sealed class TerminalPreferences
                         FontFamily = settings.FontFamily?.Trim() ?? "",
                         BackgroundOpacity = NormalizeOpacity(settings.BackgroundOpacity),
                         TabPosition = ParseTabPosition(settings.TabPosition).ToString(),
+                        ThemeId = TerminalThemes.NormalizeId(settings.ThemeId),
                         Profiles = _profiles
                     };
                 }
@@ -66,18 +70,19 @@ public sealed class TerminalPreferences
         ArgumentNullException.ThrowIfNull(profileId);
         return _profiles.TryGetValue(profileId, out var value)
             ? new TerminalAppearance(value.FontFamily ?? FontFamily, value.FontSize ?? FontSize, value.UseAcrylic ?? UseAcrylic,
-                value.BackgroundOpacity ?? BackgroundOpacity)
-            : new TerminalAppearance(FontFamily, FontSize, UseAcrylic, BackgroundOpacity);
+                value.BackgroundOpacity ?? BackgroundOpacity, value.ThemeId ?? ThemeId)
+            : new TerminalAppearance(FontFamily, FontSize, UseAcrylic, BackgroundOpacity, ThemeId);
     }
 
     public void Update(string defaultProfileId, int fontSize, bool useAcrylic = false, string? fontFamily = null,
         IReadOnlyDictionary<string, ProfileAppearanceOverride>? profileOverrides = null, double? backgroundOpacity = null,
-        TabPosition? tabPosition = null)
+        TabPosition? tabPosition = null, string? themeId = null)
     {
         var profiles = profileOverrides is null ? _profiles : NormalizeProfiles(profileOverrides);
         var settings = new Settings(defaultProfileId, Math.Clamp(fontSize, 8, 36), useAcrylic,
             fontFamily?.Trim() ?? _settings.FontFamily, profiles, NormalizeOpacity(backgroundOpacity ?? BackgroundOpacity),
-            (tabPosition is TabPosition.Left or TabPosition.Top ? tabPosition.Value : TabPosition).ToString());
+            (tabPosition is TabPosition.Left or TabPosition.Top ? tabPosition.Value : TabPosition).ToString(),
+            TerminalThemes.NormalizeId(themeId ?? ThemeId));
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var temporaryPath = _path + ".tmp";
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
@@ -100,10 +105,11 @@ public sealed class TerminalPreferences
                 {
                     FontFamily = value.FontFamily?.Trim(),
                     FontSize = value.FontSize is { } size ? Math.Clamp(size, 8, 36) : null,
-                    BackgroundOpacity = value.BackgroundOpacity is { } opacity ? NormalizeOpacity(opacity) : null
+                    BackgroundOpacity = value.BackgroundOpacity is { } opacity ? NormalizeOpacity(opacity) : null,
+                    ThemeId = value.ThemeId is null ? null : TerminalThemes.NormalizeId(value.ThemeId)
                 };
                 if (normalized.FontFamily is not null || normalized.FontSize is not null || normalized.UseAcrylic is not null ||
-                    normalized.BackgroundOpacity is not null)
+                    normalized.BackgroundOpacity is not null || normalized.ThemeId is not null)
                     result[id] = normalized;
             }
         }

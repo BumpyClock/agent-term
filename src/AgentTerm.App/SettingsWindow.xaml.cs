@@ -17,9 +17,9 @@ namespace AgentTerm_App;
 internal sealed partial class SettingsWindow : Window
 {
     private readonly record struct SettingsValues(string ProfileId, string FontFamily, int FontSize, bool UseAcrylic,
-        double BackgroundOpacity, TabPosition TabPosition);
+        double BackgroundOpacity, TabPosition TabPosition, string ThemeId);
     private sealed record ProfileDraft(string? FontFamily, bool InheritFontSize, string? FontSizeText, bool? UseAcrylic,
-        bool InheritOpacity, double? BackgroundOpacity);
+        bool InheritOpacity, double? BackgroundOpacity, string? ThemeId);
 
     private readonly TerminalPreferences _preferences = TerminalPreferences.Current;
     private readonly IReadOnlyList<ShellProfile> _profiles;
@@ -100,7 +100,8 @@ internal sealed partial class SettingsWindow : Window
     private void RestoreDraft()
     {
         _saved = new SettingsValues(_preferences.DefaultProfileId ?? "", _preferences.FontFamily,
-            _preferences.FontSize, _preferences.UseAcrylic, _preferences.BackgroundOpacity, _preferences.TabPosition);
+            _preferences.FontSize, _preferences.UseAcrylic, _preferences.BackgroundOpacity, _preferences.TabPosition,
+            _preferences.ThemeId);
         _updatingControls = true;
         _savedOverrides = _preferences.ProfileOverrides.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         _profileDrafts.Clear();
@@ -110,13 +111,14 @@ internal sealed partial class SettingsWindow : Window
             _savedOverrides.TryGetValue(profile.Id, out var value);
             var draft = new ProfileDraft(value?.FontFamily, value?.FontSize is null,
                 value?.FontSize?.ToString(CultureInfo.InvariantCulture), value?.UseAcrylic,
-                value?.BackgroundOpacity is null, value?.BackgroundOpacity);
+                value?.BackgroundOpacity is null, value?.BackgroundOpacity, value?.ThemeId);
             _profileDrafts.Add(profile.Id, draft);
             _savedProfileDrafts.Add(profile.Id, draft);
         }
         PopulateChoices(DefaultProfileBox, _saved.ProfileId, "Automatic", _profiles.Select(profile => (profile.Id, profile.Name)));
         var fonts = TerminalSurface.FontFamilies;
         PopulateChoices(FontFamilyBox, _saved.FontFamily, $"Automatic ({fonts[0]})", fonts.Select(font => (font, font)));
+        PopulateChoices(ThemeBox, _saved.ThemeId, "Automatic (system)", TerminalThemes.All.Select(theme => (theme.Id, theme.Name)));
         FontSizeBox.Text = _saved.FontSize.ToString(CultureInfo.InvariantCulture);
         BackgroundBox.SelectedIndex = _saved.UseAcrylic ? 1 : 0;
         TabPositionBox.SelectedIndex = (int)_saved.TabPosition;
@@ -172,6 +174,9 @@ internal sealed partial class SettingsWindow : Window
         var effectiveFamily = TerminalSurface.ResolveFontFamily(SelectedValue(FontFamilyBox));
         PopulateChoices(ProfileFontFamilyBox, draft.FontFamily, $"Automatic ({fonts[0]})",
             fonts.Select(font => (font, font)), inheritedLabel: $"Use default ({effectiveFamily})");
+        PopulateChoices(ProfileThemeBox, draft.ThemeId, "Automatic (system)",
+            TerminalThemes.All.Select(theme => (theme.Id, theme.Name)),
+            inheritedLabel: $"Use default ({(ThemeBox.SelectedItem as ComboBoxItem)?.Content})");
         ProfileInheritSize.IsChecked = draft.InheritFontSize;
         ProfileBackgroundBox.Items[0] = new ComboBoxItem
         {
@@ -227,7 +232,8 @@ internal sealed partial class SettingsWindow : Window
             opacity = ProfileOpacitySlider.Value / 100;
         else if (!inheritOpacity && opacity is null) opacity = OpacitySlider.Value / 100;
         _profileDrafts[id] = new ProfileDraft(SelectedValue(ProfileFontFamilyBox), inherit, rawSize,
-            ProfileBackgroundBox.SelectedIndex switch { 1 => false, 2 => true, _ => null }, inheritOpacity, opacity);
+            ProfileBackgroundBox.SelectedIndex switch { 1 => false, 2 => true, _ => null }, inheritOpacity, opacity,
+            SelectedValue(ProfileThemeBox));
     }
 
     private void OpacityChanged(object sender, RangeBaseValueChangedEventArgs e) => DraftChanged(sender, e);
@@ -256,13 +262,14 @@ internal sealed partial class SettingsWindow : Window
         {
             var current = pair.Value;
             var saved = _savedProfileDrafts[pair.Key];
-            return current.FontFamily != saved.FontFamily || current.UseAcrylic != saved.UseAcrylic ||
+            return current.FontFamily != saved.FontFamily || current.ThemeId != saved.ThemeId || current.UseAcrylic != saved.UseAcrylic ||
                 current.InheritFontSize != saved.InheritFontSize ||
                 (!current.InheritFontSize && current.FontSizeText != saved.FontSizeText) ||
                 current.InheritOpacity != saved.InheritOpacity ||
                 (!current.InheritOpacity && current.BackgroundOpacity != saved.BackgroundOpacity);
         });
         bool dirty = SelectedValue(DefaultProfileBox) != _saved.ProfileId || SelectedValue(FontFamilyBox) != _saved.FontFamily ||
+            SelectedValue(ThemeBox) != _saved.ThemeId ||
             FontSizeBox.Text != _saved.FontSize.ToString(CultureInfo.InvariantCulture) ||
             BackgroundBox.SelectedIndex != (_saved.UseAcrylic ? 1 : 0) ||
             OpacitySlider.Value != _saved.BackgroundOpacity * 100 || SelectedTabPosition != _saved.TabPosition || profilesDirty;
@@ -279,9 +286,9 @@ internal sealed partial class SettingsWindow : Window
             return;
         }
         if (SelectedValue(DefaultProfileBox) is not { } profile || SelectedValue(FontFamilyBox) is not { } family ||
-            BackgroundBox.SelectedIndex is < 0 or > 1)
+            SelectedValue(ThemeBox) is not { } themeId || BackgroundBox.SelectedIndex is < 0 or > 1)
         {
-            ShowNotice(InfoBarSeverity.Error, "Check your settings", "Choose a profile, font family, and pane background.");
+            ShowNotice(InfoBarSeverity.Error, "Check your settings", "Choose a profile, font family, color theme, and pane background.");
             return;
         }
 
@@ -300,8 +307,9 @@ internal sealed partial class SettingsWindow : Window
                 size = profileSize;
             }
             var value = new ProfileAppearanceOverride(draft.FontFamily, size, draft.UseAcrylic,
-                draft.InheritOpacity ? null : draft.BackgroundOpacity);
-            if (value.FontFamily is null && value.FontSize is null && value.UseAcrylic is null && value.BackgroundOpacity is null)
+                draft.InheritOpacity ? null : draft.BackgroundOpacity, draft.ThemeId);
+            if (value.FontFamily is null && value.FontSize is null && value.UseAcrylic is null && value.BackgroundOpacity is null &&
+                value.ThemeId is null)
                 overrides.Remove(shell.Id);
             else
                 overrides[shell.Id] = value;
@@ -309,7 +317,7 @@ internal sealed partial class SettingsWindow : Window
         try
         {
             _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides, OpacitySlider.Value / 100,
-                SelectedTabPosition);
+                SelectedTabPosition, themeId);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -338,7 +346,7 @@ internal sealed partial class SettingsWindow : Window
     private void ResetProfile_Click(object sender, RoutedEventArgs e)
     {
         if (_shownProfileId is not { } id) return;
-        _profileDrafts[id] = new ProfileDraft(null, true, null, null, true, null);
+        _profileDrafts[id] = new ProfileDraft(null, true, null, null, true, null, null);
         LoadProfileDraft(id);
         SettingsNotice.IsOpen = false;
         UpdateActions();

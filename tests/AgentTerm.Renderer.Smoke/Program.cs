@@ -92,8 +92,41 @@ internal static class Program
         Draw(image, terminal.ReadFrame(), true);
         if (image.GetPixelColors(391, 221, 1, 1)[0].A != 255)
             throw new Exception("Switching back to solid must restore an opaque background.");
+        AssertThemeColors(device, Path.GetDirectoryName(output)!);
         AssertBackgroundContinuity(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");
+    }
+
+    private static void AssertThemeColors(CanvasDevice device, string outputDirectory)
+    {
+        using var terminal = new GhosttyTerminal(40, 6);
+        terminal.Write("Theme preview\r\n"u8);
+        for (var i = 0; i < 16; i++)
+            terminal.Write(Encoding.UTF8.GetBytes($"\x1b[48;5;{i}m  "));
+        terminal.Write("\x1b[0m\r\nSelected text\r\n\x1b[38;2;240;120;80mTruecolor text\x1b[0m\r\nCursor\x1b[2 q"u8);
+        terminal.BeginSelection(0, 2);
+        terminal.ExtendSelection(12, 2);
+        terminal.EndSelection();
+        using var image = new CanvasRenderTarget(device, 400, 120, 96);
+        foreach (var theme in TerminalThemes.All)
+        {
+            terminal.SetTheme(theme);
+            var frame = terminal.ReadFrame();
+            Draw(image, frame, true);
+            AssertPixel(image, 395, 115, theme.Background.R, theme.Background.G, theme.Background.B, $"{theme.Name} background");
+            AssertPixel(image, 1, 59, theme.SelectionBackground.R, theme.SelectionBackground.G, theme.SelectionBackground.B,
+                $"{theme.Name} selection");
+            for (var i = 0; i < 16; i++)
+            {
+                var color = theme.Ansi[i];
+                AssertPixel(image, i * 20 + 1, 21, color.R, color.G, color.B, $"{theme.Name} ANSI {i}");
+            }
+            if (!image.GetPixelColors(0, 40, 130, 20).Any(c =>
+                c.R == theme.SelectionForeground.R && c.G == theme.SelectionForeground.G && c.B == theme.SelectionForeground.B))
+                throw new Exception($"{theme.Name} must render selection text with its foreground.");
+            image.SaveAsync(Path.Combine(outputDirectory, $"theme-{theme.Id}.png"), CanvasBitmapFileFormat.Png)
+                .AsTask().GetAwaiter().GetResult();
+        }
     }
 
     private static void AssertBackgroundContinuity(CanvasDevice device)

@@ -119,7 +119,12 @@ public sealed partial class GhosttyTerminal
                 cellsArray[i + 1] = cellsArray[i + 1] with { Selected = true };
         if (reverse) (defaultFg, defaultBg) = (defaultBg, defaultFg);
         _frameReverse = reverse;
-        _frame = new TerminalFrame(columns, rowsCount, cellsArray, cursor, defaultFg, defaultBg) { Viewport = viewport, HasSelection = hasSelection };
+        _frame = new TerminalFrame(columns, rowsCount, cellsArray, cursor, defaultFg, defaultBg) {
+            Viewport = viewport, HasSelection = hasSelection,
+            SelectionBackground = (_theme ?? TerminalThemes.All[0]).SelectionBackground,
+            SelectionForeground = (_theme ?? TerminalThemes.All[0]).SelectionForeground,
+            CursorText = _theme?.CursorText,
+        };
         _capturedViewRevision = _viewRevision;
         ThrowIfFailed(RenderNative.ghostty_render_state_clean(_render), "Could not clear render dirty state.");
         return _frame;

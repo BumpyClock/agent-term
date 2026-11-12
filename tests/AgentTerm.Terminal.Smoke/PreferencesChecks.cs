@@ -1,9 +1,11 @@
 using AgentTerm_App;
+using AgentTerm.Terminal;
 
 internal static class PreferencesChecks
 {
     public static void Run()
     {
+        CheckThemes();
         var path = Path.Combine(Path.GetTempPath(), "agent-term-settings-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
@@ -116,6 +118,50 @@ internal static class PreferencesChecks
             File.WriteAllText(path, "{broken");
             var invalid = new TerminalPreferences(path);
             if (invalid.LoadError is null || invalid.FontSize != 14) throw new Exception("Invalid settings should report the failure and use defaults.");
+        }
+        finally { File.Delete(path); File.Delete(path + ".tmp"); }
+    }
+
+    private static void CheckThemes()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "agent-term-themes-" + Guid.NewGuid().ToString("N") + ".json");
+        var first = TerminalThemes.All[0].Id;
+        var second = TerminalThemes.All[1].Id;
+        try
+        {
+            File.WriteAllText(path, """{"FontSize":17}""");
+            var preferences = new TerminalPreferences(path);
+            if (preferences.ThemeId != "" || preferences.ResolveAppearance("inherited").ThemeId != "")
+                throw new Exception("Legacy settings must keep automatic system colors.");
+            preferences.Update("cmd", 17, themeId: first.ToUpperInvariant(),
+                profileOverrides: new Dictionary<string, ProfileAppearanceOverride>
+                {
+                    ["automatic"] = new(ThemeId: ""),
+                    ["custom"] = new(ThemeId: second),
+                    ["inherit"] = new(ThemeId: null)
+                });
+            var saved = new TerminalPreferences(path);
+            if (saved.ThemeId != first || saved.ResolveAppearance("inherited").ThemeId != first ||
+                saved.ResolveAppearance("automatic").ThemeId != "" || saved.ResolveAppearance("custom").ThemeId != second ||
+                saved.ProfileOverrides.ContainsKey("inherit"))
+                throw new Exception("Theme choices must survive restart, distinguish automatic from inheritance, and normalize IDs.");
+            saved.Update("cmd", 18);
+            if (new TerminalPreferences(path).ThemeId != first)
+                throw new Exception("Unrelated settings changes must retain the selected color theme.");
+            saved.Update("cmd", 18, themeId: second);
+            if (saved.ResolveAppearance("inherited").ThemeId != second || saved.ResolveAppearance("automatic").ThemeId != "")
+                throw new Exception("Changing the default theme must affect inherited profiles but preserve automatic overrides.");
+            saved.Update("cmd", 18, profileOverrides: new Dictionary<string, ProfileAppearanceOverride>());
+            if (new TerminalPreferences(path).ResolveAppearance("automatic").ThemeId != second)
+                throw new Exception("Resetting profile appearance must restore theme inheritance.");
+            saved.Update("cmd", 18, themeId: "");
+            if (new TerminalPreferences(path).ThemeId != "")
+                throw new Exception("Selecting automatic must persist across restarts.");
+            File.WriteAllText(path, """{"ThemeId":"missing-theme","FontSize":19,"Profiles":{"unknown":{"ThemeId":"missing-theme"},"null":{"ThemeId":null}}}""");
+            var unknown = new TerminalPreferences(path);
+            if (unknown.ThemeId != "" || unknown.ResolveAppearance("unknown").ThemeId != "" || unknown.FontSize != 19 ||
+                unknown.LoadError is not null || unknown.ProfileOverrides.ContainsKey("null"))
+                throw new Exception("Unknown theme IDs must fall back to automatic without discarding other settings.");
         }
         finally { File.Delete(path); File.Delete(path + ".tmp"); }
     }

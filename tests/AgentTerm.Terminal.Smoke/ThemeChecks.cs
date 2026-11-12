@@ -37,10 +37,64 @@ internal static class ThemeChecks
             restored.Cells.SequenceEqual(dark.Cells), "Returning to dark mode must restore existing cells even during synchronized output.");
         terminal.Write("\x1b[?2026l"u8);
 
+        CheckNamedThemes();
         CheckApplicationOverrides();
         CheckHistoryAndAlternateScreen();
         CheckAnsiContrast();
         CheckSchemeReports();
+    }
+
+    private static void CheckNamedThemes()
+    {
+        using var terminal = new GhosttyTerminal(32, 2);
+        terminal.SetTheme(TerminalThemes.Resolve("midnight", false));
+        terminal.Write("D\x1b[31;44mI\x1b[0;38;2;10;20;30mR\x1b[0;38;5;196mE\x1b[0m"u8);
+        var midnight = terminal.ReadFrame();
+        Check(midnight.Background == new TerminalColor(0x17, 0x19, 0x23) &&
+            midnight.Cells[1].Foreground == new TerminalColor(0xef, 0x87, 0x91),
+            "Midnight must supply its background and ANSI red to Ghostty.");
+        terminal.BeginSelection(0, 0);
+        terminal.ExtendSelection(1, 0);
+        terminal.EndSelection();
+        terminal.SetTheme(TerminalThemes.Resolve("paper", false));
+        var paper = terminal.ReadFrame();
+        Check(paper.Background == new TerminalColor(0xf5, 0xf0, 0xe6) &&
+            paper.Foreground == new TerminalColor(0x34, 0x30, 0x2a) &&
+            paper.Cells[1].Foreground == new TerminalColor(0x9e, 0x34, 0x34) &&
+            paper.Cells[1].Background == new TerminalColor(0x28, 0x5c, 0x86),
+            "A named theme switch must recolor default and indexed cells without new output.");
+        Check(paper.HasSelection && terminal.ReadSelectionText() == "DI" &&
+            paper.SelectionBackground == new TerminalColor(0xd9, 0xc9, 0xaa) &&
+            paper.SelectionForeground == new TerminalColor(0x30, 0x2a, 0x22),
+            "Selections must survive a named theme switch and use its selection colors.");
+        Check(paper.Cells[2].Foreground == new TerminalColor(10, 20, 30) &&
+            paper.Cells[3].Foreground == new TerminalColor(255, 0, 0),
+            "Named themes must preserve truecolor and the xterm extended palette.");
+        Check(paper.Cursor.Color == new TerminalColor(0x88, 0x53, 0x33) &&
+            paper.CursorText == paper.Background, "Named themes must expose cursor and cursor-text colors.");
+        terminal.Write("\x1b[?996n"u8);
+        Check(Encoding.UTF8.GetString(terminal.TakeResponses().Single()) == "\x1b[?997;2n",
+            "A fixed light theme must report light even when resolved against a dark system.");
+        foreach (var theme in TerminalThemes.All)
+        {
+            terminal.SetTheme(theme);
+            var frame = terminal.ReadFrame();
+            Check(frame.Background == theme.Background && frame.Foreground == theme.Foreground,
+                $"{theme.Name} defaults must reach the native frame.");
+            terminal.Write("\x1b]10;?\x1b\\\x1b]11;?\x1b\\"u8);
+            var replies = terminal.TakeResponses().Select(Encoding.UTF8.GetString).ToArray();
+            Check(replies.Length == 2 && replies[0].Contains("]10;rgb:") && replies[1].Contains("]11;rgb:"),
+                "Named themes must retain foreground and background query replies.");
+        }
+        terminal.Write("\x1b]10;#112233\x07\x1b]4;1;#abcdef\x07"u8);
+        terminal.SetTheme(TerminalThemes.Resolve("ocean", false));
+        Check(terminal.ReadFrame().Foreground == new TerminalColor(0x11, 0x22, 0x33) &&
+            terminal.ReadFrame().Cells[1].Foreground == new TerminalColor(0xab, 0xcd, 0xef),
+            "Named theme changes must preserve OSC overrides.");
+        terminal.Write("\x1b]110\x07\x1b]104;1\x07"u8);
+        Check(terminal.ReadFrame().Foreground == new TerminalColor(0xd7, 0xe9, 0xef) &&
+            terminal.ReadFrame().Cells[1].Foreground == new TerminalColor(0xee, 0x8c, 0x85),
+            "OSC reset must reveal the latest named theme defaults.");
     }
 
     private static void CheckApplicationOverrides()

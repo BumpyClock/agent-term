@@ -214,3 +214,13 @@ Set `Read-Host 'review input'` in the composer through UI Automation and clicked
 5. Emit working, blocked, done, and error reports. A new prompt removes working and blocked but retains done and error. Emit `ESC c` to reset, or `OSC 7501;state=clear ST` to clear. Confirm the shell icon returns in both layouts.
 6. Report enough children to overflow the preview. Right-click each tab layout and choose **Program status details**. Reach the last report with the scrollbar. Focus the tab, press Shift+F10, invoke the same entry, and press Ctrl+End. The final report must be visible and selectable. Escape closes the flyout.
 7. Repeat with keyboard focus, high contrast, and large text. Status text must remain readable without interpreting terminal messages as markup.
+
+## Terminal color themes
+
+1. Open Settings, then Profiles > Defaults. Change Color theme to Midnight. Confirm Save becomes enabled. Discard must restore the saved theme. Closing with an unsaved choice must not apply it.
+2. Save Midnight with two shell tabs and a split open. Existing default and ANSI output must recolor without changing shell PIDs, scroll position, selection, or text. Truecolor output must retain its RGB values.
+3. On one profile's Appearance page, save Paper. Only that profile's panes must change. Reset to defaults must restore Midnight after Save. An explicit Automatic choice must follow Windows instead of the shared named theme.
+4. Restart a test window. Confirm global and profile theme choices persist. Switch Windows appearance while using Automatic and while using a named theme. Only Automatic should change terminal colors.
+5. Check solid and acrylic panes, selection text, and block/bar/underline cursors in all six themes. Keyboard navigation must reach both color selectors and the Save and Discard buttons.
+
+Automated coverage checks native live recoloring, ANSI and truecolor resolution, selection retention, history and alternate-screen retention, OSC overrides/resets, scheme query replies, preference persistence/inheritance, and actual renderer pixels for every built-in palette and selection. Theme-specific snapshots are produced by the renderer smoke suite. Native settings selector interaction remains a manual check.

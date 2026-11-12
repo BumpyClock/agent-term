@@ -186,7 +186,7 @@ public sealed class TerminalSurface : UserControl
         {
             var cell = frame.Cells[row * frame.Columns + col];
             if (cell.Selected || !transparentBackground || cell.Background != frame.Background)
-                drawing.FillRectangle(col * cellWidth, row * cellHeight, cellWidth, cellHeight, cell.Selected ? SelectionColor : ToColor(cell.Background));
+                drawing.FillRectangle(col * cellWidth, row * cellHeight, cellWidth, cellHeight, cell.Selected ? ToColor(frame.SelectionBackground) : ToColor(cell.Background));
         }
         drawing.Antialiasing = antialiasing;
         using var normal = CreateFormat(false, false, fontSize, fontFamily);
@@ -198,7 +198,7 @@ public sealed class TerminalSurface : UserControl
         {
             var cell = frame.Cells[row * frame.Columns + col];
             if (cell.Width == 0 || cell.Hidden) continue;
-            var foreground = cell.Selected ? Color.FromArgb(255, 255, 255, 255) : ToColor(cell.Foreground);
+            var foreground = cell.Selected ? ToColor(frame.SelectionForeground) : ToColor(cell.Foreground);
             if (cell.Dim && !cell.Selected) foreground = Color.FromArgb(255, (byte)(foreground.R / 2), (byte)(foreground.G / 2), (byte)(foreground.B / 2));
             var x = col * cellWidth;
             var y = row * cellHeight;
@@ -230,12 +230,10 @@ public sealed class TerminalSurface : UserControl
             if (!cell.Hidden && cell.Width != 0)
             {
                 using (drawing.CreateLayer(1, new Rect(cx, cy, cursorWidth, cellHeight)))
-                    drawing.DrawText(cell.Text, cx, cy, ToColor(cell.Background), cell.Bold ? (cell.Italic ? boldItalic : bold) : (cell.Italic ? italic : normal));
+                    drawing.DrawText(cell.Text, cx, cy, ToColor(frame.CursorText ?? cell.Background), cell.Bold ? (cell.Italic ? boldItalic : bold) : (cell.Italic ? italic : normal));
             }
         }
     }
-
-    private static readonly Color SelectionColor = Color.FromArgb(255, 45, 92, 150);
 
     private static CanvasTextFormat CreateFormat(bool bold, bool italic, float fontSize, string fontFamily) => new()
     {

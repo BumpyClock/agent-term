@@ -85,6 +85,17 @@
                             <Border Style="{StaticResource SettingCard}">
                                 <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
                                     <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Color theme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Terminal colors. Automatic follows the system's light or dark appearance."
+                                                   Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="ThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Default color theme" SelectionChanged="DraftChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
                                         <TextBlock Text="Font family" Style="{StaticResource SettingLabel}" />
                                         <TextBlock Text="Default typeface, inherited by profiles unless they override it."
                                                    Style="{StaticResource SettingDescription}" />
@@ -141,6 +152,17 @@
                             <Button Grid.Column="1" Content="Reset to defaults" Click="ResetProfile_Click" />
                         </Grid>
                         <StackPanel Spacing="8">
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="Color theme" Style="{StaticResource SettingLabel}" />
+                                        <TextBlock Text="Use the default theme or choose colors for this profile."
+                                                   Style="{StaticResource SettingDescription}" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="ProfileThemeBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                              AutomationProperties.Name="Profile color theme" SelectionChanged="DraftChanged" />
+                                </Grid>
+                            </Border>
                             <Border Style="{StaticResource SettingCard}">
                                 <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
                                     <StackPanel Spacing="4" VerticalAlignment="Center">

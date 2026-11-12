@@ -1,4 +1,5 @@
 using System;
+using AgentTerm.Terminal;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Automation;
@@ -105,6 +106,10 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     private void ApplyMaterial()
     {
         var appearance = TerminalPreferences.Current.ResolveAppearance(_page.Profile.Id);
+        // Theme the pane controls too, but leave window chrome on the Windows appearance.
+        // Automatic must inherit again rather than resolve against a previous fixed theme.
+        RequestedTheme = appearance.ThemeId.Length == 0 ? ElementTheme.Default
+            : TerminalThemes.Resolve(appearance.ThemeId, false).IsLight ? ElementTheme.Light : ElementTheme.Dark;
         var background = _page.TerminalBackground;
         var color = Color.FromArgb(255, background.R, background.G, background.B);
         SolidSurface.Background = new SolidColorBrush(color);
