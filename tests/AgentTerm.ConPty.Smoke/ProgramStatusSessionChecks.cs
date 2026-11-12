@@ -56,8 +56,6 @@ internal static class ProgramStatusSessionChecks
                 await Task.Delay(25);
             }
         }
-        await Wait(() => session.PromptState == ShellPromptState.Raw, "Status fixture shell must start.");
-        session.EnableManagedPrompt();
         await Wait(() => session.PromptState == ShellPromptState.Ready, "Status fixture managed prompt must be ready.");
         session.SubmitCommand("""
             function Report-Status($body) { [Console]::Write(([char]27 + ']7501;' + $body + [char]7)) }

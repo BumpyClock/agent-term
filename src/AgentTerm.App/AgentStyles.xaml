@@ -109,6 +109,10 @@
         <Setter Property="IsTextSelectionEnabled" Value="True" />
         <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
     </Style>
+    <Style x:Key="AgentRequestText" TargetType="TextBlock" BasedOn="{StaticResource AgentBodyText}">
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+    </Style>
     <Style x:Key="AgentLabelText" TargetType="TextBlock">
         <Setter Property="FontSize" Value="13" />
         <Setter Property="TextTrimming" Value="CharacterEllipsis" />

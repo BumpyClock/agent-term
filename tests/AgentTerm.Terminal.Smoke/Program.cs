@@ -1,6 +1,12 @@
 using System.Text;
 using AgentTerm.Terminal;
 
+PromptFocusChecks.Run();
+if (args.Contains("--focus-policy-only")) return;
+NativeProtocolChecks.Run();
+LiveEdgeChecks.Run();
+if (args.Contains("--gate0-only")) return;
+
 static void AssertText(GhosttyTerminal terminal, string expected, string message)
 {
     var actual = terminal.ReadText();

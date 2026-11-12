@@ -62,6 +62,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         {
             Native.ghostty_terminal_vt_write(_handle, bytes, (nuint)data.Length);
         }
+        _presentationDirty = true;
         CheckSelectionScreen();
         RestoreSelectedViewport();
         GC.KeepAlive(_writePty);
@@ -146,6 +147,9 @@ public sealed partial class GhosttyTerminal : IDisposable
         ThrowIfFailed(result, "Could not resize the libghostty-vt terminal.");
         _columns = columns;
         _rows = rows;
+        _holdStarted = null;
+        _viewRevision++;
+        _presentationDirty = true;
     }
 
     public void Dispose()

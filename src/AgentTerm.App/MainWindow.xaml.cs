@@ -267,7 +267,11 @@ public sealed partial class MainWindow : Window
         var alt = Down(VirtualKey.Menu);
         var firstPress = !e.KeyStatus.WasKeyDown;
 
-        if (!control && !shift && !alt && e.Key == VirtualKey.Escape && !IsTabHeader(e.OriginalSource) && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
+        if (!control && !shift && !alt && e.Key == VirtualKey.F6 && _visibleTab?.ActivePage.FocusPromptMode() == true)
+        {
+            e.Handled = true;
+        }
+        else if (!control && !shift && !alt && e.Key == VirtualKey.Escape && !IsTabHeader(e.OriginalSource) && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
         {
             e.Handled = true;
         }

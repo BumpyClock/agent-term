@@ -29,6 +29,21 @@ static class TimelineChecks
         thinking.Expanded = true;
         timeline.Apply(new ReasoningSummary(next, "Updated public summary"));
         Check(thinking.Expanded && thinking.Reasoning == "Updated public summary", "Supported summaries preserve expansion without inventing reasoning");
+
+        // Harnesses emit empty assistant messages around tool calls. They must not become blank reply rows.
+        var blank = Guid.NewGuid();
+        timeline.Message(blank, MessageRole.User, "blank replies");
+        var before = timeline.Entries.Count;
+        timeline.Apply(new TextDelta(blank, ""));
+        timeline.Apply(new TextDelta(blank, " \n"));
+        Check(timeline.Entries.Count == before, "Blank assistant text creates no reply row");
+        timeline.Apply(new TextDelta(blank, "real reply"));
+        timeline.Apply(new TextDelta(blank, "\n"));
+        Check(timeline.Entries.Last() is TimelineMessage { Role: MessageRole.Assistant, Text: "real reply\n" }, "Whitespace inside a streaming reply is kept");
+        timeline.Apply(new ToolStarted(blank, "late", "fixture", ToolCategory.Command, "late", "late"));
+        timeline.Apply(new ToolExecuting(blank, "missing"));
+        var late = timeline.Entries.OfType<TimelineWorkGroup>().Last();
+        Check(late.Summary == "Pending late" && !late.Tools[0].Executing, "Execution for another call does not mark this one");
     }
 }
 

@@ -2,9 +2,11 @@
 
 Status. Initial Copilot implementation on feat/smart-prompt. Live and automated verification on 2026-11-11 is summarized in interaction-testing.md. Remaining acceptance cases are explicitly noted there.
 
+The app-owned command composer described in older sections below was removed by the integrated Smart terminal correction. The shell's own prompt is now the only command input. Read [Integrated Smart terminal](#integrated-smart-terminal) first. Older sections record history and are marked where superseded.
+
 ## Outcome
 
-Give each pane one composer that can run a shell command or start an agent turn. Keep ordinary terminal interaction intact. Start with Copilot. Add Codex and Pi without another workflow controller, transcript model, or approval UI.
+Give each pane one input, the shell's own prompt, that can run a shell command or start an agent turn with `/agent`. Keep ordinary terminal interaction intact. Start with Copilot. Add Codex and Pi without another workflow controller, transcript model, or approval UI.
 
 The architectural boundary is the **agent harness**, not the model API. Copilot, Codex, and Pi already own agent loops and tools. Agent Term hosts those loops. It must not implement a separate agent loop for each runtime.
 
@@ -71,7 +73,7 @@ Resume references belong to a harness instance and environment. Changing harness
 
 ## Composer behavior
 
-Superseded on 2026-11-11 by direct user steering toward Warp's model. The pane has one prompt line. Text runs in the shell unchanged. A leading `/agent` token is the only route to the agent (`PromptRouter.Parse` returns `ShellIntent` or `AgentIntent`). The earlier Auto, Command and Agent modes and the prose grammar were removed with their callers.
+Superseded twice. The integrated Smart terminal section below replaces this behavior. Historical text follows. The pane has one prompt line. Text runs in the shell unchanged. A leading `/agent` token is the only route to the agent (`PromptRouter.Parse` returns `ShellIntent` or `AgentIntent`). The earlier Auto, Command and Agent modes and the prose grammar were removed with their callers.
 
 At a verified prompt, the prompt line owns the draft. Once a command starts, terminal focus and raw input return to the shell. This includes password prompts and REPLs that do not use the alternate screen. Escape or the visible **Native prompt** action provides a raw-mode escape hatch. Keep IME, paste, selection, Ctrl+C, and terminal shortcuts functional.
 
@@ -79,10 +81,10 @@ At a verified prompt, the prompt line owns the draft. Once a command starts, ter
 
 - **Model.** `AgentTask` is one `/agent` invocation and its follow-ups, a view over timeline turn ids. `AgentSessionController` keeps at most 32 tasks and routes follow-ups to `CurrentTask`. All tasks in a pane share one harness session.
 - **Surface.** The surface replaces the terminal view inside the same grid cell. The terminal is collapsed, not resized; the grid sizing ignores zero sizes, so ConPTY sees no resize and an owned command's capture sees no replay. Leaving the surface never interrupts the agent. Stop is a separate, explicit action.
-- **Anchor.** `TerminalSession.ReserveRows` runs only at a ready managed prompt. It anchors the cursor row with a Ghostty tracked grid reference, then submits a reservation id that PSReadLine accepts as an empty line. The prompt function prints one more blank line. No command runs and nothing is echoed. The anchor reads back in screen coordinates, the same space as the viewport offset.
+- **Anchor.** `TerminalSession.ReserveRows` runs only at a ready integrated prompt. It anchors the cursor row with a Ghostty tracked grid reference, then submits a reservation id that PSReadLine accepts as an empty line. The prompt function prints one more blank line. No command runs and nothing is echoed. The anchor reads back in screen coordinates, the same space as the viewport offset.
 - **Expiry.** An anchor expires when history trimming removes its row, when its terminal is disposed, or when it reads below the shell cursor at the live viewport, which means an in-place clear erased it. At most 64 anchors exist per terminal.
-- **Cards.** Each frame positions a card from its anchor. Cards hide in the alternate screen and while the surface is open. A card forwards wheel input to the terminal. An expired anchor removes the card but not the task.
-- **Presentation.** Conversation rows are retained by entry id, so expansion and focus survive streaming events. One tool call renders as a card. Several collapse behind a summary that keeps a failure mark. Failures and cancellations also add an outcome row outside any group. A pending request appears once, above the prompt. An approval outcome shows on its tool call, and a question answer is recorded when sent. Disclosure rows expose the UI Automation ExpandCollapse pattern. Styles use theme brushes only.
+- **Cards.** Each frame positions a card from its anchor through the surface's grid mapping. Cards hide in the alternate screen, while the surface is open, over the live prompt row, and whenever a reserved row is not blank, so a card never covers shell text. A card forwards wheel input to the terminal. An expired anchor removes the card but not the task.
+- **Presentation.** Conversation rows are retained by entry id, so expansion and focus survive streaming events. One tool call renders as a card. Several collapse behind a summary that keeps a failure mark. Failures and cancellations also add an outcome row outside any group. A pending request appears once, above the agent reply field. An approval outcome shows on its tool call, and a question answer is recorded when sent. Disclosure rows expose the UI Automation ExpandCollapse pattern. Styles use theme brushes only.
 
 ## Execution and context
 
@@ -153,7 +155,7 @@ SDK 1.0.31 packaged README Tools section and XML `SessionConfigBase.AvailableToo
 
 Each command receives a correlation ID through PSReadLine's transport. An owned command excludes competing submissions and terminal input under the terminal state lock. An explicit interactive-input handoff permits raw input only for that lease. Cancellation sends Ctrl+C and waits for both correlated output completion and prompt readiness. A 20-second timeout returns InterruptionFailed without releasing the lease. Exit releases ownership. Pane disposal closes both resources.
 
-Measured ConPTY behavior. The inbox console reordered custom OSC end markers before final output text. See https://github.com/microsoft/terminal/issues/17313 for the same reported ordering problem. Capture therefore uses visible ordered text fences, correlated with OSC readiness. It consumes the incremental output stream, not a viewport or scrollback scrape. Fences, command echo and OSC metadata are excluded. UTF-8 decoding spans byte chunks. Capture is bounded to 64,000 characters and keeps draining after truncation. ANSI is stripped; terminal cursor redraws, background-job output and full-screen programs are not reconstructed as raw process output. Readiness still depends on authenticated per-session OSC, not text matching. Shell success is authoritative; ExitCode is PowerShell's last native LASTEXITCODE and can remain from an earlier native command when a subsequent command uses only cmdlets.
+Measured ConPTY behavior. The inbox console reordered custom OSC end markers before final output text. See https://github.com/microsoft/terminal/issues/17313 for the same reported ordering problem. Capture therefore uses visible ordered text fences, `Command started [a:id]` and `Command ended [a:id]`, correlated with OSC readiness. The fences name shell command boundaries only. They never claim an agent-turn outcome, which the task card and surface own. It consumes the incremental output stream, not a viewport or scrollback scrape. Fences, command echo and OSC metadata are excluded. UTF-8 decoding spans byte chunks. Capture is bounded to 64,000 characters and keeps draining after truncation. ANSI is stripped; terminal cursor redraws, background-job output and full-screen programs are not reconstructed as raw process output. Readiness still depends on authenticated per-session OSC, not text matching. Shell success is authoritative; ExitCode is PowerShell's last native LASTEXITCODE and can remain from an earlier native command when a subsequent command uses only cmdlets.
 
 Managed submission validates the full prefixed command before accepting it. Syntax errors return a normal shell error and a completed capture. PowerShell constructs that require the first statement, such as top-level `using namespace` and `param`, are currently rejected in managed submission instead of hanging capture; run these through raw terminal input when needed. This does not create a child scope for ordinary commands.
 
@@ -164,3 +166,47 @@ Managed submission validates the full prefixed command before accepting it. Synt
 `CopilotToolPresentation` owns the SDK boundary. It selects the command argument and decodes the custom terminal result into output, directory, exit code and outcome. The shared controller never parses SDK JSON or switches on Copilot names. SDK 1.0.31 XML confirms ToolCallId on start/complete events. AssistantReasoning Content is not treated as a safe public summary. The adapter does not forward it. A future adapter can explicitly emit the optional shared ReasoningSummary event.
 
 `AgentTimelineView` retains native row controls by entry identity. The model retains user group/output expansion state. Only changed text is replaced. Quiet disclosure buttons with an ExpandCollapse automation peer replace the earlier ToggleButton and Expander, which drew a selection fill and nested chrome. ActivityLabel owns text-only gradient shimmer, system-motion/high-contrast subscriptions and unload cleanup. No idle animation timer runs. Pane activity gates all motion. The sticky composer and terminal ownership boundary are unchanged.
+
+## Integrated Smart terminal
+
+Correction on 2026-11-11. The user rejected the detached composer. The prompt must be the real shell prompt inside terminal content, bottom-aligned at first, with history above it in order, real Tab completion, history and editing, and `/agent` on the same line. Legacy must stay a conventional terminal. The decision and its rejected alternatives are in [the design note](notes/integrated-smart-terminal-design.md).
+
+**What the user gets.** Typing goes to the shell in both modes. Tab completion, Up, Ctrl+R, predictions, custom PSReadLine bindings, multiline input and IME are the shell's own. Smart draws the terminal from the bottom. Legacy draws it from the top. `/agent <request>` is typed at the shell prompt. The only app-owned text field is the reply field inside the agent surface.
+
+**What the next maintainer inherits.** One presentation flag per pane and one cell mapping, instead of a managed prompt mode, a mode handshake, an acknowledgement timeout, a command catalogue and a two-input focus arbiter.
+
+### Contracts
+
+| Contract | Owner | Rule |
+| --- | --- | --- |
+| Display mode | `MainPage.Composer.cs` | `_legacy` is per pane. Smart is the default for every shell. Switching calls `TerminalSession.SetBottomAnchored` and `TerminalSurface.SetBottomAligned` together. It writes nothing to the PTY and never resizes it, so it is legal during commands, agent work and full-screen programs. New and restarted sessions take the pane's mode before `Start`. |
+| Live edge | `TerminalSession`, `GhosttyTerminal` | Bottom-anchored presentation trims the active screen's blank tail. `TerminalViewport.TopInset` is the number of blank rows the view leaves above frame row 0 when the document is shorter than the view. It is zero with anchoring off and on the alternate screen. |
+| Cell mapping | `TerminalGridGeometry` in `TerminalSurface.cs` | `Top = remainder + TopInset * CellHeight`. The remainder is `ActualHeight - Rows * CellHeight` when bottom-aligned and zero otherwise. Frame row r is drawn at `Top + r * CellHeight`. Only `Rows - TopInset` frame rows are drawn. Glyphs, backgrounds, selection fill, cursor, IME text box, hit testing, selection drag, selection edge scroll, application mouse and task cards all use this one mapping. `Offset` stays in logical screen rows and is never adjusted by the inset. |
+| Hit testing | `TerminalGridGeometry.TryCellAt` | The inset and the remainder are not cells. A press there starts no selection. Drags clamp to the nearest drawn cell. |
+| Application mouse | `MainPage.SendApplicationMouse` | Coordinates are relative to frame row 0. The session drops a button press outside the drawn rows. Wheel, motion and release clamp into the drawn rows, so a held button is always released. |
+| Agent entry | `TerminalSession.TakeAgentRequest` at `Ready` | The shell's Enter handler routes a leading `/agent` line. The app takes it only at `Ready`, reserves two rows, opens the surface and submits. If a turn is running, the running task opens and the request waits in its reply field. |
+| Entry availability | `TerminalSession.AgentEntryAvailable` | Messaging only. The pane header shows **/agent unavailable**, with the reason in its tooltip, for shells without integration and for PowerShell sessions where AgentTerm's Enter handler is not active. It never gates `TakeAgentRequest`. |
+| Focus | `PromptFocusPolicy` | The open agent surface owns input. Otherwise the terminal does, in both modes. Input moves only when the surface opens or closes. Explicit opens and leaves hand focus over. A shell-driven `/agent` open hands focus over only while this pane's input still holds it. Passive updates never move focus. |
+| Task cards | `MainPage.RefreshTaskCards` | A card is visible only while its reserved rows inside the frame are blank: no text, default background, no underline or strikethrough. A non-blank row hides the card instead of covering it. The task stays reachable by Ctrl+Shift+Y and the task status button. |
+| Agent ownership | `TerminalSession` | While an agent command owns the shell, terminal keystrokes are dropped unless the user chooses **Type into command**. That is now its own header button, so the mode switch stays available. |
+
+Removed from the app. The page-level composer row, the shell submit branch, terminal drafts, shell placeholders and hints, the command catalogue, `ReconcilePromptMode` calls, cursor suppression, `Raw` and `Switching` handling, the managed-prompt focus arbitration and the `GettingFocus` redirect. The app never calls `SubmitCommand`.
+
+### Resize and the native editor
+
+**Who notices.** A user whose prompt is wider than the pane, for example a deep working directory, resizes the pane and keeps typing. Before this change, what they typed after a resize could be drawn inside the prompt text, and the command still ran. Now the input continues right after the prompt.
+
+**Cause.** Ghostty reflows soft-wrapped rows on resize, as any reflowing terminal does. PSReadLine 2.x then moves its cached input origin to its old column modulo the new width (`RecomputeInitialCoords` in PSReadLine `Render.cs`). That is right only when the prompt did not wrap at the old width. ConPTY reports the reflowed cursor honestly. The stale value is PSReadLine's cached origin.
+
+**Correction.** After a ConPTY resize that changes the width at a ready integrated prompt, `TerminalSession` sends Ctrl+Shift+F12. The integration handler derives the origin from the reflowed cursor and the text before it. It checks the result with PSReadLine's own offset-to-point geometry, then updates the same cached fields `InvokePrompt` sets. It does not rerun, rewrite or re-encode the prompt, and it writes no screen output. It reports `anchor;<width>;<result>`. If ConPTY had not applied the resize yet, the reported width is stale and the session sends one more chord, up to four. No timer is involved. The handler abstains, leaving PSReadLine's behavior unchanged, when the cursor is on a later line of a multi-line draft, when it is parked past an exactly full row, or when the PSReadLine internals it reads are missing.
+
+### Differences from Warp
+
+Warp pins an app editor at the bottom and reimplements shell editing. AgentTerm keeps the shell's editor, so the prompt is terminal content. It scrolls away with history when you scroll up, and typing returns to the live edge. There is no per-command block grid. When rows below the prompt are erased, for example when a completion menu closes, the content moves down until the prompt sits on the bottom row again.
+
+### Known limits
+
+- `/agent` entry needs integrated PowerShell with PSReadLine and AgentTerm's Enter handler. A profile that binds Enter itself keeps its binding, and `/agent` lines run as ordinary commands in that pane.
+- A card whose reserved rows still hold prompt text stays hidden. Whether the reservation leaves blank rows under the user's real prompt depends on the shell protocol and is a Terra acceptance item.
+- Resize re-anchoring reads PSReadLine private fields by reflection. A PSReadLine release that renames them makes the handler abstain, which brings back the upstream misplaced-echo behavior for wrapped prompts. If a key typed before the resize is processed after it but ahead of the chord, PSReadLine applies its stale origin first, and the rest of that input line keeps it.
+- Prompt decorations and OSC 133 row marks are not used. ConPTY can reorder OSC against text, so OSC arrival does not anchor rows.

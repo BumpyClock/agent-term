@@ -18,12 +18,28 @@ internal static class AgentUi
     public const int OutputLines = 12;
     public static readonly string Chevron = Glyph(0xE76C), Check = Glyph(0xE73E), Cross = Glyph(0xE711), Prompt = Glyph(0xE756),
         File = Glyph(0xE8A5), Edit = Glyph(0xE70F), Tool = Glyph(0xE90F), Idea = Glyph(0xE82F), Info = Glyph(0xE946),
-        Stop = Glyph(0xE71A), CopyGlyph = Glyph(0xE8C8), Person = Glyph(0xE77B), Agent = Glyph(0xE99A), Shield = Glyph(0xEA18);
+        Stop = Glyph(0xE73B), CopyGlyph = Glyph(0xE8C8), Person = Glyph(0xE77B), Agent = Glyph(0xE99A), Shield = Glyph(0xEA18);
     private static readonly UISettings Settings = new();
     public static string Glyph(int code) => ((char)code).ToString();
     public static Style Style(string key) => (Style)Application.Current.Resources[key];
     public static FontFamily Symbols => (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"];
     public static bool Animate => Settings.AnimationsEnabled;
+    public static string TaskStatus(AgentSessionController controller, AgentTask? task) => controller.RunningTask == task && task is not null
+        ? controller.State switch
+        {
+            AgentState.Starting => "Starting",
+            AgentState.WaitingForApproval => "Needs approval",
+            AgentState.WaitingForInput => "Needs an answer",
+            AgentState.Interrupting => "Stopping",
+            _ => "Working",
+        }
+        : task?.LastOutcome switch
+        {
+            WorkStatus.Succeeded => "Done",
+            WorkStatus.Cancelled => "Stopped",
+            WorkStatus.Failed => "Failed",
+            _ => "",
+        };
     public static FontIcon Icon(string glyph, string style = "AgentIcon")
     {
         var icon = new FontIcon { Glyph = glyph, FontFamily = Symbols, Style = Style(style), VerticalAlignment = VerticalAlignment.Center };
@@ -98,7 +114,12 @@ internal sealed class AgentTimelineView : StackPanel
 {
     private readonly Dictionary<Guid, IRow> _rows = [];
     private readonly ActivityLabel _activity = new();
+    private readonly ProgressRing _progress = new() { Width = 20, Height = 20, MinWidth = 20, MinHeight = 20 };
+    private readonly FontIcon _staticProgress = AgentUi.Icon(AgentUi.Glyph(0xE917));
     private readonly Grid _activityRow;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _elapsedTimer;
+    private AgentSessionController? _controller;
+    private bool _active;
     private readonly TextBlock _trimmed = AgentUi.Text("AgentHintText", "Earlier activity in this pane was trimmed.");
     private AgentTask? _task;
     public FontFamily Mono { get; set; } = new("Cascadia Mono, Consolas");
@@ -106,7 +127,13 @@ internal sealed class AgentTimelineView : StackPanel
     public AgentTimelineView()
     {
         Spacing = 6;
-        _activityRow = AgentUi.Row(null, _activity);
+        var indicator = new Grid { Children = { _progress, _staticProgress } };
+        _activityRow = AgentUi.Row(indicator, _activity);
+        _elapsedTimer = DispatcherQueue.CreateTimer();
+        _elapsedTimer.Interval = TimeSpan.FromSeconds(1);
+        _elapsedTimer.Tick += (_, _) => { if (_controller is { } controller) Update(controller, _task, _active); };
+        Loaded += (_, _) => { if (_controller is { } controller) Update(controller, _task, _active); };
+        Unloaded += (_, _) => { _elapsedTimer.Stop(); _progress.IsActive = false; };
         _trimmed.Margin = new Thickness(AgentUi.Gutter, 0, 0, 0);
         Children.Add(_trimmed); Children.Add(_activityRow);
         AutomationProperties.SetName(this, "Agent conversation");
@@ -114,6 +141,8 @@ internal sealed class AgentTimelineView : StackPanel
 
     public void Update(AgentSessionController controller, AgentTask? task, bool active)
     {
+        _controller = controller;
+        _active = active;
         if (task != _task)
         {
             foreach (var row in _rows.Values) Children.Remove(row.Element);
@@ -133,7 +162,7 @@ internal sealed class AgentTimelineView : StackPanel
             {
                 row = entry switch
                 {
-                    TimelineWorkGroup group => new WorkRow(group, Mono),
+                    TimelineWorkGroup group => new WorkRow(group, Mono, AwaitsApproval),
                     TimelineMessage { Role: MessageRole.User } message => new RequestRow(message, Mono),
                     TimelineMessage { Role: MessageRole.Assistant } message => new AnswerRow(message, Mono),
                     TimelineMessage message => new OutcomeRow(message, Mono),
@@ -149,9 +178,35 @@ internal sealed class AgentTimelineView : StackPanel
         var toolsRunning = entries.OfType<TimelineWorkGroup>().Any(g => g.Active);
         var thinking = entries.LastOrDefault() is TimelineWorkGroup { Reasoning: not null, Tools.Count: 0 };
         var working = running && !toolsRunning && !thinking;
-        _activityRow.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
-        _activity.Update(controller.State == AgentState.Starting ? "Starting" : "Working", working && active);
+        var status = AgentUi.TaskStatus(controller, task);
+        var ownsTurn = controller.HasActiveTurn && controller.RunningTask == task;
+        if (ownsTurn && controller.TurnElapsed.TotalSeconds >= 3)
+            status += " · " + controller.TurnElapsed.ToString(@"m\:ss");
+        if (ownsTurn && active && IsLoaded && controller.State is AgentState.Starting or AgentState.Running or AgentState.Interrupting) _elapsedTimer.Start(); else _elapsedTimer.Stop();
+        // A cancellation already has its own outcome row. Keep that detail, not a second status label.
+        var cancellationShown = task?.LastOutcome == WorkStatus.Cancelled && controller.RunningTask != task
+            && entries.OfType<TimelineMessage>().Any(m => m.Role == MessageRole.Cancelled);
+        _activityRow.Visibility = status.Length > 0 && !cancellationShown ? Visibility.Visible : Visibility.Collapsed;
+        _progress.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
+        _progress.IsActive = working && active && IsLoaded && AgentUi.Animate && !new AccessibilitySettings().HighContrast;
+        _staticProgress.Visibility = working && !_progress.IsActive ? Visibility.Visible : Visibility.Collapsed;
+        _activity.Update(status, working && active);
     }
+
+    private bool AwaitsApproval(TimelineTool tool) => _controller?.AwaitsApproval(tool.CallId) == true;
+
+    /// <summary>
+    /// An in-flight call is "running" only after the harness reports execution. Before that it is "pending", or
+    /// "awaiting approval" while a queued approval names it, so an approval gate never reads as a started command.
+    /// </summary>
+    internal static string ToolPhase(TimelineTool tool, bool awaitingApproval) => tool.Status switch
+    {
+        WorkStatus.Running when awaitingApproval => "awaiting approval",
+        WorkStatus.Running => tool.Executing ? "running" : "pending",
+        WorkStatus.Failed => "failed",
+        WorkStatus.Cancelled => "stopped",
+        _ => "done",
+    };
 
     private interface IRow
     {
@@ -170,12 +225,11 @@ internal sealed class AgentTimelineView : StackPanel
 
     private sealed class RequestRow(TimelineMessage message, FontFamily font) : IRow
     {
-        private readonly TextBlock _text = MonoText("AgentBodyText", font);
+        private readonly TextBlock _text = MonoText("AgentRequestText", font);
         private FrameworkElement? _element;
         public FrameworkElement Element => _element ??= Build();
         private Grid Build()
         {
-            _text.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             var row = AgentUi.Row(AgentUi.Icon(AgentUi.Person), _text);
             row.Margin = new Thickness(0, 8, 0, 0);
             return row;
@@ -191,7 +245,7 @@ internal sealed class AgentTimelineView : StackPanel
     {
         private readonly TextBlock _text = MonoText("AgentBodyText", font);
         private FrameworkElement? _element;
-        public FrameworkElement Element => _element ??= AgentUi.Row(null, _text);
+        public FrameworkElement Element => _element ??= AgentUi.Row(AgentUi.Icon(AgentUi.Agent), _text);
         public void Update(bool live, bool last)
         {
             _ = Element;
@@ -238,7 +292,7 @@ internal sealed class AgentTimelineView : StackPanel
     /// A run of tool calls. One call renders as its card directly. Several collapse behind a summary that keeps
     /// failures visible. Live reasoning shows as Thinking only when the harness sent a summary.
     /// </summary>
-    private sealed class WorkRow(TimelineWorkGroup group, FontFamily font) : IRow
+    private sealed class WorkRow(TimelineWorkGroup group, FontFamily font, Func<TimelineTool, bool> awaitsApproval) : IRow
     {
         private readonly StackPanel _root = new() { Spacing = 4 };
         private readonly DisclosureButton _header = new();
@@ -266,12 +320,13 @@ internal sealed class AgentTimelineView : StackPanel
             Build();
             foreach (var tool in group.Tools)
             {
-                if (!_cards.TryGetValue(tool.CallId, out var card)) { card = new ToolCard(tool, font); _cards.Add(tool.CallId, card); _details.Children.Add(card.Element); }
+                if (!_cards.TryGetValue(tool.CallId, out var card)) { card = new ToolCard(tool, font, awaitsApproval); _cards.Add(tool.CallId, card); _details.Children.Add(card.Element); }
                 card.Refresh(live);
             }
             var reasoningOnly = group.Tools.Count == 0;
             var thinking = live && reasoningOnly && last;
-            var label = reasoningOnly ? (thinking ? "Thinking" : "Thought") : group.Summary;
+            var gated = group.Tools.LastOrDefault(t => t.Status == WorkStatus.Running && awaitsApproval(t));
+            var label = reasoningOnly ? (thinking ? "Thinking" : "Thought") : gated is not null ? $"Awaiting approval for {gated.Action}" : group.Summary;
             _label.Update(label, thinking || (live && group.Active && group.Tools.Count > 1));
             _icon.Glyph = reasoningOnly ? AgentUi.Idea : group.Tools.All(t => t.Category == ToolCategory.Command) ? AgentUi.Prompt
                 : group.Tools.All(t => t.Category == ToolCategory.ReadFile) ? AgentUi.File : group.Tools.All(t => t.Category == ToolCategory.WriteFile) ? AgentUi.Edit : AgentUi.Tool;
@@ -295,6 +350,7 @@ internal sealed class AgentTimelineView : StackPanel
     private sealed class ToolCard
     {
         private readonly TimelineTool _tool;
+        private readonly Func<TimelineTool, bool> _awaitsApproval;
         private readonly Border _card = new() { Style = AgentUi.Style("AgentCard") };
         private readonly DisclosureButton _header = new();
         private readonly Grid _status = new() { Width = 14 };
@@ -308,10 +364,11 @@ internal sealed class AgentTimelineView : StackPanel
         private bool _showAll;
         private bool _live;
         public FrameworkElement Element => _card;
-        public ToolCard(TimelineTool tool, FontFamily font)
+        public ToolCard(TimelineTool tool, FontFamily font, Func<TimelineTool, bool> awaitsApproval)
         {
             _tool = tool;
-            _command = MonoText("AgentCommandText", font);
+            _awaitsApproval = awaitsApproval;
+            _command = MonoText("AgentHintText", font);
             _fullCommand = MonoText("AgentDetailText", font);
             _output = MonoText("AgentDetailText", font);
             _status.Children.Add(_statusIcon);
@@ -346,10 +403,11 @@ internal sealed class AgentTimelineView : StackPanel
             _statusIcon.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
             _statusIcon.Glyph = _tool.Status == WorkStatus.Succeeded ? AgentUi.Check : _tool.Status == WorkStatus.Failed ? AgentUi.Cross : AgentUi.Stop;
             _statusIcon.Style = AgentUi.Style(_tool.Status switch { WorkStatus.Succeeded => "AgentSuccessIcon", WorkStatus.Failed => "AgentCriticalIcon", _ => "AgentIcon" });
-            var hint = _tool.Status switch { WorkStatus.Running => "running", WorkStatus.Failed => "failed", WorkStatus.Cancelled => "stopped", _ => "" };
-            _runningHint.Update(hint, running && _live);
+            var awaiting = _awaitsApproval(_tool);
+            var status = ToolPhase(_tool, awaiting);
+            var hint = status == "done" ? "" : status;
+            _runningHint.Update(hint, running && !awaiting && _live);
             _runningHint.Visibility = hint.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            var status = _tool.Status switch { WorkStatus.Running => "running", WorkStatus.Failed => "failed", WorkStatus.Cancelled => "stopped", _ => "done" };
             AutomationProperties.SetName(_header, $"{line}, {status}");
             var hasBody = _tool.Output.Length > 0 || more.Length > 0 || line.Length < command.Length;
             _header.Chevron.Visibility = hasBody ? Visibility.Visible : Visibility.Collapsed;

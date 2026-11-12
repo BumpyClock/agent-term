@@ -4,8 +4,8 @@ namespace AgentTerm.Terminal;
 /// <summary>Ordered text fences are required because inbox ConPTY can reorder OSC relative to rendered text.</summary>
 public sealed class CommandOutputCapture(string? commandId = null)
 {
-    private readonly string _start = "Agent command [" + commandId + "]";
-    private readonly string _end = "Agent completed [" + commandId + "]";
+    private readonly string _start = "Command started [" + commandId + "]";
+    private readonly string _end = "Command ended [" + commandId + "]";
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
     private readonly StringBuilder _text = new();
     private readonly StringBuilder _fence = new();

@@ -24,15 +24,22 @@ public sealed partial class GhosttyTerminal
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 29, (IntPtr)(&lines)), "Could not configure scrollback lines.");
     }
 
-    public void ScrollLines(int delta) => Scroll(new ScrollBehavior { Tag = 2, Value = delta });
-    public void ScrollTo(long offset) => Scroll(new ScrollBehavior { Tag = 3, Value = (nint)Math.Clamp(offset, 0, (long)nint.MaxValue) });
-    public void ScrollToBottom() => Scroll(new ScrollBehavior { Tag = 1 });
-    private void Scroll(ScrollBehavior behavior)
+    public void ScrollLines(int delta) => ScrollTo(ReadFrame().Viewport.Offset + delta);
+    public void ScrollTo(long offset)
     {
         ThrowIfDisposed();
-        ThrowIfFailed(ScrollNative.ghostty_terminal_scroll_viewport(_handle, behavior), "Could not scroll terminal viewport.");
+        EnsurePresentation();
+        var viewport = ReadViewport();
+        var target = Math.Clamp(offset, 0, viewport.MaximumOffset);
+        NativeScroll(target);
+        _following = target == viewport.MaximumOffset;
         _viewRevision++;
         CaptureSelectedViewport();
+    }
+    public void ScrollToBottom()
+    {
+        _following = true;
+        ScrollTo(ReadFrame().Viewport.MaximumOffset);
     }
 
     public unsafe void BeginSelection(int column, int row, int clickCount = 1, bool rectangular = false)
@@ -161,7 +168,13 @@ public sealed partial class GhosttyTerminal
             _anchor?.Dispose(); _anchor = null;
         }
     }
-    private unsafe TerminalViewport ReadViewport()
+    private TerminalViewport ReadViewport()
+    {
+        var native = ReadNativeViewport();
+        return !_preparingPresentation && _presentedTotal is { } total && !native.IsAlternateScreen
+            ? native with { TotalRows = total } : native;
+    }
+    private unsafe TerminalViewport ReadNativeViewport()
     {
         Scrollbar bar = default;
         ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 9, &bar), "Could not read terminal scrollbar.");

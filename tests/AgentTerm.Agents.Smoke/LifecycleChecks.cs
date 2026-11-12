@@ -57,7 +57,9 @@ static class LifecycleChecks
             await using var controller = new AgentSessionController(harness);
             var submission = controller.SubmitAsync("must not send", location);
             await harness.Entered.Task;
+            Check(controller.HasActiveTurn && controller.CanInterrupt, "Startup owns a turn and offers real cancellation before provider open completes.");
             var stop = controller.InterruptAsync();
+            Check(controller.HasActiveTurn && !controller.CanInterrupt, "Stopping retains turn ownership without offering a duplicate Stop.");
             Check(!controller.CanSubmit && !await controller.SubmitAsync("too soon", location), "Stop retains admission until startup unwinds.");
             var concurrentStop = controller.InterruptAsync();
             Check(ReferenceEquals(stop, concurrentStop), "Concurrent startup Stop shares one operation.");

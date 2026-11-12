@@ -22,5 +22,7 @@
     <Compile Include="../../src/AgentTerm.App/ActivityLabel.cs" Link="ActivityLabel.cs" />
     <Compile Include="../../src/AgentTerm.App/AgentTimelineView.cs" Link="AgentTimelineView.cs" />
     <Page Include="../../src/AgentTerm.App/AgentStyles.xaml" Link="AgentStyles.xaml" />
+    <Compile Include="../../src/AgentTerm.App/AgentRequestPanel.xaml.cs" Link="AgentRequestPanel.xaml.cs" DependentUpon="AgentRequestPanel.xaml" />
+    <Page Include="../../src/AgentTerm.App/AgentRequestPanel.xaml" Link="AgentRequestPanel.xaml" />
   </ItemGroup>
 </Project>

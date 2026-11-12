@@ -13,6 +13,7 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     private sealed class TurnOperation(Guid id, CancellationToken lifetime)
     {
         public Guid Id { get; } = id;
+        public long Started { get; } = System.Diagnostics.Stopwatch.GetTimestamp();
         public CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
         public TaskCompletionSource Submitted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource? Stop;
@@ -21,6 +22,11 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     public AgentLocation? Location { get; private set; }
     private readonly Queue<AgentEvent> _requests = new();
     public AgentEvent? Request => _requests.TryPeek(out var request) ? request : null;
+    /// <summary>Any queued approval, not only the shown one, names this call. A row must not claim it is running while it waits.</summary>
+    public bool AwaitsApproval(string callId) => _requests.Any(r => r is ApprovalRequest { CallId: { } id } && id == callId);
+    public bool HasActiveTurn => _operation is not null;
+    public bool CanInterrupt => _operation is { Stop: null } && (State == AgentState.Starting || _session is not null) && State != AgentState.Disposed;
+    public TimeSpan TurnElapsed => _operation is { } operation ? System.Diagnostics.Stopwatch.GetElapsedTime(operation.Started) : TimeSpan.Zero;
     public bool CanSubmit => State is AgentState.Idle or AgentState.Failed;
     public event Action? Changed;
     public const int TaskLimit = 32;
@@ -86,8 +92,8 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
         {
             if (State != AgentState.Disposed)
             {
-                Timeline.Message(turn, MessageRole.Notice, "Interrupted.");
-                Finish(AgentState.Idle); Changed?.Invoke();
+                RecordStopped(turn);
+                Finish(AgentState.Idle, WorkStatus.Cancelled); Changed?.Invoke();
             }
             return false;
         }
@@ -119,7 +125,7 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
                     case QuestionRequest question: _requests.Enqueue(question); UpdateRequestState(); break;
                     case TurnFailed failed: Timeline.Message(item.Turn, MessageRole.Failure, failed.Message); Finish(AgentState.Failed); break;
                     case TurnCompleted: Finish(AgentState.Idle); break;
-                    case TurnInterrupted: Timeline.Message(item.Turn, MessageRole.Notice, "Interrupted."); Finish(AgentState.Idle); break;
+                    case TurnInterrupted: RecordStopped(item.Turn); Finish(AgentState.Idle, WorkStatus.Cancelled); break;
                 }
                 Changed?.Invoke();
             }
@@ -133,8 +139,15 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
             Timeline.Message(_turn ?? Guid.Empty, MessageRole.Failure, ex.Message); Finish(AgentState.Failed); Changed?.Invoke();
         }
     }
-    private void Finish(AgentState state)
+    private void RecordStopped(Guid turn)
     {
+        var partial = Timeline.Entries.OfType<TimelineMessage>().Any(m => m.Turn == turn && m.Role == MessageRole.Assistant && m.Text.Length > 0);
+        Timeline.Message(turn, MessageRole.Cancelled, partial ? "Stopped. Partial reply kept." : "Stopped before any reply.");
+    }
+
+    private void Finish(AgentState state, WorkStatus? outcome = null)
+    {
+        if (RunningTask is { } task) task.LastOutcome = outcome ?? (state == AgentState.Failed ? WorkStatus.Failed : WorkStatus.Succeeded);
         if (_turn is { } turn) Timeline.Settle(turn);
         _operation?.Cancellation.Dispose(); _operation = null;
         _requests.Clear(); State = state;

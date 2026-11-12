@@ -95,6 +95,7 @@ internal static class Program
         AssertThemeColors(device, Path.GetDirectoryName(output)!);
         AssertOscCursorText(device);
         AssertBackgroundContinuity(device);
+        GridGeometryChecks.Run(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");
     }
 

@@ -67,6 +67,20 @@ static class LifecycleChecks
             try { await session.SubmitAsync(new(Guid.NewGuid(), "unusable")); } catch (InvalidOperationException) { rejected = true; }
             Check(rejected, "Late idle cannot revive a timed-out session.");
         }
+        await using (var session = new CopilotHarness.Session(null, (_, _) => Task.CompletedTask))
+        {
+            var turn = Guid.NewGuid();
+            await session.SubmitAsync(new(turn, "fixture"));
+            session.OnEvent(new AssistantMessageEvent { Data = new() { MessageId = "one", Content = "final only" } });
+            session.OnEvent(new AssistantMessageDeltaEvent { Data = new() { MessageId = "two", DeltaContent = "stream" } });
+            session.OnEvent(new AssistantMessageEvent { Data = new() { MessageId = "two", Content = "stream tail" } });
+            session.OnEvent(Idle());
+            await using var events = session.Events(timeout.Token).GetAsyncEnumerator();
+            Check(await events.MoveNextAsync() && events.Current is TextDelta a && a.Text == "final only", "Final-only message must be visible.");
+            Check(await events.MoveNextAsync() && events.Current is TextDelta b && b.Text == "stream", "Streamed content must be visible.");
+            Check(await events.MoveNextAsync() && events.Current is TextDelta c && c.Text == " tail", "Final message must emit only the missing suffix.");
+            Check(await events.MoveNextAsync() && events.Current is TurnCompleted, "Native idle completes the turn without duplicating content.");
+        }
         Console.WriteLine("Copilot native error/idle, concurrent Stop and bounded drain checks passed.");
     }
 }

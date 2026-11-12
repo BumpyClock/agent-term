@@ -34,12 +34,13 @@ public sealed partial class GhosttyTerminal
         }
 
         // A held update must not consume terminal dirty state. Resize ends the hold.
-        if (ReadMode(2026))
+        if (!_preparingPresentation && ReadMode(2026))
         {
             _holdStarted ??= Environment.TickCount64;
             if (_frame is not null && _viewRevision == _capturedViewRevision && Environment.TickCount64 - _holdStarted.Value < 1000) return _frame;
         }
         else _holdStarted = null;
+        EnsurePresentation();
         var viewport = ReadViewport();
         var hasSelection = HasSelection();
         var reverse = ReadMode(5);

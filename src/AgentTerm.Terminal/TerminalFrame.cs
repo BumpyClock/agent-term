@@ -28,6 +28,7 @@ public sealed record TerminalFrame(int Columns, int Rows, TerminalCell[] Cells,
 
 public readonly record struct TerminalViewport(long TotalRows, long Offset, int Rows, bool IsAlternateScreen)
 {
+    public int TopInset => (int)Math.Max(0, Rows - TotalRows);
     public long MaximumOffset => Math.Max(0, TotalRows - Rows);
     public bool IsAtBottom => Offset >= MaximumOffset;
 }

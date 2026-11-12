@@ -70,6 +70,7 @@ public sealed class CopilotHarness : IAgentHarness
             public TaskCompletionSource Idle { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public Task? Stop;
             public string? Failure;
+            public Dictionary<string, string> Messages { get; } = [];
         }
         private IHostTerminal? _terminal;
         private readonly HashSet<Task<TerminalExecutionResult>> _executions = [];
@@ -86,11 +87,13 @@ public sealed class CopilotHarness : IAgentHarness
                 EnableManagedSettings = true,
                 AvailableTools = ["run_in_terminal", "ask_user"],
                 Tools = [CopilotTool.DefineTool(
-                    async ([Description("Exact PowerShell command to execute in the invoking pane, preserving shell state.")] string command) =>
+                    async ([Description("Exact PowerShell command to execute in the invoking pane, preserving shell state.")] string command, ToolInvocation invocation) =>
                     {
                         if (_terminal is null) return new TerminalExecutionResult(TerminalExecutionStatus.Unsupported);
                         var id = Guid.NewGuid();
-                        var reply = await RequestAsync(id, new ApprovalRequest(_turn ?? Guid.Empty, id, command));
+                        var turn = _turn ?? Guid.Empty;
+                        // The SDK binds ToolInvocation outside the model's schema. Its call id matches ToolExecutionStartEvent.
+                        var reply = await RequestAsync(id, new ApprovalRequest(turn, id, command, invocation.ToolCallId));
                         if (!reply.Approved) return new TerminalExecutionResult(TerminalExecutionStatus.Denied);
                         Task<TerminalExecutionResult> execution;
                         lock (_executions)
@@ -98,6 +101,7 @@ public sealed class CopilotHarness : IAgentHarness
                             execution = _terminal.ExecuteAsync(new(command), _active?.Cancellation.Token ?? _lifetime.Token);
                             _executions.Add(execution);
                         }
+                        _events.Writer.TryWrite(new ToolExecuting(turn, invocation.ToolCallId));
                         try { return await execution; }
                         finally { lock (_executions) _executions.Remove(execution); }
                     },
@@ -106,17 +110,18 @@ public sealed class CopilotHarness : IAgentHarness
                 OnPermissionRequest = async (request, invocation) =>
                 {
                     var id = Guid.NewGuid();
-                    var detail = request switch
+                    (string Detail, string? CallId) gate = request switch
                     {
-                        PermissionRequestShell shell => shell.FullCommandText,
-                        PermissionRequestWrite write => $"Write {write.FileName}\n{write.Diff}",
-                        PermissionRequestRead read => $"Read {read.Path}",
-                        PermissionRequestUrl url => $"Access URL {url.Url}",
-                        PermissionRequestMcp mcp => $"{mcp.ServerDisplayName ?? mcp.ServerName} / {mcp.ToolName}\n{mcp.Args}",
-                        PermissionRequestCustomTool tool => $"{tool.ToolName}\n{tool.ToolDescription}\n{tool.Args}",
-                        _ => $"{request.Kind} permission. Review this tool activity before approving.",
+                        PermissionRequestShell shell => (shell.FullCommandText, shell.ToolCallId),
+                        PermissionRequestWrite write => ($"Write {write.FileName}\n{write.Diff}", write.ToolCallId),
+                        PermissionRequestRead read => ($"Read {read.Path}", read.ToolCallId),
+                        PermissionRequestUrl url => ($"Access URL {url.Url}", url.ToolCallId),
+                        PermissionRequestMcp mcp => ($"{mcp.ServerDisplayName ?? mcp.ServerName} / {mcp.ToolName}\n{mcp.Args}", mcp.ToolCallId),
+                        PermissionRequestCustomTool tool => ($"{tool.ToolName}\n{tool.ToolDescription}\n{tool.Args}", tool.ToolCallId),
+                        _ => ($"{request.Kind} permission. Review this tool activity before approving.", null),
                     };
-                    var reply = await RequestAsync(id, new ApprovalRequest(_turn ?? Guid.Empty, id, detail));
+                    // The runtime executes after approval without reporting a start, so such a row stays "pending", never "running".
+                    var reply = await RequestAsync(id, new ApprovalRequest(_turn ?? Guid.Empty, id, gate.Detail, gate.CallId));
                     return reply.Approved ? PermissionDecision.ApproveOnce() : PermissionDecision.Reject("User declined.");
                 },
                 OnUserInputRequest = async (request, invocation) =>
@@ -166,9 +171,27 @@ public sealed class CopilotHarness : IAgentHarness
                 owner.Stop ??= Task.Run(() => StopAsync(owner, default));
                 return;
             }
+            if (item is AssistantMessageDeltaEvent delta)
+            {
+                var id = delta.Data.MessageId;
+                owner.Messages.TryGetValue(id, out var prior);
+                owner.Messages[id] = (prior ?? "") + delta.Data.DeltaContent;
+                _events.Writer.TryWrite(new TextDelta(turn, delta.Data.DeltaContent));
+                return;
+            }
+            if (item is AssistantMessageEvent message)
+            {
+                var id = message.Data.MessageId;
+                var content = message.Data.Content;
+                owner.Messages.TryGetValue(id, out var prior);
+                if (prior is null) _events.Writer.TryWrite(new TextDelta(turn, content));
+                else if (content.StartsWith(prior, StringComparison.Ordinal) && content.Length > prior.Length)
+                    _events.Writer.TryWrite(new TextDelta(turn, content[prior.Length..]));
+                owner.Messages[id] = content;
+                return;
+            }
             AgentEvent? normalized = item switch
             {
-                AssistantMessageDeltaEvent text => new TextDelta(turn, text.Data.DeltaContent),
                 SessionIdleEvent => owner.Failure is { } failure ? new TurnFailed(turn, failure) : owner.Stop is not null ? new TurnInterrupted(turn) : new TurnCompleted(turn),
                 _ => null,
             };

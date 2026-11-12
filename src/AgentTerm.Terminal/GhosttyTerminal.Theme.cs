@@ -38,6 +38,7 @@ public sealed partial class GhosttyTerminal
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 15, (IntPtr)palette), "Could not set terminal palette.");
         _theme = theme;
         // A host theme switch must be visible even while an application holds synchronized output.
+        _presentationDirty = true;
         _viewRevision++;
     }
 

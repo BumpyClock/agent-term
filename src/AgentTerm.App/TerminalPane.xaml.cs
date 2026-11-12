@@ -20,6 +20,13 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     {
         _page = page;
         InitializeComponent();
+        RoutedEventHandler? attachControls = null;
+        attachControls = (_, _) =>
+        {
+            Loaded -= attachControls;
+            page.AttachPromptModeControls(PromptModeHost);
+        };
+        Loaded += attachControls;
         _backdrop.AttachmentChanged += UpdateSolidFallback;
         TerminalContent.Content = page;
         PaneShell.Text = page.Profile.Name;

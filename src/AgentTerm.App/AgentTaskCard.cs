@@ -11,6 +11,7 @@ internal sealed class AgentTaskCard : Button
     private readonly TextBlock _title = AgentUi.Text("AgentCommandText");
     private readonly ActivityLabel _status = new();
     private readonly FontIcon _mark = AgentUi.Icon(AgentUi.Cross, "AgentCriticalIcon");
+    private bool? _latest;
     public AgentTask Task { get; }
 
     public AgentTaskCard(AgentTask task)
@@ -28,20 +29,21 @@ internal sealed class AgentTaskCard : Button
         Grid.SetColumn(_title, 1); row.Children.Add(_title);
         Grid.SetColumn(trailing, 2); row.Children.Add(trailing);
         Content = row;
-        ToolTipService.SetToolTip(this, "Open this agent task (Enter)");
     }
 
     public void Update(AgentSessionController controller, bool animate)
     {
         var running = controller.RunningTask == Task;
-        var failed = controller.Timeline.Entries.OfType<TimelineMessage>().LastOrDefault(m => Task.Contains(m.Turn)) is { Role: MessageRole.Failure };
-        var status = !running ? (failed ? "Failed" : "") : controller.State switch
+        // Ctrl+Shift+Y in the terminal opens the running task, else the current one. Only that card advertises it.
+        var latest = (controller.RunningTask ?? controller.CurrentTask) == Task;
+        if (_latest != latest)
         {
-            AgentState.WaitingForApproval => "Needs approval",
-            AgentState.WaitingForInput => "Needs an answer",
-            AgentState.Interrupting => "Stopping",
-            _ => "Working",
-        };
+            _latest = latest;
+            ToolTipService.SetToolTip(this, latest ? "Open this agent task (Enter, or Ctrl+Shift+Y from the terminal)" : "Open this agent task (Enter)");
+            AutomationProperties.SetAcceleratorKey(this, latest ? "Control+Shift+Y" : "");
+        }
+        var failed = Task.LastOutcome == WorkStatus.Failed;
+        var status = AgentUi.TaskStatus(controller, Task);
         var title = Task.Title.Length > 0 ? Task.Title : "New agent task";
         if (_title.Text != title) _title.Text = title;
         _status.Update(status, animate && running && controller.State is AgentState.Running or AgentState.Starting);
