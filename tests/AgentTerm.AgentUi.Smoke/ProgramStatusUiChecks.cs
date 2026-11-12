@@ -1,8 +1,14 @@
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using AgentTerm.Terminal;
 using AgentTerm_App;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Graphics.Imaging;
+using Windows.Storage;
 
 internal static class ProgramStatusUiChecks
 {
@@ -19,100 +25,348 @@ internal static class ProgramStatusUiChecks
             ["SidebarTabHintStyle"] = new Style { TargetType = typeof(TextBlock) }
         };
         var sidebar = new SidebarTabItem(tab, resources);
-        var working = new PaneProgramStatus(1, "PowerShell", new("", ProgramState.Working, null, 30,
-            "claude-code", "claude-code", "Build", "Compiling", DateTimeOffset.UtcNow));
+        var working = Report("", ProgramState.Working, "Build", "Compiling", progress: 30);
         status.Update([working]);
-        Check(Tip(tab) == Tip(sidebar) && Tip(tab).Contains("Working · 30%"), "Top and expanded sidebar must expose identical live status details.");
-        Check(AutomationProperties.GetHelpText(tab) == "Working · 30%", "Top tab must expose status to assistive technology.");
-        Check(AutomationProperties.GetHelpText(sidebar).Contains("Compiling"), "Sidebar must expose status to assistive technology.");
+        Check(ToolTipService.GetToolTip(tab) is ToolTip { IsEnabled: false } && ToolTipService.GetToolTip(sidebar) is null, "Status must have one rich surface, without a competing basic tooltip.");
+        Check(AutomationProperties.GetHelpText(tab).Contains("Working · 30%") && AutomationProperties.GetHelpText(sidebar).Contains("Compiling"), "Both layouts must expose complete status to assistive technology.");
         Check(!ReferenceEquals(tab.IconSource, shell), "Program status must replace the shell icon.");
         sidebar.IsCompact = true;
-        Check(Tip(sidebar).StartsWith(Tip(tab), StringComparison.Ordinal) && Tip(sidebar).Contains("Shift+F10") && Tip(sidebar).Contains("Ctrl+F4"), "Compact sidebar must retain full status and tab actions.");
-        Check(AutomationProperties.GetHelpText(sidebar).Contains("Shift+F10") && AutomationProperties.GetHelpText(sidebar).Contains("Ctrl+F4"), "Compact actions must remain accessible with status.");
+        Check(AutomationProperties.GetHelpText(sidebar).Contains("Alt+Down") && AutomationProperties.GetHelpText(sidebar).Contains("Ctrl+F4"), "Compact actions must remain accessible with status.");
         var blocked = working with { Status = working.Status with { State = ProgramState.Blocked, Kind = "question", Message = "Which target?" } };
         status.Update([blocked]);
-        Check(Tip(sidebar).StartsWith(Tip(tab), StringComparison.Ordinal) && Tip(sidebar).Contains("Which target?"), "Status changes must reach an existing compact row.");
-        var newShell = new FontIconSource { Glyph = "\uE756" };
-        status.SetShellIcon(newShell);
-        Check(!ReferenceEquals(tab.IconSource, newShell), "Late shell icon loading must not erase program status.");
+        Check(AutomationProperties.GetHelpText(sidebar).Contains("Which target?"), "Existing compact rows must follow status changes.");
         status.Update([]);
-        Check(ReferenceEquals(tab.IconSource, newShell), "Clearing the last report must restore the latest shell icon.");
-        Check(ToolTipService.GetToolTip(tab) is null && AutomationProperties.GetHelpText(tab) == "", "Clearing reports must clear top tooltip and accessible status.");
-        Check(ToolTipService.GetToolTip(sidebar) is ToolTip { Content: StackPanel } && AutomationProperties.GetHelpText(sidebar).Contains("Ctrl+F4"), "Compact sidebar must restore its ordinary title/action hint.");
+        Check(ReferenceEquals(tab.IconSource, shell), "Clearing reports must restore the shell icon.");
+        Check(AutomationProperties.GetHelpText(tab) == "", "Clearing reports must clear accessible status.");
+        Check(ToolTipService.GetToolTip(sidebar) is ToolTip { Content: StackPanel }, "Compact sidebar must restore its ordinary title/action hint.");
         status.Update([working]);
-        var beforeDetach = Tip(sidebar);
+        var beforeDetach = AutomationProperties.GetHelpText(sidebar);
         sidebar.Detach();
         status.Update([blocked]);
-        Check(Tip(sidebar) == beforeDetach && Tip(tab).Contains("Which target?"), "Detached rows must stop following live tabs.");
-        Console.WriteLine("Native top, expanded sidebar, and compact sidebar status checks passed.");
+        Check(AutomationProperties.GetHelpText(sidebar) == beforeDetach, "Detached rows must stop following live tabs.");
+        Console.WriteLine("Top, expanded and compact sidebar status contracts passed.");
     }
 
     internal static async Task CheckDetailsAsync(Window window)
     {
-        var tab = new TabViewItem { Header = "Status fixture" };
+        var tab = new TabViewItem { Header = "PowerShell" };
         var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var input = new TextBox { Text = "Terminal focus fixture", Margin = new Thickness(24), VerticalAlignment = VerticalAlignment.Top };
+        var terminalEscapeCount = 0;
+        input.PreviewKeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Escape) terminalEscapeCount++; };
+        tab.Content = input;
+        var tabs = new TabView();
+        tabs.TabItems.Add(tab);
+        var root = new Grid { RequestedTheme = ElementTheme.Dark, Children = { tabs } };
+        window.Content = root;
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1100, 850));
+        window.Activate();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        ShowWindow(hwnd, 9);
+        Foreground(hwnd);
+        RequireForeground(window);
+
+        status.Update([Report("", ProgramState.Done, "pi", "Quiver Git Pull")]);
+        await Task.Delay(300);
+        input.Focus(FocusState.Programmatic);
+        Move(window, input, 100, 15);
+        await Task.Delay(100);
+        Move(window, tab, 70, 16);
+        await Task.Delay(800);
+        var card = OpenCard(tab);
+        if (card is null) await CaptureAsync(root, "hover-failure");
+        Check(card is not null, "Hover must open the rich card without a context menu.");
+        Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), input), "Hover must preserve terminal focus.");
+        await CaptureAsync(card!, "single-dark");
+        Move(window, card!, 70, 60);
+        await Task.Delay(600);
+        Check(OpenCard(tab) == card, "Moving from tab to card must keep it open.");
+        status.Update([Report("", ProgramState.Working, "pi", "Pulling changes", progress: 35)]);
+        Check(OpenCard(tab) == card && Text(card!).Contains("Pulling changes"), "Live reports must update the open card in place.");
+        Press(window, 0x1B);
+        await Task.Delay(150);
+        Check(OpenCard(tab) is null && ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), input), "Escape must dismiss hover without stealing terminal focus.");
+        Check(terminalEscapeCount == 1, "Hover dismissal must let Escape reach the terminal input.");
+        Move(window, input, 500, 180);
+        await Task.Delay(100);
+        Move(window, tab, 70, 16);
+        await Task.Delay(700);
+        card = OpenCard(tab);
+        Check(card is not null, "Hover must reopen after a fresh pointer entry.");
+        Move(window, input, 500, 180);
+        await Task.Delay(600);
+        Check(OpenCard(tab) is null, "Leaving both tab and card must dismiss hover.");
+        Console.WriteLine("Pointer hover, terminal focus preservation, pointer bridge, live update and leave dismissal passed.");
+
+        status.Update([Report("", ProgramState.Working, "PowerShell", "Validating terminal rendering")]);
+        Move(window, tab, 70, 16);
+        await Task.Delay(700);
+        card = OpenCard(tab)!;
+        var programName = Descendants(card).OfType<TextBlock>().Single(block => block.Name == "Name" && block.Text == "PowerShell");
+        Check(programName.TransformToVisual(card).TransformPoint(new(0, 0)).Y < 12, "Matching single-report titles must collapse the heading without an empty gap.");
+        var presenter = VisualTreeHelper.GetOpenPopupsForXamlRoot(tab.XamlRoot).SelectMany(popup => Descendants(popup.Child)).OfType<FlyoutPresenter>().Single();
+        Check(new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast || presenter.Background is AcrylicBrush, "The status card must use the native acrylic brush.");
+        var pin = Descendants(card).OfType<Button>().Single(button => AutomationProperties.GetName(button) == "Keep program status open");
+        Move(window, pin, 30, 12);
+        Inject(window, PointerInput(0x0002), PointerInput(0x0004));
+        await Task.Delay(300);
+        Move(window, input, 500, 180);
+        await Task.Delay(600);
+        Check(OpenCard(tab) == card && pin.Visibility == Visibility.Collapsed, "Clicking Keep open must pin the same card after the pointer leaves.");
+        Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), card.Scroll), "Keep open must focus reports for keyboard use.");
+        await CaptureAsync(card, "pinned-pointer");
+        Press(window, 0x1B);
+        await Task.Delay(200);
+        Check(OpenCard(tab) is null, "Escape must dismiss a pointer-pinned card.");
+        Console.WriteLine("Keep open pointer click, persistence after pointer exit, keyboard focus and Escape passed.");
+
+        tab.Focus(FocusState.Keyboard);
+        Press(window, 0x12, 0x28);
+        await Task.Delay(300);
+        card = OpenCard(tab);
+        Check(card is not null, "Alt+Down must open status directly from a focused tab.");
+        Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), card!.Scroll), "Keyboard opening must focus the report scroller.");
+        await CaptureAsync(card, "pinned-keyboard");
+        var reports = Enumerable.Range(0, 256).Select(index => Report($"task{index:D3}", ProgramState.Working, $"Task {index}", "Detail " + index)).ToArray();
+        status.Update(reports);
+        await Task.Delay(300);
+        Check(Text(card).Contains("Detail 255"), "Every report must remain available.");
+        Press(window, 0x11, 0x23);
+        await Task.Delay(200);
+        Check(card.Scroll.VerticalOffset >= card.Scroll.ScrollableHeight - 1 && card.Scroll.VerticalOffset > 0, "Ctrl+End must reach the last report.");
+        var offset = card.Scroll.VerticalOffset;
+        status.Update(reports.Select(r => r with { Status = r.Status with { Progress = 40 } }).ToArray());
+        await Task.Delay(100);
+        Check(Math.Abs(card.Scroll.VerticalOffset - offset) < 1, "Live updates must preserve reading position.");
+        var selectedMessage = Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Detail 255");
+        selectedMessage.Select(selectedMessage.ContentStart, selectedMessage.ContentEnd);
+        var selectedBefore = selectedMessage.SelectedText;
+        var beforeTop = selectedMessage.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y;
+        var inserted = Report("aaa", ProgramState.Blocked, "New approval", "May I continue?", pane: 2, kind: "permission");
+        status.Update([inserted, .. reports]);
+        await Task.Delay(150);
+        Check(ReferenceEquals(selectedMessage, Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Detail 255")) && selectedMessage.SelectedText == selectedBefore, "Inserting an urgent pane must preserve selected text and its element.");
+        Check(Math.Abs(selectedMessage.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - beforeTop) < 2, "Structural insertion must preserve the visible report.");
+        status.Update([.. reports, inserted with { Status = inserted.Status with { State = ProgramState.Done } }]);
+        await Task.Delay(150);
+        Check(selectedMessage.SelectedText == selectedBefore && Math.Abs(selectedMessage.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - beforeTop) < 2, "An urgency reorder must preserve text selection and reading position.");
+        status.Update(reports);
+        await Task.Delay(150);
+        Check(selectedMessage.SelectedText == selectedBefore, "Removing another pane must retain text selection.");
+        selectedMessage.Focus(FocusState.Keyboard);
+        await Task.Delay(300);
+        Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), selectedMessage), "Selectable report text must accept keyboard focus.");
+        var readingOffset = card.Scroll.VerticalOffset;
+        Press(window, 0x10, 0x24);
+        await Task.Delay(100);
+        Check(Math.Abs(card.Scroll.VerticalOffset - readingOffset) < 1, "Shift+Home in selectable text must not jump the report scroller.");
+        Console.WriteLine("Structural insertion/removal preserve selected text, row identity and the visible report.");
+        await CheckReadingUpdatesAsync(status, card);
+        Press(window, 0x1B);
+        await Task.Delay(200);
+        Check(OpenCard(tab) is null, "Escape must dismiss keyboard status.");
+        Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(tab.XamlRoot), tab), "Keyboard dismissal must restore tab focus.");
+        Console.WriteLine("Alt+Down, focused scrolling, 256 reports, Ctrl+End, live scroll preservation, Escape and focus return passed.");
+
+        var mixed = new[] {
+            Report("", ProgramState.Working, "claude-code", "Updating terminal rendering", pane: 1, progress: 62),
+            Report("build", ProgramState.Done, "Build", "Release build passed", pane: 1),
+            Report("build/tests", ProgramState.Working, "Smoke tests", "Checking live status and keyboard navigation", pane: 1, progress: 80),
+            Report("", ProgramState.Blocked, "codex", "Approve running the integration tests?", pane: 2, kind: "permission")
+        };
+        status.Update(mixed);
+        status.ShowDetails(tab);
+        await Task.Delay(300);
+        card = OpenCard(tab)!;
+        Check(Text(card).IndexOf("Pane 2", StringComparison.Ordinal) < Text(card).IndexOf("Pane 1", StringComparison.Ordinal), "The urgent pane must lead.");
+        var accessibleNames = AccessibleNames(Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(card.Scroll)).ToArray();
+        var approvalIndex = Array.IndexOf(accessibleNames, "Approve running the integration tests?");
+        var buildIndex = Array.IndexOf(accessibleNames, "Release build passed");
+        var testIndex = Array.IndexOf(accessibleNames, "Checking live status and keyboard navigation");
+        Check(approvalIndex >= 0 && buildIndex > approvalIndex && testIndex > buildIndex, "The accessibility tree must expose urgent and nested reports in visual reading order.");
+        Check(accessibleNames.Any(name => name.Contains("Approval needed")) && accessibleNames.Any(name => name.Contains("Working · 62%")), "Accessible report text must include state and percentage.");
+        Console.WriteLine("Native accessibility tree exposes urgent-first report order, nested text, state and percentage.");
+        await CaptureAsync(card, "multiple-dark");
+        Console.WriteLine($"Native multi-report capture. High contrast={new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast}.");
+        status.Hide();
+        await Task.Delay(150);
+        root.RequestedTheme = ElementTheme.Light;
+        status.ShowDetails(tab);
+        await Task.Delay(300);
+        await CaptureAsync(OpenCard(tab)!, "multiple-light");
+        status.Hide();
+        await Task.Delay(150);
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(520, 650));
+        status.Update([Report("", ProgramState.Error, "Build with a long descriptive program title", new string('x', 300) + " final message")]);
+        status.ShowDetails(tab);
+        await Task.Delay(300);
+        card = OpenCard(tab)!;
+        Check(card.ActualWidth <= tab.XamlRoot.Size.Width && card.Scroll.ExtentWidth <= card.Scroll.ViewportWidth + 1, "Narrow cards must wrap without horizontal overflow.");
+        await CaptureAsync(card, "long-light");
+        status.Update([]);
+        await Task.Delay(150);
+        Check(OpenCard(tab) is null, "Clearing the final report must close the card.");
+        Console.WriteLine("Urgent pane ordering, nested content, dark/light native captures, narrow long text and clearing passed.");
+    }
+
+    internal static async Task CheckIconsAsync(Window window)
+    {
+        var tab = new TabViewItem { Header = "Command Prompt" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var icon = new ProgramStatusIcon { Tab = tab, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+        var canvas = new Grid { Width = 160, Height = 48, Padding = new Thickness(12), RequestedTheme = ElementTheme.Dark, Background = new SolidColorBrush(Microsoft.UI.Colors.Black), Children = { icon } };
+        window.Content = canvas;
+        var working = Report("", ProgramState.Working, "cmd", "Icon fixture");
+        status.Update([working]);
+        for (var attempt = 0; attempt < 30 && tab.IconSource is not ImageIconSource; attempt++) await Task.Delay(100);
+        Check(tab.IconSource is ImageIconSource, "A reported local executable must resolve its actual icon.");
+        var moving = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled && !new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        var frames = await Program.SampleAsync(canvas, 6);
+        Check(moving ? frames > 1 : frames == 1, "The tab activity indicator must animate only when Windows permits motion.");
+        await CaptureAsync(canvas, "icon-working");
+        status.Update([working with { Status = working.Status with { Progress = 62 } }]);
+        await Task.Delay(300);
+        var ring = Descendants(icon).OfType<ProgressRing>().Single();
+        Check(!ring.IsIndeterminate && ring.Value == 62 && ring.Visibility == Visibility.Visible, "Reported progress must stay visible even when animation is disabled.");
+        await CaptureAsync(canvas, "icon-progress");
+        status.Update([working with { Status = working.Status with { State = ProgramState.Done } }]);
+        Check(await Program.SampleAsync(canvas, 3) == 1, "Completed tabs must stop animating.");
+        await CaptureAsync(canvas, "icon-done");
+        Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% progress and static completion passed. Motion enabled={moving}.");
+    }
+
+    internal static async Task CheckLayoutAsync(Window window)
+    {
+        var tab = new TabViewItem { Header = "PowerShell" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
         var tabs = new TabView();
         tabs.TabItems.Add(tab);
         window.Content = tabs;
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1100, 850));
         window.Activate();
-        var reports = Enumerable.Range(0, 256).Select(index => new PaneProgramStatus(1, "Fixture",
-            new($"task{index:D3}", ProgramState.Working, null, null, "fixture", "fixture", $"Task {index}", "Detail " + index, DateTimeOffset.UtcNow))).ToArray();
-        status.Update(reports);
-        await Task.Delay(200);
-        var menu = (MenuFlyout)tab.ContextFlyout;
-        menu.ShowAt(tab);
-        await Task.Delay(100);
-        var entry = (MenuFlyoutItem)menu.Items[0];
-        var peer = Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(entry);
-        ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)peer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
-        await Task.Delay(200);
-        var popup = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(tab.XamlRoot)
-            .SelectMany(popup => Descendants(popup.Child)).OfType<TextBox>().Single();
-        Check(popup.Text.Contains("Detail 255"), "The interactive details surface must retain the final report.");
-        popup.Focus(FocusState.Programmatic);
-        Key(0x11, 0, 0, 0);
-        Key(0x23, 0, 0, 0);
-        Key(0x23, 0, 2, 0);
-        Key(0x11, 0, 2, 0);
-        await Task.Delay(200);
-        Check(popup.SelectionStart == popup.Text.Length, "Ctrl+End must reach the final report in the focused details flyout.");
-        var scroll = Descendants(popup).OfType<ScrollViewer>().First();
-        Check(scroll.ScrollableHeight > 0 && scroll.VerticalOffset > 0, "Keyboard navigation must scroll overflowing details into view.");
-        scroll.ChangeView(null, 0, null, true);
-        await Task.Delay(100);
-        scroll.ChangeView(null, scroll.ScrollableHeight, null, true);
-        await Task.Delay(100);
-        Check(scroll.VerticalOffset >= scroll.ScrollableHeight - 1, "The details scrollbar must reach the final record.");
-        Key(0x1B, 0, 0, 0);
-        Key(0x1B, 0, 2, 0);
-        await Task.Delay(100);
-        Console.WriteLine("Interactive status details passed menu invocation, Ctrl+End and final-record scrolling.");
+        await Task.Delay(300);
+        status.Update([Report("", ProgramState.Working, "Build", "Layout fixture")]);
+        status.ShowDetails(tab);
+        await Task.Delay(300);
+        var card = OpenCard(tab);
+        Check(card is not null && card.ActualHeight > 0, "The native layout fixture must render a status card.");
+        try { await CheckReadingUpdatesAsync(status, card!); }
+        finally { status.Hide(); await Task.Delay(150); }
+        Console.WriteLine("Native status layout checks passed without global input injection.");
     }
 
+    private static async Task CheckReadingUpdatesAsync(TabProgramStatus status, ProgramStatusCard card)
+    {
+        var reports = Enumerable.Range(0, 20).Select(index => Report($"task{index:D2}", ProgramState.Working, $"Task {index}", "Reading detail " + index)).ToArray();
+        status.Update(reports);
+        await Task.Delay(150);
+        var reading = Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Reading detail 10");
+        card.Scroll.ChangeView(null, card.Scroll.VerticalOffset + reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - 30, null, true);
+        await Task.Delay(150);
+        var before = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y;
+        reading.Select(reading.ContentStart, reading.ContentEnd);
+        status.Update(reports.Select((report, index) => index == 0 ? report with { Status = report.Status with { Message = string.Join("\n", Enumerable.Repeat("Growing report", 12)) } } : report).ToArray());
+        await Task.Delay(150);
+        var growthShift = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - before;
+        var selectionKept = reading.SelectedText == "Reading detail 10";
+
+        var older = Report("old", ProgramState.Working, "Older row", "Created first, below the viewport");
+        status.Update([older]);
+        await Task.Delay(100);
+        var urgent = Enumerable.Range(0, 8).Select(index => Report($"a{index}", ProgramState.Blocked, $"Urgent {index}", "Urgent detail " + index, pane: 2)).ToArray();
+        status.Update([older, .. urgent]);
+        await Task.Delay(150);
+        card.Scroll.ChangeView(null, 0, null, true);
+        await Task.Delay(150);
+        reading = Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Urgent detail 0");
+        before = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y;
+        status.Update([older, .. urgent, Report("z", ProgramState.Blocked, "Inserted later", "After the visible row, before the older row", pane: 2)]);
+        await Task.Delay(150);
+        var insertionShift = reading.TransformToVisual(card.Scroll).TransformPoint(new(0, 0)).Y - before;
+        Console.WriteLine($"Reading-position regression: in-place growth shift={growthShift:F2}px, insertion below visible row shift={insertionShift:F2}px, selection retained={selectionKept}.");
+        Check(Math.Abs(growthShift) < 2 && Math.Abs(insertionShift) < 2 && selectionKept, "In-place growth and insertion below the visible report must preserve reading position and selection.");
+    }
+
+    private static PaneProgramStatus Report(string id, ProgramState state, string title, string message, int pane = 1, int? progress = null, string? kind = null) =>
+        new(pane, "PowerShell", new(id, state, kind, progress, title, title, title, message, DateTimeOffset.Now));
+
+    private static ProgramStatusCard? OpenCard(FrameworkElement target) => VisualTreeHelper.GetOpenPopupsForXamlRoot(target.XamlRoot)
+        .SelectMany(p => Descendants(p.Child)).OfType<ProgramStatusCard>().SingleOrDefault();
+    private static string Text(DependencyObject root) => string.Join("\n", Descendants(root).OfType<TextBlock>().Select(t => t.Text));
+    private static IEnumerable<string> AccessibleNames(Microsoft.UI.Xaml.Automation.Peers.AutomationPeer peer)
+    {
+        yield return peer.GetName();
+        foreach (var child in peer.GetChildren() ?? [])
+            foreach (var name in AccessibleNames(child)) yield return name;
+    }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {
         yield return root;
-        for (var index = 0; index < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); index++)
-            foreach (var child in Descendants(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index))) yield return child;
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            foreach (var child in Descendants(VisualTreeHelper.GetChild(root, index))) yield return child;
     }
+    private static async Task CaptureAsync(FrameworkElement element, string name)
+    {
+        var presenter = element;
+        while (VisualTreeHelper.GetParent(presenter) is FrameworkElement parent) presenter = parent;
+        var bitmap = new RenderTargetBitmap();
+        await bitmap.RenderAsync(presenter);
+        var bytes = (await bitmap.GetPixelsAsync()).ToArray();
+        var path = Path.GetFullPath(Path.Combine("artifacts", "program-status", name + ".png"));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var file = await StorageFile.GetFileFromPathAsync(Create(path));
+        using var stream = await file.OpenAsync(FileAccessMode.ReadWrite);
+        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, 96, 96, bytes);
+        if (element is ProgramStatusCard)
+        {
+            var bounds = element.TransformToVisual(presenter).TransformPoint(new Windows.Foundation.Point(-16, -16));
+            encoder.BitmapTransform.Bounds = new BitmapBounds { X = (uint)Math.Max(0, bounds.X), Y = (uint)Math.Max(0, bounds.Y), Width = (uint)(element.ActualWidth + 32), Height = (uint)(element.ActualHeight + 32) };
+        }
+        await encoder.FlushAsync();
+        Console.WriteLine("Native status capture " + path);
+    }
+    private static string Create(string path) { File.WriteAllBytes(path, []); return path; }
+    private static void Move(Window window, FrameworkElement target, double x, double y)
+    {
+        var point = target.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(x, y));
+        var origin = new Point();
+        ClientToScreen(WinRT.Interop.WindowNative.GetWindowHandle(window), ref origin);
+        var scale = target.XamlRoot.RasterizationScale;
 
-    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "keybd_event")]
-    private static extern void Key(byte key, byte scan, uint flags, nuint extra);
-
-    private static string Tip(DependencyObject element)
-    {
-        var tip = ToolTipService.GetToolTip(element);
-        if (tip is ToolTip wrapper) tip = wrapper.Content;
-        return Text(tip);
+        Inject(window, PointerInput(0xC001, (int)((origin.X + point.X * scale - GetSystemMetrics(76)) * 65535 / GetSystemMetrics(78)), (int)((origin.Y + point.Y * scale - GetSystemMetrics(77)) * 65535 / GetSystemMetrics(79))));
     }
-    private static string Text(object? content) => content switch
+    private static void Press(Window window, params byte[] keys)
     {
-        TextBlock text => text.Text,
-        StackPanel panel => string.Join("\n", panel.Children.OfType<TextBlock>().Select(text => text.Text).Where(text => text.Length > 0)),
-        _ => ""
-    };
-    private static void Check(bool condition, string message)
-    {
-        if (!condition) throw new InvalidOperationException(message);
+        var down = keys.Select(key => new Input { Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = key } } });
+        var up = keys.Reverse().Select(key => new Input { Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = key, Flags = 2 } } });
+        Inject(window, down.Concat(up).ToArray());
     }
+    private static Input PointerInput(uint flags, int x = 0, int y = 0) => new() { Data = new InputData { Mouse = new MouseInput { X = x, Y = y, Flags = flags } } };
+    private static void RequireForeground(Window window)
+    {
+        var expected = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        var actual = GetForegroundWindow();
+        Check(actual == expected, $"Smoke window lost foreground ownership (expected {expected:X}, actual {actual:X}); input injection stopped.");
+    }
+    private static void Inject(Window window, params Input[] inputs)
+    {
+        RequireForeground(window);
+        Check(SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) == inputs.Length, "Windows rejected smoke input injection.");
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct Input { public uint Type; public InputData Data; }
+    [StructLayout(LayoutKind.Explicit)] private struct InputData { [FieldOffset(0)] public MouseInput Mouse; [FieldOffset(0)] public KeyboardInput Keyboard; }
+    [StructLayout(LayoutKind.Sequential)] private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public nuint Extra; }
+    [StructLayout(LayoutKind.Sequential)] private struct KeyboardInput { public ushort Key, Scan; public uint Flags, Time; public nuint Extra; }
+    [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X; public int Y; }
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int show);
+    [DllImport("user32.dll")] private static extern bool ClientToScreen(nint hwnd, ref Point point);
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll", EntryPoint = "SetForegroundWindow")] private static extern bool Foreground(nint hwnd);
+    private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }
