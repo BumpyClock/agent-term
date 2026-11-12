@@ -24,7 +24,7 @@ try
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(120));
     await using var terminal = new TerminalSession(100, 30); terminal.Start();
     async Task Wait(Func<bool> condition) { while (!condition()) await Task.Delay(25, timeout.Token); }
-    await Wait(() => terminal.PromptState == ShellPromptState.Raw); terminal.EnableManagedPrompt(); await Wait(() => terminal.PromptState == ShellPromptState.Ready);
+    await Wait(() => terminal.PromptState == ShellPromptState.Ready);
     var secretMarker = Guid.NewGuid().ToString("N");
     terminal.SubmitCommand("$paneOnly = '" + secretMarker + "'; function PaneProof { Write-Output $paneOnly }; Set-Alias paneProofAlias PaneProof; Set-Location -LiteralPath '" + fixture.Replace("'", "''") + "'");
     await Wait(() => terminal.PromptState == ShellPromptState.Ready);
@@ -36,15 +36,22 @@ try
     await using var session = await harness.OpenAsync(new(location, Terminal: proof), timeout.Token);
     const string command = "paneProofAlias; (Get-Location).Path; $PID";
     await session.SubmitAsync(new(Guid.NewGuid(), "Call run_in_terminal exactly once with this exact command and report its output. Do not guess the value. Command is " + command), timeout.Token);
-    var invoked = false; var returned = false;
+    var invoked = false; var returned = false; var assistantText = new System.Text.StringBuilder();
+    string? startedCall = null, approvedCall = null, executedCall = null;
     await foreach (var item in session.Events(timeout.Token))
     {
-        if (item is ToolStarted tool && tool.Name == "run_in_terminal") { invoked = true; Console.WriteLine("SDK ToolStarted run_in_terminal " + tool.Detail); }
-        if (item is ApprovalRequest request) await session.RespondAsync(new(request.Request, request.Description == command), timeout.Token);
+        if (item is TextDelta text) assistantText.Append(text.Text);
+        if (item is ToolStarted tool && tool.Name == "run_in_terminal") { invoked = true; startedCall = tool.CallId; Console.WriteLine("SDK ToolStarted run_in_terminal " + tool.Detail); }
+        if (item is ApprovalRequest request) { approvedCall = request.CallId; await session.RespondAsync(new(request.Request, request.Description == command), timeout.Token); }
+        if (item is ToolExecuting executing) executedCall = executing.CallId;
         if (item is ToolOutput output) { Console.WriteLine("SDK result " + output.Text); if (output.Text.Contains(secretMarker)) returned = true; }
         if (item is TurnFailed failed) throw new Exception(failed.Message);
         if (item is TurnCompleted) break;
     }
+    if (assistantText.Length == 0) throw new Exception("Real Copilot produced no assistant text.");
+    Console.WriteLine("Real Copilot produced assistant text (content omitted).");
+    if (startedCall is null || approvedCall != startedCall || executedCall != startedCall)
+        throw new Exception($"Approval and execution must name the started call. started={startedCall} approval={approvedCall} executing={executedCall}");
     if (!invoked || !returned || proof.Calls != 1 || proof.Result is not { Status: TerminalExecutionStatus.Completed } result || !result.Output.Contains(secretMarker) || !result.Output.Contains(fixture) || !result.Output.Contains(pid.ToString()) || terminal.ProcessId != pid) throw new Exception("Actual tool proof missing. Calls=" + proof.Calls + " result=" + System.Text.Json.JsonSerializer.Serialize(proof.Result));
     Console.WriteLine("Actual host tool result " + System.Text.Json.JsonSerializer.Serialize(proof.Result));
     Console.WriteLine($"Real Copilot custom tool invocation, shell-only variable/alias/cwd and unchanged ProcessId {pid} passed.");

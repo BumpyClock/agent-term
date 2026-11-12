@@ -33,7 +33,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private ushort _rows = 24;
     private readonly TerminalKeyboardInput _keyboard = new();
     private readonly TerminalCompositionInput _composition = new();
-    public bool IsComposing => _composition.IsComposing || _composerIme;
+    public bool IsComposing => _composition.IsComposing || _replyIme;
     private bool _clearingInput;
     private TerminalKeyboardInput.PhysicalKey? _textKey;
     private int _blinkTicks;
@@ -56,6 +56,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private int _lastClickColumn = -1, _lastClickRow = -1;
     private int _clickCount;
     private bool _viewActive = true;
+    private bool _inputActive;
+
+    internal void SetInputActive(bool active) => _inputActive = active;
     private bool _loadedOnce;
     private TerminalColor? _terminalBackground;
     internal System.Collections.Generic.IReadOnlyList<ProgramStatus> ReadProgramStatuses() =>
@@ -79,11 +82,14 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _appearance = TerminalPreferences.Current.ResolveAppearance(profile.Id);
         _agent = new(App.AgentHarness, () => _session);
         InitializeComponent();
+        RequestPanel.Attach(_agent, AgentReply);
+        _modeBar.ModeRequested += ToggleDisplayMode;
+        _modeBar.TaskRequested += () => OpenLatestTask();
+        _modeBar.InteractRequested += AllowAgentInput;
         _agent.Changed += AgentChanged;
         Terminal.Input.TextCompositionStarted += Input_CompositionStarted;
         Terminal.Input.TextCompositionEnded += Input_CompositionEnded;
         Terminal.Input.TextChanging += Input_TextChanging;
-        // The native editor may handle pointer events before they bubble to the terminal.
         Terminal.AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(Terminal_KeyUp), true);
         Terminal.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(Terminal_PointerPressed), true);
         Terminal.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(Terminal_PointerMoved), true);
@@ -102,6 +108,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _selectionTimer.Interval = TimeSpan.FromMilliseconds(50);
         _selectionTimer.Tick += SelectionTimer_Tick;
         ActualThemeChanged += Page_ActualThemeChanged;
+        Terminal.SetBottomAligned(!_legacy);
     }
 
     private async void Page_Loaded(object sender, RoutedEventArgs e)
@@ -135,13 +142,20 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
     }
 
-    public void FocusTerminal()
+    public void FocusTerminal() => FocusTerminal(FocusState.Programmatic);
+
+    private void FocusTerminal(FocusState focusState)
     {
-        if (_viewActive && _state is SessionState.Running or SessionState.Idle)
-        {
-            if (_surfaceOpen || (!_rawMode && _session?.PromptState == ShellPromptState.Ready)) Composer.Focus(FocusState.Programmatic);
-            else Terminal.FocusInput(FocusState.Programmatic);
-        }
+        if (!_viewActive || (focusState != FocusState.Pointer && !_inputActive) ||
+            _state is not (SessionState.Starting or SessionState.Running or SessionState.Idle)) return;
+        if (_inputOwner == PromptInputOwner.Composer) AgentReply.Focus(focusState);
+        else Terminal.FocusInput(focusState);
+    }
+
+    internal void FocusUnclaimedInput()
+    {
+        var focused = XamlRoot is null ? null : FocusManager.GetFocusedElement(XamlRoot);
+        if (focused is null || PaneInputFocused()) FocusTerminal();
     }
 
     private async void NewSession_Click(object sender, RoutedEventArgs e) => await RestartSessionAsync();
@@ -165,6 +179,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             UpdateGridSize();
             var session = new TerminalSession(_columns, _rows, Profile);
             _session = session;
+            session.SetBottomAnchored(!_legacy);
             session.SetTheme(CurrentTheme);
             _startup = Task.Run(session.Start);
             await _startup;
@@ -239,7 +254,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void RefreshOutput(TerminalSession session)
     {
-        RefreshComposer();
+        if (!_startingTask && session.PromptState == ShellPromptState.Ready && session.TakeAgentRequest() is { } request)
+            _ = StartTaskAsync(request, explicitHandoff: false);
+        RefreshAgentChrome();
         var frame = session.ReadFrame();
         Terminal.SetFrame(frame);
         RefreshTaskCards(frame);
@@ -450,10 +467,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         catch (Exception exception) { ShowInteractionFailure(exception); }
     }
 
-    private (int Column, int Row) CellAt(Point point) =>
-        (Math.Clamp((int)Math.Floor(point.X / Terminal.CellWidth), 0, _columns - 1),
-         Math.Clamp((int)Math.Floor(point.Y / Terminal.CellHeight), 0, _rows - 1));
-
     private TerminalMouseGeometry MouseGeometry() => new(
         (uint)(_columns * Terminal.CellWidth), (uint)(_rows * Terminal.CellHeight),
         (uint)Terminal.CellWidth, (uint)Terminal.CellHeight,
@@ -462,7 +475,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool SendApplicationMouse(PointerPoint point, TerminalMouseAction action, TerminalMouseButton? button)
     {
         if (_state != SessionState.Running || _session is not { } session) return false;
-        var position = point.Position;
+        var geometry = Terminal.Geometry;
+        var position = action == TerminalMouseAction.Press && button is not (TerminalMouseButton.WheelUp or TerminalMouseButton.WheelDown
+            or TerminalMouseButton.WheelLeft or TerminalMouseButton.WheelRight)
+            ? geometry.ToFrame(point.Position) : geometry.ToFrameClamped(point.Position);
         var modifiers = Modifiers();
         if (action == TerminalMouseAction.Release && button is { } released && _applicationMouseButtons.Contains(released))
             modifiers &= ~TerminalModifiers.Shift;
@@ -501,23 +517,33 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
             if (!_selecting && button is not null && SendApplicationMouse(point, TerminalMouseAction.Press, button))
             {
-                Terminal.FocusInput(FocusState.Pointer);
-                _applicationMouseButtons.Add(button.Value);
-                Terminal.CapturePointer(e.Pointer);
+                FocusTerminal(FocusState.Pointer);
+                var grid = Terminal.Geometry;
+                if (point.Position.Y >= grid.Top && point.Position.Y < grid.Bottom)
+                {
+                    _applicationMouseButtons.Add(button.Value);
+                    Terminal.CapturePointer(e.Pointer);
+                }
                 e.Handled = true;
                 return;
             }
             if (point.Properties.IsRightButtonPressed)
             {
+                FocusTerminal(FocusState.Pointer);
                 e.Handled = true;
                 if (session.ReadFrame().HasSelection) CopySelection(session);
                 else await PasteAsync(session);
                 return;
             }
             if (!point.Properties.IsLeftButtonPressed || (button is not null && button != TerminalMouseButton.Left)) return;
-            Terminal.FocusInput(FocusState.Pointer);
+            FocusTerminal(FocusState.Pointer);
+            if (!Terminal.Geometry.TryCellAt(point.Position, out var column, out var row))
+            {
+                if (!Down(VirtualKey.Shift) && session.ReadFrame().HasSelection) { session.ClearSelection(); RefreshOutput(session); }
+                e.Handled = true;
+                return;
+            }
             _selectionPointer = point.Position;
-            var (column, row) = CellAt(point.Position);
             var now = Environment.TickCount64;
             _clickCount = now - _lastClickTime <= 500 && column == _lastClickColumn && row == _lastClickRow
                 ? Math.Min(_clickCount + 1, 3) : 1;
@@ -560,7 +586,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 return;
             }
             _selectionPointer = point.Position;
-            var (column, row) = CellAt(_selectionPointer);
+            var (column, row) = Terminal.Geometry.ClampedCellAt(_selectionPointer);
             if (column != _lastClickColumn || row != _lastClickRow) _selectionMoved = true;
             if (_selectionMoved)
             {
@@ -628,10 +654,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (!_selecting || _session is not { } session) return;
-            var direction = _selectionPointer.Y < 0 ? -1 : _selectionPointer.Y >= Terminal.ActualHeight ? 1 : 0;
+            var direction = _selectionPointer.Y < Terminal.Geometry.Top ? -1 : _selectionPointer.Y >= Terminal.ActualHeight ? 1 : 0;
             if (direction == 0) return;
             session.ScrollLines(direction);
-            var (column, row) = CellAt(_selectionPointer);
+            RefreshOutput(session);
+            var (column, row) = Terminal.Geometry.ClampedCellAt(_selectionPointer);
             session.ExtendSelection(column, row);
             _selectionMoved = true;
             RefreshOutput(session);
@@ -665,11 +692,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             (key == VirtualKey.Insert && mods == TerminalModifiers.Control && hasSelection) ||
             (key == VirtualKey.Enter && mods == TerminalModifiers.None && hasSelection);
         var findShortcut = ctrlShift && key == VirtualKey.F;
+        var taskShortcut = ctrlShift && key == VirtualKey.Y && (_agent.RunningTask ?? _agent.CurrentTask) is not null;
         var keyCode = (uint)key;
         var zoomShortcut = (mods & TerminalModifiers.Control) != 0 && (mods & (TerminalModifiers.Alt | TerminalModifiers.Super)) == 0 &&
             (keyCode is 0xBB or 0xBD or 0x6B or 0x6D or 0x30 or 0x60);
         var historyShortcut = ctrlShift && key is VirtualKey.Up or VirtualKey.Down or VirtualKey.PageUp or VirtualKey.PageDown or VirtualKey.Home or VirtualKey.End;
-        var shortcut = findShortcut || zoomShortcut || (ctrlShift && (key is VirtualKey.Tab or VirtualKey.V || (key == VirtualKey.C && hasSelection))) ||
+        var shortcut = findShortcut || taskShortcut || zoomShortcut || (ctrlShift && (key is VirtualKey.Tab or VirtualKey.V || (key == VirtualKey.C && hasSelection))) ||
             ((mods == TerminalModifiers.Shift && key == VirtualKey.Insert) || (mods == TerminalModifiers.Control && key == VirtualKey.V)) || selectionCopy || historyShortcut ||
             (key == VirtualKey.Escape && mods == TerminalModifiers.None && session.ReadFrame().HasSelection);
         try
@@ -682,6 +710,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 if (findShortcut)
                 {
                     ShowFind();
+                    return;
+                }
+                if (taskShortcut)
+                {
+                    OpenLatestTask();
                     return;
                 }
                 if (zoomShortcut)
@@ -728,7 +761,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_state != SessionState.Running) return;
 
             var virtualKey = (uint)key;
-            // The keypad separator uses the layout's text. Ghostty does not assign it a legacy sequence.
             var special = virtualKey is < 0x20 or (>= 0x21 and <= 0x2F) or (>= 0x60 and <= 0x87 and not 0x6C)
                 or 0x5D or 0x90 or 0x91 || IsSidedModifier(key);
             var direct = special || (mods & TerminalModifiers.Super) != 0 || (!altGr && (mods & ctrlAlt) != 0);
@@ -846,7 +878,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Terminal_GotFocus(object sender, RoutedEventArgs e)
     {
-        if (_session?.AgentOwnsTerminal != true && _session?.PromptState == ShellPromptState.Ready) { _rawMode = true; _session.RestoreRawPrompt(); }
         if (_state == SessionState.Running) _session?.SetFocus(true);
         Terminal.RefreshCursor();
     }
@@ -863,7 +894,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             ReleaseApplicationMouse();
-            // End held keys before the focus report so Kitty applications can clear their key state.
             foreach (var key in releases)
                 session.SendKey(key.Key, key.Modifiers, key.Action);
             session.SetFocus(false);

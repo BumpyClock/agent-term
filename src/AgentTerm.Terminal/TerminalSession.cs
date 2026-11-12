@@ -12,6 +12,8 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     private readonly Task<int> _completion;
     private readonly ShellProfile _profile;
     private readonly string _promptToken = Guid.NewGuid().ToString("N");
+    private readonly string _commandPath = Path.Combine(Path.GetTempPath(), "agent-term-" + Guid.NewGuid().ToString("N") + ".input");
+    private FileStream? _commandMailbox;
     private readonly ShellPromptProtocol _prompt;
     private readonly ProgramStatusProtocol _programStatus = new();
     private readonly OscScanner _osc = new();
@@ -25,7 +27,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         public bool InteractiveInput;
     }
     private OwnedCommand? _owned;
-    public bool AgentOwnsTerminal { get { lock (_gate) return _owned is not null; } }
+    public bool AgentOwnsTerminal { get { lock (_gate) return _owned is not null || ReservationPending || _restoringDraft; } }
     public void AllowAgentInteractiveInput() { lock (_gate) { if (_owned is not null) _owned.InteractiveInput = true; } }
     private bool _started;
     private Task? _stopTask;
@@ -36,12 +38,17 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("ConPTY requires Windows.");
         _profile = profile ?? ShellProfile.Default;
         _prompt = new(_promptToken);
+        if (ShellIntegration.SupportsIntegration(_profile)) _prompt.State = ShellPromptState.Initializing;
         _osc.Sequence += _prompt.Accept;
+        _prompt.Marker += message => { if (_restoringDraft && message == "restored;" + _mailboxPending) _draftRestored = true; };
+        _prompt.Marker += ReanchorMarker;
+        _prompt.Marker += MailboxMarker;
         _osc.Sequence += _programStatus.Accept;
         _osc.Reset += _programStatus.Reset;
         _prompt.PromptStarted += _programStatus.EndCommand;
         _osc.OutputByte += b => _owned?.Capture.Feed(b);
         _prompt.Marker += message => _owned?.Capture.Marker(message);
+        _columns = columns;
         _connection = new ConPtyConnection(columns, rows);
         _programStatus.SupportRequested += () =>
         {
@@ -51,6 +58,9 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         _connection.OutputReceived += ProcessOutput;
         _completion = CompleteAsync();
     }
+
+    public void SetBottomAnchored(bool anchored) => MutateView(() => _terminal.SetBottomAnchored(anchored));
+    public bool AgentEntryAvailable { get { lock (_gate) return _prompt.AgentEntryAvailable; } }
 
     public string ShellName => _profile.Name;
     public ShellProfile Profile => _profile;
@@ -74,7 +84,19 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_started) throw new InvalidOperationException("This session has already started.");
-            _connection.Start(_profile.Executable, ShellIntegration.Arguments(_profile, _promptToken), _profile.StartingDirectory);
+            try
+            {
+                if (ShellIntegration.SupportsIntegration(_profile))
+                    _commandMailbox = new FileStream(_commandPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read,
+                        4096, FileOptions.DeleteOnClose);
+                _connection.Start(_profile.Executable, ShellIntegration.Arguments(_profile, _promptToken, _commandPath), _profile.StartingDirectory);
+            }
+            catch (Exception error)
+            {
+                _commandMailbox?.Dispose();
+                _commandMailbox = null;
+                throw new InvalidOperationException("Could not start shell with a protected command mailbox. No command was submitted.", error);
+            }
             _started = true;
         }
     }
@@ -84,61 +106,65 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            if (_owned is { InteractiveInput: false }) return;
+            if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
             var bytes = Encoding.UTF8.GetBytes(text);
             if (bytes.Length != 0) PrepareInput();
             _connection.Send(bytes);
         }
     }
 
-    public ShellPromptState PromptState { get { lock (_gate) return Completion.IsCompleted ? ShellPromptState.Exited : _prompt.State; } }
-    public IReadOnlySet<string> KnownCommands { get { lock (_gate) return _prompt.Commands; } }
+    public ShellPromptState PromptState { get { lock (_gate) return Completion.IsCompleted ? ShellPromptState.Exited : _mailboxPending is not null ? ShellPromptState.Executing : _prompt.State; } }
     public bool? LastCommandSucceeded { get { lock (_gate) return _prompt.LastCommandSucceeded; } }
-    public void EnableManagedPrompt()
-    {
-        lock (_gate)
-        {
-            if (_prompt.State != ShellPromptState.Raw) throw new InvalidOperationException("Shell integration is not ready.");
-            _prompt.State = ShellPromptState.Executing;
-            Send("$global:__AgentTermManaged=$true\r");
-        }
-    }
-    public void RestoreRawPrompt()
-    {
-        lock (_gate)
-        {
-            if (_owned is not null || _prompt.State != ShellPromptState.Ready) return;
-            _prompt.State = ShellPromptState.Executing;
-            Send("$global:__AgentTermManaged=$false\r");
-        }
-    }
+    public string? TakeAgentRequest() { lock (_gate) return _prompt.TakeAgentRequest(); }
+    private bool ReservationPending => _mailboxPending?.StartsWith("c:", StringComparison.Ordinal) == true;
+    private string? _mailboxPending;
+    private bool _mailboxArmed;
+    private bool _restoringDraft;
+    private bool _draftRestored;
     public void SubmitCommand(string command) => SubmitCommand(command, Guid.NewGuid().ToString("N"));
     private void SubmitCommand(string command, string id)
     {
         lock (_gate)
         {
-            if (_owned is not null) throw new InvalidOperationException("Agent using terminal.");
+            if (_owned is not null && _owned.Id != id) throw new InvalidOperationException("Agent using terminal.");
             if (_prompt.State != ShellPromptState.Ready) throw new InvalidOperationException("Wait for shell readiness or use terminal input.");
-            var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(id + "\n" + command));
+            if (_mailboxPending is not null) throw new InvalidOperationException("Mailbox restoration is pending.");
+            var mailbox = _commandMailbox ?? throw new InvalidOperationException("Protected command mailbox is unavailable. No command was submitted.");
+            try
+            {
+                var bytes = Encoding.UTF8.GetBytes(id + "\n" + command);
+                mailbox.Position = 0;
+                mailbox.Write(bytes);
+                mailbox.SetLength(bytes.Length);
+                mailbox.Flush();
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                _commandMailbox = null;
+                mailbox.Dispose();
+                throw new InvalidOperationException("Could not write protected command mailbox. No command was submitted. Close and reopen this pane.", error);
+            }
+            _mailboxPending = id;
+            _mailboxArmed = false;
             _prompt.State = ShellPromptState.Executing;
-            _connection.Send(Encoding.UTF8.GetBytes(encoded + "\u001b[24;5~"));
+            _connection.Send(Encoding.UTF8.GetBytes("\u001b[24;7~\u001b[24;5~"));
         }
     }
 
     /// <summary>
-    /// Reserves two blank history rows at the managed prompt for an inline card, without echo or a command.
-    /// Returns null unless the managed prompt is ready. The anchor marks the first reserved row.
+    /// Reserves two blank history rows at the native prompt for an inline card, without echo or a command.
+    /// Returns null unless the native prompt is ready. The anchor marks the first reserved row.
     /// </summary>
     public TerminalAnchor? ReserveRows()
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            if (_owned is not null || _prompt.State != ShellPromptState.Ready) return null;
+            if (_owned is not null || _mailboxPending is not null || _prompt.State != ShellPromptState.Ready) return null;
             _terminal.ScrollToBottom();
             var frame = _terminal.ReadFrame();
             if (frame.Viewport.IsAlternateScreen) return null;
-            var anchor = _terminal.AnchorActiveRow(Math.Clamp(frame.Cursor.Row, 0, frame.Rows - 1));
+            var anchor = _terminal.AnchorActiveRow(_terminal.ReadActiveCursorRow());
             SubmitCommand("", "c:" + Guid.NewGuid().ToString("N")[..8]);
             return anchor;
         }
@@ -159,11 +185,16 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_gate)
         {
             if (_disposeTask is not null || Completion.IsCompleted) return new(TerminalExecutionStatus.Exited);
-            if (_owned is not null || _prompt.State == ShellPromptState.Executing) return new(TerminalExecutionStatus.Busy);
-            if (_prompt.State != ShellPromptState.Ready) return new(TerminalExecutionStatus.Unsupported, Message: "Managed PowerShell must be ready.");
+            if (_owned is not null || _mailboxPending is not null || _prompt.State == ShellPromptState.Executing) return new(TerminalExecutionStatus.Busy);
+            if (_prompt.State != ShellPromptState.Ready)
+                return new(TerminalExecutionStatus.Unsupported, Message: "Integrated PowerShell must be ready.");
             owned = new();
-            SubmitCommand(request.Command, owned.Id);
             _owned = owned;
+        }
+        lock (_gate)
+        {
+            try { SubmitCommand(request.Command, owned.Id); }
+            catch { _owned = null; throw; }
         }
         using var cancel = cancellationToken.Register(() =>
         {
@@ -187,7 +218,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         try { return await owned.Completion.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
         catch (TimeoutException)
         {
-            // Ownership deliberately remains held until the shell actually reports ready.
             return new(TerminalExecutionStatus.InterruptionFailed, Message: "PowerShell did not report readiness after Ctrl+C. Terminal remains agent-owned; use interactive input or close the pane.");
         }
     }
@@ -229,7 +259,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            if (_owned is { InteractiveInput: false }) return;
+            if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
             var bytes = _terminal.EncodeKey(virtualKey, modifiers, action, text);
             if (bytes.Length != 0 && action != TerminalKeyAction.Release &&
                 virtualKey is not (0x10 or 0x11 or 0x12 or 0x5B or 0x5C or >= 0xA0 and <= 0xA5)) PrepareInput();
@@ -255,10 +285,16 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            if (_owned is { InteractiveInput: false }) return true;
+            if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return true;
             if ((mouse.Modifiers & TerminalModifiers.Shift) != 0 || !_terminal.IsMouseTrackingEnabled) return false;
-            var bytes = _terminal.EncodeMouse(mouse, geometry);
-            // Mouse coordinates refer to the displayed viewport. Hover and drag must not jump it to the bottom.
+            var viewport = _terminal.ReadFrame().Viewport;
+            var activeY = mouse.Y - (_terminal.ActiveTop - viewport.Offset) * geometry.CellHeight;
+            if (mouse.Action == TerminalMouseAction.Release ||
+                mouse.Action == TerminalMouseAction.Motion && mouse.Button is (TerminalMouseButton.Left or TerminalMouseButton.Right or
+                    TerminalMouseButton.Middle or TerminalMouseButton.Back or TerminalMouseButton.Forward))
+                activeY = Math.Clamp(activeY, 0, viewport.Rows * geometry.CellHeight - 1);
+            else if (activeY < 0 || activeY >= viewport.Rows * geometry.CellHeight) return true;
+            var bytes = _terminal.EncodeMouse(mouse with { Y = activeY }, geometry);
             if (mouse.Action == TerminalMouseAction.Press && bytes.Length != 0) _terminal.ClearSelection();
             if (bytes.Length != 0) _connection.Send(bytes);
             return true;
@@ -270,7 +306,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            if (_owned is { InteractiveInput: false }) return;
+            if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
             var bytes = _terminal.EncodePaste(text);
             if (bytes.Length != 0) PrepareInput();
             _connection.Send(bytes);
@@ -292,16 +328,77 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void Resize(ushort columns, ushort rows)
     {
-        bool stopped;
+        bool stopped, widthChanged;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             _terminal.Resize(columns, rows);
             stopped = _stopTask is not null;
+            widthChanged = columns != _columns;
+            _columns = columns;
         }
-        // ConPTY resize can block while it emits a redraw. Keep the output reader
-        // free to enter ProcessOutput and drain that redraw at the new dimensions.
-        if (!stopped) _connection.Resize(columns, rows);
+        if (stopped) return;
+        _connection.Resize(columns, rows);
+        if (!widthChanged) return;
+        lock (_gate)
+        {
+            if (_disposeTask is not null || _columns != columns) return;
+            _reanchorColumns = columns;
+            _reanchorAttempts = 0;
+            if (!_reanchorInFlight) SendReanchor();
+        }
+    }
+
+    private const int ReanchorAttemptLimit = 4;
+    private static readonly byte[] ReanchorChord = Encoding.ASCII.GetBytes("\u001b[24;6~");
+    private ushort _columns;
+    private ushort? _reanchorColumns;
+    private bool _reanchorInFlight;
+    private int _reanchorAttempts;
+
+    private void SendReanchor()
+    {
+        if (_reanchorColumns is null || _reanchorAttempts >= ReanchorAttemptLimit || _stopTask is not null || _owned is not null ||
+            _mailboxPending is not null || _prompt.State != ShellPromptState.Ready)
+        {
+            _reanchorColumns = null;
+            return;
+        }
+        try { _connection.Send(ReanchorChord); }
+        catch (InvalidOperationException) { _reanchorColumns = null; return; }
+        _reanchorInFlight = true;
+        _reanchorAttempts++;
+    }
+
+    private void MailboxMarker(string message)
+    {
+        if (message == "mailbox-armed") { _mailboxArmed = _mailboxPending is not null; return; }
+        if (!_mailboxArmed || _mailboxPending is not { } pending ||
+            message is not ("mailbox-rejected;read" or "mailbox-rejected;format")) return;
+        _mailboxArmed = false;
+        _mailboxPending = null;
+        _prompt.State = ShellPromptState.Ready;
+        if (_owned is not { } owned || owned.Id != pending) return;
+        _owned = null;
+        owned.Completion.TrySetResult(new(TerminalExecutionStatus.Completed, owned.Capture.Text, false,
+            Message: message.EndsWith(";read", StringComparison.Ordinal)
+                ? "Protected command mailbox could not be read. No command was accepted."
+                : "Invalid command mailbox. No command was accepted."));
+    }
+
+    private void ReanchorMarker(string message)
+    {
+        if (message.StartsWith("start", StringComparison.Ordinal) || message.StartsWith("ready", StringComparison.Ordinal))
+        {
+            _reanchorInFlight = false;
+            _reanchorColumns = null;
+            return;
+        }
+        if (!message.StartsWith("anchor;", StringComparison.Ordinal)) return;
+        _reanchorInFlight = false;
+        var seen = message.Split(';').ElementAtOrDefault(1);
+        if (_reanchorColumns is { } target && seen != target.ToString(System.Globalization.CultureInfo.InvariantCulture)) SendReanchor();
+        else _reanchorColumns = null;
     }
 
     private void PrepareInput()
@@ -352,7 +449,18 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             _terminal.Write(bytes.Span);
             _osc.Feed(bytes.Span);
-            if (_owned is { } owned && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == owned.Id && owned.Capture.Ended)
+            if (_mailboxPending is { } pending && !_restoringDraft && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == pending)
+            {
+                _restoringDraft = true;
+                _draftRestored = false;
+                _connection.Send(Encoding.UTF8.GetBytes("\u001b[24;4~"));
+            }
+            if (_restoringDraft && _draftRestored)
+            {
+                _mailboxPending = null;
+                _restoringDraft = false;
+            }
+            if (_mailboxPending is null && _owned is { } owned && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == owned.Id && owned.Capture.Ended)
             {
                 _owned = null;
                 owned.Completion.TrySetResult(new(owned.Interrupted ? TerminalExecutionStatus.Interrupted : TerminalExecutionStatus.Completed,
@@ -361,7 +469,6 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             }
             foreach (var reply in _terminal.TakeResponses())
             {
-                // During teardown keep draining output, but the input channel is closing.
                 if (_disposeTask is null) _connection.SendReply(reply);
             }
         }
@@ -369,14 +476,12 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public ValueTask DisposeAsync()
     {
-        // Native close must not wait for the reader while we hold its terminal lock.
         lock (_gate) return new ValueTask(_disposeTask ??= Task.Run(CloseAsync));
     }
 
     /// <summary>Stops the owned shell while retaining its screen and history for inspection.</summary>
     public ValueTask StopAsync()
     {
-        // Closing ConPTY can wait for output. Its reader must remain free to enter the terminal lock.
         lock (_gate) return new ValueTask(_stopTask ??= Task.Run(async () =>
             await _connection.DisposeAsync().ConfigureAwait(false)));
     }
@@ -390,6 +495,8 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             {
                 _connection.OutputReceived -= ProcessOutput;
                 _terminal.Dispose();
+                _commandMailbox?.Dispose();
+                _commandMailbox = null;
             }
         }
     }

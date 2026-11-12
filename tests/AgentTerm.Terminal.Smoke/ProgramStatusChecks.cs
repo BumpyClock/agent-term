@@ -63,7 +63,7 @@ internal static class ProgramStatusChecks
         Check(protocol.ReadStatuses().Count == 2, "Alternate screen and soft reset must preserve records.");
         scanner.Feed("\u001bc"u8);
         Check(protocol.ReadStatuses().Count == 0, "Full terminal reset must clear records.");
-        scanner.Feed("\u001b]7501;state=working\a\u001b]777;secret;raw\a\u001b]7501;state=blocked\a"u8);
+        scanner.Feed("\u001b]7501;state=working\a\u001b]777;secret;ready\a\u001b]7501;state=blocked\a"u8);
         Check(protocol.ReadStatuses().Single().State == ProgramState.Blocked, "Native prompt cleanup must respect stream order within one chunk.");
         scanner.Feed("\u001b]777;wrong;ready\a"u8);
         Check(protocol.ReadStatuses().Count == 1, "Unrelated shell marker tokens must not clear records.");
@@ -76,7 +76,7 @@ internal static class ProgramStatusChecks
         Check(protocol.ReadStatuses().Single().State == ProgramState.Done, "Unterminated APC must not hide prompts or later reports.");
         Report(scanner, "state=working");
         scanner.Feed("\u001b]777;secret;rea\u001bdy\a"u8);
-        Check(prompt.State == ShellPromptState.Raw && protocol.ReadStatuses().Single().State == ProgramState.Working, "Interrupted OSC must not change prompt readiness or clear status.");
+        Check(prompt.State == ShellPromptState.Ready && protocol.ReadStatuses().Single().State == ProgramState.Working, "Interrupted OSC must not change prompt readiness or clear status.");
         scanner.Feed("\u001b]777;secret;ready\a"u8);
         Check(prompt.State == ShellPromptState.Ready && protocol.ReadStatuses().Count == 0, "Prompt readiness and status cleanup must consume the same completed marker.");
         for (int i = 0; i < 256; i++) Report(scanner, $"state=idle:id=task{i}");

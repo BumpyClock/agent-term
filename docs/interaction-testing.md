@@ -144,9 +144,9 @@ On the latest build, a roughly 680 by 500 window showed the editor, status, Stop
 
 ### Existing-pane host execution acceptance
 
-Use the Release x64 app built by `scripts/check.ps1`. At the terminal prompt run `$terraPane = 'pane-only-42'; function TerraProof { $terraPane }; Set-Alias terraProofAlias TerraProof; Set-Location $env:TEMP; $PID`. Record the printed shell PID before invoking the agent. Enter `/agent Use run_in_terminal to run exactly terraProofAlias; (Get-Location).Path; $PID and report the output`. Approve that exact command. Verify visible execution and the shell-only value/cwd in tool output, and compare the agent-reported PID with the recorded baseline. The visible boundary lines are intentional ConPTY ordering fences, not output returned to the model.
+Use the Release x64 app built by `scripts/check.ps1`. At the terminal prompt run `$terraPane = 'pane-only-42'; function TerraProof { $terraPane }; Set-Alias terraProofAlias TerraProof; Set-Location $env:TEMP; $PID`. Record the printed shell PID before invoking the agent. Enter `/agent Use run_in_terminal to run exactly terraProofAlias; (Get-Location).Path; $PID and report the output`. Approve that exact command. Verify visible execution and the shell-only value/cwd in tool output, and compare the agent-reported PID with the recorded baseline. The visible `Command started [a:id]` and `Command ended [a:id]` lines are intentional ConPTY ordering fences, not output returned to the model and not an agent-turn outcome.
 
-Ask the agent to run `Start-Sleep 60`. Approve once. Verify the working status, blocked competing shell submissions, and no accidental raw typing. Press Stop. Wait for readiness. At the terminal prompt run `terraProofAlias; $PID`. Verify the same value and PID. For interactive handoff ask for `Read-Host 'fixture input'`, approve, click **Type in terminal**, enter a harmless value in the terminal and verify completion. Repeat in a second pane and verify the variable does not exist there. Terra owns this live UI acceptance; no new screenshots or recordings are claimed by implementation checks.
+Ask the agent to run `Start-Sleep 60`. Approve once. Verify the working status, blocked competing shell submissions, and no accidental raw typing. Press Stop. Wait for readiness. At the terminal prompt run `terraProofAlias; $PID`. Verify the same value and PID. For interactive handoff ask for `Read-Host 'fixture input'`, approve, click **Type into command**, enter a harmless value in the terminal and verify completion. Repeat in a second pane and verify the variable does not exist there. Terra owns this live UI acceptance; no new screenshots or recordings are claimed by implementation checks.
 
 The authenticated smoke now verifies actual SDK ToolStarted, callback invocation, returned unique variable value, alias, cwd and original process ID. Its fixture approves only exact `paneProofAlias; (Get-Location).Path; $PID` and `Start-Sleep 60`. The marker value is never included in the prompt. It also checks stop recovery. Deterministic tests cover fragmented UTF-8, metadata/echo exclusion and reordered OSC. Real ConPTY tests cover output beyond the viewport, truncation, state/alias/cwd, exit 7, busy rejection, input exclusion, cancellation, recovery and two-pane isolation.
 
@@ -246,3 +246,82 @@ The isolated Release build, native `--status-layout` checks, and changed-file li
 6. Check solid and acrylic panes, selected text, and block/bar/underline cursors for every variant. Keyboard navigation must reach all scheme and palette selectors and the Save and Discard buttons.
 
 Automated coverage checks slot resolution against system appearance, forced modes, scheme reports, live recoloring, ANSI and truecolor resolution, selection retention, history and alternate-screen retention, OSC overrides/resets, preference persistence/migration/inheritance, and actual renderer pixels for every built-in palette and selection. Theme-specific snapshots are produced by the renderer smoke suite. Native Settings selector interaction and real Windows appearance switching remain manual checks.
+
+
+## Prompt UX Round 1 acceptance
+
+Implementation changes, not new runtime evidence. Run with terra-high in an isolated app. Do not close the existing user's app.
+
+1. Start a fresh supported PowerShell pane. Wait beyond readiness. Smart must show one composer, no fresh `PS>` cue, and one bordered Smart mode button. Run `Write-Output 'round-1-shell'`. The echo must contain the submitted command without `__AgentTermStart;`. Run `Write-Output ('__AgentTerm' + 'Start; user-owned-output')`. Its output must remain visible. Run `cmd /c exit 7` and inspect failure status through the ConPTY suite.
+2. Type a Smart draft and press Escape. Only the draft clears. Use the mode button to enter Legacy. Its native prompt and full-height input remain. Type a native draft, switch to Smart, execute a command, and return to Legacy. The native draft and shell PID must survive. Historical output is never removed to hide a new prompt.
+3. Enter `/agent` with a unique harmless request. Verify pre-submit routing guidance says ask agent. During work, a quiet task has a progress ring and Working status. Follow-up input is read-only and Send and send/newline hints are absent. Esc returns to terminal without switching mode or stopping work. The task card reopens the task. A free-text question must still accept input.
+4. Complete, stop, and safely fail separate fixture turns. The surface and history card must distinguish Done, Stopped, and Failed. A follow-up clears the previous outcome while running. Preserve streamed/final answer reconciliation and tool detail expansion. The title must stay horizontally fixed when Stop becomes unavailable. The completed back tooltip must not claim that work continues.
+5. Capture narrow and split panes, keyboard focus, fresh Legacy `/agent`, terminal return, cancellation and safe error. Legacy glyph investigation remains open. Compare actual terminal cell code points with the user's configured private-use glyphs and a native Windows Terminal prompt before changing fonts or shell encoding. Do not treat a font preference as the cause without that evidence.
+
+Regression suites are written for shell echo/prompt fallback/history/output preservation, status/capture/first-statement syntax, retained task outcomes, and native timeline progress/outcome rendering. Round 1 implementation did not execute them. Earlier verification entries above remain historical evidence only.
+
+## Prompt UX Round 2 acceptance
+
+Resize input implementation follow-up. Smart submissions now use a session-local UTF-8 mailbox and send only the execution chord through ConPTY, so PSReadLine never renders encoded transport. The focused and full ConPTY routes include long-input scrollback, short-command adjacency at 72/40/120 columns, intentional blank output, Unicode/multiline capture and Legacy history regressions. Compilation only is established for this change. Terra-high must run both routes as specified in [the resize handoff](notes/prompt-ux-round-2-resize.md). Refresh the launch snapshot's terminal source and DLL before UI acceptance. Its old diagnostic DLL contains relative probe writes.
+
+Implementation and compile evidence only. Terra-high owns test execution and computer use. Preserve user app PID 37216. Use `artifacts/prompt-ux-review/round-2/app/AgentTerm.App.exe`, not the normal build or round-1 output.
+
+1. In Legacy, submit a fresh unique `/agent` request. The pane header must still say Legacy on the agent surface. Escape after completion must restore an actual native prompt with no app composer. Reopen its history card and verify the same response. Repeat Escape during Starting/Working. Work continues. When no command owns input, native shell input must work. A later agent command temporarily acquires managed input without changing the preference. While it owns input, normal typing must not reach it; Type into command remains the explicit opt-in. After completion/cancellation, native input returns. Test a native shell command during background agent thinking. An overlapping agent command must report Busy, not mix input.
+2. At compact and split widths, inspect the pane header mode control and the agent header. Return and Stop retain their slots. The title starts at its beginning, ends with an ellipsis if needed, and has a full tooltip. The mode control must not leave a permanent extra row. Test keyboard mode activation, Stop activation, Ctrl+C, Escape from details, and card reopening. Check inactive panes keep their drafts and preference.
+3. Bare `/agent` must say Ask the agent. A submitted turn must show a muted regular request and primary readable answer. During work, show one "Agent replies paused until this turn finishes" message without send hints or the input glyph. Stop during startup and during a running turn. Each must show one Stopped outcome; tool cancellation/error details must stay visible. Follow-up submission must remove the settled status while retaining prior outcomes in history.
+4. Submit `Write-Error 'round-2-focus'` and immediately type `echo round-2-recovery`, with no screenshot viewer or other window activated between actions. Log actual focused element before submit, during execution, and after readiness. Repeat with Send, then intentional Tab away during execution. Do not call a later click-to-focus a pass for automatic focus return. Code inspection alone has not reproduced the round-1 lost entry.
+5. Run the focused prompt-mode suite. It checks the command/output adjacency before and after ConPTY resize. If it fails, save `ReadText()` and `ReadFrame()` rows before and after resize, plus raw ConPTY redraw bytes. Compare libghostty-only resize with the delayed ConPTY repaint before changing either owner. Never delete blank historical rows as a correction.
+6. For Legacy question marks, save actual `TerminalCell.Text` rune values alongside the profile's configured separator values. Compare the same profile in native Windows Terminal. Literal U+003F in both outputs is not a font-renderer defect. Preserved private-use codepoints with missing glyphs require checking rendering/fallback. Do not change the host font, shell encoding, or profile based on the JPEG alone.
+
+Run the isolated ConPTY executable with `--prompt-mode-only`, then the full ConPTY suite. Run Agents smoke and AgentUi smoke (`--timeline-only` isolates timeline checks from the known baseline details-navigation failure). No runtime checks were executed by round-2 implementation. Preserve the repaired namespace-dependent execution assertions after Write-Error; a standalone using directive legitimately retains prior status.
+
+Round 2 focus ownership repair and exact current-build live checks are in [the focus handoff](notes/prompt-ux-round-2-focus.md). Compilation only is established. Terra-high must execute policy regressions and verify actual focused elements, Enter, Tab, keyboard mode activation and inactive-pane isolation against the new focus-app binary.
+
+
+## Prompt UX Round 3 acceptance
+
+Use the isolated Round 3 binary and commands in [the Round 3 handoff](notes/prompt-ux-round-3.md). Round 2 paths above are historical. Terra-high owns test execution and live acceptance. Preserve PID 37216.
+
+The mode button still uses standard Tab, Space and Enter. Explicit activation now hands focus to the selected input, superseding only the round-2 instruction that focus stay on the mode button. Passive readiness must still preserve intentional navigation and inactive-pane focus.
+
+Capture Legacy idle immediately after switching, native typing without a click, a fresh unique native task, and Escape after completion and cancellation. Include a restored nonempty native draft before the native task to exercise cursor-offset consumption. Native prompt and cursor must appear below, never under, task cards. Escape while an agent command owns the shell must not opt into its input. Type into command remains the separate explicit opt-in.
+
+Also verify Starting and Working mode exclusion, functional startup Stop, pointer Stop and Ctrl+C, no-reply and partial-reply outcomes, elapsed time after three seconds, reduced motion, stable composer baseline/hint slot, Smart one-line unique `/agent` routing, error recovery, split ownership and compact active Stop. Preserve complete transcript context. No round-3 runtime passes or visual success are established.
+
+Prompt mode keyboard path. Press F6, then Space or Enter to activate the focused mode control. This path still requires live keyboard and focus-ring verification in the current build.
+
+## Integrated Smart terminal acceptance
+
+This supersedes every composer, prompt-mode handshake and Smart draft step above. Those sections are historical. The shell's own prompt is the only command input in Smart and Legacy. The design is in [the design note](notes/integrated-smart-terminal-design.md) and the app handoff is in [the Opus handoff](notes/integrated-opus-handoff.md).
+
+Implementation and compile evidence only. Terra-high owns test execution and computer use. Preserve user app PID 37216. Use the isolated app at `artifacts/integrated/opus/bin/AgentTerm.App/release_win-x64/AgentTerm.App.exe` only after the parent confirms it was rebuilt against the final Terminal sources. Do not use the default output.
+
+Gate 0 runs first. It is Sol's live edge proof in the Terminal smoke suite. If it fails, stop and report before UI capture.
+
+Then capture these four states in a fresh supported PowerShell pane in Smart, before any further UX judgement.
+
+1. **Launch.** The shell's real prompt and its cursor sit on the bottom row. The rows above are terminal background. No text box, placeholder or hint appears anywhere in the pane. The pane header shows **Smart ⇄**, and no **/agent unavailable** label once the prompt is ready. If the label appears, record its tooltip text.
+2. **Tab completion.** Type `Get-ChildIt` and press Tab. It completes to `Get-ChildItem` on the bottom row. Then type a directory prefix and press Tab. It completes the path. Press Ctrl+Spacebar for the menu, then Escape. Record whether the prompt returns to the bottom row.
+3. **After a command.** Run three short commands. From top to bottom the order is oldest to newest. Each output directly follows its echo, and the newest prompt is on the bottom row. Press Up and confirm the last command is recalled in the same shell.
+4. **Scrollback.** Fill more than one screen, then scroll up. The prompt scrolls away with the output, unlike Warp. Type a key. The view returns to the live edge without passing it.
+
+Further checks, after the four captures are reviewed.
+
+5. Click and drag in the blank rows above a short document. No selection starts there. Drag from a prompt cell up into those rows and copy. The text matches the cells. Click cells near the prompt. Selection starts on the clicked cell.
+6. Switch to Legacy during a running `Start-Sleep 5` and again in a full-screen program. The switch is instant, the grid size text does not change, and Legacy draws from the top. Switch back. F6 then Space or Enter switches the focused pane's mode.
+7. `Clear-Host` and Ctrl+L with scrollback present. In Smart, the prompt is on the bottom row with history above it, with no blank gap between history and the prompt.
+8. Type `/agent` with a unique harmless request at the shell prompt in Smart and in Legacy. The surface opens with focus in its reply field. Escape returns to the terminal with the shell at its own prompt. Up recalls the `/agent` line. The task card sits on two blank rows and covers no prompt text. If the card is missing, record the two rows' text. A hidden card over non-blank rows is the designed behavior, not a pass.
+9. While an agent command runs, typing does not reach it. **Type into command** in the pane header hands input over. The mode switch stays usable.
+10. Ctrl+Shift+Y in the terminal reopens the latest task. With no task, the chord reaches the shell.
+11. Split right and down. Each pane keeps its own mode, and a shell-driven `/agent` open in one pane never moves focus out of another pane.
+12. IME composition at the bottom row. The candidate window sits at the cursor in Smart and Legacy.
+
+Regression commands, for Terra only.
+
+```powershell
+dotnet run --project tests/AgentTerm.Renderer.Smoke -c Release --artifacts-path artifacts/integrated/terra -- artifacts/integrated/terra/renderer-smoke.png
+dotnet run --project tests/AgentTerm.Terminal.Smoke -c Release --artifacts-path artifacts/integrated/terra
+dotnet run --project tests/AgentTerm.AgentUi.Smoke -c Release --artifacts-path artifacts/integrated/terra -- --timeline-only
+```
+
+The renderer suite now includes `GridGeometryChecks`: first-row inset, sub-cell remainder, clipped rows, caret and IME origin, hit testing at the inset boundary, drag clamping and mouse translation. Its last case needs Sol's live edge model and fails if a fresh bottom-anchored terminal does not report a five-row inset.

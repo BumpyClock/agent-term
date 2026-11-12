@@ -20,6 +20,9 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     {
         _page = page;
         InitializeComponent();
+        page.AttachPromptModeControls(Header);
+        Header.SplitRequested += sideBySide => SplitRequested?.Invoke(sideBySide);
+        Header.CloseRequested += () => CloseRequested?.Invoke();
         _backdrop.AttachmentChanged += UpdateSolidFallback;
         TerminalContent.Content = page;
         PaneShell.Text = page.Profile.Name;
@@ -106,7 +109,6 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     private void ApplyMaterial()
     {
         var appearance = TerminalPreferences.Current.ResolveAppearance(_page.Profile.Id);
-        // Auto inherits Windows again after leaving a forced light or dark appearance.
         RequestedTheme = appearance.ColorScheme switch
         {
             TerminalColorScheme.Light => ElementTheme.Light,
@@ -122,8 +124,4 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
 
     private void UpdateSolidFallback() => SolidSurface.Visibility =
         _backdrop.IsAttached ? Visibility.Collapsed : Visibility.Visible;
-
-    private void SplitRight_Click(object sender, RoutedEventArgs e) => SplitRequested?.Invoke(true);
-    private void SplitDown_Click(object sender, RoutedEventArgs e) => SplitRequested?.Invoke(false);
-    private void Close_Click(object sender, RoutedEventArgs e) => CloseRequested?.Invoke();
 }

@@ -95,6 +95,7 @@ internal static class Program
         AssertThemeColors(device, Path.GetDirectoryName(output)!);
         AssertOscCursorText(device);
         AssertBackgroundContinuity(device);
+        GridGeometryChecks.Run(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");
     }
 
@@ -174,7 +175,6 @@ internal static class Program
                 var row = (int)((y + 0.5f) / (cellHeight * scale));
                 for (var x = 1; x < width - 1; x++)
                 {
-                    // Color transitions may land halfway through a pixel. Interior pixels must be solid.
                     var bandPosition = (x + 0.5f) / (4 * cellWidth * scale);
                     if (Math.Abs(bandPosition - Math.Round(bandPosition)) < 1 / (4 * cellWidth * scale)) continue;
                     var expected = row == 1 ? new TerminalColor(45, 92, 150) : bands[(int)bandPosition];

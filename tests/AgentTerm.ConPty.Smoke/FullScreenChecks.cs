@@ -5,7 +5,7 @@ internal static class FullScreenChecks
     public static async Task RunAsync()
     {
         await using var session = new TerminalSession(80, 24, TestShell.Profile);
-        session.Start();
+        await TestShell.StartLegacyAsync(session);
         await WaitAsync(session, frame => Text(frame).Contains("PS "), "initial prompt");
         string executable = Path.Combine(AppContext.BaseDirectory, "AgentTerm.ConPty.Smoke.exe");
         session.Send($"& '{executable.Replace("'", "''")}' --tui-fixture\r");

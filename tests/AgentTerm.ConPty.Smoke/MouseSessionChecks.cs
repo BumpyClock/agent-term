@@ -28,7 +28,56 @@ internal static class MouseSessionChecks
         if (session.SendMouse(press, geometry)) throw new Exception("Disabled mouse tracking must return input to local selection.");
         session.Send("q");
         await session.Completion.WaitAsync(TimeSpan.FromSeconds(20));
-        Console.WriteLine("Mouse ConPTY fixture passed press, release, wheel, Shift bypass, and tracking disable.");
+        await SmartReleaseAsync(profile);
+        Console.WriteLine("Mouse ConPTY fixture passed press, release, wheel, Shift bypass, tracking disable, and Smart release/held-motion clamping.");
+    }
+
+    private static async Task SmartReleaseAsync(ShellProfile profile)
+    {
+        await using var session = new TerminalSession(80, 24, profile);
+        session.SetBottomAnchored(true);
+        session.Start();
+        await WaitAsync(session, "MOUSE_READY");
+        session.Send("s");
+        await WaitAsync(session, "SMART_READY");
+        var frame = session.ReadFrame();
+
+        if (frame.Viewport.TopInset <= 0)
+            throw new Exception($"Fixture did not expose history above active rows: {frame.Viewport}.");
+        var geometry = new TerminalMouseGeometry(800, 480, 10, 20);
+        var outside = new TerminalMouseEvent(TerminalMouseAction.Press, TerminalMouseButton.Left,
+            TerminalModifiers.None, 25, 0);
+        if (!session.SendMouse(outside, geometry)) throw new Exception("Tracking did not own the filtered press.");
+        session.Send("c");
+        await WaitAsync(session, "CHECKPOINT");
+        if (session.ReadText().Contains("REPORT=", StringComparison.Ordinal))
+            throw new Exception("Press outside active rows reached the fixture.");
+        if (!session.SendMouse(outside with { Action = TerminalMouseAction.Release }, geometry))
+            throw new Exception("Tracking did not own the release.");
+        await WaitAsync(session, "REPORT=1B5B3C303B333B316D");
+        var tallGeometry = new TerminalMouseGeometry(800, 960, 10, 20);
+        var below = outside with { Y = 1000 };
+        if (!session.SendMouse(below, tallGeometry)) throw new Exception("Tracking did not own the filtered lower press.");
+        session.Send("c");
+        if (!session.SendMouse(below with { Action = TerminalMouseAction.Release }, tallGeometry))
+            throw new Exception("Tracking did not own the lower release.");
+        await WaitAsync(session, "REPORT=1B5B3C303B333B32346D");
+        if (session.ReadText().Split("REPORT=", StringSplitOptions.None).Length != 3)
+            throw new Exception("Press below active rows reached the fixture.");
+        session.Send("h");
+        await WaitAsync(session, "HELD_READY");
+        var held = outside with { Action = TerminalMouseAction.Motion };
+        session.SendMouse(held, geometry);
+        await WaitAsync(session, "REPORT=1B5B3C33323B333B314D");
+        session.SendMouse(held with { Y = 1000 }, tallGeometry);
+        await WaitAsync(session, "REPORT=1B5B3C33323B333B32344D");
+        session.SendMouse(held with { Button = null }, geometry);
+        session.Send("c");
+        await WaitAsync(session, "CHECKPOINT-3");
+        if (session.ReadText().Split("REPORT=", StringSplitOptions.None).Length != 5)
+            throw new Exception("Unheld motion outside active rows reached the fixture.");
+        session.Send("q");
+        await session.Completion.WaitAsync(TimeSpan.FromSeconds(20));
     }
 
     public static void RunFixture()
@@ -42,12 +91,29 @@ internal static class MouseSessionChecks
         {
             Console.Write("\x1b[?1000h\x1b[?1006hMOUSE_READY\r\n");
             var report = new List<byte>();
+            var checkpoint = 0;
             while (stream.ReadByte() is var value && value >= 0)
             {
                 if (report.Count == 0 && value == 'q') break;
                 if (report.Count == 0 && value == 'd')
                 {
                     Console.Write("\x1b[?1000l\x1b[?1006lMOUSE_DISABLED\r\n");
+                    continue;
+                }
+                if (report.Count == 0 && value == 'h')
+                {
+                    Console.Write("\x1b[?1003hHELD_READY\r\n");
+                    continue;
+                }
+                if (report.Count == 0 && value == 's')
+                {
+                    for (var i = 0; i < 30; i++) Console.Write($"history-{i}\r\n");
+                    Console.Write("\x1b[H\x1b[2JSMART_READY");
+                    continue;
+                }
+                if (report.Count == 0 && value == 'c')
+                {
+                    Console.Write($"\r\nCHECKPOINT-{++checkpoint}\r\n");
                     continue;
                 }
                 report.Add((byte)value);

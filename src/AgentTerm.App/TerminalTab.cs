@@ -79,9 +79,11 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     {
         var pane = _active;
         if (!_visible || ReferenceEquals(pane, _retiring)) return;
+        var focused = XamlRoot is null ? null : Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot);
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (_visible && !IsClosing && ReferenceEquals(_active, pane) && !ReferenceEquals(pane, _retiring))
+            if (_visible && !IsClosing && ReferenceEquals(_active, pane) && !ReferenceEquals(pane, _retiring) &&
+                ReferenceEquals(focused, Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot)))
                 pane.Page.FocusTerminal();
         });
     }
@@ -308,7 +310,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         var pane = new Pane(page, view);
         page.SessionReady += () =>
         {
-            if (ReferenceEquals(_active, pane)) FocusActivePane();
+            if (ReferenceEquals(_active, pane)) page.FocusUnclaimedInput();
         };
         view.GotFocus += (_, _) => ActivatePane(pane);
         view.SplitRequested += sideBySide =>
@@ -334,8 +336,11 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private void UpdateFocus()
     {
         foreach (var pane in _panes)
-            pane.View.SetFocused(_visible && ReferenceEquals(pane, _active) && !ReferenceEquals(pane, _retiring),
-                multiplePanes: _panes.Count > 1);
+        {
+            var active = _visible && ReferenceEquals(pane, _active) && !ReferenceEquals(pane, _retiring);
+            pane.Page.SetInputActive(active);
+            pane.View.SetFocused(active, multiplePanes: _panes.Count > 1);
+        }
     }
 
     private Rect Bounds(FrameworkElement pane) => pane.TransformToVisual(_layout)

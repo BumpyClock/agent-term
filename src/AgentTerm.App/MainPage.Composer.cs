@@ -1,118 +1,108 @@
 using AgentTerm.Agents;
 using AgentTerm.Terminal;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.System;
 namespace AgentTerm_App;
 
-/// <summary>
-/// Smart prompt, agent surface and task cards. Prompt text runs in the shell unchanged; only a leading /agent
-/// starts an agent task. The task's surface replaces the terminal view in place without resizing the shell,
-/// and its collapsed card stays on two history rows reserved where it was invoked.
-/// </summary>
 public sealed partial class MainPage
 {
     private readonly AgentSessionController _agent;
     private readonly AgentTimelineView _timelineView = new();
     private readonly Dictionary<AgentTask, (TerminalSession Session, TerminalAnchor Anchor, AgentTaskCard Card)> _cards = [];
-    private readonly ActivityLabel _taskStatus = new();
-    private bool _composerIme;
-    private bool _rawMode;
+    private readonly PromptModeBar _modeBar = new();
+    private bool _replyIme;
+    private bool _legacy;
+    private const string PausedReply = "Agent replies paused until this turn finishes";
+    private string? _stopTip;
     private bool _surfaceOpen;
+    private AgentTask? _surfaceTask;
+    private string? _promptFailure;
     private bool _startingTask;
-    private AgentEvent? _shownRequest;
-    private ShellPromptState _lastPrompt;
+    private PromptInputOwner _inputOwner = PromptInputOwner.Terminal;
     private string? _promptFont;
 
-    private bool AgentBusy => _agent.State is AgentState.Starting or AgentState.Running or AgentState.WaitingForApproval or AgentState.WaitingForInput or AgentState.Interrupting;
-    private void Composer_Changed(object sender, RoutedEventArgs e) { if (Composer is not null) RefreshComposer(); }
-    private void Composer_FocusChanged(object sender, RoutedEventArgs e) => RefreshPromptGlyph();
-    private void Composer_CompositionStarted(TextBox sender, TextCompositionStartedEventArgs args) => _composerIme = true;
-    private void Composer_CompositionEnded(TextBox sender, TextCompositionEndedEventArgs args) => _composerIme = false;
+    private bool AgentBusy => _agent.HasActiveTurn;
+    internal void AttachPromptModeControls(PaneHeader header) => header.ModeBar = _modeBar;
+    private void AgentReply_Changing(TextBox sender, TextBoxTextChangingEventArgs args) => _promptFailure = null;
+    private void AgentReply_Changed(object sender, RoutedEventArgs e) { if (AgentReply is not null) RefreshAgentChrome(); }
+    private void AgentReply_FocusChanged(object sender, RoutedEventArgs e) => UpdatePromptGlyph();
+    private void UpdatePromptGlyph() =>
+        PromptGlyph.Opacity = AgentReply.IsReadOnly ? 0 : AgentReply.FocusState != FocusState.Unfocused ? 1 : 0.6;
+    private void AgentReply_CompositionStarted(TextBox sender, TextCompositionStartedEventArgs args) => _replyIme = true;
+    private void AgentReply_CompositionEnded(TextBox sender, TextCompositionEndedEventArgs args) => _replyIme = false;
 
-    private void RefreshComposer()
+    private void ApplyDisplayMode()
     {
-        if (Composer is null || _agent is null) return;
+        Terminal.SetBottomAligned(!_legacy);
+        if (_session is not { } session || _state is not (SessionState.Starting or SessionState.Running or SessionState.Idle)) return;
+        session.SetBottomAnchored(!_legacy);
+        if (_state != SessionState.Starting) RefreshOutput(session);
+    }
+
+    private void RefreshAgentChrome()
+    {
+        if (AgentReply is null || _agent is null) return;
         var session = _session;
         var state = session?.PromptState ?? ShellPromptState.Unknown;
-        if (_rawMode && state == ShellPromptState.Ready) session?.RestoreRawPrompt();
-        if (state == ShellPromptState.Raw && !_rawMode) session?.EnableManagedPrompt();
-        if (state == ShellPromptState.Ready && _lastPrompt != state && !_rawMode && _viewActive) Composer.Focus(FocusState.Programmatic);
-        _lastPrompt = state;
-        Terminal.SetCursorSuppressed(state == ShellPromptState.Ready && !_rawMode);
+        var owns = session?.AgentOwnsTerminal == true;
         if (_promptFont != Terminal.TerminalFontFamily)
         {
             _promptFont = Terminal.TerminalFontFamily;
             var font = new FontFamily(_promptFont + ", Cascadia Mono, Consolas");
-            Composer.FontFamily = PromptGlyph.FontFamily = PromptHint.FontFamily = RequestText.FontFamily = _timelineView.Mono = font;
+            AgentReply.FontFamily = PromptGlyph.FontFamily = PromptHint.FontFamily = RequestPanel.DetailFont = _timelineView.Mono = font;
         }
-        var owns = session?.AgentOwnsTerminal == true;
         var request = _agent.Request;
         if (_surfaceOpen)
         {
-            Composer.PlaceholderText = request switch
+            AgentReply.PlaceholderText = request switch
             {
-                ApprovalRequest => "Enter runs it. Ctrl+C rejects it.",
                 QuestionRequest { AllowFreeform: true } => "Answer the agent",
                 QuestionRequest => "Pick an answer above",
-                _ when AgentBusy => "The agent is working. Esc returns to the terminal.",
-                _ => "Ask a follow up, or Esc for terminal",
+                _ when AgentBusy => PausedReply,
+                _ when _agent.CurrentTask?.Turns.Count == 0 => "Ask the agent",
+                _ => "Ask a follow up",
             };
-            PromptHint.Text = "esc terminal · enter send · shift+enter new line" + (AgentBusy ? " · ctrl+c stop" : "");
+            PromptHint.Text = _promptFailure ?? (request switch
+            {
+                QuestionRequest { AllowFreeform: true } => "Enter answer · Shift+Enter new line",
+                QuestionRequest => "",
+                _ when AgentBusy => AgentReply.Text.Length > 0 ? PausedReply : "",
+                _ => "Enter send · Shift+Enter new line",
+            });
+            PromptHint.Visibility = PromptHint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        else
-        {
-            // One line that never changes with shell state, so the prompt height and the PTY size stay put during a command.
-            Composer.PlaceholderText = _rawMode ? "Native prompt is active. Click Smart prompt to return." : "Run a command, or /agent to ask the agent";
-            PromptHint.Text = "/agent ask the agent" + (_agent.CurrentTask is not null ? " · ctrl+shift+y open last task" : "") + " · esc native prompt";
-        }
-        SubmitPrompt.IsEnabled = CanSend(Composer.Text, state, owns);
-        var raw = owns ? "Type in terminal" : _rawMode ? "Smart prompt" : "Native prompt";
-        if (RawTerminalButton.Content as string != raw)
-        {
-            RawTerminalButton.Content = raw;
-            ToolTipService.SetToolTip(RawTerminalButton, owns ? "Let keystrokes reach the command the agent is running"
-                : _rawMode ? "Return to the smart prompt" : "Use the shell's own prompt (Esc)");
-        }
-        RawTerminalButton.Visibility = owns || !_surfaceOpen ? Visibility.Visible : Visibility.Collapsed;
-        StopAgentButton.Visibility = AgentBusy ? Visibility.Visible : Visibility.Collapsed;
-        RefreshTaskStatus();
-        RefreshPromptGlyph();
+        AgentReply.IsReadOnly = AgentBusy && request is not QuestionRequest { AllowFreeform: true };
+        UpdatePromptGlyph();
+        SubmitPrompt.IsEnabled = CanSend(AgentReply.Text);
+        SubmitPrompt.Opacity = AgentReply.IsReadOnly ? 0 : 1;
+        SubmitPrompt.IsHitTestVisible = !AgentReply.IsReadOnly;
+
+        _modeBar.ShowInteract(owns);
+        _modeBar.ShowMode(_legacy, state, session?.AgentEntryAvailable == false);
+
+        var approvalPending = request is ApprovalRequest;
+        StopShortcut.Visibility = approvalPending ? Visibility.Collapsed : Visibility.Visible;
+        var stopTip = approvalPending ? "Stop the agent's current turn" : "Stop the agent's current turn (Ctrl+C)";
+        if (_stopTip != stopTip) { _stopTip = stopTip; ToolTipService.SetToolTip(StopAgentButton, stopTip); }
+        StopAgentButton.Opacity = AgentBusy ? 1 : 0;
+        StopAgentButton.IsEnabled = _agent.CanInterrupt;
+        StopAgentButton.IsHitTestVisible = AgentBusy;
+        AutomationProperties.SetAccessibilityView(StopAgentButton, AgentBusy ? AccessibilityView.Content : AccessibilityView.Raw);
+        ToolTipService.SetToolTip(LeaveSurfaceButton, AgentBusy ? "Back to the terminal. The agent keeps working."
+            : "Back to the terminal. This conversation is saved in its task card.");
+        _modeBar.ShowTask(_agent.State, !_surfaceOpen, _viewActive && IsLoaded);
     }
 
-    private bool CanSend(string text, ShellPromptState state, bool owns)
+    private bool CanSend(string text)
     {
-        if (_startingTask) return false;
-        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (!_surfaceOpen || _startingTask || string.IsNullOrWhiteSpace(text)) return false;
         if (PromptRouter.Parse(text) is AgentIntent) return true;
-        if (_surfaceOpen) return _agent.Request is QuestionRequest { AllowFreeform: true } || (_agent.CanSubmit && _agent.Request is null);
-        return state == ShellPromptState.Ready && !owns;
-    }
-
-    private void RefreshPromptGlyph()
-    {
-        var style = AgentUi.Style(_surfaceOpen ? "AgentPromptGlyphAgent" : "AgentPromptGlyph");
-        if (PromptGlyph.Style != style) PromptGlyph.Style = style;
-        PromptGlyph.Opacity = Composer.FocusState != FocusState.Unfocused || _surfaceOpen ? 1 : 0.6;
-    }
-
-    /// <summary>Keeps background agent work discoverable from the terminal view.</summary>
-    private void RefreshTaskStatus()
-    {
-        if (TaskStatusLabelHost.Children.Count == 0) TaskStatusLabelHost.Children.Add(_taskStatus);
-        var label = _agent.State switch
-        {
-            AgentState.WaitingForApproval => "Agent needs approval",
-            AgentState.WaitingForInput => "Agent needs an answer",
-            AgentState.Starting or AgentState.Running or AgentState.Interrupting => "Agent working",
-            _ => "",
-        };
-        TaskStatusButton.Visibility = !_surfaceOpen && label.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _taskStatus.Update(label, _viewActive && IsLoaded && _agent.State is AgentState.Running or AgentState.Starting);
-        var name = label + ". Open the agent task";
-        if (Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(TaskStatusButton) != name) Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(TaskStatusButton, name);
+        return _agent.Request is QuestionRequest { AllowFreeform: true } || (_agent.CanSubmit && _agent.Request is null);
     }
 
     private void AgentChanged()
@@ -126,16 +116,15 @@ public sealed partial class MainPage
                 if (!_agent.Tasks.Contains(task)) RemoveCard(task);
                 else entry.Card.Update(_agent, _viewActive && IsLoaded);
             }
-            RefreshComposer();
+            RefreshAgentChrome();
         });
     }
 
-    /// <summary>Called on activation changes so shimmer runs only in a visible pane.</summary>
     private void SetAgentAnimation(bool active)
     {
         if (_surfaceOpen) _timelineView.Update(_agent, _agent.CurrentTask, active);
         foreach (var entry in _cards.Values) entry.Card.Update(_agent, active);
-        RefreshComposer();
+        RefreshAgentChrome();
     }
 
     private void UpdateSurface(bool follow)
@@ -143,46 +132,51 @@ public sealed partial class MainPage
         if (!AgentTimelineHost.Children.Contains(_timelineView)) AgentTimelineHost.Children.Add(_timelineView);
         var task = _agent.CurrentTask;
         _timelineView.Update(_agent, task, _viewActive && IsLoaded);
-        SurfaceTitle.Text = task is { Title.Length: > 0 } ? task.Title : "New agent task";
-        var request = _agent.Request;
-        var approval = request as ApprovalRequest;
-        var question = request as QuestionRequest;
-        RequestPanel.Visibility = request is null ? Visibility.Collapsed : Visibility.Visible;
-        RequestTitle.Text = approval is not null ? "Allow the agent to run this?" : question?.Question ?? "";
-        RequestText.Text = approval?.Description ?? "";
-        RequestDetail.Visibility = approval is not null ? Visibility.Visible : Visibility.Collapsed;
-        ApproveRequest.Visibility = DenyRequest.Visibility = approval is not null ? Visibility.Visible : Visibility.Collapsed;
-        RequestChoices.Visibility = question?.Choices.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (_shownRequest != request)
-        {
-            _shownRequest = request;
-            RequestChoices.Children.Clear();
-            foreach (var choice in question?.Choices ?? [])
-            {
-                var button = new Button { Content = new TextBlock { Text = choice, TextWrapping = TextWrapping.Wrap }, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 3, 10, 3), MinHeight = 0 };
-                var requestId = question!.Request;
-                button.Click += async (_, _) => await _agent.RespondAsync(new(requestId, Answer: choice));
-                RequestChoices.Children.Add(button);
-            }
-        }
+        SurfaceTitle.Text = task is { Turns.Count: > 0 } ? "Agent task" : "New agent task";
+        ToolTipService.SetToolTip(SurfaceTitle, task?.Title);
+        RequestPanel.Update();
         if (!follow) return;
         AgentOutput.UpdateLayout();
         AgentOutput.ChangeView(null, AgentOutput.ScrollableHeight, null, true);
     }
 
-    private void OpenSurface(AgentTask task)
+    private bool PaneInputFocused()
+    {
+        var focused = XamlRoot is null ? null : FocusManager.GetFocusedElement(XamlRoot);
+        return ReferenceEquals(focused, AgentReply) || ReferenceEquals(focused, Terminal.Input);
+    }
+
+    private void UpdateInputOwner(bool handoff)
+    {
+        var next = PromptFocusPolicy.Owner(_surfaceOpen);
+        var transfer = PromptFocusPolicy.ShouldTransfer(_inputOwner, next, _viewActive && _inputActive,
+            !_replyIme && FindBar.Visibility != Visibility.Visible, handoff);
+        _inputOwner = next;
+        if (!transfer) return;
+        UpdateLayout();
+        FocusTerminal();
+    }
+
+    private void OpenSurface(AgentTask task, bool explicitHandoff = true)
     {
         _agent.ActivateTask(task);
+        if (_surfaceTask != task)
+        {
+            if (_surfaceTask is { } previous) previous.ReplyDraft = AgentReply.Text;
+            _surfaceTask = task;
+            AgentReply.Text = task.ReplyDraft;
+            _promptFailure = null;
+        }
         if (!_surfaceOpen)
         {
+            var handoff = explicitHandoff || PaneInputFocused();
             _surfaceOpen = true;
-            // Collapsing the terminal reports a zero size, which the grid sizing ignores, so the shell is never resized.
             Terminal.Visibility = HistoryScrollBar.Visibility = TaskCardLayer.Visibility = Visibility.Collapsed;
             AgentSurface.Visibility = Visibility.Visible;
+            UpdateInputOwner(handoff);
         }
         UpdateSurface(true);
-        RefreshComposer();
-        Composer.Focus(FocusState.Programmatic);
+        RefreshAgentChrome();
     }
 
     private void LeaveSurface()
@@ -191,9 +185,13 @@ public sealed partial class MainPage
         _surfaceOpen = false;
         AgentSurface.Visibility = Visibility.Collapsed;
         Terminal.Visibility = HistoryScrollBar.Visibility = TaskCardLayer.Visibility = Visibility.Visible;
-        if (_session is { } session) RefreshTaskCards(session.ReadFrame());
-        RefreshComposer();
-        Composer.Focus(FocusState.Programmatic);
+        if (_session is { } session)
+        {
+            session.ScrollToBottom();
+            RefreshOutput(session);
+        }
+        UpdateInputOwner(true);
+        RefreshAgentChrome();
     }
 
     private void LeaveSurface_Click(object sender, RoutedEventArgs e) => LeaveSurface();
@@ -203,53 +201,58 @@ public sealed partial class MainPage
         LeaveSurface();
         return true;
     }
-    private void TaskStatus_Click(object sender, RoutedEventArgs e) { if ((_agent.RunningTask ?? _agent.CurrentTask) is { } task) OpenSurface(task); }
-
-    private async void SubmitPrompt_Click(object sender, RoutedEventArgs e) => await SubmitComposerAsync();
-    private async Task SubmitComposerAsync()
+    private bool OpenLatestTask()
     {
-        var text = Composer.Text;
-        if (_session is not { } session || !CanSend(text, session.PromptState, session.AgentOwnsTerminal)) return;
-        if (PromptRouter.Parse(text) is AgentIntent agent) await StartTaskAsync(agent.Request);
-        else if (_surfaceOpen) await SendToAgentAsync(text);
-        else
+        if ((_agent.RunningTask ?? _agent.CurrentTask) is not { } task) return false;
+        OpenSurface(task);
+        return true;
+    }
+
+    private async void SubmitPrompt_Click(object sender, RoutedEventArgs e) => await SubmitReplyAsync();
+    private async Task SubmitReplyAsync()
+    {
+        var text = AgentReply.Text;
+        if (!CanSend(text)) return;
+        _promptFailure = null;
+        if (_agent.Request is QuestionRequest { AllowFreeform: true }) await SendToAgentAsync(text);
+        else if (PromptRouter.Parse(text) is AgentIntent agent)
         {
-            _lastPrompt = ShellPromptState.Executing;
-            session.SubmitCommand(text);
-            Composer.Text = "";
-            Terminal.FocusInput(FocusState.Programmatic);
+            AgentReply.Text = "";
+            await StartTaskAsync(agent.Request);
         }
-        RefreshComposer();
+        else await SendToAgentAsync(text);
+        RefreshAgentChrome();
     }
 
     private async Task SendToAgentAsync(string text)
     {
-        if (_shownRequest is QuestionRequest { AllowFreeform: true } question)
+        if (RequestPanel.Shown is QuestionRequest { AllowFreeform: true } question)
         {
-            if (await _agent.RespondAsync(new(question.Request, Answer: text)) && Composer.Text == text) Composer.Text = "";
+            if (await _agent.RespondAsync(new(question.Request, Answer: text)) && AgentReply.Text == text) AgentReply.Text = "";
             return;
         }
         if (!_agent.CanSubmit) return;
-        if (_session?.ReadWorkingDirectory() is not { } directory) { PromptHint.Text = "The agent needs the shell to report a local working directory."; return; }
-        // The request appears in the conversation at once. A failure to start is reported there, not by restoring the draft.
-        Composer.Text = "";
+        if (_session?.ReadWorkingDirectory() is not { } directory) { ShowPromptHint("The agent needs the shell to report a local working directory."); return; }
+        AgentReply.Text = "";
         await _agent.SubmitAsync(text, new(directory.Path, directory.WslDistribution));
     }
 
-    /// <summary>
-    /// /agent opens a new task. Two blank history rows are reserved first so its card stays where it was invoked.
-    /// While a turn runs, /agent reopens that task instead and leaves the draft in place.
-    /// </summary>
-    private async Task StartTaskAsync(string request)
+    private async Task StartTaskAsync(string request, bool explicitHandoff = true)
     {
-        if (AgentBusy) { if (_agent.RunningTask is { } running) OpenSurface(running); return; }
+        if (AgentBusy)
+        {
+            if (_agent.RunningTask is not { } running) return;
+            OpenSurface(running, explicitHandoff);
+            if (request.Length > 0)
+                AgentReply.Text = AgentReply.Text.Length == 0 ? request : AgentReply.Text + Environment.NewLine + request;
+            return;
+        }
         if (_startingTask) return;
         _startingTask = true;
         try
         {
             var task = _agent.BeginTask();
-            Composer.Text = "";
-            if (_session is { } session && !_rawMode && session.ReserveRows() is { } anchor)
+            if (_session is { } session && session.ReserveRows() is { } anchor)
             {
                 var card = new AgentTaskCard(task);
                 card.Click += (_, _) => OpenSurface(task);
@@ -260,27 +263,35 @@ public sealed partial class MainPage
                 try { while (session.PromptState != ShellPromptState.Ready) await Task.Delay(16, ready.Token); }
                 catch (OperationCanceledException) { }
             }
-            OpenSurface(task);
-            if (request.Length > 0) await SendToAgentAsync(request);
+            OpenSurface(task, explicitHandoff);
+            if (request.Length > 0)
+            {
+                AgentReply.Text = request;
+                await SendToAgentAsync(request);
+            }
         }
-        finally { _startingTask = false; RefreshComposer(); }
+        finally { _startingTask = false; RefreshAgentChrome(); }
     }
 
-    /// <summary>Positions cards from their anchors on every frame. An expired anchor removes its card; the task remains reachable from the prompt.</summary>
     private void RefreshTaskCards(TerminalFrame frame)
     {
         if (_cards.Count == 0) return;
-        var cell = Terminal.CellHeight;
+        var geometry = Terminal.GeometryFor(frame);
+        var cell = geometry.CellHeight;
         foreach (var (task, entry) in _cards.ToArray())
         {
             var row = entry.Session == _session ? entry.Session.ReadAnchor(entry.Anchor) : null;
             if (row is null) { RemoveCard(task); continue; }
-            var top = (row.Value - frame.Viewport.Offset) * cell;
-            var visible = !_surfaceOpen && !frame.Viewport.IsAlternateScreen && top > -2 * cell && top < TaskCardLayer.ActualHeight;
+            var frameRow = row.Value - frame.Viewport.Offset;
+            var top = geometry.RowTop(frameRow);
+            var cursorRow = frame.Viewport.Offset + frame.Cursor.Row;
+            var overlapsPrompt = row.Value <= cursorRow && cursorRow < row.Value + 2;
+            var visible = !_surfaceOpen && !frame.Viewport.IsAlternateScreen && !overlapsPrompt
+                && top > -2 * cell && top < TaskCardLayer.ActualHeight && geometry.RowsBlank(frame, frameRow, 2);
             entry.Card.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
             if (!visible) continue;
             Canvas.SetTop(entry.Card, top + 2);
-            entry.Card.Width = Math.Max(0, TaskCardLayer.ActualWidth);
+            entry.Card.Width = Math.Max(0, Math.Min(TaskCardLayer.ActualWidth, geometry.Columns * geometry.CellWidth));
             entry.Card.Height = Math.Max(0, 2 * cell - 4);
         }
     }
@@ -299,62 +310,67 @@ public sealed partial class MainPage
     }
     private void TaskCardLayer_PointerWheelChanged(object sender, PointerRoutedEventArgs e) => Terminal_PointerWheelChanged(Terminal, e);
 
-    private async void Composer_KeyDown(object sender, KeyRoutedEventArgs e)
+    private async void AgentReply_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_composerIme) return;
+        if (_replyIme) return;
         var ctrl = Down(VirtualKey.Control);
         var shift = Down(VirtualKey.Shift);
         switch (e.Key)
         {
             case VirtualKey.Escape:
                 e.Handled = true;
-                if (_surfaceOpen) LeaveSurface(); else RawTerminal_Click(sender, e);
+                LeaveSurface();
                 return;
-            case VirtualKey.Y when ctrl && shift && (_agent.RunningTask ?? _agent.CurrentTask) is { } task:
-                e.Handled = true;
-                OpenSurface(task);
-                return;
-            case VirtualKey.C when ctrl && !shift && _surfaceOpen && Composer.SelectionLength == 0:
-                if (_agent.Request is ApprovalRequest) { e.Handled = true; DenyRequest_Click(sender, e); }
+            case VirtualKey.C when ctrl && !shift && AgentReply.SelectionLength == 0:
+                if (_agent.Request is ApprovalRequest) { e.Handled = true; await RequestPanel.DenyAsync(); }
                 else if (AgentBusy) { e.Handled = true; InterruptAgent_Click(sender, e); }
                 return;
-            case VirtualKey.Back when _surfaceOpen && Composer.Text.Length == 0:
+            case VirtualKey.Back when AgentReply.Text.Length == 0:
                 e.Handled = true;
                 LeaveSurface();
                 return;
             case VirtualKey.Enter when !shift:
                 e.Handled = true;
-                if (_surfaceOpen && _shownRequest is ApprovalRequest && Composer.Text.Length == 0)
+                if (RequestPanel.Shown is ApprovalRequest && AgentReply.Text.Length == 0)
                 {
-                    if (!e.KeyStatus.WasKeyDown) ApproveRequest_Click(sender, e);
+                    if (!e.KeyStatus.WasKeyDown) await RequestPanel.ApproveAsync();
                 }
-                else await SubmitComposerAsync();
+                else await SubmitReplyAsync();
                 return;
         }
     }
 
-    private void RawTerminal_Click(object sender, RoutedEventArgs e)
+    internal bool FocusPromptMode() => _modeBar.FocusMode();
+
+    private void ToggleDisplayMode()
     {
-        if (_session?.AgentOwnsTerminal == true)
-        {
-            LeaveSurface();
-            _session.AllowAgentInteractiveInput();
-            Terminal.FocusInput(FocusState.Programmatic);
-            return;
-        }
-        _rawMode = !_rawMode;
-        if (_rawMode) { _session?.RestoreRawPrompt(); Terminal.FocusInput(FocusState.Programmatic); }
-        else Composer.Focus(FocusState.Programmatic);
-        RefreshComposer();
+        _legacy = !_legacy;
+        ApplyDisplayMode();
+        LeaveSurface();
+        RefreshAgentChrome();
+        FocusTerminal();
+    }
+
+    private void AllowAgentInput()
+    {
+        if (_session is not { AgentOwnsTerminal: true } session) return;
+        LeaveSurface();
+        session.AllowAgentInteractiveInput();
+        RefreshAgentChrome();
+        FocusTerminal();
     }
 
     private async void InterruptAgent_Click(object sender, RoutedEventArgs e)
     {
+        _promptFailure = null;
         try { await _agent.InterruptAsync(); }
-        catch (Exception ex) { PromptHint.Text = ex.Message; }
+        catch (Exception ex) { ShowPromptHint(ex.Message); }
     }
-    private async void ApproveRequest_Click(object sender, RoutedEventArgs e)
-    { if (_shownRequest is ApprovalRequest request) await _agent.RespondAsync(new(request.Request, true)); }
-    private async void DenyRequest_Click(object sender, RoutedEventArgs e)
-    { if (_shownRequest is ApprovalRequest request) await _agent.RespondAsync(new(request.Request)); }
+
+    private void ShowPromptHint(string text)
+    {
+        _promptFailure = text;
+        PromptHint.Text = text;
+        PromptHint.Visibility = Visibility.Visible;
+    }
 }

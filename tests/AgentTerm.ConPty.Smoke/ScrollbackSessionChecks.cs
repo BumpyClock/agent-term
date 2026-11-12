@@ -5,7 +5,7 @@ internal static class ScrollbackSessionChecks
     public static async Task RunAsync()
     {
         await using var session = new TerminalSession(100, 10, TestShell.Profile);
-        session.Start();
+        await TestShell.StartLegacyAsync(session);
         await WaitAsync(session, frame => Text(frame).Contains("PS "));
         session.Send("1..100 | ForEach-Object { 'HISTORY_' + $_.ToString('D3') }\r");
         await WaitAsync(session, frame => Text(frame).Contains("HISTORY_100") && Text(frame).Contains("PS "));
@@ -50,7 +50,7 @@ internal static class ScrollbackSessionChecks
             throw new Exception("Completed sessions must resize without a live ConPTY.");
 
         await using var stoppedSession = new TerminalSession(100, 10, TestShell.Profile);
-        stoppedSession.Start();
+        await TestShell.StartLegacyAsync(stoppedSession);
         await WaitAsync(stoppedSession, frame => Text(frame).Contains("PS "));
         stoppedSession.Send("1..40 | ForEach-Object { 'STOP_' + $_.ToString('D3') }\r");
         await WaitAsync(stoppedSession, frame => Text(frame).Contains("STOP_040") && Text(frame).Contains("PS "));

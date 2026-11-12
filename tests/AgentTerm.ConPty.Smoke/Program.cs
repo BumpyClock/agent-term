@@ -27,7 +27,53 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
+if (args.Contains("--mailbox-only"))
+{
+    await MailboxChecks.RunAsync();
+    return;
+}
+
+if (args.Contains("--mouse-only"))
+{
+    await MouseSessionChecks.RunAsync();
+    return;
+}
+
+if (args.Contains("--resize-input-only"))
+{
+    await ResizeInputChecks.RunAsync();
+    return;
+}
+
+if (args.Contains("--transition-resize-probe"))
+{
+    await PromptModeChecks.ProbeAsync();
+    return;
+}
+
+if (args.Contains("--resize-anchor-attribution"))
+{
+    await ResizeAnchorChecks.AttributionAsync();
+    return;
+}
+
+if (args.Contains("--resize-anchor-only"))
+{
+    await ResizeAnchorChecks.RunAsync();
+    return;
+}
+
+if (args.Contains("--prompt-mode-only"))
+{
+    await NativeStartupChecks.RunAsync();
+    await PromptModeChecks.RunAsync();
+    await ResizeInputChecks.RunAsync();
+    await ResizeAnchorChecks.RunAsync();
+    return;
+}
+
 var timeout = TimeSpan.FromSeconds(20);
+await MailboxChecks.RunAsync();
 await ProgramStatusSessionChecks.RunAsync();
 ShellProfileDiscoveryChecks.Run();
 await TerminalEnvironmentChecks.RunAsync();
@@ -37,6 +83,11 @@ await ScrollbackSessionChecks.RunAsync();
 await ProfileChecks.RunAsync();
 await DirectoryChecks.RunAsync();
 await SmartPromptChecks.RunAsync();
+await NativeStartupChecks.RunAsync();
+await PromptModeChecks.ProbeAsync();
+await PromptModeChecks.RunAsync();
+await ResizeInputChecks.RunAsync();
+await ResizeAnchorChecks.RunAsync();
 var prompt = new Regex(@"(?m)^PS [^\r\n]*> ?$", RegexOptions.CultureInvariant);
 var id = Guid.NewGuid().ToString("N")[..8];
 
@@ -100,7 +151,7 @@ static void AssertExited(Process process, string screen)
 var session = new TerminalSession(120, 30, TestShell.Profile);
 try
 {
-    session.Start();
+    await TestShell.StartLegacyAsync(session);
     await WaitForScreen(session, screen => prompt.IsMatch(screen), "PowerShell should display its initial prompt.");
     using var process = Process.GetProcessById(session.ProcessId);
 
@@ -150,7 +201,7 @@ for (var cycle = 0; cycle < 2; cycle++)
     var active = new TerminalSession(profile: TestShell.Profile);
     try
     {
-        active.Start();
+        await TestShell.StartLegacyAsync(active);
         await WaitForScreen(active, screen => prompt.IsMatch(screen), $"Cleanup cycle {cycle + 1} should start PowerShell.");
         using var process = Process.GetProcessById(active.ProcessId);
         var closing = $"AT_{id}:closing-{cycle}";
@@ -169,7 +220,7 @@ for (var cycle = 0; cycle < 2; cycle++)
 var stress = new TerminalSession(120, 30, TestShell.Profile);
 try
 {
-    stress.Start();
+    await TestShell.StartLegacyAsync(stress);
     await WaitForScreen(stress, screen => prompt.IsMatch(screen), "The resize stress session should start.");
     using var process = Process.GetProcessById(stress.ProcessId);
     stress.Send($"1..400 | % {{ Write-Output ('AT_{id}:'+'stress-'+$_); Start-Sleep -Milliseconds 10 }}\r");

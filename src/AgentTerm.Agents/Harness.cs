@@ -10,9 +10,12 @@ public abstract record AgentEvent(Guid Turn);
 public sealed record TextDelta(Guid Turn, string Text) : AgentEvent(Turn);
 public sealed record ToolStarted(Guid Turn, string CallId, string Name, ToolCategory Category, string Action, string Detail) : AgentEvent(Turn);
 public sealed record ToolOutput(Guid Turn, string CallId, string Text) : AgentEvent(Turn);
+/// <summary>The host began executing an approved call. Until then a started call is only requested or in flight.</summary>
+public sealed record ToolExecuting(Guid Turn, string CallId) : AgentEvent(Turn);
 public sealed record ToolCompleted(Guid Turn, string CallId, WorkStatus Status) : AgentEvent(Turn);
 public sealed record ReasoningSummary(Guid Turn, string Text) : AgentEvent(Turn);
-public sealed record ApprovalRequest(Guid Turn, Guid Request, string Description) : AgentEvent(Turn);
+/// <param name="CallId">The tool call this approval gates, when the harness can attribute it.</param>
+public sealed record ApprovalRequest(Guid Turn, Guid Request, string Description, string? CallId = null) : AgentEvent(Turn);
 public sealed record QuestionRequest(Guid Turn, Guid Request, string Question, IReadOnlyList<string> Choices, bool AllowFreeform) : AgentEvent(Turn);
 public sealed record TurnCompleted(Guid Turn) : AgentEvent(Turn);
 public sealed record TurnFailed(Guid Turn, string Message) : AgentEvent(Turn);

@@ -15,17 +15,23 @@ UiContext.Run(async () =>
     var protocol = new ShellPromptProtocol("test");
     var protocolScanner = new OscScanner();
     protocolScanner.Sequence += protocol.Accept;
-    var wire = "\u001b]777;other;ready\a\u001b]777;test;raw\a\u001b]777;test;start\a\u001b]777;test;end;0;7\a\u001b]777;test;commands;" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("myAlias\nmyFunction")) + "\a\u001b]777;test;ready\a";
+    var wire = "\u001b]777;other;ready\a\u001b]777;test;ready\a\u001b]777;test;start\a\u001b]777;test;end;0;7\a\u001b]777;test;ready\a";
     foreach (var b in System.Text.Encoding.UTF8.GetBytes(wire)) protocolScanner.Feed([b]);
-    Check(protocol.State == ShellPromptState.Ready && protocol.LastCommandSucceeded == false && protocol.LastExitCode == 7, "Fragmented lifecycle"); Check(protocol.Commands.Contains("myAlias"), "Metadata");
+    Check(protocol.State == ShellPromptState.Ready && protocol.LastCommandSucceeded == false && protocol.LastExitCode == 7, "Fragmented lifecycle");
     protocolScanner.Feed(System.Text.Encoding.UTF8.GetBytes("\u001b]777;test;start\u001b\\"));
     Check(protocol.State == ShellPromptState.Executing, "ST termination");
+    protocolScanner.Feed(System.Text.Encoding.UTF8.GetBytes("\u001b]777;other;agent;aGVsbG8=\a\u001b]777;test;agent;!invalid!\a"));
+    Check(protocol.TakeAgentRequest() is null, "Untrusted and malformed native requests are ignored");
+    var nativeWire = "\u001b]777;test;ready\a\u001b]777;test;agent;" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("native 界")) + "\a\u001b]777;test;agent;\a";
+    foreach (var b in System.Text.Encoding.UTF8.GetBytes(nativeWire)) protocolScanner.Feed([b]);
+    Check(protocol.TakeAgentRequest() == "native 界" && protocol.TakeAgentRequest() == "" && protocol.TakeAgentRequest() is null, "Native requests retain Unicode, order and bare entry exactly once");
+    Check(protocol.State == ShellPromptState.Ready && protocol.LastCommandSucceeded == false, "Native entry must not alter readiness or last command status");
     var captureProtocol = new ShellPromptProtocol("capture");
     var captureProtocolScanner = new OscScanner();
     captureProtocolScanner.Sequence += captureProtocol.Accept;
     var capture = new CommandOutputCapture();
     captureProtocolScanner.OutputByte += capture.Feed; captureProtocol.Marker += capture.Marker;
-    var captureWire = "prior echo\u001b]777;capture;start\ahello 🦉終\u001b]7;file://localhost/C:/\a\u001b]777;capture;end;1;0\aprompt\u001b]777;capture;commands;YQ==\a";
+    var captureWire = "prior echo\u001b]777;capture;start\ahello 🦉終\u001b]7;file://localhost/C:/\a\u001b]777;capture;end;1;0\aprompt\u001b]777;capture;ready\a";
     foreach (var b in System.Text.Encoding.UTF8.GetBytes(captureWire)) captureProtocolScanner.Feed([b]);
     Check(capture.Text == "hello 🦉終", "Capture excludes echo/metadata/prompt with byte-fragmented UTF-8.");
     var orderedProtocol = new ShellPromptProtocol("ordered");
@@ -33,7 +39,7 @@ UiContext.Run(async () =>
     orderedProtocolScanner.Sequence += orderedProtocol.Accept;
     var orderedCapture = new CommandOutputCapture("a:fixture");
     orderedProtocolScanner.OutputByte += orderedCapture.Feed; orderedProtocol.Marker += orderedCapture.Marker;
-    var orderedWire = "echo __AgentTermStart; command\r\nAgent command [a:fixture]\r\nfirst 🦉\r\nA\r\nnext\r\n\u001b]777;ordered;end;1;0;a:fixture\a\u001b]777;ordered;ready;a:fixture\afinal line\r\nAgent completed [a:fixture]\r\nprompt";
+    var orderedWire = "echo __AgentTermStart; command\r\nCommand started [a:fixture]\r\nfirst 🦉\r\nA\r\nnext\r\n\u001b]777;ordered;end;1;0;a:fixture\a\u001b]777;ordered;ready;a:fixture\afinal line\r\nCommand ended [a:fixture]\r\nprompt";
     foreach (var b in System.Text.Encoding.UTF8.GetBytes(orderedWire)) orderedProtocolScanner.Feed([b]);
     Check(orderedCapture.Ended && orderedCapture.Text == "first 🦉\r\nA\r\nnext\r\nfinal line\r\n", "Reordered OSC must not cut off output or capture fences/echo/prompt.");
     var harness = new FakeHarness(); await using var controller = new AgentSessionController(harness); var otherHarness = new FakeHarness(); await using var other = new AgentSessionController(otherHarness);
@@ -73,6 +79,26 @@ UiContext.Run(async () =>
     await Wait(() => Display(controller).Contains("after tools"));
     Check(!group.Expanded, "Collapsed user choice survives unrelated stream append");
 
+    session.Emit(new ToolStarted(turn, "gated", "terminal", ToolCategory.Command, "gated", "gated"));
+    session.Emit(new ToolStarted(turn, "parallel", "terminal", ToolCategory.Command, "parallel", "parallel"));
+    var shownApproval = Guid.NewGuid(); var queuedApproval = Guid.NewGuid();
+    session.Emit(new ApprovalRequest(turn, shownApproval, "parallel", "parallel"));
+    session.Emit(new ApprovalRequest(turn, queuedApproval, "gated", "gated"));
+    await Wait(() => controller.AwaitsApproval("gated"));
+    var parallelGroup = controller.Timeline.Entries.OfType<TimelineWorkGroup>().Last();
+    Check(controller.AwaitsApproval("parallel") && !controller.AwaitsApproval("one"), "Every queued approval names only its own call.");
+    Check(parallelGroup.Summary == "Pending parallel", "A call with no reported execution must not read as running.");
+    await controller.RespondAsync(new(shownApproval, true));
+    Check(!controller.AwaitsApproval("parallel") && controller.AwaitsApproval("gated"), "Answering one approval leaves the other call gated.");
+    session.Emit(new ToolExecuting(turn, "parallel"));
+    await Wait(() => parallelGroup.Tools.Single(t => t.CallId == "parallel").Executing);
+    Check(parallelGroup.Summary == "Running parallel" && !parallelGroup.Tools.Single(t => t.CallId == "gated").Executing, "Execution is reported per call.");
+    await controller.RespondAsync(new(queuedApproval));
+    session.Emit(new ToolCompleted(turn, "gated", WorkStatus.Cancelled));
+    session.Emit(new ToolCompleted(turn, "parallel", WorkStatus.Succeeded));
+    await Wait(() => !parallelGroup.Active);
+    Check(!controller.AwaitsApproval("gated") && controller.State == AgentState.Running, "Both approvals settle.");
+
     foreach (var approved in new[] { false, true })
     {
         var id = Guid.NewGuid(); session.Emit(new ApprovalRequest(turn, id, "Write fixture")); await Wait(() => controller.State == AgentState.WaitingForApproval); await controller.RespondAsync(new(id, approved)); Check(session.Response?.Approved == approved && controller.State == AgentState.Running, "Permission decision");
@@ -85,14 +111,27 @@ UiContext.Run(async () =>
     session.FailResponse = false;
     Check(await controller.RespondAsync(new(request, Answer: "two")), "Response retry succeeds");
     Check(session.Response?.Answer == "two" && controller.Request is null, "Question reply");
-    session.Emit(new TurnCompleted(turn)); await Wait(() => controller.State == AgentState.Idle); Check(await controller.SubmitAsync("next", location), "Second turn"); session.Emit(new TurnCompleted(turn)); await Task.Delay(30); Check(controller.State == AgentState.Running, "Late completion ignored");
+    session.Emit(new TurnCompleted(turn)); await Wait(() => controller.State == AgentState.Idle);
+    Check(controller.CurrentTask?.LastOutcome == WorkStatus.Succeeded, "Completed task retains its outcome for the surface and history card.");
+    Check(await controller.SubmitAsync("next", location), "Second turn");
+    Check(controller.CurrentTask?.LastOutcome is null, "Follow-up clears the previous completion marker.");
+    session.Emit(new TurnCompleted(turn)); await Task.Delay(30); Check(controller.State == AgentState.Running, "Late completion ignored");
     session.Emit(new TurnFailed(session.Turn, "fixture failure")); await Wait(() => controller.State == AgentState.Failed); Check(Display(controller).Contains("fixture failure"), "Visible failure");
+    Check(controller.CurrentTask?.LastOutcome == WorkStatus.Failed, "Failed task must not look completed.");
     await controller.SubmitAsync("cancel", location);
     session.Emit(new ToolStarted(session.Turn, "interrupted", "terminal", ToolCategory.Command, "sleep", "sleep"));
     await Wait(() => controller.Timeline.Entries.OfType<TimelineWorkGroup>().Last().Active);
     var interruptedGroup = controller.Timeline.Entries.OfType<TimelineWorkGroup>().Last();
     await controller.InterruptAsync(); await Wait(() => controller.State == AgentState.Idle);
+    Check(controller.CurrentTask?.LastOutcome == WorkStatus.Cancelled, "Interrupted task must retain Stopped rather than Done.");
+    Check(controller.Timeline.Entries.OfType<TimelineMessage>().Any(m => m.Turn == session.Turn && m.Role == MessageRole.Cancelled && m.Text == "Stopped before any reply."), "Cancellation must retain a typed, readable outcome rather than a generic duplicate notice.");
     Check(other.State == AgentState.Running, "Interrupt isolation");
+    await controller.SubmitAsync("keep partial reply", location);
+    session.Emit(new TextDelta(session.Turn, "Retained partial answer"));
+    await Wait(() => Display(controller).Contains("Retained partial answer"));
+    await controller.InterruptAsync(); await Wait(() => !controller.HasActiveTurn);
+    Check(Display(controller).Contains("Retained partial answer") && Display(controller).Contains("Stopped. Partial reply kept."), "Stop must preserve and explain partial output.");
+
     Check(!interruptedGroup.Active && interruptedGroup.Tools[0].Status == WorkStatus.Cancelled, "Interrupted group settled");
     await controller.SubmitAsync("bounded", location); session.Emit(new TextDelta(session.Turn, new string('x', 70000))); await Wait(() => controller.Timeline.Entries.OfType<TimelineMessage>().Last().Text.Length <= AgentTimeline.TextLimit && Display(controller).Contains("Earlier text omitted"));
     session.Emit(new TurnCompleted(session.Turn)); await Wait(() => controller.State == AgentState.Idle);

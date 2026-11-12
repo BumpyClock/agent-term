@@ -22,6 +22,8 @@ public sealed class TimelineTool(string callId, ToolCategory category, string ac
     public string Command { get; } = AgentTimeline.Bound(command);
     public string Output { get; internal set; } = "";
     public WorkStatus Status { get; internal set; } = WorkStatus.Running;
+    /// <summary>The harness reported actual execution. A running call without it may still wait for approval or input.</summary>
+    public bool Executing { get; internal set; }
     public bool OutputExpanded { get; set; }
 }
 public sealed class TimelineWorkGroup(Guid turn) : TimelineEntry(turn)
@@ -48,8 +50,9 @@ public sealed class TimelineWorkGroup(Guid turn) : TimelineEntry(turn)
                 });
             }
             var settled = counts.Count > 1 ? string.Join(", ", counts[..^1]) + " and " + char.ToLowerInvariant(counts[^1][0]) + counts[^1][1..] : counts.FirstOrDefault() ?? "";
-            var active = _tools.LastOrDefault(t => t.Status == WorkStatus.Running);
-            var label = active is not null ? $"Running {active.Action}" : settled;
+            var active = _tools.LastOrDefault(t => t.Status == WorkStatus.Running && t.Executing)
+                ?? _tools.LastOrDefault(t => t.Status == WorkStatus.Running);
+            var label = active is null ? settled : active.Executing ? $"Running {active.Action}" : $"Pending {active.Action}";
             var failed = _tools.Count(t => t.Status == WorkStatus.Failed);
             var cancelled = _tools.Count(t => t.Status == WorkStatus.Cancelled);
             if (failed > 0) label += $", {failed} failed";
@@ -60,20 +63,23 @@ public sealed class TimelineWorkGroup(Guid turn) : TimelineEntry(turn)
     internal void Add(TimelineTool tool) { _tools.Add(tool); }
 }
 
-/// <summary>One /agent invocation and its follow-ups: a view over timeline turns. The app pairs it with a history anchor.</summary>
 public sealed class AgentTask
 {
     private readonly List<Guid> _turns = [];
     public Guid Id { get; } = Guid.NewGuid();
+    /// <summary>Unsent conversation reply, retained when another task is opened.</summary>
+    public string ReplyDraft { get; set; } = "";
     /// <summary>The first request's first line. Empty until a request is sent.</summary>
     public string Title { get; private set; } = "";
     public IReadOnlyList<Guid> Turns => _turns;
+    public WorkStatus? LastOutcome { get; internal set; }
     public bool Contains(Guid turn) => _turns.Contains(turn);
     internal void Add(Guid turn, string request)
     {
         var line = request.Trim().Split((char)10)[0].Trim();
         if (Title.Length == 0) Title = line.Length > 120 ? line[..119] + "…" : line;
         _turns.Add(turn);
+        LastOutcome = null;
     }
 }
 
@@ -85,12 +91,24 @@ public sealed class AgentTimeline
     private readonly List<TimelineEntry> _entries = [];
     public IReadOnlyList<TimelineEntry> Entries => _entries;
     public bool HasTrimmed { get; private set; }
+    private (Guid Turn, string Text)? _blankPrefix;
     private const string Omission = "[Earlier text omitted]\n";
     internal static string Bound(string text) => text.Length <= TextLimit ? text : Omission + text[^(TextLimit - Omission.Length)..];
     public void Message(Guid turn, MessageRole role, string text)
     {
+        if (role == MessageRole.Assistant)
+        {
+            if (_blankPrefix is { } prefix && prefix.Turn == turn) text = prefix.Text + text;
+            _blankPrefix = null;
+            if (string.IsNullOrWhiteSpace(text) && !(_entries.LastOrDefault() is TimelineMessage { Role: MessageRole.Assistant } previous && previous.Turn == turn))
+            {
+                _blankPrefix = (turn, text.Length <= TextLimit ? text : text[^TextLimit..]);
+                return;
+            }
+        }
+        else _blankPrefix = null;
         if (role == MessageRole.Assistant && _entries.LastOrDefault() is TimelineMessage last && last.Turn == turn && last.Role == role) last.Append(text);
-        else Add(new TimelineMessage(turn, role, text));
+        else if (role != MessageRole.Assistant || !string.IsNullOrWhiteSpace(text)) Add(new TimelineMessage(turn, role, text));
     }
     private void Add(TimelineEntry entry)
     {
@@ -99,6 +117,7 @@ public sealed class AgentTimeline
     }
     public void Apply(AgentEvent item)
     {
+        if (item is ToolStarted or ReasoningSummary) _blankPrefix = null;
         switch (item)
         {
             case TextDelta text: Message(text.Turn, MessageRole.Assistant, text.Text); break;
@@ -111,6 +130,9 @@ public sealed class AgentTimeline
                 break;
             case ToolOutput output:
                 if (Find(output.Turn, output.CallId) is { } found) { found.Tool.Output = Bound(found.Tool.Output + output.Text); }
+                break;
+            case ToolExecuting executing:
+                if (Find(executing.Turn, executing.CallId) is { } executed) executed.Tool.Executing = true;
                 break;
             case ToolCompleted completed:
                 if (Find(completed.Turn, completed.CallId) is { } call)
@@ -135,6 +157,7 @@ public sealed class AgentTimeline
     }
     public void Settle(Guid turn)
     {
+        _blankPrefix = null;
         foreach (var group in _entries.OfType<TimelineWorkGroup>().Where(g => g.Turn == turn))
         { foreach (var tool in group.Tools.Where(t => t.Status == WorkStatus.Running)) tool.Status = WorkStatus.Cancelled; }
     }

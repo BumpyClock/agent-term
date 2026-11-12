@@ -40,15 +40,20 @@ public sealed class TerminalSurface : UserControl
         _canvas.Invalidate();
     }
 
-    // The smart prompt owns the input line while the shell waits, so the idle shell cursor is not drawn.
-    private bool _cursorSuppressed;
     internal string TerminalFontFamily => _terminalFontFamily;
-    internal void SetCursorSuppressed(bool suppressed)
+
+    private bool _bottomAligned;
+    public void SetBottomAligned(bool aligned)
     {
-        if (_cursorSuppressed == suppressed) return;
-        _cursorSuppressed = suppressed;
+        if (_bottomAligned == aligned) return;
+        _bottomAligned = aligned;
+        PositionInput();
         _canvas.Invalidate();
     }
+
+    internal TerminalGridGeometry Geometry => _frame is { } frame ? GeometryFor(frame) : new(0, 0, 0, CellWidth, CellHeight);
+    internal TerminalGridGeometry GeometryFor(TerminalFrame frame) =>
+        TerminalGridGeometry.For(frame, ActualHeight, CellWidth, CellHeight, _bottomAligned);
 
     private TerminalFrame? _frame;
     private bool _cursorPhase = true;
@@ -76,7 +81,7 @@ public sealed class TerminalSurface : UserControl
         _canvas.Draw += Draw;
         _canvas.CreateResources += (_, _) => { _resourcesReady = true; MeasureCells(); };
         ActualThemeChanged += (_, _) => _canvas.Invalidate();
-        PointerPressed += (_, _) => FocusInput(FocusState.Pointer);
+        SizeChanged += (_, _) => { PositionInput(); _canvas.Invalidate(); };
     }
 
     public void SetAcrylicBackground(bool enabled)
@@ -95,7 +100,6 @@ public sealed class TerminalSurface : UserControl
     private static string[] FindTerminalFonts()
     {
         var installed = CanvasTextFormat.GetSystemFontFamilies().ToHashSet(StringComparer.OrdinalIgnoreCase);
-        // DirectWrite can expose either full Nerd Font family names or their legacy short names.
         string[] candidates =
         [
             "CaskaydiaCove Nerd Font Mono", "CaskaydiaCove NFM", "CaskaydiaCove Nerd Font", "CaskaydiaCove NF",
@@ -154,10 +158,9 @@ public sealed class TerminalSurface : UserControl
     private void PositionInput()
     {
         if (_frame is not { } frame) return;
-        var x = Math.Clamp(frame.Cursor.Column, 0, Math.Max(0, frame.Columns - 1)) * CellWidth;
-        var y = Math.Clamp(frame.Cursor.Row, 0, Math.Max(0, frame.Rows - 1)) * CellHeight;
-        _input.Margin = new Thickness(x, y, 0, 0);
-        _input.Width = Math.Max(CellWidth, (frame.Columns * CellWidth) - x);
+        var caret = Geometry.Caret(frame.Cursor);
+        _input.Margin = new Thickness(caret.X, caret.Y, 0, 0);
+        _input.Width = Math.Max(CellWidth, (frame.Columns * CellWidth) - caret.X);
         _input.Height = CellHeight;
     }
 
@@ -165,7 +168,8 @@ public sealed class TerminalSurface : UserControl
     {
         if (_frame is { } frame)
             DrawFrame(args.DrawingSession, frame, CellWidth, CellHeight,
-                _input.FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily, _compositionVisible || _cursorSuppressed);
+                _input.FocusState != FocusState.Unfocused, _cursorPhase, _terminalFontSize, _acrylicBackground, _terminalFontFamily, _compositionVisible,
+                (float)Geometry.Top);
         else
         {
             var shade = ActualTheme == ElementTheme.Light ? (byte)250 : (byte)0;
@@ -175,25 +179,25 @@ public sealed class TerminalSurface : UserControl
 
     public static void DrawFrame(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, bool focused, bool cursorPhase, float fontSize = 14, bool transparentBackground = false,
-        string fontFamily = FallbackFont, bool hideCursor = false)
+        string fontFamily = FallbackFont, bool hideCursor = false, float gridTop = 0)
     {
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
+        var rows = TerminalGridGeometry.VisibleRows(frame);
         var antialiasing = drawing.Antialiasing;
-        // Adjacent cell fills must meet without blending their shared edges into the backdrop.
         drawing.Antialiasing = CanvasAntialiasing.Aliased;
-        for (var row = 0; row < frame.Rows; row++)
+        for (var row = 0; row < rows; row++)
         for (var col = 0; col < frame.Columns; col++)
         {
             var cell = frame.Cells[row * frame.Columns + col];
             if (cell.Selected || !transparentBackground || cell.Background != frame.Background)
-                drawing.FillRectangle(col * cellWidth, row * cellHeight, cellWidth, cellHeight, cell.Selected ? ToColor(frame.SelectionBackground) : ToColor(cell.Background));
+                drawing.FillRectangle(col * cellWidth, gridTop + row * cellHeight, cellWidth, cellHeight, cell.Selected ? ToColor(frame.SelectionBackground) : ToColor(cell.Background));
         }
         drawing.Antialiasing = antialiasing;
         using var normal = CreateFormat(false, false, fontSize, fontFamily);
         using var bold = CreateFormat(true, false, fontSize, fontFamily);
         using var italic = CreateFormat(false, true, fontSize, fontFamily);
         using var boldItalic = CreateFormat(true, true, fontSize, fontFamily);
-        for (var row = 0; row < frame.Rows; row++)
+        for (var row = 0; row < rows; row++)
         for (var col = 0; col < frame.Columns; col++)
         {
             var cell = frame.Cells[row * frame.Columns + col];
@@ -201,7 +205,7 @@ public sealed class TerminalSurface : UserControl
             var foreground = cell.Selected ? ToColor(frame.SelectionForeground) : ToColor(cell.Foreground);
             if (cell.Dim && !cell.Selected) foreground = Color.FromArgb(255, (byte)(foreground.R / 2), (byte)(foreground.G / 2), (byte)(foreground.B / 2));
             var x = col * cellWidth;
-            var y = row * cellHeight;
+            var y = gridTop + row * cellHeight;
             var width = cellWidth * cell.Width;
             if (!string.IsNullOrWhiteSpace(cell.Text))
             {
@@ -212,9 +216,9 @@ public sealed class TerminalSurface : UserControl
             if (cell.Strikethrough) drawing.DrawLine(x, y + cellHeight / 2, x + width, y + cellHeight / 2, foreground);
         }
         var cursor = frame.Cursor;
-        if (hideCursor || !cursor.Visible || (cursor.Blink && focused && !cursorPhase) || cursor.Column < 0 || cursor.Column >= frame.Columns || cursor.Row < 0 || cursor.Row >= frame.Rows) return;
+        if (hideCursor || !cursor.Visible || (cursor.Blink && focused && !cursorPhase) || cursor.Column < 0 || cursor.Column >= frame.Columns || cursor.Row < 0 || cursor.Row >= rows) return;
         var cx = cursor.Column * cellWidth;
-        var cy = cursor.Row * cellHeight;
+        var cy = gridTop + cursor.Row * cellHeight;
         var color = ToColor(cursor.Color);
         if (!focused)
             drawing.DrawRectangle(cx + 0.5f, cy + 0.5f, cellWidth - 1, cellHeight - 1, color);
@@ -245,4 +249,53 @@ public sealed class TerminalSurface : UserControl
     };
 
     private static Color ToColor(TerminalColor color) => Color.FromArgb(255, color.R, color.G, color.B);
+}
+
+internal readonly record struct TerminalGridGeometry(double Top, int Columns, int Rows, float CellWidth, float CellHeight)
+{
+    internal double Bottom => Top + Rows * CellHeight;
+
+    internal static int VisibleRows(TerminalFrame frame) => Math.Clamp(frame.Rows - frame.Viewport.TopInset, 0, frame.Rows);
+
+    internal static TerminalGridGeometry For(TerminalFrame frame, double surfaceHeight, float cellWidth, float cellHeight, bool bottomAligned)
+    {
+        var remainder = bottomAligned ? surfaceHeight - frame.Rows * cellHeight : 0;
+        return new(remainder + frame.Viewport.TopInset * cellHeight, frame.Columns, VisibleRows(frame), cellWidth, cellHeight);
+    }
+
+    internal double RowTop(long frameRow) => Top + frameRow * CellHeight;
+
+    internal bool TryCellAt(Point point, out int column, out int row)
+    {
+        column = row = -1;
+        if (Rows == 0 || Columns == 0 || point.Y < Top || point.Y >= Bottom || point.X < 0 || point.X >= Columns * CellWidth) return false;
+        column = Math.Clamp((int)Math.Floor(point.X / CellWidth), 0, Columns - 1);
+        row = Math.Clamp((int)Math.Floor((point.Y - Top) / CellHeight), 0, Rows - 1);
+        return true;
+    }
+
+    internal (int Column, int Row) ClampedCellAt(Point point) =>
+        (Math.Clamp((int)Math.Floor(point.X / CellWidth), 0, Math.Max(0, Columns - 1)),
+         Math.Clamp((int)Math.Floor((point.Y - Top) / CellHeight), 0, Math.Max(0, Rows - 1)));
+
+    internal Point ToFrame(Point point) => new(point.X, point.Y - Top);
+
+    internal Point ToFrameClamped(Point point) =>
+        new(Math.Clamp(point.X, 0, Math.Max(0, Columns * CellWidth - 1)), Math.Clamp(point.Y - Top, 0, Math.Max(0, Rows * CellHeight - 1)));
+
+    internal bool RowsBlank(TerminalFrame frame, long firstRow, int count)
+    {
+        for (var row = Math.Max(0, firstRow); row < Math.Min(firstRow + count, Rows); row++)
+            for (var column = 0; column < frame.Columns; column++)
+            {
+                var cell = frame.Cells[row * frame.Columns + column];
+                if (!string.IsNullOrWhiteSpace(cell.Text) || cell.Background != frame.Background || cell.Underline || cell.Strikethrough)
+                    return false;
+            }
+        return true;
+    }
+
+    internal Point Caret(TerminalCursor cursor) =>
+        new(Math.Clamp(cursor.Column, 0, Math.Max(0, Columns - 1)) * CellWidth,
+            RowTop(Math.Clamp(cursor.Row, 0, Math.Max(0, Rows - 1))));
 }
