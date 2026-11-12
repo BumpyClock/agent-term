@@ -20,7 +20,7 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     {
         _page = page;
         InitializeComponent();
-        page.AttachPromptModeControls(Header);
+        page.AttachAgentControls(Header);
         Header.SplitRequested += sideBySide => SplitRequested?.Invoke(sideBySide);
         Header.CloseRequested += () => CloseRequested?.Invoke();
         _backdrop.AttachmentChanged += UpdateSolidFallback;

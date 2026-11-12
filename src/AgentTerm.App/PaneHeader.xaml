@@ -68,7 +68,7 @@
     </UserControl.Resources>
     <Grid x:Name="Root" Padding="10,0,4,0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4" SizeChanged="Root_SizeChanged">
         <ContentPresenter x:Name="ContextHost" VerticalAlignment="Center" HorizontalContentAlignment="Stretch" />
-        <ContentPresenter x:Name="ModeHost" Grid.Column="1" VerticalAlignment="Center" />
+        <ContentPresenter x:Name="AgentHost" Grid.Column="1" VerticalAlignment="Center" />
         <StackPanel x:Name="PaneActions" Grid.Column="2" Orientation="Horizontal" Spacing="4">
             <Button x:Name="SplitRightButton" Width="28" MinWidth="0" Height="28" Padding="0"
                     Style="{StaticResource PaneActionButtonStyle}"

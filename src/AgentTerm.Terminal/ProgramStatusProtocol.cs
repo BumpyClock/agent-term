@@ -63,7 +63,6 @@ public sealed class ProgramStatusProtocol
             if (key.Length > 16) return;
             if ((key == "title" && value.Length > 256) || (key == "msg" && value.Length > 2732)) return;
             if (key.Length == 0 || key.Any(c => c is < 'a' or > 'z')) continue;
-            // Validate every occurrence before applying anything, including overwritten duplicate fields.
             if ((key == "app" && value.Length > 32) || (key == "id" && !ValidId(value))) return;
             if (value.Any(c => !IsValueCharacter(c))) continue;
             if (key is "title" or "msg")

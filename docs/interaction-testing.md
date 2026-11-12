@@ -1,5 +1,7 @@
 # Interaction testing
 
+Startup, tab attachment and automatic focus checks are in [terminal startup](terminal-startup.md). Run `scripts/check-startup.ps1 -Trials 5` after changing terminal loading, visibility or refresh scheduling.
+
 Use these checks for tab-strip changes. They cover native WinUI interaction that build and terminal tests cannot establish.
 
 ## Tab reordering
@@ -75,6 +77,20 @@ The resource extraction probe decoded icons from PowerShell, Windows PowerShell,
 Close the final running tab using its close button. Repeat with a stopped session and with the final pane's close action. Confirm that the terminal window and any Settings window close, and its owned shell/conhost processes exit. Also close a window with multiple running tabs and panes to cover asynchronous cleanup.
 
 The shutdown handler queues its final native close request. The last-tab path has no remaining tabs to await, so cleanup completes synchronously. Calling Close again inside the canceled Closing callback is reentrant and can leave the empty window open. The queued request lets that callback return first. Resumed live testing exposed a separate native backdrop release crash. Rooting its target until disconnect alone did not fix it. Closing the target through public `IClosable` on the UI thread passed pane removal, forced garbage collection/finalization, survivor reattachment, and last-tab shutdown with Settings open in an instrumented app.
+
+## Shell startup and tab focus
+
+The full-application startup check uses the real window, shell, tab sidebar, and Win2D canvas. It runs commands and requires their output to reach a canvas draw with nonblank raster pixels, then requests and checks terminal input focus. It also covers rapid tab creation, switching, detached-tab focus, splitting, and closing a pane. Build it into a separate output directory so the normal app executable remains unchanged:
+
+```powershell
+dotnet build .\src\AgentTerm.App\AgentTerm.App.csproj -c Release -p:Platform=x64 -p:StartupSmoke=true -p:OutDir="$PWD\artifacts\startup-smoke\"
+.\artifacts\startup-smoke\AgentTerm.App.exe "$PWD\artifacts\startup-left.txt" Left
+.\artifacts\startup-smoke\AgentTerm.App.exe "$PWD\artifacts\startup-top.txt" Top
+```
+
+Wait for each process to exit and check its exit code and report. The check changes tab position only in its own memory; it never saves over the user's preferences.
+
+On 2026-11-12, a ready PowerShell prompt was present in the affected process, but the terminal canvas never painted it. Calling `UpdateLayout` during the sidebar's `Loaded` handler produced an unmatched Win2D unload event while the canvas remained attached. `ScrollIntoView` can also force layout. Selection reveals and caption fitting now run after the current layout pass. Rapid tab replacement exposed another path: canvases could receive `Unloaded` before their first `Loaded`, leaving Win2D's native load count out of balance. The canvas is now attached only once its host loads. Queued tab focus also requires a loaded tab whose captured `XamlRoot` is still current. Do not force sidebar layout or reveal rows synchronously during tab loading.
 
 ## Pane materials
 
@@ -290,17 +306,17 @@ Also verify Starting and Working mode exclusion, functional startup Stop, pointe
 
 Prompt mode keyboard path. Press F6, then Space or Enter to activate the focused mode control. This path still requires live keyboard and focus-ring verification in the current build.
 
-## Integrated Smart terminal acceptance
+## Integrated shell prompt acceptance
 
-This supersedes every composer, prompt-mode handshake and Smart draft step above. Those sections are historical. The shell's own prompt is the only command input in Smart and Legacy. The design is in [the design note](notes/integrated-smart-terminal-design.md) and the app handoff is in [the Opus handoff](notes/integrated-opus-handoff.md).
+This supersedes every composer, prompt-mode handshake and Smart draft step above. Those sections are historical. The shell's own prompt is the only command input at either terminal start position. The design is in [the design note](notes/integrated-smart-terminal-design.md) and the app handoff is in [the Opus handoff](notes/integrated-opus-handoff.md).
 
-Implementation and compile evidence only. Terra-high owns test execution and computer use. Preserve user app PID 37216. Use the isolated app at `artifacts/integrated/opus/bin/AgentTerm.App/release_win-x64/AgentTerm.App.exe` only after the parent confirms it was rebuilt against the final Terminal sources. Do not use the default output.
+Use a fresh verification app instance and an isolated build output when an existing user app holds its binaries open. Do not close user sessions to rebuild or test.
 
 Gate 0 runs first. It is Sol's live edge proof in the Terminal smoke suite. If it fails, stop and report before UI capture.
 
-Then capture these four states in a fresh supported PowerShell pane in Smart, before any further UX judgement.
+Then capture these four states in a fresh supported PowerShell pane with the Bottom start position.
 
-1. **Launch.** The shell's real prompt and its cursor sit on the bottom row. The rows above are terminal background. No text box, placeholder or hint appears anywhere in the pane. The pane header shows **Smart ⇄**, and no **/agent unavailable** label once the prompt is ready. If the label appears, record its tooltip text.
+1. **Launch.** The shell's real prompt and its cursor sit on the bottom row. The rows above are terminal background. No text box, placeholder or hint appears anywhere in the pane. The pane header has no Smart/Legacy toggle, and no **/agent unavailable** label once the prompt is ready. If the label appears, record its tooltip text.
 2. **Tab completion.** Type `Get-ChildIt` and press Tab. It completes to `Get-ChildItem` on the bottom row. Then type a directory prefix and press Tab. It completes the path. Press Ctrl+Spacebar for the menu, then Escape. Record whether the prompt returns to the bottom row.
 3. **After a command.** Run three short commands. From top to bottom the order is oldest to newest. Each output directly follows its echo, and the newest prompt is on the bottom row. Press Up and confirm the last command is recalled in the same shell.
 4. **Scrollback.** Fill more than one screen, then scroll up. The prompt scrolls away with the output, unlike Warp. Type a key. The view returns to the live edge without passing it.
@@ -308,15 +324,23 @@ Then capture these four states in a fresh supported PowerShell pane in Smart, be
 Further checks, after the four captures are reviewed.
 
 5. Click and drag in the blank rows above a short document. No selection starts there. Drag from a prompt cell up into those rows and copy. The text matches the cells. Click cells near the prompt. Selection starts on the clicked cell.
-6. Switch to Legacy during a running `Start-Sleep 5` and again in a full-screen program. The switch is instant, the grid size text does not change, and Legacy draws from the top. Switch back. F6 then Space or Enter switches the focused pane's mode.
-7. `Clear-Host` and Ctrl+L with scrollback present. In Smart, the prompt is on the bottom row with history above it, with no blank gap between history and the prompt.
-8. Type `/agent` with a unique harmless request at the shell prompt in Smart and in Legacy. The surface opens with focus in its reply field. Escape returns to the terminal with the shell at its own prompt. Up recalls the `/agent` line. The task card sits on two blank rows and covers no prompt text. If the card is missing, record the two rows' text. A hidden card over non-blank rows is the designed behavior, not a pass.
-9. While an agent command runs, typing does not reach it. **Type into command** in the pane header hands input over. The mode switch stays usable.
+6. In Settings > Startup, change Terminal start position to Top and Save during a running `Start-Sleep 5`, then during a full-screen program. The shell is not interrupted or resized. Switch back to Bottom through Settings. Verify Save/Discard, switching settings pages without losing the draft, closing with unsaved changes, and persistence after app restart. New tabs, split panes and restarted sessions use the saved position. F6 is no longer intercepted for a display toggle.
+7. `Clear-Host` and Ctrl+L with scrollback present. With Bottom selected, the prompt is on the bottom row with history above it, with no blank gap between history and the prompt.
+8. Type `/agent` with a unique harmless request at the shell prompt with Bottom and with Top selected. The surface opens with focus in its reply field. Escape returns to the terminal with the shell at its own prompt. Up recalls the `/agent` line. The task card sits on two blank rows and covers no prompt text. If the card is missing, record the two rows' text. A hidden card over non-blank rows is the designed behavior, not a pass.
+9. While an agent command runs, typing does not reach it. **Type into command** in the pane header hands input over. Saving a start position does not change this ownership.
 10. Ctrl+Shift+Y in the terminal reopens the latest task. With no task, the chord reaches the shell.
-11. Split right and down. Each pane keeps its own mode, and a shell-driven `/agent` open in one pane never moves focus out of another pane.
-12. IME composition at the bottom row. The candidate window sits at the cursor in Smart and Legacy.
+11. Split right and down. All panes use the saved start position, and a shell-driven `/agent` open in one pane never moves focus out of another pane.
+12. IME composition at the bottom row. The candidate window sits at the cursor at both start positions.
 
-Regression commands, for Terra only.
+### Window chrome and settings icons
+
+- In both Top and Left tab layouts, verify the app icon and AgentTerm name at the title bar's top left. The selected shell name belongs in its tab and pane context, not repeated as the window title.
+- With Left tabs, verify New tab and the profile dropdown above the first tab at full and compact widths. Switch tab layouts repeatedly without losing tabs, their order, selection, shell state or keyboard focus.
+- Verify the Settings gear immediately left of the GitHub avatar. Clicking it and Ctrl+, open the same Settings window. The profile dropdown no longer contains Settings.
+- In Settings, verify PowerShell, Windows PowerShell and Command Prompt show their actual executable icons, not the same generic terminal glyph. The fallback remains available if an executable has no readable icon.
+- Resize the main window, maximize and restore it. Check app branding, Settings, avatar and caption buttons do not overlap. Verify drag regions and keyboard access.
+
+Regression commands.
 
 ```powershell
 dotnet run --project tests/AgentTerm.Renderer.Smoke -c Release --artifacts-path artifacts/integrated/terra -- artifacts/integrated/terra/renderer-smoke.png

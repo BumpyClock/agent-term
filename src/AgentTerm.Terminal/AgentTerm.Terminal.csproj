@@ -4,10 +4,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- This AnyCPU library must carry the host for each supported Windows architecture. -->
     <ConptyRequiresx86Host>true</ConptyRequiresx86Host>
     <ConptyRequiresx64Host>true</ConptyRequiresx64Host>
     <ConptyRequiresARM64Host>true</ConptyRequiresARM64Host>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 <ItemGroup><ProjectReference Include="../AgentTerm.Agents/AgentTerm.Agents.csproj" /></ItemGroup>
 <ItemGroup>

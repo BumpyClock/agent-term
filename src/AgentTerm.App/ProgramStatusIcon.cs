@@ -6,7 +6,6 @@ using Windows.UI.ViewManagement;
 
 namespace AgentTerm_App;
 
-// Program identity and activity are independent: an icon does not have to disappear to show work.
 internal sealed partial class ProgramStatusIcon : ContentControl
 {
     public static readonly DependencyProperty TabProperty = DependencyProperty.Register(nameof(Tab), typeof(TabViewItem), typeof(ProgramStatusIcon), new PropertyMetadata(null, (sender, _) => ((ProgramStatusIcon)sender).Connect()));
@@ -73,7 +72,6 @@ internal sealed partial class ProgramStatusIcon : ContentControl
         var primary = (tab.Tag as TabProgramStatus)?.Primary;
         var working = primary?.State == AgentTerm.Terminal.ProgramState.Working;
         var showProgress = working && (primary?.Progress is not null || (_settings.AnimationsEnabled && !_accessibility.HighContrast));
-        // The fixed footprint keeps labels stationary as work starts, finishes, or resolves an icon.
         _icon.Width = _icon.Height = working ? 12 : 16;
         if (_icon.Content is FontIcon fontIcon) fontIcon.FontSize = working ? 12 : 16;
         _activity.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;

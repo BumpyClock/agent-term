@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using AgentTerm.Terminal;
@@ -6,6 +7,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using Microsoft.UI.Input;
 using Windows.ApplicationModel.DataTransfer;
@@ -23,7 +25,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 {
     private enum SessionState { Idle, Starting, Running, Stopping, Disposed }
 
-    private readonly DispatcherQueueTimer _refreshTimer;
+    private readonly DispatcherQueueTimer _chromeTimer;
+    private readonly DispatcherQueueTimer _cursorTimer;
+    private readonly DispatcherQueueTimer _synchronizedRefreshTimer;
+    private readonly DispatcherQueue _dispatcher;
     private TerminalSession? _session;
     private SessionState _state;
     private Task _startup = Task.CompletedTask;
@@ -36,7 +41,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     public bool IsComposing => _composition.IsComposing || _replyIme;
     private bool _clearingInput;
     private TerminalKeyboardInput.PhysicalKey? _textKey;
-    private int _blinkTicks;
+    private readonly long _blinkStarted = Environment.TickCount64;
+    private bool _renderingSubscribed;
+    private bool _frameRefreshQueued;
+    private int _outputRefreshQueued;
+    private volatile bool _acceptOutputNotifications;
+    private TerminalFrame? _presentedFrame;
     private readonly UISettings _uiSettings = new();
     private readonly DispatcherQueueTimer _selectionTimer;
     private bool _updatingScrollBar;
@@ -82,10 +92,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _appearance = TerminalPreferences.Current.ResolveAppearance(profile.Id);
         _agent = new(App.AgentHarness, () => _session);
         InitializeComponent();
+        _dispatcher = DispatcherQueue;
         RequestPanel.Attach(_agent, AgentReply);
-        _modeBar.ModeRequested += ToggleDisplayMode;
-        _modeBar.TaskRequested += () => OpenLatestTask();
-        _modeBar.InteractRequested += AllowAgentInput;
+        _agentBar.TaskRequested += () => OpenLatestTask();
+        _agentBar.InteractRequested += AllowAgentInput;
         _agent.Changed += AgentChanged;
         Terminal.Input.TextCompositionStarted += Input_CompositionStarted;
         Terminal.Input.TextCompositionEnded += Input_CompositionEnded;
@@ -97,9 +107,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         Terminal.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(Terminal_PointerCaptureLost), true);
         Terminal.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Terminal_PointerWheelChanged), true);
         ShellText.Text = profile.Name;
-        _refreshTimer = DispatcherQueue.CreateTimer();
-        _refreshTimer.Interval = TimeSpan.FromMilliseconds(33);
-        _refreshTimer.Tick += Refresh_Tick;
+        _chromeTimer = DispatcherQueue.CreateTimer();
+        _chromeTimer.Interval = TimeSpan.FromMilliseconds(250);
+        _chromeTimer.Tick += Chrome_Tick;
+        _cursorTimer = DispatcherQueue.CreateTimer();
+        _cursorTimer.Interval = TimeSpan.FromMilliseconds(528);
+        _cursorTimer.Tick += (_, _) => Terminal.SetCursorPhase(((Environment.TickCount64 - _blinkStarted) / 528) % 2 == 0);
+        _synchronizedRefreshTimer = DispatcherQueue.CreateTimer();
+        _synchronizedRefreshTimer.IsRepeating = false;
+        _synchronizedRefreshTimer.Tick += (_, _) => RequestFrameRefresh();
         Terminal.MetricsChanged += UpdateGridSize;
         SetFontSize(_appearance.FontSize);
         Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
@@ -108,7 +124,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _selectionTimer.Interval = TimeSpan.FromMilliseconds(50);
         _selectionTimer.Tick += SelectionTimer_Tick;
         ActualThemeChanged += Page_ActualThemeChanged;
-        Terminal.SetBottomAligned(!_legacy);
+        ApplyDisplayMode();
     }
 
     private async void Page_Loaded(object sender, RoutedEventArgs e)
@@ -128,17 +144,19 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state == SessionState.Disposed) return;
         if (!visible)
         {
-            _refreshTimer.Stop();
+            StopRefresh();
+            Terminal.SuspendRendering();
             PaneStatus.Refresh(PaneStatus.Directory, false, DateTimeOffset.UtcNow);
             CancelSelectionGesture();
             return;
         }
+        Terminal.ResumeRendering();
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
             session.SetTheme(CurrentTheme);
             UpdateGridSize();
             RefreshOutput(session);
-            if (_state == SessionState.Running) _refreshTimer.Start();
+            if (_state == SessionState.Running) StartRefresh();
         }
     }
 
@@ -179,7 +197,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             UpdateGridSize();
             var session = new TerminalSession(_columns, _rows, Profile);
             _session = session;
-            session.SetBottomAnchored(!_legacy);
+            session.OutputAvailable += Session_OutputAvailable;
+            session.SetBottomAnchored(TerminalPreferences.Current.TerminalStartPosition == TerminalStartPosition.Bottom);
             session.SetTheme(CurrentTheme);
             _startup = Task.Run(session.Start);
             await _startup;
@@ -192,7 +211,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             UpdateGridSize();
             session.Resize(_columns, _rows);
             RefreshOutput(session);
-            if (_viewActive) _refreshTimer.Start();
+            if (_viewActive) StartRefresh();
             SessionReady?.Invoke();
             _ = ObserveExitAsync(session);
         }
@@ -223,7 +242,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_session == session && _state == SessionState.Stopping)
             {
                 RefreshOutput(session);
-                _refreshTimer.Stop();
                 SetState(SessionState.Idle);
                 StatusText.Text = $"{Profile.Name} exited with code {exitCode} · Restart session to continue";
             }
@@ -235,16 +253,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
     }
 
-    private async void Refresh_Tick(DispatcherQueueTimer sender, object args)
+    private async void Chrome_Tick(DispatcherQueueTimer sender, object args)
     {
         if (_state != SessionState.Running || _session is not { } session)
             return;
 
         try
         {
-            RefreshOutput(session);
-            _blinkTicks++;
-            Terminal.SetCursorPhase(!_uiSettings.AnimationsEnabled || (_blinkTicks / 16) % 2 == 0);
+            RefreshChrome(session);
+            UpdateCursorBlink();
         }
         catch (Exception exception)
         {
@@ -252,20 +269,114 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
     }
 
+    private void StartRefresh()
+    {
+        if (!_viewActive || !IsLoaded || _state != SessionState.Running) return;
+        _acceptOutputNotifications = true;
+        RequestFrameRefresh();
+        _chromeTimer.Start();
+        UpdateCursorBlink();
+    }
+
+    private void StopRefresh()
+    {
+        _acceptOutputNotifications = false;
+        _chromeTimer.Stop();
+        _cursorTimer.Stop();
+        _synchronizedRefreshTimer.Stop();
+        if (!_renderingSubscribed) return;
+        CompositionTarget.Rendering -= Refresh_Rendering;
+        _renderingSubscribed = false;
+    }
+
+    private void Session_OutputAvailable()
+    {
+        if (!_acceptOutputNotifications || Volatile.Read(ref _surfaceOpen) || Interlocked.Exchange(ref _outputRefreshQueued, 1) != 0) return;
+        if (!_dispatcher.TryEnqueue(() =>
+        {
+            Interlocked.Exchange(ref _outputRefreshQueued, 0);
+            RequestFrameRefresh();
+        })) Interlocked.Exchange(ref _outputRefreshQueued, 0);
+    }
+
+    private void RequestFrameRefresh()
+    {
+        if (_frameRefreshQueued || _renderingSubscribed || !_viewActive || !IsLoaded || _surfaceOpen || _state != SessionState.Running) return;
+        CompositionTarget.Rendering += Refresh_Rendering;
+        _renderingSubscribed = true;
+    }
+
+    private void UpdateCursorBlink()
+    {
+        if (_viewActive && IsLoaded && !_surfaceOpen && _state == SessionState.Running &&
+            _presentedFrame?.Cursor.Blink == true && Terminal.Input.FocusState != FocusState.Unfocused && _uiSettings.AnimationsEnabled)
+        {
+            if (!_cursorTimer.IsRunning) _cursorTimer.Start();
+        }
+        else
+        {
+            _cursorTimer.Stop();
+            Terminal.SetCursorPhase(true);
+        }
+    }
+
+    private void Refresh_Rendering(object? sender, object args)
+    {
+        CompositionTarget.Rendering -= Refresh_Rendering;
+        _renderingSubscribed = false;
+        if (_frameRefreshQueued || !_viewActive || !IsLoaded || _surfaceOpen || _state != SessionState.Running) return;
+        _frameRefreshQueued = DispatcherQueue.TryEnqueue(RefreshQueuedFrame);
+    }
+
+    private async void RefreshQueuedFrame()
+    {
+        _frameRefreshQueued = false;
+        if (!_viewActive || !IsLoaded || _surfaceOpen || _state != SessionState.Running || _session is not { } session) return;
+        try
+        {
+            RefreshTerminalFrame(session);
+            UpdateCursorBlink();
+        }
+        catch (Exception exception) { await FailSessionAsync(exception); }
+    }
+
     private void RefreshOutput(TerminalSession session)
+    {
+        RefreshChrome(session);
+        RefreshTerminalFrame(session, refreshCards: true);
+    }
+
+    private void RefreshChrome(TerminalSession session)
+    {
+        RefreshAgentChrome();
+        PaneStatus.Refresh(session.ReadWorkingDirectory(), _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
+    }
+
+    private void RefreshTerminalFrame(TerminalSession session, bool refreshCards = false)
     {
         if (!_startingTask && session.PromptState == ShellPromptState.Ready && session.TakeAgentRequest() is { } request)
             _ = StartTaskAsync(request, explicitHandoff: false);
-        RefreshAgentChrome();
         var frame = session.ReadFrame();
-        Terminal.SetFrame(frame);
-        RefreshTaskCards(frame);
-        PaneStatus.Refresh(session.ReadWorkingDirectory(), _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
-        if (_terminalBackground != frame.Background)
+        _synchronizedRefreshTimer.Stop();
+        if (_viewActive && IsLoaded && !_surfaceOpen && _state == SessionState.Running && session.PendingFrameRefreshDelay is { } delay)
         {
-            _terminalBackground = frame.Background;
-            TerminalBackgroundChanged?.Invoke();
+            _synchronizedRefreshTimer.Interval = delay > TimeSpan.Zero ? delay : TimeSpan.FromMilliseconds(1);
+            _synchronizedRefreshTimer.Start();
         }
+        var previous = _presentedFrame;
+        if (!ReferenceEquals(previous, frame))
+        {
+            _presentedFrame = frame;
+            Terminal.SetFrame(frame);
+            RefreshTaskCards(frame);
+            if (_terminalBackground != frame.Background)
+            {
+                _terminalBackground = frame.Background;
+                TerminalBackgroundChanged?.Invoke();
+            }
+        }
+        else if (refreshCards) RefreshTaskCards(frame);
+        if (!refreshCards && previous?.Viewport == frame.Viewport) return;
         _updatingScrollBar = true;
         try
         {
@@ -338,6 +449,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         else if (previous.FontFamily != _appearance.FontFamily)
             SetFontSize(_fontSize);
         Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
+        ApplyDisplayMode();
         Page_ActualThemeChanged(this, EventArgs.Empty);
     }
 
@@ -400,6 +512,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 session.Find(string.Empty, forward, FindMatchCase.IsChecked == true);
                 FindStatus.Text = string.Empty;
+                RefreshOutput(session);
                 return;
             }
             var found = session.Find(FindBox.Text, forward, FindMatchCase.IsChecked == true);
@@ -772,6 +885,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 e.Handled = true;
                 session.SendKey(virtualKey, mods, action);
+                RefreshTerminalFrame(session);
             }
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
@@ -810,7 +924,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var content = Clipboard.GetContent();
             if (!content.Contains(StandardDataFormats.Text)) return;
             var text = await content.GetTextAsync();
-            if (_session == session && _state == SessionState.Running) session.Paste(text);
+            if (_session == session && _state == SessionState.Running)
+            {
+                session.Paste(text);
+                RefreshTerminalFrame(session);
+            }
         }
         catch (Exception exception) { ShowClipboardFailure(exception); }
     }
@@ -849,7 +967,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         Terminal.SetCompositionVisible(false);
         ClearInput();
         if (text.Length == 0 || _state != SessionState.Running || _session is not { } session) return;
-        try { session.SendKey(0, TerminalModifiers.None, TerminalKeyAction.Press, text); }
+        try
+        {
+            session.SendKey(0, TerminalModifiers.None, TerminalKeyAction.Press, text);
+            RefreshTerminalFrame(session);
+        }
         catch (Exception exception) { await FailSessionAsync(exception); }
     }
 
@@ -864,7 +986,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (_keyboard.Text(physical, text) is { } input)
+            {
                 session.SendKey(input.Key, input.Modifiers, input.Action, input.Text);
+                RefreshTerminalFrame(session);
+            }
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
     }
@@ -880,10 +1005,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         if (_state == SessionState.Running) _session?.SetFocus(true);
         Terminal.RefreshCursor();
+        UpdateCursorBlink();
     }
 
     private async void Terminal_LostFocus(object sender, RoutedEventArgs e)
     {
+        _cursorTimer.Stop();
         _composition.Cancel();
         _textKey = null;
         Terminal.SetCompositionVisible(false);
@@ -923,7 +1050,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             await FailSessionAsync(exception);
             return;
         }
-        _refreshTimer.Stop();
         if (_state != SessionState.Disposed)
         {
             SetState(SessionState.Idle);
@@ -954,8 +1080,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         _state = state;
         if (state != SessionState.Running)
+        {
+            StopRefresh();
             PaneStatus.Refresh(state == SessionState.Starting ? null : PaneStatus.Directory, false, DateTimeOffset.UtcNow);
-        Terminal.IsEnabled = state == SessionState.Running || (state == SessionState.Idle && _session is not null);
+        }
+        Terminal.IsEnabled = state is SessionState.Starting or SessionState.Running || (state == SessionState.Idle && _session is not null);
         SessionHeader.Visibility = state == SessionState.Idle ? Visibility.Visible : Visibility.Collapsed;
         SessionFooter.Visibility = state == SessionState.Running ? Visibility.Collapsed : Visibility.Visible;
         StopButton.IsEnabled = state is SessionState.Starting or SessionState.Running;
@@ -983,11 +1112,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private Task ReleaseSessionAsync()
     {
-        _refreshTimer.Stop();
+        StopRefresh();
         CancelSelectionGesture();
         if (_session is not { } session)
             return _release;
 
+        session.OutputAvailable -= Session_OutputAvailable;
         _session = null;
         return _release = ReleaseCoreAsync(session, _startup);
     }
@@ -1007,6 +1137,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Page_Unloaded(object sender, RoutedEventArgs e)
     {
+        if (!IsLoaded)
+        {
+            StopRefresh();
+            Terminal.SuspendRendering();
+        }
         SetAgentAnimation(false);
         CancelSelectionGesture();
     }
@@ -1018,7 +1153,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         SetState(SessionState.Disposed);
         await _agent.DisposeAsync();
         PaneStatus.Dispose();
-        _refreshTimer.Stop();
         _selectionTimer.Stop();
         await ReleaseSessionAsync();
         TerminalPreferences.Current.Changed -= PreferencesChanged;

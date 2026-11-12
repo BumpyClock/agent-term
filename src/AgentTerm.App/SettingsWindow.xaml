@@ -61,6 +61,20 @@
                                           AutomationProperties.Name="Default profile" SelectionChanged="DraftChanged" />
                             </Grid>
                         </Border>
+                        <Border Style="{StaticResource SettingCard}">
+                            <Grid ColumnDefinitions="*,236" ColumnSpacing="24">
+                                <StackPanel Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock Text="Terminal start position" Style="{StaticResource SettingLabel}" />
+                                    <TextBlock Text="Start the shell prompt at the top or bottom. Applies to all panes when saved."
+                                               Style="{StaticResource SettingDescription}" />
+                                </StackPanel>
+                                <ComboBox x:Name="TerminalStartPositionBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                          AutomationProperties.Name="Terminal start position" SelectionChanged="DraftChanged">
+                                    <ComboBoxItem Content="Bottom" />
+                                    <ComboBoxItem Content="Top" />
+                                </ComboBox>
+                            </Grid>
+                        </Border>
                     </StackPanel>
                     <StackPanel x:Name="TabsPage" Spacing="20" Visibility="Collapsed">
                         <TextBlock Text="Tabs" FontSize="26" FontWeight="SemiBold" />

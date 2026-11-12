@@ -218,7 +218,6 @@ internal sealed class TabProgramStatus
         RefreshIcon();
         item.SetValue(DetailsProperty, _presentation.Details);
         AutomationProperties.SetHelpText(item, records.Count == 0 ? "" : _presentation.Details + "\nAlt+Down opens program status. Escape dismisses it.");
-        // A null tip lets TabViewItem recreate its automatic title tooltip when its template reloads.
         ToolTipService.SetToolTip(item, records.Count == 0 ? null : _suppressedTitleTip);
     }
 
@@ -230,7 +229,6 @@ internal sealed class TabProgramStatus
 
     private async Task LoadProgramIconAsync(string? app)
     {
-        // The protocol reports a command name. Resolve only local PATH executables, never URLs or remote paths.
         if (app is null) return;
         try
         {

@@ -31,29 +31,25 @@ public sealed partial class MainWindow
     {
         if (_closing || TerminalPreferences.Current.TabPosition == _tabPosition) return;
         ApplyTabPosition(TerminalPreferences.Current.TabPosition);
-        // Collapsing a tab list can drop this window's logical focus onto the title-bar buttons.
-        // Restore it to the terminal without activating this window over Settings.
         _visibleTab?.FocusActivePane();
     });
 
-    // Both positions keep the same TabView, footer, and title-bar drag region; only the tab list moves.
     private void ApplyTabPosition(TabPosition position)
     {
         _tabPosition = position;
         var left = position == TabPosition.Left;
         if (_tabListView is not null) _tabListView.Visibility = left ? Visibility.Collapsed : Visibility.Visible;
         if (_tabStrip is not null) _tabStrip.MinHeight = left ? TabStripHeight : 0;
-        // Centers the new-tab button over the sidebar icon column.
-        TabStripActions.Margin = new Thickness(left ? 12 : 4, 0, 0, 0);
-        TabList.Visibility = WindowTitleText.Visibility = left ? Visibility.Visible : Visibility.Collapsed;
+        var actionsHost = left ? SidebarActionsHost : TopTabActionsHost;
+        if (!ReferenceEquals(TabStripActions.Parent, actionsHost))
+        {
+            ((Grid)TabStripActions.Parent).Children.Remove(TabStripActions);
+            actionsHost.Children.Add(TabStripActions);
+        }
+        TabSidebar.Visibility = left ? Visibility.Visible : Visibility.Collapsed;
         SyncSidebar();
         UpdateSidebarLayout();
-        if (left)
-        {
-            // The list was collapsed until now; ScrollIntoView needs a measured list to reach rows past the first screen.
-            TabList.UpdateLayout();
-            SyncSidebarSelection(reveal: true);
-        }
+        if (left) SyncSidebarSelection(reveal: true);
         _gitHubFailedWidth = 0;
         UpdateGitHubFit();
     }
@@ -66,10 +62,15 @@ public sealed partial class MainWindow
         var left = _tabPosition == TabPosition.Left;
         var width = left ? TabSidebarLayout.Width(WindowRoot.ActualWidth) : 0;
         if (_tabContent is not null) _tabContent.Margin = new Thickness(width, 0, 0, 0);
-        if (!left) return;
-        TabList.Width = width;
-        TabList.Margin = new Thickness(0, (_tabStrip?.ActualHeight ?? TabStripHeight) + 4, 0, 4);
+        if (!left)
+        {
+            TabStripActions.Margin = new Thickness(4, 0, 0, 0);
+            return;
+        }
+        TabSidebar.Width = width;
+        TabSidebar.Margin = new Thickness(0, (_tabStrip?.ActualHeight ?? TabStripHeight) + 4, 0, 4);
         var compact = TabSidebarLayout.IsCompact(WindowRoot.ActualWidth);
+        TabStripActions.Margin = new Thickness(compact ? 0 : 12, 0, 0, 0);
         foreach (var item in _sidebarItems.Values) item.IsCompact = compact;
     }
 
@@ -117,14 +118,8 @@ public sealed partial class MainWindow
         }
     }
 
-    // Title updates only rename the title bar; they must not scroll a sidebar the user is browsing.
-    private void UpdateWindowTitle() => WindowTitleText.Text = (Tabs.SelectedItem as TabViewItem)?.Header as string ?? "";
-
-    // The selected row is revealed only when selection moves to a different row or the caller asks
-    // (entering Left), so closes, reorders, and title updates leave the scroll position alone.
     private void SyncSidebarSelection(bool reveal = false)
     {
-        UpdateWindowTitle();
         if (_tabPosition != TabPosition.Left) return;
         var row = Tabs.SelectedItem is TabViewItem tab && _sidebarItems.TryGetValue(tab, out var match) ? match : null;
         if (!ReferenceEquals(TabList.SelectedItem, row))
@@ -135,7 +130,11 @@ public sealed partial class MainWindow
             TabList.SelectedItem = row;
             _syncingSidebar = syncing;
         }
-        if (reveal && row is not null) TabList.ScrollIntoView(row);
+        if (reveal && row is not null) DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_closing && _tabPosition == TabPosition.Left && ReferenceEquals(TabList.SelectedItem, row))
+                TabList.ScrollIntoView(row);
+        });
     }
 
     private void FocusSelectedTab()

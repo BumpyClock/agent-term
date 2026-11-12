@@ -6,17 +6,24 @@ namespace AgentTerm.Terminal;
 
 public sealed partial class GhosttyTerminal
 {
+    private static readonly string[] AsciiText = Enumerable.Range(0, 128).Select(value => ((char)value).ToString()).ToArray();
     private RenderHandle? _render;
     private RenderRowsHandle? _renderRows;
     private RenderCellsHandle? _renderCells;
     private TerminalFrame? _frame;
     private long? _holdStarted;
+    private long? _frameRefreshAt;
     private bool _frameReverse;
+
+    /// <summary>Remaining delay before a synchronized-output hold must be recaptured, or null when no refresh is pending.</summary>
+    public TimeSpan? PendingFrameRefreshDelay => _frameRefreshAt is { } deadline
+        ? TimeSpan.FromMilliseconds(Math.Max(0, deadline - Environment.TickCount64)) : null;
 
     /// <summary>Captures an owned snapshot of the visible terminal grid.</summary>
     public unsafe TerminalFrame ReadFrame()
     {
         ThrowIfDisposed();
+        _frameRefreshAt = null;
         if (_render is null)
         {
             ThrowIfFailed(RenderNative.ghostty_render_state_new(IntPtr.Zero, out var state), "Could not create render state.");
@@ -36,7 +43,11 @@ public sealed partial class GhosttyTerminal
         if (!_preparingPresentation && ReadMode(2026))
         {
             _holdStarted ??= Environment.TickCount64;
-            if (_frame is not null && _viewRevision == _capturedViewRevision && Environment.TickCount64 - _holdStarted.Value < 1000) return _frame;
+            if (_frame is not null && _viewRevision == _capturedViewRevision && Environment.TickCount64 - _holdStarted.Value < 1000)
+            {
+                _frameRefreshAt = _holdStarted.Value + 1000;
+                return _frame;
+            }
         }
         else _holdStarted = null;
         EnsurePresentation();
@@ -64,7 +75,13 @@ public sealed partial class GhosttyTerminal
             cursorResult == 0 ? cursorColor.ToColor() : reverse ? defaultBg : defaultFg);
         if (dirty == 0 && _frame is not null && _viewRevision == _capturedViewRevision && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
             (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background) return _frame;
-        var cellsArray = new TerminalCell[columns * rowsCount];
+        var previous = _frame;
+        var captureAll = dirty == 2 || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
+            previous.Viewport != viewport || previous.HasSelection != hasSelection || reverse != _frameReverse ||
+            (reverse ? defaultBg : defaultFg) != previous.Foreground || (reverse ? defaultFg : defaultBg) != previous.Background ||
+            (_viewRevision != _capturedViewRevision && hasSelection);
+        var cellsArray = captureAll ? new TerminalCell[columns * rowsCount] : previous!.Cells;
+        var cellsChanged = captureAll;
         var rowHandle = _renderRows!;
         var cellHandle = _renderCells!;
         var rowPtr = rowHandle.DangerousGetHandle();
@@ -73,6 +90,18 @@ public sealed partial class GhosttyTerminal
         byte* scratch = stackalloc byte[64];
         while (RenderNative.ghostty_render_state_row_iterator_next(rowHandle) != 0)
         {
+            byte rowDirty = 0;
+            ThrowIfFailed(RenderNative.ghostty_render_state_row_get(rowHandle, 1, &rowDirty), "Could not read render row dirty state.");
+            if (!captureAll && rowDirty == 0)
+            {
+                index += columns;
+                continue;
+            }
+            if (!cellsChanged)
+            {
+                cellsArray = (TerminalCell[])cellsArray.Clone();
+                cellsChanged = true;
+            }
             var cellPtr = cellHandle.DangerousGetHandle();
             ThrowIfFailed(RenderNative.ghostty_render_state_row_get(rowHandle, 3, &cellPtr), "Could not read render row.");
             while (RenderNative.ghostty_render_state_row_cells_next(cellHandle) != 0)
@@ -93,7 +122,8 @@ public sealed partial class GhosttyTerminal
                 var buffer = new ByteBuffer { Pointer = scratch, Capacity = 64 };
                 result = RenderNative.ghostty_render_state_row_cells_get(cellHandle, 9, &buffer);
                 string text;
-                if (result == 0) text = Encoding.UTF8.GetString(scratch, checked((int)buffer.Length));
+                if (result == 0) text = buffer.Length == 1 && scratch[0] < AsciiText.Length
+                    ? AsciiText[scratch[0]] : Encoding.UTF8.GetString(scratch, checked((int)buffer.Length));
                 else
                 {
                     if (result != -3) ThrowIfFailed(result, "Could not read cell text.");
@@ -107,13 +137,20 @@ public sealed partial class GhosttyTerminal
                 }
                 byte selected = 0;
                 CellGet(7, &selected);
-                cellsArray[index++] = new TerminalCell(text, (byte)(wide == 1 ? 2 : wide >= 2 ? 0 : 1), fg, bg,
-                    (style.Flags & 1) != 0, (style.Flags & 2) != 0, (style.Flags & 0x700) != 0,
-                    (style.Flags & 64) != 0, (style.Flags & 4) != 0, (style.Flags & 32) != 0) { Selected = selected != 0 };
+                var width = (byte)(wide == 1 ? 2 : wide >= 2 ? 0 : 1);
+                var old = previous?.Columns == columns && previous.Rows == rowsCount ? previous.Cells[index] : null;
+                cellsArray[index++] = old is not null && old.Text == text && old.Width == width && old.Foreground == fg && old.Background == bg &&
+                    old.Bold == ((style.Flags & 1) != 0) && old.Italic == ((style.Flags & 2) != 0) && old.Underline == ((style.Flags & 0x700) != 0) &&
+                    old.Strikethrough == ((style.Flags & 64) != 0) && old.Dim == ((style.Flags & 4) != 0) && old.Hidden == ((style.Flags & 32) != 0) &&
+                    old.Selected == (selected != 0)
+                    ? old
+                    : new TerminalCell(text, width, fg, bg,
+                        (style.Flags & 1) != 0, (style.Flags & 2) != 0, (style.Flags & 0x700) != 0,
+                        (style.Flags & 64) != 0, (style.Flags & 4) != 0, (style.Flags & 32) != 0) { Selected = selected != 0 };
             }
         }
         if (index != cellsArray.Length) throw new InvalidOperationException("Render state returned an incomplete grid.");
-        for (var i = 0; i + 1 < cellsArray.Length; i++)
+        for (var i = 0; cellsChanged && i + 1 < cellsArray.Length; i++)
             if (cellsArray[i].Width == 2 && cellsArray[i].Selected && cellsArray[i + 1].Width == 0)
                 cellsArray[i + 1] = cellsArray[i + 1] with { Selected = true };
         if (reverse) (defaultFg, defaultBg) = (defaultBg, defaultFg);
