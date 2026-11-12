@@ -121,6 +121,7 @@ InputChecks.Run();
 MouseChecks.Run();
 ScrollbackChecks.Run();
 PreferencesChecks.Run();
+TabPositionChecks.Run();
 GitHubChecks.Run();
 await PaneStatusChecks.RunAsync();
 Console.WriteLine("AgentTerm.Terminal smoke checks passed.");

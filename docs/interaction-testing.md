@@ -13,6 +13,42 @@ Use these checks for tab-strip changes. They cover native WinUI interaction that
 
 Pass when order changes, each tab retains its shell and history, the dragged tab stays selected, and the window does not move. A screenshot or UI Automation tab order establishes the visible result. If using a temporary event trace, native completion with `Move` plus matching tab identities before and after establishes the collection change. Remove temporary probes after diagnosis.
 
+## Left tabs
+
+1. Open a separate test window. Back up `%LOCALAPPDATA%\AgentTerm\settings.json` first, because saving the tab position writes it. Restore the file afterwards.
+2. Open PowerShell, Command Prompt, and Windows PowerShell tabs. Split one tab. In each shell, set and print a session marker and its process ID, as in [Tab reordering](#tab-reordering).
+3. In **Settings > Tabs**, choose **Left**. Confirm the footer reports unsaved changes and **Discard changes** restores **Top**. Choose **Left** again and save.
+4. Confirm the window keeps every tab, the split, and the selected tab. Print each marker again; the process IDs must not change. Return to **Top** and repeat.
+5. In Left mode, check hover, the selected fill, outline, and accent indicator, and the close button. Close one tab with its close button and one with middle-click. Drag an unselected tab and the selected tab to new positions; Ctrl+Tab must follow the new order and the selected shell must keep accepting input.
+6. Press Ctrl+Shift+E. Up and Down move focus without switching. Enter or Space opens the focused tab and focuses its terminal. Shift+F10 opens **Close tab** beside the row. Escape returns to the terminal. Ctrl+F4 closes the selected tab in both positions.
+7. Drag the window from the empty title bar and double-click it to maximize. Check the new-tab button, profile menu, GitHub avatar, and caption buttons.
+8. Resize below 680 DIPs. The sidebar shows centered shell icons whose tooltips name the tab and mention right-click tab actions, and the title bar names the selected tab. The new-tab button stays centered over the icon column.
+9. Open more tabs than fit. Scroll the sidebar away from the selected tab, then change the selected tab's title by splitting it with another profile, and close an unselected tab. The scroll position must not move. Ctrl+Shift+Tab to an off-screen tab, Ctrl+Shift+E, and switching to Left with the last tab selected must each bring the selected tab into view.
+10. In an automation inspector, the sidebar is a `Tab` control with `TabItem` children. Each item exposes its title, selection state, and Invoke. Expanded rows contain a `Close <title>` button.
+11. Repeat the visual checks in light mode and high contrast, with Windows animations off, and at a larger Windows text size.
+
+On 2026-11-11, a Release build on Windows 11 at 150% scaling was checked in dark mode through UI Automation and synthetic input:
+
+- Discard restored **Top**. Closing Settings with an unsaved **Left** kept the saved file at **Top**. Saving switched the open window.
+- Two PowerShell tabs, one split pane, and Command Prompt kept their process IDs, markers, and selection across Top to Left to Top.
+- Hover, close button, middle-click in both positions, pointer and keyboard context menus, and Ctrl+F4 on a focused row closed the intended tab. After a keyboard close, focus returned to the selected row.
+- Ctrl+Shift+E, Up, Enter, Space, and Escape followed step 6.
+- Held drags with absolute `mouse_event` moves reordered the top strip and the sidebar, including the selected row; Ctrl+Tab followed the new order.
+- New tab, title-bar drag, and double-click maximize worked. The caption buttons were located clear of the title-bar controls at a 502-pixel width but were not clicked.
+- Compact mode, trimmed-title tooltips, and overflow scrolling matched step 8.
+
+A light-mode capture came from an isolated preview copy that forced `RequestedTheme` to Light; the production theme path was not changed. High contrast and screen-reader speech were not checked, because they require changing Windows settings.
+
+A second pass on 2026-11-11 used the scripts in `artifacts/left-tabs/round-2`, which drive only the AgentTerm process they start and restore `settings.json` byte for byte:
+
+- UI Automation reported the sidebar as `Tab` and each row as `TabItem` with Invoke, SelectionItem, and ScrollItem. `SelectionItem.Select()` switched tabs, and invoking a row's close button closed only that tab.
+- Step 9 passed. A title change, from `PowerShell` to `PowerShell · Command Prompt`, and closing an unselected tab left the scroll position at 0%. Ctrl+Shift+Tab moved it to 72.45%, and Ctrl+Shift+E kept it at 72.45%. Switching to Left with 17 tabs scrolled to the selected last tab.
+- The new-tab button and the sidebar icons shared the same horizontal center at 1262, 882, and 502 pixel window widths.
+- With Windows animations turned off for the run, a new process read `AnimationsEnabled` as false, and Left mode, keyboard focus, and a drag reorder worked.
+- Larger text was checked in a capture-only build that set the sidebar title to 31.5 pixels (14 × 2.25). Rows grew from 48 to 67 pixels without clipping. Writing the Windows text-size registry value did not reach a new app process, so the real Windows text-size setting was not verified.
+- High contrast was not switched on, because it re-themes the whole desktop. The indicator's high-contrast brush is the system highlight color on the selected tab's window-color background.
+- Compact rows hide the close button, so UI Automation exposes no close button there. Ctrl+F4 and the Shift+F10 menu still close the tab.
+
 ## Automation limitation
 
 On 2026-11-10, the available Windows `sky.drag` and unified CUA drag APIs exposed no duration or held-button controls. A measured `sky.drag` gesture pressed, moved once, and released in about 22 ms. WinUI raised `TabDragStarting`, then completed with `None` and preserved the order. A manual held drag in the same window completed with `Move`, moved Command Prompt before PowerShell, and retained both tab object identities.

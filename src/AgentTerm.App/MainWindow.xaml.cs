@@ -141,6 +141,7 @@ public sealed partial class MainWindow : Window
             header.Width = 0;
         if (FindVisualChild<ScrollContentPresenter>(Tabs, "ScrollContentPresenter") is { } presenter)
             presenter.Padding = new Thickness(0);
+        if (_tabStrip is null) InitializeTabSidebar();
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
@@ -169,6 +170,7 @@ public sealed partial class MainWindow : Window
         {
             item.Header = tab.Title;
             _ = SetShellIconAsync(item, tab);
+            if (ReferenceEquals(Tabs.SelectedItem, item)) UpdateWindowTitle();
         };
         tab.CloseRequested += async () => await CloseTabAsync(item);
         Tabs.TabItems.Add(item);
@@ -196,6 +198,7 @@ public sealed partial class MainWindow : Window
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        SyncSidebarSelection();
         var next = (Tabs.SelectedItem as TabViewItem)?.Content as TerminalTab;
         if (ReferenceEquals(next, _visibleTab)) return;
         _visibleTab?.SetVisible(false);
@@ -246,7 +249,7 @@ public sealed partial class MainWindow : Window
         var alt = Down(VirtualKey.Menu);
         var firstPress = !e.KeyStatus.WasKeyDown;
 
-        if (!control && !shift && !alt && e.Key == VirtualKey.Escape && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
+        if (!control && !shift && !alt && e.Key == VirtualKey.Escape && !IsTabHeader(e.OriginalSource) && _visibleTab?.ActivePage.TryLeaveAgentSurface() == true)
         {
             e.Handled = true;
         }
@@ -271,6 +274,22 @@ public sealed partial class MainWindow : Window
                     _visibleTab?.SplitDuplicate();
                     break;
             }
+        }
+        else if (control && !shift && !alt && e.Key == VirtualKey.F4 && e.OriginalSource is SidebarTabItem focusedRow)
+        {
+            // TabView's own Ctrl+F4 only sees focus inside the TabView; a focused sidebar row closes itself.
+            e.Handled = true;
+            if (firstPress) await CloseSidebarTabAsync(focusedRow, keyboard: true);
+        }
+        else if (control && shift && !alt && e.Key == VirtualKey.E)
+        {
+            e.Handled = true;
+            if (firstPress) FocusSelectedTab();
+        }
+        else if (!control && !shift && !alt && e.Key == VirtualKey.Escape && IsTabHeader(e.OriginalSource))
+        {
+            e.Handled = true;
+            _visibleTab?.FocusActivePane();
         }
         else if (alt && shift && !control && (uint)e.Key is 0xBB or 0x6B or 0xBD or 0x6D or 0x44)
         {

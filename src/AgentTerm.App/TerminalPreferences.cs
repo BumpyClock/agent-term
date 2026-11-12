@@ -10,12 +10,13 @@ public sealed record TerminalAppearance(string FontFamily, int FontSize, bool Us
 // Null fields inherit Defaults; an empty font family explicitly selects Automatic.
 public sealed record ProfileAppearanceOverride(string? FontFamily = null, int? FontSize = null, bool? UseAcrylic = null,
     double? BackgroundOpacity = null);
+public enum TabPosition { Top, Left }
 
 public sealed class TerminalPreferences
 {
     private sealed record Settings(string DefaultProfileId = "", int FontSize = 14, bool UseAcrylic = false,
         string FontFamily = "", IReadOnlyDictionary<string, ProfileAppearanceOverride>? Profiles = null,
-        double BackgroundOpacity = 0.8);
+        double BackgroundOpacity = 0.8, string? TabPosition = null);
     private Settings _settings = new();
     private IReadOnlyDictionary<string, ProfileAppearanceOverride> _profiles = NormalizeProfiles(null);
     private readonly string _path;
@@ -26,6 +27,7 @@ public sealed class TerminalPreferences
     public bool UseAcrylic => _settings.UseAcrylic;
     public string FontFamily => _settings.FontFamily;
     public double BackgroundOpacity => _settings.BackgroundOpacity;
+    public TabPosition TabPosition => ParseTabPosition(_settings.TabPosition);
     public IReadOnlyDictionary<string, ProfileAppearanceOverride> ProfileOverrides => _profiles;
     public string? LoadError { get; }
     public event Action? Changed;
@@ -47,6 +49,7 @@ public sealed class TerminalPreferences
                         FontSize = Math.Clamp(settings.FontSize, 8, 36),
                         FontFamily = settings.FontFamily?.Trim() ?? "",
                         BackgroundOpacity = NormalizeOpacity(settings.BackgroundOpacity),
+                        TabPosition = ParseTabPosition(settings.TabPosition).ToString(),
                         Profiles = _profiles
                     };
                 }
@@ -68,11 +71,13 @@ public sealed class TerminalPreferences
     }
 
     public void Update(string defaultProfileId, int fontSize, bool useAcrylic = false, string? fontFamily = null,
-        IReadOnlyDictionary<string, ProfileAppearanceOverride>? profileOverrides = null, double? backgroundOpacity = null)
+        IReadOnlyDictionary<string, ProfileAppearanceOverride>? profileOverrides = null, double? backgroundOpacity = null,
+        TabPosition? tabPosition = null)
     {
         var profiles = profileOverrides is null ? _profiles : NormalizeProfiles(profileOverrides);
         var settings = new Settings(defaultProfileId, Math.Clamp(fontSize, 8, 36), useAcrylic,
-            fontFamily?.Trim() ?? _settings.FontFamily, profiles, NormalizeOpacity(backgroundOpacity ?? BackgroundOpacity));
+            fontFamily?.Trim() ?? _settings.FontFamily, profiles, NormalizeOpacity(backgroundOpacity ?? BackgroundOpacity),
+            (tabPosition is TabPosition.Left or TabPosition.Top ? tabPosition.Value : TabPosition).ToString());
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var temporaryPath = _path + ".tmp";
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
@@ -104,6 +109,10 @@ public sealed class TerminalPreferences
         }
         return new ReadOnlyDictionary<string, ProfileAppearanceOverride>(result);
     }
+
+    // Unknown or missing values keep the original top tab strip instead of failing the whole settings file.
+    private static TabPosition ParseTabPosition(string? value) =>
+        string.Equals(value, nameof(TabPosition.Left), StringComparison.OrdinalIgnoreCase) ? TabPosition.Left : TabPosition.Top;
 
     private static double NormalizeOpacity(double opacity) => double.IsFinite(opacity) ? Math.Clamp(opacity, 0, 1) : 0.8;
 }
