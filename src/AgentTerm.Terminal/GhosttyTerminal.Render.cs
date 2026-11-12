@@ -123,7 +123,7 @@ public sealed partial class GhosttyTerminal
             Viewport = viewport, HasSelection = hasSelection,
             SelectionBackground = (_theme ?? TerminalThemes.All[0]).SelectionBackground,
             SelectionForeground = (_theme ?? TerminalThemes.All[0]).SelectionForeground,
-            CursorText = _theme?.CursorText,
+            CursorText = _theme is null ? null : _theme.CursorText ?? background.ToColor(),
         };
         _capturedViewRevision = _viewRevision;
         ThrowIfFailed(RenderNative.ghostty_render_state_clean(_render), "Could not clear render dirty state.");

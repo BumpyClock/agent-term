@@ -141,7 +141,7 @@ internal static class BrandedThemeChecks
         Check(theme is not null, $"{id} must be in the theme catalog.");
         Check(theme!.Name == name && theme.IsLight == light, $"{id} must keep its upstream name and appearance slot.");
         Check(theme.Background == upstream.Background && theme.Foreground == upstream.Foreground &&
-            theme.Cursor == upstream.Cursor && theme.CursorText == upstream.CursorText &&
+            theme.Cursor == upstream.Cursor && (theme.CursorText ?? theme.Background) == upstream.CursorText &&
             theme.SelectionBackground == upstream.SelectionBackground && theme.SelectionForeground == upstream.SelectionForeground,
             $"{name} defaults, cursor, and selection colors must match the upstream file exactly.");
         Check(theme.Ansi.SequenceEqual(upstream.Palette), $"{name} ANSI 0-15 must match the upstream palette exactly.");

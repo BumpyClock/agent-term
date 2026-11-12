@@ -13,7 +13,7 @@ Ghostty keys map to the catalog constructor as follows:
 | `background` | `Background` |
 | `foreground` | `Foreground` |
 | `cursor-color` | `Cursor` |
-| `cursor-text` | `CursorText` (explicit only when it differs from `background`) |
+| `cursor-text` | `CursorText` (explicit only when it differs from `background`; otherwise follow the effective native background, including OSC overrides) |
 | `selection-background` | `SelectionBackground` |
 | `selection-foreground` | `SelectionForeground` |
 | `palette = 0..15` | `Ansi[0..15]` |

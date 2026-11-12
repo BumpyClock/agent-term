@@ -12,7 +12,8 @@ public sealed class TerminalTheme
     public TerminalColor Background { get; }
     public TerminalColor Foreground { get; }
     public TerminalColor Cursor { get; }
-    public TerminalColor CursorText { get; }
+    /// <summary>Null follows the effective native background, including application OSC overrides.</summary>
+    public TerminalColor? CursorText { get; }
     public TerminalColor SelectionBackground { get; }
     public TerminalColor SelectionForeground { get; }
     public IReadOnlyList<TerminalColor> Ansi { get; }
@@ -26,7 +27,7 @@ public sealed class TerminalTheme
         Background = Parse(background);
         Foreground = Parse(foreground);
         Cursor = Parse(cursor);
-        CursorText = cursorText is null ? Background : Parse(cursorText);
+        CursorText = cursorText is null ? null : Parse(cursorText);
         SelectionBackground = Parse(selectionBackground);
         SelectionForeground = Parse(selectionForeground);
         var colors = ansi.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(Parse).ToArray();

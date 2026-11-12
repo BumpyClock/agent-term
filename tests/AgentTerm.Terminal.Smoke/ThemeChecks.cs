@@ -40,6 +40,7 @@ internal static class ThemeChecks
         BrandedThemeChecks.Run();
         CheckPairedSlots();
         CheckNamedThemes();
+        CheckCursorBackgroundOverride();
         CheckApplicationOverrides();
         CheckHistoryAndAlternateScreen();
         CheckAnsiContrast();
@@ -138,6 +139,23 @@ internal static class ThemeChecks
         Check(terminal.ReadFrame().Foreground == new TerminalColor(0xd7, 0xe9, 0xef) &&
             terminal.ReadFrame().Cells[1].Foreground == new TerminalColor(0xee, 0x8c, 0x85),
             "OSC reset must reveal the latest named theme defaults.");
+    }
+
+    private static void CheckCursorBackgroundOverride()
+    {
+        using var terminal = new GhosttyTerminal(8, 2);
+        terminal.SetTheme(TerminalThemes.Resolve("agent-dark", false));
+        terminal.Write("\x1b]11;#ffffff\x07\x1b]12;#000000\x07M\x1b[H\x1b[2 q"u8);
+        var frame = terminal.ReadFrame();
+        Check(frame.CursorText == new TerminalColor(255, 255, 255) && frame.Cursor.Color == new TerminalColor(0, 0, 0),
+            "Background-derived cursor text must follow the effective OSC background rather than the original theme background.");
+        terminal.SetTheme(TerminalThemes.Resolve("catppuccin-mocha", false));
+        Check(terminal.ReadFrame().CursorText == new TerminalColor(0x11, 0x11, 0x1b),
+            "An explicit theme cursor-text color must survive an OSC background override.");
+        terminal.SetTheme(TerminalThemes.Resolve("agent-dark", false));
+        terminal.Write("\x1b]111\x07"u8);
+        Check(terminal.ReadFrame().CursorText == new TerminalColor(0, 0, 0),
+            "Resetting OSC background must restore the current theme's derived cursor text.");
     }
 
     private static void CheckApplicationOverrides()

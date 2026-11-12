@@ -93,6 +93,7 @@ internal static class Program
         if (image.GetPixelColors(391, 221, 1, 1)[0].A != 255)
             throw new Exception("Switching back to solid must restore an opaque background.");
         AssertThemeColors(device, Path.GetDirectoryName(output)!);
+        AssertOscCursorText(device);
         AssertBackgroundContinuity(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");
     }
@@ -124,13 +125,27 @@ internal static class Program
             if (!image.GetPixelColors(0, 40, 130, 20).Any(c =>
                 c.R == theme.SelectionForeground.R && c.G == theme.SelectionForeground.G && c.B == theme.SelectionForeground.B))
                 throw new Exception($"{theme.Name} must render selection text with its foreground.");
+            var cursorText = theme.CursorText ?? theme.Background;
             var cursorPixels = image.GetPixelColors(0, 80, 10, 20);
             if (!cursorPixels.Any(c => c.R == theme.Cursor.R && c.G == theme.Cursor.G && c.B == theme.Cursor.B) ||
-                !cursorPixels.Any(c => c.R == theme.CursorText.R && c.G == theme.CursorText.G && c.B == theme.CursorText.B))
+                !cursorPixels.Any(c => c.R == cursorText.R && c.G == cursorText.G && c.B == cursorText.B))
                 throw new Exception($"{theme.Name} must render the block cursor and its text using the theme colors.");
             image.SaveAsync(Path.Combine(outputDirectory, $"theme-{theme.Id}.png"), CanvasBitmapFileFormat.Png)
                 .AsTask().GetAwaiter().GetResult();
         }
+    }
+
+    private static void AssertOscCursorText(CanvasDevice device)
+    {
+        using var terminal = new GhosttyTerminal(8, 2);
+        terminal.SetTheme(TerminalThemes.Resolve("agent-dark", false));
+        terminal.Write("\x1b]11;#ffffff\x07\x1b]12;#000000\x07M\x1b[H\x1b[2 q"u8);
+        using var image = new CanvasRenderTarget(device, 80, 40, 96);
+        Draw(image, terminal.ReadFrame(), true);
+        var pixels = image.GetPixelColors(0, 0, 10, 20);
+        if (!pixels.Any(c => c.R == 255 && c.G == 255 && c.B == 255) ||
+            !pixels.Any(c => c.R == 0 && c.G == 0 && c.B == 0))
+            throw new Exception("An OSC white background and black block cursor must render a visible white M inside the black cursor.");
     }
 
     private static void AssertBackgroundContinuity(CanvasDevice device)
