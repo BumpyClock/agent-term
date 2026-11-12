@@ -2,7 +2,7 @@
 
 AgentTerm ships two third-party palette families. Each color in their four entries in `src/AgentTerm.Terminal/TerminalTheme.cs` is copied verbatim from the upstream Ghostty theme file named below. Do not tune these colors for contrast or taste. Change them only by re-fetching upstream, updating the pinned fixtures in `tests/AgentTerm.Terminal.Smoke/BrandedThemeChecks.cs`, and updating this file.
 
-Upstream sources were fetched on 2026-11-11.
+Upstream sources were fetched on 2026-11-11. The app build and publish output include all three license copies under `ThirdPartyNotices/`.
 
 ## Mapping
 
