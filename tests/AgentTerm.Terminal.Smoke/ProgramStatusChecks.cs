@@ -1,26 +1,33 @@
 using System.Text;
 using AgentTerm.Terminal;
 
+/// <summary>OSC 7501 record rules over native validated reports.</summary>
 internal static class ProgramStatusChecks
 {
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
-    private static void Report(OscScanner scanner, string body) => scanner.Feed(Encoding.UTF8.GetBytes("\u001b]7501;" + body + "\u001b\\"));
+    private static void Report(TerminalProtocolStream scanner, string body) => scanner.Feed(Encoding.UTF8.GetBytes("\u001b]7501;" + body + "\u001b\\"));
+    private static void Feed(this TerminalProtocolStream stream, ReadOnlySpan<byte> bytes) => stream.Write(bytes);
 
     public static void Run()
     {
+        // Wired as TerminalSession wires native reports, prompt markers and resets.
+        using var terminal = new GhosttyTerminal(80, 8);
         var protocol = new ProgramStatusProtocol();
-        var scanner = new OscScanner();
+        var scanner = new TerminalProtocolStream(terminal, "777;secret;");
         var prompt = new ShellPromptProtocol("secret");
         scanner.Sequence += prompt.Accept;
-        scanner.Sequence += protocol.Accept;
-        scanner.Reset += protocol.Reset;
+        scanner.ProtocolEvent += item =>
+        {
+            if (item is TerminalProgramStatusReport report) protocol.Apply(report);
+            else if (item is TerminalSemanticPrompt { StartsNewPrompt: true }) protocol.EndCommand();
+            else if (item is TerminalReset) protocol.Reset();
+        };
         prompt.PromptStarted += protocol.EndCommand;
-        int queries = 0;
-        protocol.SupportRequested += () => queries++;
         var stream = Encoding.UTF8.GetBytes("plain\u001b]7501;?\u001b\\\u001b]7501;state=working:app=claude-code:msg=SGVsbG8:progress=40\a");
         foreach (var b in stream) scanner.Feed([b]);
-        Check(queries == 1, "A split feature query must produce one support response.");
-        Check(Encoding.UTF8.GetString(ProgramStatusProtocol.SupportReply) == "\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\u001b\\", "Detection must advertise supported states and kinds without reflecting input.");
+        var replies = terminal.TakeResponses();
+        Check(replies.Length == 1, "A split feature query must produce one support response.");
+        Check(Encoding.UTF8.GetString(replies[0]) == "\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\u001b\\", "Detection must advertise supported states and kinds without reflecting input.");
         var root = protocol.ReadStatuses().Single();
         Check(root.State == ProgramState.Working && root.Message == "Hello" && root.Progress == 40, "Split reports and unpadded text must decode.");
         Report(scanner, "state=blocked:id=task/child:kind=permission:title=VGVzdA==");
@@ -45,12 +52,15 @@ internal static class ProgramStatusChecks
             "state=done:msg=AA==", "state=done:msg=woA=", "state=done:msg=/w==", "state=done:msg=A",
             "state=done:title=" + new string('A', 260), "state=done:app=" + new string('a', 33),
             "state=done:abcdefghijklmnopq=x", "state=done:id=a/b/c/d/e/f/g/h/i",
-            "state=done:msg=AA==:msg=SGk=", "state=done:extra=" + new string('a', 4096)
+            "state=done:extra=" + new string('a', 4096)
         })
         {
             Report(scanner, invalid);
             Check(protocol.ReadStatuses().Single(r => r.Id == "").State == ProgramState.Idle, "Invalid report must leave existing state unchanged: " + invalid[..Math.Min(invalid.Length, 80)]);
         }
+        // Native parsing applies the specification's last-value rule: a replaced msg is length-checked but not decoded.
+        Report(scanner, "state=done:msg=AA==:msg=SGk=");
+        Check(protocol.ReadStatuses().Single(r => r.Id == "") is { State: ProgramState.Done, Message: "Hi" }, "The last msg value must win.");
         Report(scanner, "garbage:state=working:state=blocked:kind=question:future=yes:msg=@@@@");
         Check(protocol.ReadStatuses().Single(r => r.Id == "").State == ProgramState.Blocked, "Malformed pairs and unknown keys must be skipped; last state wins.");
         scanner.Feed("\u001b]133;A\a"u8);

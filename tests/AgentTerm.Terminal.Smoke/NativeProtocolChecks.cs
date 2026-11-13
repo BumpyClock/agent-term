@@ -20,15 +20,16 @@ internal static class NativeProtocolChecks
         Send("start"); Send("end;1;0;"); Send("ready;");
         Check(protocol.ReadyCommandId is null, "Later human readiness does not retain an agent id.");
 
-        var scanner = new OscScanner();
+        using var terminal = new GhosttyTerminal(80, 6);
+        var stream = new TerminalProtocolStream(terminal, "777;capture;");
         var captureProtocol = new ShellPromptProtocol("capture");
         var capture = new CommandOutputCapture("a:fixture");
-        scanner.Sequence += captureProtocol.Accept;
-        scanner.Output += capture.Feed;
+        stream.Sequence += captureProtocol.Accept;
+        stream.Output += capture.Feed;
         captureProtocol.Marker += capture.Marker;
         void Feed(string wire)
         {
-            foreach (var value in System.Text.Encoding.UTF8.GetBytes(wire)) scanner.Feed([value]);
+            foreach (var value in System.Text.Encoding.UTF8.GetBytes(wire)) stream.Write([value]);
         }
         Feed("echo command\r\n\u001b]777;other;start;a:fixture\aignored\u001b]777;capture;start;a:other\aignored");
         Check(capture.Text == "" && !capture.Ended, "OSC alone cannot start ordered text capture.");

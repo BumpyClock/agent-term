@@ -21,7 +21,6 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     private FileStream? _commandMailbox;
     private readonly ShellPromptProtocol _prompt;
     private readonly ProgramStatusProtocol _programStatus = new();
-    private readonly OscScanner _osc = new();
     private sealed class OwnedCommand
     {
         public readonly string Id = "a:" + Guid.NewGuid().ToString("N")[..8];
@@ -44,27 +43,18 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         _profile = profile ?? ShellProfile.Default;
         _prompt = new(_promptToken);
         if (ShellIntegration.SupportsIntegration(_profile)) _prompt.State = ShellPromptState.Initializing;
-        _osc.Sequence += _prompt.Accept;
         _prompt.Marker += message => { if (_restoringDraft && message == "restored;" + _mailboxPending) _draftRestored = true; };
         _prompt.Marker += ReanchorMarker;
         _prompt.Marker += MailboxMarker;
-        _osc.Sequence += _programStatus.Accept;
-        _osc.Reset += _programStatus.Reset;
         _prompt.PromptStarted += _programStatus.EndCommand;
-        // Scanner order matches stream order, so a title set after the prompt marker in the same chunk survives.
-        _osc.Sequence += (sequence, _) => { if (IsTitleSequence(sequence)) _titlePending = true; };
-        _osc.Reset += ClearTitle;
+        // Protocol events apply in stream order, so a title set after the prompt marker in the same chunk survives.
         _prompt.PromptStarted += ClearTitle;
-        _osc.Output += bytes => _owned?.Capture.Feed(bytes);
         _prompt.Marker += message => _owned?.Capture.Marker(message);
         _columns = columns;
         _connection = new ConPtyConnection(columns, rows);
-        _programStatus.SupportRequested += () =>
-        {
-            if (_disposeTask is null) _connection.SendReply(ProgramStatusProtocol.SupportReply);
-        };
         _terminal = new GhosttyTerminal(columns, rows);
         _terminal.ConfigureConPtyHost();
+        _stream = ConfigureProtocol();
         _connection.OutputReceived += ProcessOutput;
         _completion = CompleteAsync();
     }
@@ -88,19 +78,11 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     }
 
     private string _title = "";
-    private bool _titlePending;
 
     /// <summary>The title a program set with OSC 0 or OSC 2 since the last integrated prompt, or empty.</summary>
     public string Title { get { lock (_gate) return _title; } }
 
-    private static bool IsTitleSequence(string sequence) =>
-        sequence is "0" or "2" || sequence.StartsWith("0;", StringComparison.Ordinal) || sequence.StartsWith("2;", StringComparison.Ordinal);
-
-    private void ClearTitle()
-    {
-        _titlePending = false;
-        _title = "";
-    }
+    private void ClearTitle() => _title = "";
 
     private async Task<int> CompleteAsync()
     {
@@ -485,16 +467,11 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     private void ProcessOutput(ReadOnlyMemory<byte> bytes)
     {
+        TerminalProtocolEvent[]? events;
         lock (_gate)
         {
-            _terminal.Write(bytes.Span);
+            _stream.Write(bytes.Span);
             HistoryActivity();
-            _osc.Feed(bytes.Span);
-            if (_titlePending)
-            {
-                _titlePending = false;
-                _title = _terminal.ReadTitle();
-            }
             if (_mailboxPending is { } pending && !_restoringDraft && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == pending)
             {
                 _restoringDraft = true;
@@ -517,7 +494,9 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             {
                 if (_disposeTask is null) _connection.SendReply(reply);
             }
+            events = TakeProtocolDispatch();
         }
+        DispatchProtocolEvents(events);
         OutputAvailable?.Invoke();
     }
 

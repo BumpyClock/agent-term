@@ -28,13 +28,13 @@ internal static class NativeStartupChecks
         var gate = new object();
         using var terminal = new GhosttyTerminal(100, 30);
         var protocol = new ShellPromptProtocol("native-startup-fixture");
-        var scanner = new OscScanner(); scanner.Sequence += protocol.Accept;
+        var scanner = new TerminalProtocolStream(terminal, "777;native-startup-fixture;"); scanner.Sequence += protocol.Accept;
         await using var connection = new ConPtyConnection(100, 30);
         connection.OutputReceived += bytes =>
         {
             lock (gate)
             {
-                terminal.Write(bytes.Span); scanner.Feed(bytes.Span);
+                scanner.Write(bytes.Span);
                 foreach (var reply in terminal.TakeResponses()) connection.Send(reply);
             }
         };

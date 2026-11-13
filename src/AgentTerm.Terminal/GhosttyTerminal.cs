@@ -73,22 +73,27 @@ public sealed partial class GhosttyTerminal : IDisposable
             try { Native.ghostty_terminal_vt_write(_handle, bytes, (nuint)data.Length); }
             finally { ContentVersion++; }
         }
-        SettleAfterWrite();
-        GC.KeepAlive(_writePty);
-        GC.KeepAlive(_renderHold);
-        if (_callbackError is { } error)
-        {
-            _callbackError = null;
-            error.Throw();
-        }
+        FinishWrite();
     }
 
-    /// <summary>Viewport and selection upkeep after parsed output. Also applied at a render-hold boundary inside a write.</summary>
+    /// <summary>Viewport and selection upkeep after parsed output, including a hold boundary inside a write.</summary>
     private void SettleAfterWrite()
     {
         _presentationDirty = true;
         CheckSelectionScreen();
         RestoreSelectedViewport();
+    }
+
+    /// <summary>Applies post-write bookkeeping and rethrows a captured callback failure once.</summary>
+    internal void FinishWrite()
+    {
+        SettleAfterWrite();
+        GC.KeepAlive(this);
+        if (_callbackError is { } error)
+        {
+            _callbackError = null;
+            error.Throw();
+        }
     }
 
     /// <summary>Reads the last OSC 7 report. The returned string owns its memory.</summary>
