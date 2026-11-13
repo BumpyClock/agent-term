@@ -20,6 +20,20 @@ Comment-sicko agents removed narration from the changed product, test and script
 
 The pass also identified maintainability follow-ups. `TerminalSurface.UpdateRaster` has numeric damage margins. `ProfileAppearanceOverride.FontFamily` encodes inheritance and automatic selection with null and an empty string. Sidebar reveal and GitHub fitting depend on queued layout work. Existing tooltip and transition behavior also warrants a focused UI contract check before a future redesign. These are design flags, not demonstrated runtime defects from these reviews. Their behavior was preserved in this change.
 
+## GitHub review follow-up.
+
+Copilot and CodeRabbit reviewed `46eb3a1`. The follow-up fixes preserve two contracts. Only an uncovered terminal needs rendering resources and cursor animation. Every local selection mutation must reach the displayed frame without relying on child-process echo. Covered-tab activation now leaves the existing suspension intact, hidden cursors cannot start the blink timer, and accepted application mouse presses refresh the frame immediately. Both Left and Top startup runs passed these regressions.
+
+Startup input stays focusable but read-only until the session is running. This prevents text from entering an invisible editing buffer before it can be sent. The startup check verifies both focus retention and the transition back to editable input.
+
+The glyph cache now trims and disposes old layouts as soon as its grid capacity shrinks. The 35-transition raster suite passed. Rebuilding that suite against the previous renderer failed the new shrink case with 43,168 layouts above the new 1,024 bound.
+
+The comparison script allows workload duration plus 60 seconds for startup, idle sampling and final checks. Workload completion JSON is published by a same-directory rename after the file closes. A controlled partial-write probe reproduced invalid JSON with the previous code and complete publication with the fix. Capture completion now rejects recorded errors and zero-frame samples. Compiled contract probes rejected both failures and preserved valid capture statistics.
+
+The real 60-second comparison completed both 3,600-update trials with identical final pixels. A separate capture smoke returned 102 valid frames without an error. These are functional checks, not display-FPS evidence. The [post-review comparison](terminal-20261112-review.md) records timing on the updated renderer separately.
+
+The source-hash mismatch claim was a newline mismatch. Raw measured Windows hashes are retained. LF-normalized adapter and session bytes equal the Git blobs at `46eb3a1` exactly. The evidence now records both conventions and the equivalent revision instead of relabelling measured hashes.
+
 ## Remaining limits.
 
 Displayed 60 FPS, GPU residency, monitor-to-monitor DPI changes, and forced device loss were not established by these runs. See [current measurements](terminal-20261112-current.md), [startup evidence](../terminal-startup.md), and [the measurement boundary](../terminal-frame-budget.md).

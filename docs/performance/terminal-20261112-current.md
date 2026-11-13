@@ -1,4 +1,6 @@
-# Current renderer and demand scheduling, 2026-11-12.
+# Renderer before GitHub review, 2026-11-12.
+
+Latest measurements after the review fixes are in [the post-review report](terminal-20261112-review.md). This page retains the earlier measurements and functional resource checks.
 
 Five alternating trials per side passed the native-fixture workload and image gates at `46eb3a1`, before the subsequent review fixes. The optimized p95 snapshot-plus-draw callback work was 7.64 to 8.29 ms, with a median of 7.88 ms. Every optimized trial passed the 16.6 ms p95 callback-work gate. This is not a measurement of displayed FPS or full-application frame time. Earlier functional checks below are labelled separately.
 
@@ -13,7 +15,7 @@ Measured builds used local revision `88a4fd5` and completed with zero errors and
 
 The optimized side was a frozen source snapshot equivalent to `46eb3a1`. The [trial evidence](terminal-20261112-final.json) retains raw Windows build-input hashes and adds LF-normalized source hashes. The adapter and session used CRLF in the measured checkout and LF in Git; normalized bytes match exactly. This is a newline difference, not a code difference. The baseline and optimized executables used the same native DLL hash. These timings precede the later cache-shrink and refresh review fixes.
 
-## Final alternating comparison.
+## Pre-review alternating comparison.
 
 Measured on the desktop with other user applications left open. Each side generated 720 updates at 60 Hz over 12 seconds, with 2,412 nonblank cells. All ten final raster hashes matched. The baseline used its 33 ms timer; the current version used demand scheduling. This compares the combined code and scheduling change. A matched-timer comparison was not run, so the table does not isolate either change.
 

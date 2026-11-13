@@ -2,7 +2,8 @@
 
 This folder keeps summarized, reviewable evidence for terminal rendering changes. Raw trial JSON, PNGs and traces stay under `artifacts/`, which is gitignored. Each entry names the code it measured, the exact command and what the numbers do not show.
 
-- [Current renderer and demand scheduling, 2026-11-12](terminal-20261112-current.md).
+- [Performance after GitHub review, 2026-11-12](terminal-20261112-review.md).
+- [Renderer and demand scheduling before GitHub review, 2026-11-12](terminal-20261112-current.md).
 - [Intermediate composition comparison, 2026-11-12. Historical](#intermediate-composition-comparison-2026-11-12-historical).
 
 ## Intermediate composition comparison, 2026-11-12. Historical.

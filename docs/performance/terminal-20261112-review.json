@@ -1,0 +1,620 @@
+{
+  "date": "2026-11-12",
+  "baselineRevision": "5606a460c7dbca60db3c2f78805c29d63c6802cc",
+  "optimizedSourceRevision": "18714f8e0fea1f7f464c586cbc6d624b7e7fc131",
+  "currentSourceHashes": {
+    "currentRenderer": "A24BD8FB298B714107FC72B3A46A26F484C12B5770B8ABFA25D7D8C179B9A44E",
+    "currentAdapter": "BC842FA5526BDC7DE271E5A79CF33F7F4F5B3356F0B2C90C1D7CB35AC596066C",
+    "currentSession": "F8FB8E54D992C4317BCBC5FDBF605742673DC0FC96272BC7CB71D25683344DD1",
+    "nativeLibrary": "E2B61FB450904E60B8B15E53288B4848448300D9115844E5DE0018205010A5AA"
+  },
+  "currentSourceLfHashes": {
+    "currentRenderer": "A24BD8FB298B714107FC72B3A46A26F484C12B5770B8ABFA25D7D8C179B9A44E",
+    "currentAdapter": "C083301FBC49FE21BFAEB9475CC9341B929C6386A4A37798F9844A3F4EE86985",
+    "currentSession": "99A6E47DB49FBB2BB8B8E9158E8A91A37EC9202DA42DD1A1677EA921A3B66EC1"
+  },
+  "sourceHashConvention": "Raw SHA-256 hashes describe measured Windows build inputs. LF hashes normalize CRLF to LF and match optimizedSourceRevision Git blobs exactly.",
+  "geometry": {
+    "columns": 284,
+    "rows": 76,
+    "surfaceWidth": 2560,
+    "surfaceHeight": 1369.3333740234375,
+    "cellWidth": 9,
+    "cellHeight": 18,
+    "font": "FiraCode Nerd Font",
+    "dpi": 144
+  },
+  "runs": [
+    {
+      "side": "baseline",
+      "trial": 1,
+      "schedule": "timer",
+      "elapsedSeconds": 12.0301573,
+      "cpuSeconds": 17.015625,
+      "allocatedBytes": 333399504,
+      "gcPauseMs": 1169.938,
+      "draws": 166,
+      "readFrames": 242,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 50,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.21875
+      },
+      "refreshDurations": {
+        "count": 167,
+        "medianMs": 5.9796,
+        "p95Ms": 8.0488,
+        "maxMs": 11.237,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 165,
+        "medianMs": 71.4691,
+        "p95Ms": 90.6692,
+        "maxMs": 102.5201,
+        "over16_6Ms": 165
+      },
+      "heartbeatIntervals": {
+        "count": 167,
+        "medianMs": 71.2782,
+        "p95Ms": 89.8028,
+        "maxMs": 101.2459,
+        "over16_6Ms": 167
+      },
+      "drawWorkAvailability": "not-available",
+      "drawWorkDurations": null,
+      "frameWorkDurations": null,
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000694699992891,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "fixed",
+      "trial": 1,
+      "schedule": "demand",
+      "elapsedSeconds": 12.0170814,
+      "cpuSeconds": 10.90625,
+      "allocatedBytes": 128412720,
+      "gcPauseMs": 114.446,
+      "draws": 713,
+      "readFrames": 717,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 0,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.25
+      },
+      "refreshDurations": {
+        "count": 714,
+        "medianMs": 3.5493,
+        "p95Ms": 5.8073,
+        "maxMs": 13.1665,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 712,
+        "medianMs": 16.6763,
+        "p95Ms": 19.3586,
+        "maxMs": 39.1112,
+        "over16_6Ms": 370
+      },
+      "heartbeatIntervals": {
+        "count": 517,
+        "medianMs": 23.5316,
+        "p95Ms": 33.2332,
+        "maxMs": 71.8406,
+        "over16_6Ms": 466
+      },
+      "drawWorkAvailability": "callback-elapsed-only",
+      "drawWorkDurations": {
+        "count": 713,
+        "medianMs": 4.1943,
+        "p95Ms": 6.2871,
+        "maxMs": 63.2478,
+        "over16_6Ms": 3
+      },
+      "frameWorkDurations": {
+        "count": 713,
+        "medianMs": 7.773299999999999,
+        "p95Ms": 10.913599999999999,
+        "maxMs": 69.2451,
+        "over16_6Ms": 3
+      },
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000397900003009,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "baseline",
+      "trial": 2,
+      "schedule": "timer",
+      "elapsedSeconds": 12.0298691,
+      "cpuSeconds": 17.96875,
+      "allocatedBytes": 357517200,
+      "gcPauseMs": 1196.495,
+      "draws": 178,
+      "readFrames": 261,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 56,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.171875
+      },
+      "refreshDurations": {
+        "count": 179,
+        "medianMs": 5.6916,
+        "p95Ms": 7.6672,
+        "maxMs": 9.8501,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 177,
+        "medianMs": 66.4725,
+        "p95Ms": 84.1963,
+        "maxMs": 91.6724,
+        "over16_6Ms": 177
+      },
+      "heartbeatIntervals": {
+        "count": 179,
+        "medianMs": 66.3776,
+        "p95Ms": 84.4021,
+        "maxMs": 91.7962,
+        "over16_6Ms": 179
+      },
+      "drawWorkAvailability": "not-available",
+      "drawWorkDurations": null,
+      "frameWorkDurations": null,
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000401199999033,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "fixed",
+      "trial": 2,
+      "schedule": "demand",
+      "elapsedSeconds": 12.0186613,
+      "cpuSeconds": 10.09375,
+      "allocatedBytes": 122177808,
+      "gcPauseMs": 103.953,
+      "draws": 678,
+      "readFrames": 711,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 0,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.15625
+      },
+      "refreshDurations": {
+        "count": 708,
+        "medianMs": 3.3188,
+        "p95Ms": 5.6467,
+        "maxMs": 13.3904,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 677,
+        "medianMs": 16.7381,
+        "p95Ms": 32.1237,
+        "maxMs": 39.5536,
+        "over16_6Ms": 374
+      },
+      "heartbeatIntervals": {
+        "count": 542,
+        "medianMs": 22.1849,
+        "p95Ms": 31.3391,
+        "maxMs": 62.7582,
+        "over16_6Ms": 452
+      },
+      "drawWorkAvailability": "callback-elapsed-only",
+      "drawWorkDurations": {
+        "count": 678,
+        "medianMs": 4.0143,
+        "p95Ms": 5.6085,
+        "maxMs": 44.1438,
+        "over16_6Ms": 2
+      },
+      "frameWorkDurations": {
+        "count": 678,
+        "medianMs": 7.4277,
+        "p95Ms": 10.4169,
+        "maxMs": 48.8763,
+        "over16_6Ms": 3
+      },
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000636899989331,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "baseline",
+      "trial": 3,
+      "schedule": "timer",
+      "elapsedSeconds": 12.0636465,
+      "cpuSeconds": 18.46875,
+      "allocatedBytes": 355467864,
+      "gcPauseMs": 1066.099,
+      "draws": 177,
+      "readFrames": 259,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 55,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.171875
+      },
+      "refreshDurations": {
+        "count": 178,
+        "medianMs": 5.6977,
+        "p95Ms": 7.7914,
+        "maxMs": 9.4141,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 176,
+        "medianMs": 67.0037,
+        "p95Ms": 86.3482,
+        "maxMs": 103.4014,
+        "over16_6Ms": 176
+      },
+      "heartbeatIntervals": {
+        "count": 178,
+        "medianMs": 67.075,
+        "p95Ms": 86.5317,
+        "maxMs": 102.4446,
+        "over16_6Ms": 178
+      },
+      "drawWorkAvailability": "not-available",
+      "drawWorkDurations": null,
+      "frameWorkDurations": null,
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.00048010001774,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "fixed",
+      "trial": 3,
+      "schedule": "demand",
+      "elapsedSeconds": 12.0209453,
+      "cpuSeconds": 8.59375,
+      "allocatedBytes": 101791144,
+      "gcPauseMs": 83.452,
+      "draws": 565,
+      "readFrames": 634,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 0,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.140625
+      },
+      "refreshDurations": {
+        "count": 631,
+        "medianMs": 3.0714,
+        "p95Ms": 5.1132,
+        "maxMs": 8.5318,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 564,
+        "medianMs": 17.061,
+        "p95Ms": 34.8843,
+        "maxMs": 49.2611,
+        "over16_6Ms": 343
+      },
+      "heartbeatIntervals": {
+        "count": 516,
+        "medianMs": 23.2402,
+        "p95Ms": 30.9952,
+        "maxMs": 46.6698,
+        "over16_6Ms": 479
+      },
+      "drawWorkAvailability": "callback-elapsed-only",
+      "drawWorkDurations": {
+        "count": 565,
+        "medianMs": 3.9581,
+        "p95Ms": 5.686,
+        "maxMs": 43.9939,
+        "over16_6Ms": 2
+      },
+      "frameWorkDurations": {
+        "count": 565,
+        "medianMs": 7.4193999999999996,
+        "p95Ms": 9.8766,
+        "maxMs": 48.757999999999996,
+        "over16_6Ms": 2
+      },
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000229900004342,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "baseline",
+      "trial": 4,
+      "schedule": "timer",
+      "elapsedSeconds": 12.0194224,
+      "cpuSeconds": 17.375,
+      "allocatedBytes": 341421840,
+      "gcPauseMs": 1216.567,
+      "draws": 170,
+      "readFrames": 249,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 52,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.3125
+      },
+      "refreshDurations": {
+        "count": 171,
+        "medianMs": 6.0526,
+        "p95Ms": 8.0029,
+        "maxMs": 12.717,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 169,
+        "medianMs": 70.2371,
+        "p95Ms": 88.0368,
+        "maxMs": 106.4158,
+        "over16_6Ms": 169
+      },
+      "heartbeatIntervals": {
+        "count": 171,
+        "medianMs": 70.5575,
+        "p95Ms": 87.9303,
+        "maxMs": 106.2093,
+        "over16_6Ms": 170
+      },
+      "drawWorkAvailability": "not-available",
+      "drawWorkDurations": null,
+      "frameWorkDurations": null,
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000593300006585,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "fixed",
+      "trial": 4,
+      "schedule": "demand",
+      "elapsedSeconds": 12.0547854,
+      "cpuSeconds": 8.578125,
+      "allocatedBytes": 95979408,
+      "gcPauseMs": 75.06,
+      "draws": 533,
+      "readFrames": 561,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 0,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.1875
+      },
+      "refreshDurations": {
+        "count": 558,
+        "medianMs": 3.0211,
+        "p95Ms": 5.8205,
+        "maxMs": 11.3087,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 532,
+        "medianMs": 17.5411,
+        "p95Ms": 35.5689,
+        "maxMs": 41.9085,
+        "over16_6Ms": 349
+      },
+      "heartbeatIntervals": {
+        "count": 495,
+        "medianMs": 24.4805,
+        "p95Ms": 31.6351,
+        "maxMs": 66.3906,
+        "over16_6Ms": 476
+      },
+      "drawWorkAvailability": "callback-elapsed-only",
+      "drawWorkDurations": {
+        "count": 533,
+        "medianMs": 3.9159,
+        "p95Ms": 7.2081,
+        "maxMs": 46.0539,
+        "over16_6Ms": 2
+      },
+      "frameWorkDurations": {
+        "count": 533,
+        "medianMs": 7.1417,
+        "p95Ms": 11.4317,
+        "maxMs": 51.038399999999996,
+        "over16_6Ms": 2
+      },
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000417100003688,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "baseline",
+      "trial": 5,
+      "schedule": "timer",
+      "elapsedSeconds": 12.0450244,
+      "cpuSeconds": 17.75,
+      "allocatedBytes": 361482880,
+      "gcPauseMs": 1145.891,
+      "draws": 180,
+      "readFrames": 258,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 53,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.21875
+      },
+      "refreshDurations": {
+        "count": 181,
+        "medianMs": 5.7714,
+        "p95Ms": 7.9238,
+        "maxMs": 10.7783,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 179,
+        "medianMs": 64.7872,
+        "p95Ms": 85.6483,
+        "maxMs": 91.0891,
+        "over16_6Ms": 179
+      },
+      "heartbeatIntervals": {
+        "count": 180,
+        "medianMs": 65.0511,
+        "p95Ms": 86.2269,
+        "maxMs": 90.7125,
+        "over16_6Ms": 180
+      },
+      "drawWorkAvailability": "not-available",
+      "drawWorkDurations": null,
+      "frameWorkDurations": null,
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.00045210000826,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    },
+    {
+      "side": "fixed",
+      "trial": 5,
+      "schedule": "demand",
+      "elapsedSeconds": 12.0208509,
+      "cpuSeconds": 10.171875,
+      "allocatedBytes": 128249720,
+      "gcPauseMs": 100.086,
+      "draws": 713,
+      "readFrames": 716,
+      "idle": {
+        "seconds": 2,
+        "readFrames": 0,
+        "draws": 0,
+        "renderingSubscriptions": 0,
+        "cpuSeconds": 0.21875
+      },
+      "refreshDurations": {
+        "count": 713,
+        "medianMs": 3.2274,
+        "p95Ms": 5.0648,
+        "maxMs": 9.0482,
+        "over16_6Ms": 0
+      },
+      "drawIntervals": {
+        "count": 712,
+        "medianMs": 16.7188,
+        "p95Ms": 19.7393,
+        "maxMs": 43.707,
+        "over16_6Ms": 386
+      },
+      "heartbeatIntervals": {
+        "count": 514,
+        "medianMs": 23.8905,
+        "p95Ms": 31.0954,
+        "maxMs": 48.8966,
+        "over16_6Ms": 487
+      },
+      "drawWorkAvailability": "callback-elapsed-only",
+      "drawWorkDurations": {
+        "count": 713,
+        "medianMs": 3.7084,
+        "p95Ms": 6.7427,
+        "maxMs": 43.0932,
+        "over16_6Ms": 3
+      },
+      "frameWorkDurations": {
+        "count": 713,
+        "medianMs": 6.924899999999999,
+        "p95Ms": 10.656500000000001,
+        "maxMs": 47.8046,
+        "over16_6Ms": 3
+      },
+      "frameHash": "F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C",
+      "workload": {
+        "ticks": 720,
+        "expectedTicks": 720,
+        "bytes": 2525760,
+        "elapsed": 12.000660199992126,
+        "hz": 60,
+        "pattern": "agent",
+        "idleUntil": "run-2.go"
+      },
+      "nonblankCells": 2412
+    }
+  ],
+  "boundary": "Fixture UI callback work. Excludes Win2D EndDraw, GPU completion and display presentation. Code and scheduling changed together."
+}
