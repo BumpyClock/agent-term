@@ -21,7 +21,6 @@ internal sealed class WindowsEffectHost : IEffectHost
     private static readonly TimeSpan NotificationLifetime = TimeSpan.FromMinutes(10);
 
     private readonly DispatcherQueue _dispatcher = DispatcherQueue.GetForCurrentThread();
-    private readonly HashSet<long> _shown = [];
     private ITaskbarList3? _taskbar;
     private bool _taskbarFailed;
     private bool _registered;
@@ -104,7 +103,6 @@ internal sealed class WindowsEffectHost : IEffectHost
             content.ExpiresOnReboot = true;
             content.Expiration = DateTimeOffset.Now + NotificationLifetime;
             AppNotificationManager.Default.Show(content);
-            _shown.Add(notification.Id);
             return content.Id != 0;
         }
         catch (Exception exception) when (exception is COMException or InvalidOperationException or ArgumentException)
@@ -115,8 +113,8 @@ internal sealed class WindowsEffectHost : IEffectHost
 
     public void RemoveSystemNotification(long id)
     {
-        if (!_registered || !_shown.Remove(id)) return;
-        try { _ = AppNotificationManager.Default.RemoveByTagAsync(id.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        if (!_registered) return;
+        try { _ = AppNotificationManager.Default.RemoveByTagAndGroupAsync(id.ToString(System.Globalization.CultureInfo.InvariantCulture), "agentterm-effects"); }
         catch (Exception exception) when (exception is COMException or InvalidOperationException) { }
     }
 
@@ -169,7 +167,6 @@ internal sealed class WindowsEffectHost : IEffectHost
         // Windows raises this on a thread-pool thread. Pane state lives on the UI thread.
         _dispatcher.TryEnqueue(() =>
         {
-            _shown.Remove(id);
             SystemNotificationActivated?.Invoke(id);
         });
     }

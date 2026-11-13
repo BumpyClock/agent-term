@@ -25,7 +25,6 @@ public sealed partial class MainPage
     private static readonly ProgressAggregator EffectProgress = new(EffectHost);
 
     private PaneEffects? _effects;
-    private readonly EffectInbox _effectInbox = new();
     private int _effectDispatchQueued;
     private EffectNoticeView? _noticeView;
     private ProgressBar? _progressBar;
@@ -86,15 +85,6 @@ public sealed partial class MainPage
     private void DetachEffects(TerminalSession session)
     {
         session.EffectsAvailable -= Session_EffectsAvailable;
-        _effectInbox.Clear();
-        _effects?.Reset();
-    }
-
-    /// <summary>The shell exited. A program that is gone cannot clear its own progress or answer a held clipboard question.</summary>
-    private void EffectsSessionEnded()
-    {
-        _effectInbox.Clear();
-        _session?.Effects.Reset();
         _effects?.Reset();
     }
 
@@ -121,9 +111,8 @@ public sealed partial class MainPage
     }
 
     // Called on the terminal reader thread, outside every session lock.
-    private void Session_EffectsAvailable(IReadOnlyList<TerminalEffect> batch)
+    private void Session_EffectsAvailable()
     {
-        _effectInbox.Add(batch);
         if (Interlocked.Exchange(ref _effectDispatchQueued, 1) != 0) return;
         if (!_dispatcher.TryEnqueue(DrainEffects)) Volatile.Write(ref _effectDispatchQueued, 0);
     }
@@ -132,8 +121,8 @@ public sealed partial class MainPage
     {
         Volatile.Write(ref _effectDispatchQueued, 0);
         if (_state == SessionState.Disposed || _effects is null) return;
-        var batch = _effectInbox.Take();
-        if (batch.Count != 0) _effects.Apply(batch);
+        var batch = _session?.Effects.TakePending();
+        if (batch is { Count: > 0 }) _effects.Apply(batch);
     }
 
     private ClipboardOutcome ResolveClipboardWrite(long requestId, bool allow) =>

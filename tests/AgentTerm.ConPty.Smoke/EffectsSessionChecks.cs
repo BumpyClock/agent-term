@@ -12,14 +12,17 @@ internal static class EffectsSessionChecks
         {
             current = session;
             session.ConfigureEffects(TerminalEffectOptions.Default with { Bell = BellStyle.Both });
-            session.EffectsAvailable += batch =>
+            session.Start();
+            await WaitAsync(() => session.PromptState == ShellPromptState.Ready, "PowerShell should reach its prompt.");
+            session.Send("[Console]::Write([char]7)\r");
+            await WaitAsync(() => session.Effects.HasPending, "Without subscribers effects must remain available for the owner to pull.");
+            session.EffectsAvailable += () => throw new InvalidOperationException("first subscriber fault");
+            session.EffectsAvailable += () =>
             {
                 // The handler runs on the reader thread. If it still held the terminal lock, another thread could not read the screen.
                 lockProbe.Add(Task.Run(() => session.ReadText()).Wait(TimeSpan.FromSeconds(3)));
-                lock (batches) batches.Add(batch);
+                lock (batches) batches.Add(session.Effects.TakePending());
             };
-            session.Start();
-            await WaitAsync(() => session.PromptState == ShellPromptState.Ready, "PowerShell should reach its prompt.");
 
             session.Send("[Console]::Write([char]27 + ']9;4;1;42' + [char]7 + [char]27 + ']9;Build finished' + [char]7 + [char]7); Start-Sleep -Seconds 1\r");
             await WaitAsync(() => Flat(batches).Any(effect => effect is ProgressEffect { State: TerminalProgressState.Set, Percent: 42 }) &&
@@ -32,15 +35,14 @@ internal static class EffectsSessionChecks
                 throw new Exception("EffectsAvailable must run outside the terminal lock.");
 
             // A throwing subscriber must not stop output.
-            session.EffectsAvailable += _ => throw new InvalidOperationException("subscriber fault");
+            session.EffectsAvailable += () => throw new InvalidOperationException("subscriber fault");
             session.Send("[Console]::Write([char]27 + ']9;4;0' + [char]7); Write-Host 'effects-alive'\r");
             await WaitAsync(() => session.ReadText().Contains("effects-alive", StringComparison.Ordinal), "Output should continue after a subscriber throws.");
             await WaitAsync(() => Flat(batches).Any(effect => effect is ProgressEffect { State: TerminalProgressState.Remove }), "Removing progress should reach the host.");
 
             // Progress still showing when the shell exits is removed for the host, since its program can no longer clear it.
             session.Send("[Console]::Write([char]27 + ']9;4;1;10' + [char]7); Start-Sleep -Milliseconds 300; exit\r");
-            await WaitAsync(() => Flat(batches).Count(effect => effect is ProgressEffect) >= 4 &&
-                Flat(batches).OfType<ProgressEffect>().Last().State == TerminalProgressState.Remove,
+            await WaitAsync(() => Flat(batches).Any(effect => effect is ResetEffect),
                 "A shell exit should remove progress that was showing.");
         }
         _ = current;

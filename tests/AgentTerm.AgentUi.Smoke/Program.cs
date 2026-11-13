@@ -31,6 +31,7 @@ internal static class Program
         var window = new Window();
         try
         {
+            EffectsSettingsChecks.Run();
             if (Environment.GetCommandLineArgs().Contains("--request-focus-only"))
             {
                 _result = await RequestFocusChecks.RunAsync(window);

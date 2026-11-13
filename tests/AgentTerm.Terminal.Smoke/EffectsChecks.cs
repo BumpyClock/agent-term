@@ -13,13 +13,13 @@ internal static class EffectsChecks
         public bool Throw;
         public bool HasText() => Text is { Length: > 0 };
 
-        public ClipboardOutcome TryReadText(int maxChars, out string text)
+        public ClipboardOutcome TryReadText(int maxBytes, out string text)
         {
             Reads++;
             if (Throw) throw new InvalidOperationException("clipboard fault");
             text = "";
             if (ReadOutcome != ClipboardOutcome.Success) return ReadOutcome;
-            if (Text is { Length: var length } && length > maxChars) return ClipboardOutcome.TooLarge;
+            if (Text is not null && Encoding.UTF8.GetByteCount(Text) > maxBytes) return ClipboardOutcome.TooLarge;
             text = Text ?? "";
             return ClipboardOutcome.Success;
         }
@@ -51,6 +51,8 @@ internal static class EffectsChecks
         CheckNotifications();
         CheckProgress();
         CheckProgressReset();
+        CheckProgressCoalescing();
+        CheckWriteSnapshot();
         CheckClipboardWrite();
         CheckClipboardWritePolicies();
         CheckClipboardWriteLimits();
@@ -86,6 +88,49 @@ internal static class EffectsChecks
 
     private static string Reply(GhosttyTerminal terminal) =>
         Encoding.UTF8.GetString(terminal.TakeResponses().SelectMany(bytes => bytes).ToArray());
+
+    private static void CheckWriteSnapshot()
+    {
+        var effects = new TerminalEffects();
+        var clipboard = new FakeClipboard { Text = "keep" };
+        effects.Clipboard = clipboard;
+        var snapshot = TerminalEffectOptions.Default with { ClipboardMaxBytes = 4096 };
+        effects.Options = snapshot with { ClipboardMaxBytes = 16384 };
+        // The boundary omitted the oversized payload under its original options snapshot.
+        var validate = typeof(TerminalEffects).GetMethod("HandleWrite", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var result = (ClipboardWriteDecision)validate.Invoke(effects,
+            [new ClipboardWriteInput(ClipboardLocation.Standard, [], "test", 8192), snapshot])!;
+        Require(result.Outcome == ClipboardOutcome.Denied && clipboard.Clears == 0 && clipboard.Text == "keep",
+            "Raising the limit after payload rejection must not convert the request into a clipboard clear.");
+    }
+
+    private static void CheckProgressCoalescing()
+    {
+        foreach (var state in new[] { TerminalProgressState.Error, TerminalProgressState.Pause })
+        foreach (var separate in new[] { false, true })
+        foreach (var reverse in new[] { false, true })
+        {
+            var (terminal, _) = Create();
+            using (terminal)
+            {
+                var set = $"{Esc}]9;4;1;40{Bel}";
+                var omitted = $"{Esc}]9;4;{(int)state}{Bel}";
+                var first = reverse ? omitted : set;
+                var second = reverse ? set : omitted;
+                if (separate) { Feed(terminal, first); Feed(terminal, second); }
+                else Feed(terminal, first + second);
+                var actual = terminal.Effects.TakePending();
+                Require(actual is [ProgressEffect { Percent: 40 } progress] && progress.State == (reverse ? TerminalProgressState.Set : state),
+                    "Progress must resolve omitted percentages before coalescing across native chunks.");
+                terminal.Effects.Options = terminal.Effects.Options with { Progress = false };
+                Require(terminal.Effects.TakePending() is [ProgressEffect { State: TerminalProgressState.Remove }], "Disabling progress must clear delivered state.");
+                terminal.Effects.Options = terminal.Effects.Options with { Progress = true };
+                terminal.Effects.Progress(state, -1);
+                Require(terminal.Effects.TakePending() is [ProgressEffect fresh] && fresh.Percent == (state == TerminalProgressState.Error ? 100 : 0),
+                    "Reenabled progress must not retain a disabled percentage.");
+            }
+        }
+    }
 
     private static void CheckBell()
     {
@@ -153,7 +198,7 @@ internal static class EffectsChecks
             Feed(terminal, $"{Esc}]9;4;2;70{Bel}");
             Require(terminal.Effects.TakePending() is [ProgressEffect { State: TerminalProgressState.Error, Percent: 70 }], "State 2 should be an error with its percentage.");
             Feed(terminal, $"{Esc}]9;4;4{Bel}");
-            Require(terminal.Effects.TakePending() is [ProgressEffect { State: TerminalProgressState.Pause, Percent: -1 }], "A paused state without a value should keep the previous percentage.");
+            Require(terminal.Effects.TakePending() is [ProgressEffect { State: TerminalProgressState.Pause, Percent: 70 }], "A paused state without a value should keep the previous percentage.");
             Feed(terminal, $"{Esc}]9;4;0{Bel}");
             Require(terminal.Effects.TakePending() is [ProgressEffect { State: TerminalProgressState.Remove }], "State 0 should remove progress.");
             for (var index = 0; index < 100; index++) Feed(terminal, $"{Esc}]9;4;0{Bel}");
@@ -395,7 +440,9 @@ internal static class EffectsChecks
             Feed(terminal, $"{Esc}[?2004l");
 
             Feed(terminal, $"{Esc}[?5522h");
-            var pasteEvent = Encoding.UTF8.GetString(terminal.EncodeClipboardPaste("pasted é"));
+            terminal.Effects.Options = terminal.Effects.Options with { ClipboardMaxBytes = 4096 };
+            var pasted = "pasted é" + new string('é', 4096);
+            var pasteEvent = Encoding.UTF8.GetString(terminal.EncodeClipboardPaste(pasted));
             Require(pasteEvent.Contains("5522", StringComparison.Ordinal) && !pasteEvent.Contains("pasted", StringComparison.Ordinal),
                 $"With mode 5522 a paste should be an event, not the text, got <{pasteEvent}>.");
             Require(terminal.TakeResponses().Length == 0, "The paste event should not also be queued as a terminal reply.");
@@ -405,9 +452,12 @@ internal static class EffectsChecks
             var pw = password.Success ? $":pw={password.Groups[1].Value}:name={Base64("Paste test")}" : "";
             Feed(terminal, $"{Esc}]5522;type=read{pw};{Base64("text/plain")}{St}");
             var response = Reply(terminal);
-            Require(response.Contains(Base64("pasted é"), StringComparison.Ordinal) && clipboard.Reads == 0,
-                $"A paste event read should be served from the pasted text without reading the clipboard, got <{response}> from <{pasteEvent}> sent <{pw}> effects {Describe(terminal.Effects.TakePending())}.");
-            Require(!terminal.Effects.TakePending().OfType<ClipboardEffect>().Any(effect => effect.Kind == ClipboardNoticeKind.ReadBlocked),
+            var actualEffects = terminal.Effects.TakePending();
+            var returned = Regex.Matches(response, @"type=read:status=DATA:mime=[^;]+;([^]*)")
+                .SelectMany(match => Convert.FromBase64String(match.Groups[1].Value)).ToArray();
+            Require(returned.SequenceEqual(Encoding.UTF8.GetBytes(pasted)) && clipboard.Reads == 0,
+                "A paste event above the program limit must return exact UTF-8 bytes without physical clipboard reads.");
+            Require(!actualEffects.OfType<ClipboardEffect>().Any(effect => effect.Kind == ClipboardNoticeKind.ReadBlocked),
                 "A read answered by the paste grant should not be reported as blocked.");
         }
     }

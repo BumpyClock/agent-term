@@ -261,7 +261,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 return;
 
             SetState(SessionState.Stopping);
-            EffectsSessionEnded();
             CancelSelectionGesture();
             RefreshOutput(session);
             await session.StopAsync();

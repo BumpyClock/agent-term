@@ -1,14 +1,14 @@
 namespace AgentTerm.Terminal;
 
 // Effects programs request through the terminal: clipboard, bell, desktop notifications, progress, and window resize.
-// The terminal queues them while it parses output. This file delivers them after the terminal lock is released.
+// The terminal queues them while it parses output. This file signals availability after the terminal lock is released.
 public sealed partial class TerminalSession
 {
     /// <summary>
-    /// Raised on the reader thread, outside every session lock, with the effects a chunk of output requested in order.
+    /// Raised on the reader thread, outside every session lock, when effects are pending. The owner pulls Effects.TakePending on its delivery thread.
     /// Handlers must return promptly and marshal to the UI themselves. An exception from a handler is ignored.
     /// </summary>
-    public event Action<IReadOnlyList<TerminalEffect>>? EffectsAvailable;
+    public event Action? EffectsAvailable;
 
     /// <summary>Preferences, clipboard adapter, and pending approvals for this session.</summary>
     public TerminalEffects Effects => _terminal.Effects;
@@ -28,16 +28,18 @@ public sealed partial class TerminalSession
     {
         var effects = _terminal.Effects;
         if (!effects.HasPending) return;
-        var batch = effects.TakePending();
-        if (batch.Count == 0) return;
-        try { EffectsAvailable?.Invoke(batch); }
-        catch (Exception) { effects.RecordFault(); }
+        if (EffectsAvailable is not { } handlers) return;
+        foreach (Action handler in handlers.GetInvocationList())
+        {
+            try { handler(); }
+            catch (Exception) { effects.RecordFault(); }
+        }
     }
 
     /// <summary>The shell exited. A program that cannot clear its own progress or approvals no longer can.</summary>
     private void EndEffects()
     {
-        _terminal.Effects.Reset();
+        _terminal.Effects.Reset(clearHost: true);
         FlushEffects();
     }
 }

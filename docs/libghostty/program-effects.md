@@ -16,7 +16,7 @@ Settings live in Settings, **Program requests**. They save to `settings.json` un
 
 Clipboard write choices are Allow, Ask first, and Block. Ask first holds the text and shows a card with **Copy** and **Don't copy**.
 The program is told the write was denied, because its request cannot wait on you. Approving still copies the text. The size limit
-(64 KiB to 8 MiB, default 1 MiB) applies to reads and writes. Pasting into a program is never affected by these settings.
+(presets from 64 KiB to 8 MiB, default 1 MiB) applies to program reads and writes. Stored custom limits remain exact. Pasting into a program is never affected by these settings.
 
 Reads are off because they expose whatever you last copied. With reads on, every read leaves a visible card.
 
@@ -35,12 +35,14 @@ outranks indeterminate. The most recent report wins inside a tier. Closing a pan
 
 `GhosttyTerminal.Effects` is a `TerminalEffects`. Native callbacks registered in `GhosttyTerminal.Effects.cs`
 (`BELL`, `DESKTOP_NOTIFICATION`, `PROGRESS_REPORT`, `CLIPBOARD_WRITE`, `CLIPBOARD_READ`, `RESIZE_WINDOW`) copy their borrowed
-payload, apply policy, queue an immutable `TerminalEffect`, and return. They never call UI code, never wait on another thread,
-and never let an exception cross the ABI. A failing callback answers as a refusal and increments `Effects.Faults`.
+payload, apply policy, queue an immutable `TerminalEffect`, and return. They never call UI code or let an exception cross the ABI.
+Clipboard operations are the bounded owner-thread wait exception. OSC 5522 requires its reply inside the callback, so success
+is reported only after the write succeeds. A failing callback answers as a refusal and increments `Effects.Faults`.
 
-`TerminalSession` drains the queue after it releases its terminal lock and raises `EffectsAvailable` on the reader thread.
-The app subscribes in `MainPage.Effects.cs`, copies batches into a bounded `EffectInbox`, and drains it on the UI thread
-with one dispatch at a time. Nothing runs while a pane is idle. The only timers are one-shot and exist while a card or bell flash shows.
+`TerminalSession` raises the parameterless `EffectsAvailable` signal outside its terminal lock on the reader thread.
+Each subscriber is notified independently even if another throws. The session does not drain unreceived effects.
+The app subscribes in `MainPage.Effects.cs` and pulls `session.Effects.TakePending()` on the UI thread with one dispatch flag.
+`TerminalEffects` owns the only bounded queue and resolves omitted progress percentages before coalescing. Nothing runs while a pane is idle. The only timers are one-shot and exist while a card or bell flash shows.
 
 ### Bounds and coalescing
 
@@ -63,14 +65,14 @@ with one dispatch at a time. Nothing runs while a pane is idle. The only timers 
 - Reads answer an empty clipboard (OSC 52) or `EPERM` (OSC 5522) when blocked. Over the size limit, or while Windows holds the clipboard, they answer empty or an I/O error.
 - A Kitty "list targets" read with no MIME list reveals nothing while reads are blocked.
 - The terminal never remembers a Kitty password grant (`remember` is always false). Settings stay the single source of truth.
-- Windows access (`WindowsTerminalClipboard`) uses the Win32 clipboard, never the UI thread. Reads open it ownerless with a short retry. Writes run on one dedicated message-pump thread that owns a message-only window, because only an owner window can set clipboard data. Each open gives up as *busy* rather than blocking the reader. A write that timed out is cancelled so it cannot land after the program was told *busy*.
+- Windows access (`WindowsTerminalClipboard`) uses the Win32 clipboard, never the UI thread. Reads open it ownerless with a short retry. Writes run on one dedicated message-pump thread that owns a message-only window, because only an owner window can set clipboard data. Clipboard access gives up as *busy* after a bounded wait. A write that timed out is cancelled so it cannot land after the program was told *busy*.
 - Tests inject `ITerminalClipboard`. No test touches the real clipboard.
 
 ### Kitty paste events
 
 Installing the read callback lets a program enable mode 5522. `GhosttyTerminal.EncodeClipboardPaste` (used by `TerminalSession.Paste`)
 then sends the program a paste event, and the program's follow-up read arrives with `granted` set. It is served from the text you
-just pasted, valid for 30 seconds, even when general reads are blocked, because you chose to share it. The Kitty protocol only grants when the
+just pasted, valid for 30 seconds, independently of program clipboard size limits and even when general reads are blocked, because you chose to share it. The Kitty protocol only grants when the
 read carries a `name`, which is why `name=` appears in the checks. Without mode 5522 a paste is the plain or bracketed paste as before.
 
 ### Reset and exit
@@ -91,4 +93,4 @@ or the page releases its session.
 - `EffectsHostChecks` (Terminal.Smoke): bell throttling, notification lifecycle and activation, progress aggregation across panes and windows, card actions, expiry and bounds, settings round trip and tolerance of a bad `Effects` section.
 - `EffectsSessionChecks` (ConPty.Smoke, `--effects-only`): through a real ConPTY shell, delivery outside the terminal lock, ordering, a throwing subscriber, and progress removal on exit.
 
-The UI inbox bounds repeated approval notices as well as ordinary effects. See [integration verification](README.md) for platform and UI coverage.
+The producer queue bounds approval notices and ordinary effects. Decision cards survive ordinary notice eviction; removing a decision denies its owned request. Toast routes are bounded by the four retained cards. Superseded toasts are withdrawn by tag and group. Custom clipboard budgets remain exact when opening and applying Settings. See [integration verification](README.md) for platform and UI coverage.

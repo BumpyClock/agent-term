@@ -62,20 +62,14 @@ internal sealed class EffectsSettingsPanel : StackPanel
         _loading = true;
         Select(_write, options.ClipboardWrite);
         Select(_read, options.ClipboardRead);
-        // A limit saved by an older build or edited by hand may not be one of the choices. Show the closest one not below it.
-        Select(_limit, NearestLimit(options.ClipboardMaxBytes));
+        if (!_limit.Items.OfType<ComboBoxItem>().Any(item => item.Tag is int bytes && bytes == options.ClipboardMaxBytes))
+            _limit.Items.Add(new ComboBoxItem { Content = $"Custom ({options.ClipboardMaxBytes:N0} bytes)", Tag = options.ClipboardMaxBytes });
+        Select(_limit, options.ClipboardMaxBytes);
         Select(_bell, options.Bell);
         Select(_notifications, options.Notifications);
         _progress.IsOn = options.Progress;
         _resize.IsOn = options.AllowWindowResize;
         _loading = false;
-    }
-
-    private static int NearestLimit(int bytes)
-    {
-        foreach (var choice in new[] { 64 * 1024, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024 })
-            if (bytes <= choice) return choice;
-        return 8 * 1024 * 1024;
     }
 
     private ComboBox Choices<T>(string name, params (string Label, T Value)[] values) where T : notnull

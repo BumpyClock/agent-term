@@ -41,6 +41,15 @@ internal sealed class PaneEffects : IDisposable
         _resolveWrite = resolveWrite;
         _clock = clock ?? (() => Environment.TickCount64);
         _host.SystemNotificationActivated += SystemNotificationActivated;
+        Notices.Removed += notice =>
+        {
+            if (notice.RequestId != 0) _resolveWrite(notice.RequestId, false);
+            foreach (var id in _systemNotices.Where(pair => pair.Value == notice.Key).Select(pair => pair.Key).ToArray())
+            {
+                _systemNotices.Remove(id);
+                Safe(() => _host.RemoveSystemNotification(id));
+            }
+        };
     }
 
     internal NoticeCenter Notices { get; } = new();
@@ -107,8 +116,8 @@ internal sealed class PaneEffects : IDisposable
         switch (action)
         {
             case NoticeAction.AllowWrite when notice.RequestId != 0:
-                Notices.Dismiss(noticeId);
                 var outcome = _resolveWrite(notice.RequestId, true);
+                Notices.Dismiss(noticeId, cancelDecision: false);
                 if (outcome == ClipboardOutcome.Success)
                     ShowCard("clip-wrote", NoticeSeverity.Info, "Clipboard updated", "Copied the text.", Lifetime(InfoLifetime));
                 else
@@ -117,7 +126,6 @@ internal sealed class PaneEffects : IDisposable
                         Lifetime(WarningLifetime));
                 break;
             case NoticeAction.Dismiss:
-                if (notice.RequestId != 0) _resolveWrite(notice.RequestId, false);
                 Notices.Dismiss(noticeId);
                 break;
             case NoticeAction.Show:
@@ -165,9 +173,15 @@ internal sealed class PaneEffects : IDisposable
         MarkUnseen();
         if (!_host.IsActive(_view.Window)) Safe(() => _host.FlashWindow(_view.Window));
         var now = _clock();
-        if (options.Notifications != NotificationStyle.InAppAndSystem || !_host.SystemNotificationsAvailable ||
+        if (_host.IsActive(_view.Window) || options.Notifications != NotificationStyle.InAppAndSystem || !_host.SystemNotificationsAvailable ||
             now - _lastSystem < (long)SystemNotificationInterval.TotalMilliseconds) return;
         _lastSystem = now;
+        if (Notices.Find(stored.Id) is null) return;
+        foreach (var previous in _systemNotices.Where(pair => pair.Value == key).Select(pair => pair.Key).ToArray())
+        {
+            _systemNotices.Remove(previous);
+            Safe(() => _host.RemoveSystemNotification(previous));
+        }
         var id = Interlocked.Increment(ref _nextSystemId);
         var shown = false;
         Safe(() => shown = _host.ShowSystemNotification(new SystemNotification(id, title, notification.Body, _view.Window)));
@@ -183,8 +197,7 @@ internal sealed class PaneEffects : IDisposable
         }
         else
         {
-            var percent = effect.Percent >= 0 ? effect.Percent : _current?.Percent ?? (effect.State == TerminalProgressState.Error ? 100 : 0);
-            _current = (effect.State, percent);
+            _current = (effect.State, effect.Percent);
         }
         _progress.Update(this, _view.Window, _current?.State, _current?.Percent ?? 0);
         Safe(() => _view.ShowProgress(_current?.State ?? TerminalProgressState.Remove, _current?.Percent ?? 0));
@@ -251,6 +264,7 @@ internal sealed class PaneEffects : IDisposable
     {
         if (!_systemNotices.TryGetValue(id, out var key)) return;
         _systemNotices.Remove(id);
+        Safe(() => _host.RemoveSystemNotification(id));
         var notice = Notices.Items.FirstOrDefault(item => item.Key == key);
         if (notice is not null) Notices.Dismiss(notice.Id);
         _attention = false;

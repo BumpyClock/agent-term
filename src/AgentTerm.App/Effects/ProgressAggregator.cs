@@ -15,7 +15,7 @@ internal sealed class ProgressAggregator(IEffectHost host)
     private readonly Dictionary<nint, TaskbarProgress> _shown = [];
     private long _order;
 
-    /// <summary>Records a pane's progress. A Remove state or a null state clears it. A percent of -1 keeps the pane's previous one.</summary>
+    /// <summary>Records a pane's progress. A Remove state or a null state clears it. Percentages are resolved by the producer.</summary>
     internal void Update(object source, nint window, TerminalProgressState? state, int percent)
     {
         var index = _entries.FindIndex(entry => ReferenceEquals(entry.Source, source));
@@ -24,8 +24,7 @@ internal sealed class ProgressAggregator(IEffectHost host)
         var oldWindow = previous?.Window ?? window;
         if (state is { } value and not TerminalProgressState.Remove)
         {
-            var kept = percent < 0 ? previous?.Percent ?? (value == TerminalProgressState.Error ? 100 : 0) : percent;
-            _entries.Add(new Entry(source, window, value, Math.Clamp(kept, 0, 100), ++_order));
+            _entries.Add(new Entry(source, window, value, percent, ++_order));
         }
         Refresh(oldWindow);
         if (window != oldWindow) Refresh(window);

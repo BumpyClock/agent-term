@@ -4,9 +4,9 @@ namespace AgentTerm.Terminal;
 
 /// <summary>
 /// Policy, bounds, and the ordered queue behind the native effect callbacks (bell, notification, progress,
-/// clipboard, window resize). Everything here is managed, thread-safe, and non-blocking: native callbacks call in while the
-/// terminal lock is held, copy their payload, and return. The session drains <see cref="TakePending"/> after it releases
-/// its lock, so UI code never runs inside a native callback.
+/// clipboard, window resize). The queue is managed and thread-safe. Native callbacks copy payloads under the terminal lock.
+/// Clipboard operations may wait for the clipboard owner thread for a bounded time so their synchronous reply is truthful.
+/// The UI drains <see cref="TakePending"/> after the session releases its lock.
 /// </summary>
 public sealed class TerminalEffects
 {
@@ -33,6 +33,7 @@ public sealed class TerminalEffects
     private volatile ITerminalClipboard? _clipboard;
     private long _nextRequest;
     private bool _uiProgressActive;
+    private int? _progressPercent;
     private string? _pasteText;
     private long _pasteExpires;
     private int _faults;
@@ -43,7 +44,15 @@ public sealed class TerminalEffects
     public TerminalEffectOptions Options
     {
         get => _options;
-        set => _options = (value ?? throw new ArgumentNullException(nameof(value))).Normalize();
+        set
+        {
+            var options = (value ?? throw new ArgumentNullException(nameof(value))).Normalize();
+            lock (_gate)
+            {
+                _options = options;
+                if (!options.Progress) Progress(TerminalProgressState.Remove, 0);
+            }
+        }
     }
 
     /// <summary>The clipboard adapter. Null refuses every clipboard request as unsupported.</summary>
@@ -114,10 +123,13 @@ public sealed class TerminalEffects
         };
         lock (_gate)
         {
+            if (state != TerminalProgressState.Remove && !_options.Progress) return;
+            if (state is TerminalProgressState.Error or TerminalProgressState.Pause && percent < 0)
+                percent = _progressPercent ?? (state == TerminalProgressState.Error ? 100 : 0);
+            _progressPercent = state == TerminalProgressState.Remove ? null : percent;
             _pending.RemoveAll(effect => effect is ProgressEffect);
             // Nothing is visible, so there is nothing to remove. This keeps a flood of removals from waking the UI.
             if (state == TerminalProgressState.Remove && !_uiProgressActive) return;
-            if (state != TerminalProgressState.Remove && !_options.Progress) return;
             _pending.Add(new ProgressEffect(state, percent));
         }
     }
@@ -139,7 +151,11 @@ public sealed class TerminalEffects
     /// <summary>Applies write policy. Runs on the reader thread inside a native callback.</summary>
     public ClipboardWriteDecision HandleWrite(ClipboardWriteInput input)
     {
-        var options = _options;
+        return HandleWrite(input, _options);
+    }
+
+    internal ClipboardWriteDecision HandleWrite(ClipboardWriteInput input, TerminalEffectOptions options)
+    {
         var program = Clip(Sanitize(input.Program), MaxProgramChars);
         if (options.ClipboardWrite == ClipboardWritePolicy.Deny)
         {
@@ -265,7 +281,6 @@ public sealed class TerminalEffects
     {
         lock (_gate)
         {
-            if (text.Length > _options.ClipboardMaxBytes) { _pasteText = null; return; }
             _pasteText = text;
             _pasteExpires = _clock() + (long)PasteGrantLifetime.TotalMilliseconds;
         }
@@ -304,6 +319,7 @@ public sealed class TerminalEffects
         lock (_gate)
         {
             _pending.Clear();
+            _progressPercent = null;
             _writes.Clear();
             _pasteText = null;
             if (clearHost) _pending.Add(new ResetEffect());

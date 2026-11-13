@@ -13,6 +13,7 @@ internal sealed class NoticeCenter
     private long _nextId;
 
     internal event Action? Changed;
+    internal event Action<Notice>? Removed;
 
     internal IReadOnlyList<Notice> Items => _snapshot;
 
@@ -25,15 +26,15 @@ internal sealed class NoticeCenter
         if (index >= 0)
         {
             repeats = _items[index].Repeats + 1;
-            _items.RemoveAt(index);
+            RemoveAt(index);
         }
         var notice = new Notice(++_nextId, key, severity, title, message, repeats, expiresAt, actions ?? [NoticeAction.Dismiss], requestId, fromProgram);
         _items.Add(notice);
         while (_items.Count > MaxVisible)
         {
             // Drop what the user can ignore before what waits for a decision.
-            var victim = _items.FindIndex(item => item.ExpiresAt != 0);
-            _items.RemoveAt(victim < 0 ? 0 : victim);
+            var victim = _items.FindIndex(item => item.RequestId == 0);
+            RemoveAt(victim < 0 ? 0 : victim);
         }
         Publish();
         return notice;
@@ -41,11 +42,11 @@ internal sealed class NoticeCenter
 
     internal Notice? Find(long id) => _items.FirstOrDefault(item => item.Id == id);
 
-    internal bool Dismiss(long id)
+    internal bool Dismiss(long id, bool cancelDecision = true)
     {
         var index = _items.FindIndex(item => item.Id == id);
         if (index < 0) return false;
-        _items.RemoveAt(index);
+        RemoveAt(index, cancelDecision);
         Publish();
         return true;
     }
@@ -75,14 +76,20 @@ internal sealed class NoticeCenter
     internal void Clear()
     {
         if (_items.Count == 0) return;
-        _items.Clear();
+        while (_items.Count != 0) RemoveAt(_items.Count - 1);
         Publish();
     }
 
     /// <summary>Removes notices whose time has passed. Returns true when any were removed.</summary>
     internal bool Expire(long now)
     {
-        var removed = _items.RemoveAll(item => item.ExpiresAt != 0 && item.ExpiresAt <= now);
+        var removed = 0;
+        for (var index = _items.Count - 1; index >= 0; index--)
+            if (_items[index].ExpiresAt != 0 && _items[index].ExpiresAt <= now)
+            {
+                RemoveAt(index);
+                removed++;
+            }
         if (removed != 0) Publish();
         return removed != 0;
     }
@@ -97,6 +104,13 @@ internal sealed class NoticeCenter
                 if (item.ExpiresAt != 0 && (next is null || item.ExpiresAt < next)) next = item.ExpiresAt;
             return next;
         }
+    }
+
+    private void RemoveAt(int index, bool cancelDecision = true)
+    {
+        var notice = _items[index];
+        _items.RemoveAt(index);
+        Removed?.Invoke(cancelDecision ? notice : notice with { RequestId = 0 });
     }
 
     private void Publish()

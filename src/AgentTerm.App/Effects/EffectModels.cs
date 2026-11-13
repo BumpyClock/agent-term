@@ -25,6 +25,7 @@ internal enum NoticeAction
 /// <summary>
 /// A card shown inside the pane that raised it. A notice with the same <see cref="Key"/> replaces the earlier one and counts a repeat.
 /// <see cref="ExpiresAt"/> is a clock value in milliseconds, or zero when the notice stays until the user acts.
+/// A nonzero RequestId owns a pending clipboard decision. Removal must cancel it unless the action already resolved it.
 /// </summary>
 internal sealed record Notice(long Id, string Key, NoticeSeverity Severity, string Title, string Message, int Repeats, long ExpiresAt,
     IReadOnlyList<NoticeAction> Actions, long RequestId = 0, bool FromProgram = false);
@@ -57,7 +58,7 @@ internal interface IPaneEffectView
     /// <summary>True when the user can see this pane right now.</summary>
     bool IsVisible { get; }
     void ShowBell();
-    /// <summary>Shows or clears the pane's progress indicator. A percent of -1 keeps the current one.</summary>
+    /// <summary>Shows or clears the pane's progress indicator. Percentages are resolved by the producer.</summary>
     void ShowProgress(TerminalProgressState state, int percent);
     void RequestWindowResize(int rows, int columns);
     /// <summary>Selects this pane's tab and brings its window forward.</summary>

@@ -54,19 +54,34 @@ internal static partial class StartupChecks
         Invoke("ClearLinkHover");
         report.Add("PASS real hyperlink overlay updates its color with the displayed cell.");
 
+        var target = TerminalLinkPolicy.Evaluate(Encoding.UTF8.GetBytes("https://" + new string('a', 600) + "@destination.example/path"));
+        var confirmation = (Task<bool>)typeof(MainPage).GetMethod("ConfirmLinkAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [target])!;
+        ContentDialog? dialog = null;
+        await WaitAsync(() => (dialog = VisualTreeHelper.GetOpenPopupsForXamlRoot(surface.XamlRoot)
+            .SelectMany(popup => Descendants(popup.Child)).OfType<ContentDialog>().FirstOrDefault()) is not null, "full link confirmation");
+        try
+        {
+            if (!Descendants(dialog!).OfType<TextBlock>().Any(block => block.Text == target.Uri!.AbsoluteUri && block.Text.Contains("destination.example")))
+                throw new Exception("Link confirmation must show the complete validated destination, including a host beyond the hover truncation.");
+        }
+        finally { dialog!.Hide(); }
+        if (await confirmation) throw new Exception("Cancelling confirmation must not approve launching a link.");
+        report.Add("PASS link confirmation shows the full validated URI and cancels without launching.");
+
         await WaitAsync(() => Field<int>(page, "_outputRefreshQueued") == 0, "last output notification before scrolling");
         var offset = Presented().Viewport.Offset;
         typeof(MainPage).GetField("_animationsEnabled", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(page, true);
         Invoke("ScrollHistoryWheel", session, -5d);
-        await WaitAsync(() => Field<DispatcherQueueTimer?>(page, "_scrollTimer")?.IsRunning == false, "fractional scrolling completion");
+        await WaitAsync(() => !Field<TerminalScrollAnimation>(page, "_scrollAnimation").IsActive, "fractional scrolling completion");
+        await WaitAsync(() => !Field<bool>(page, "_renderingSubscribed") && !Field<bool>(page, "_frameRefreshQueued"), "scrolling frame pump becoming idle");
         if (Presented().Viewport.Offset != offset - 5 || Field<double>(surface, "_scrollFraction") != 0 ||
             Presented().OverscanAbove.Length != 0 || Presented().OverscanBelow.Length != 0)
             throw new Exception($"Smooth scrolling did not settle. Offset {offset} -> {Presented().Viewport.Offset}, fraction {Field<double>(surface, "_scrollFraction")}, overscan {Presented().OverscanAbove.Length}/{Presented().OverscanBelow.Length}.");
-        report.Add("PASS real scroll timer settles five history rows and releases overscan.");
+        report.Add("PASS composition-driven scrolling settles five history rows and releases overscan.");
 
         var find = (TextBox)page.FindName("FindBox");
         find.Text = "history-020";
-        Invoke("FindMatch", true);
+        Invoke("FindMatch", true, false);
         await WaitAsync(() => !Field<bool>(page, "_findInFlight"), "progressive find in the live page");
         if (!session.HasSelection) throw new Exception("Find did not select its history match.");
         session.ClearSelection();

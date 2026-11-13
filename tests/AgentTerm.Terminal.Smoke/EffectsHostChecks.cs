@@ -59,16 +59,10 @@ internal static class EffectsHostChecks
 
     public static void Run()
     {
-        var inbox = new EffectInbox();
-        for (var request = 1; request <= 1000; request++)
-            inbox.Add([new ClipboardEffect(ClipboardNoticeKind.WriteRequested, 1, "test", request)]);
-        Require(inbox.Take().Count <= EffectInbox.Capacity, "Undelivered clipboard approvals must stay bounded across batches.");
-        inbox.Add([new NotificationEffect("before", "reset"), new ResetEffect(), new NotificationEffect("after", "reset")]);
-        Require(inbox.Take() is [ResetEffect, NotificationEffect { Title: "after" }], "A reset must remove earlier queued notices and preserve later ones.");
-
         CheckBell();
         CheckNotifications();
         CheckNotificationActivation();
+        CheckNotificationBounds();
         CheckProgress();
         CheckClipboardCards();
         CheckResizeGate();
@@ -192,6 +186,37 @@ internal static class EffectsHostChecks
         Require(rig.View.Bells == 0, "A closed pane ignores later effects.");
     }
 
+    private static void CheckNotificationBounds()
+    {
+        var rig = new Rig();
+        rig.Host.Active = true;
+        rig.View.Visible = false;
+        rig.Effects.Apply([new NotificationEffect("hidden", "foreground")]);
+        Require(rig.Host.Toasts.Count == 0, "A hidden pane in the foreground window must not send a system toast.");
+        rig.Host.Active = false;
+        for (var index = 0; index < 100; index++)
+        {
+            rig.Now += 2000;
+            rig.Effects.Apply([new NotificationEffect("notice", index.ToString())]);
+            Require(rig.Host.Toasts.Count(toast => !rig.Host.Removed.Contains(toast.Id)) <= NoticeCenter.MaxVisible,
+                "Unseen toasts must stay bounded across throttle intervals.");
+        }
+        var obsolete = rig.Host.Toasts.First();
+        rig.Host.Activate(obsolete.Id);
+        Require(rig.View.Reveals == 0, "Evicted toast routes must not activate panes.");
+        var current = rig.Host.Toasts.Last();
+        rig.Host.Activate(current.Id);
+        Require(rig.View.Reveals == 1 && rig.Host.Removed.Contains(current.Id), "Current activation must reveal and withdraw the toast.");
+        rig.Now += 2000;
+        rig.Effects.Apply([new NotificationEffect("same", "same")]);
+        var old = rig.Host.Toasts.Last();
+        rig.Now += 2000;
+        rig.Effects.Apply([new NotificationEffect("same", "same")]);
+        Require(rig.Host.Removed.Contains(old.Id), "Replacing a toast must withdraw its old tag and activation route.");
+        rig.Host.Activate(old.Id);
+        Require(rig.View.Reveals == 1, "Superseded toast activation must be ignored.");
+    }
+
     private static void CheckProgress()
     {
         var rig = new Rig();
@@ -202,7 +227,7 @@ internal static class EffectsHostChecks
         rig.Effects.Apply([new ProgressEffect(TerminalProgressState.Set, 40)]);
         Require(rig.Host.Taskbar.Count == calls, "Repeating the same taskbar state should not call Windows again.");
 
-        rig.Effects.Apply([new ProgressEffect(TerminalProgressState.Error, -1)]);
+        rig.Effects.Apply([new ProgressEffect(TerminalProgressState.Error, 40)]);
         Require(rig.Aggregator.Shown(7) == new TaskbarProgress(TaskbarProgressKind.Error, 40) && rig.Effects.Badge == "failed",
             "An error without a value should keep the previous percentage.");
         rig.Effects.Apply([new ProgressEffect(TerminalProgressState.Pause, 55)]);
@@ -245,8 +270,9 @@ internal static class EffectsHostChecks
         rig.Host.Active = true;
         rig.Effects.Apply([new ClipboardEffect(ClipboardNoticeKind.Wrote, 1234, "")]);
         var wrote = rig.Effects.Notices.Items.Single();
-        Require(wrote.Title == "Clipboard updated" && wrote.Message.Contains("1,234", StringComparison.Ordinal) || wrote.Message.Contains("1234", StringComparison.Ordinal),
-            $"A write should be disclosed with its size, got <{wrote.Message}>.");
+        Require(wrote.Title == "Clipboard updated", "A write should disclose its action.");
+        Require(wrote.Message.Contains(1234.ToString("N0", System.Globalization.CultureInfo.CurrentCulture), StringComparison.Ordinal),
+            $"A write should disclose its size, got <{wrote.Message}>.");
         rig.Effects.Apply([new ClipboardEffect(ClipboardNoticeKind.Wrote, 5, "", Repeats: 3)]);
         Require(rig.Effects.Notices.Items.Single().Repeats == 4, "Repeated writes should update one card with a count.");
 
@@ -279,6 +305,13 @@ internal static class EffectsHostChecks
         for (var id = 1; id <= NoticeCenter.MaxVisible; id++) crowded.Effects.Apply([new ClipboardEffect(ClipboardNoticeKind.WriteRequested, 1, "", id, "p")]);
         crowded.Effects.Apply([new ClipboardEffect(ClipboardNoticeKind.Wrote, 1, "")]);
         Require(crowded.Effects.Notices.Items.Count == NoticeCenter.MaxVisible, "Cards must stay bounded when decisions wait.");
+        crowded.Effects.Apply([new NotificationEffect("unseen", "persistent")]);
+        Require(crowded.Effects.Notices.Items.All(item => item.RequestId != 0) && crowded.Writes.Count == 0,
+            "Four held decisions must survive an unseen ordinary notification.");
+        crowded.Effects.Apply([new ClipboardEffect(ClipboardNoticeKind.WriteRequested, 1, "", 5, "new")]);
+        Require(crowded.Writes.SequenceEqual([(1L, false)]), "Evicting an owned decision must deny its pending request.");
+        crowded.Effects.Reset();
+        Require(crowded.Writes.Count == 5 && crowded.Writes.All(write => !write.Allow), "Reset must deny every remaining owned decision.");
     }
 
     private static void CheckResizeGate()
@@ -328,7 +361,7 @@ internal static class EffectsHostChecks
             var options = new TerminalEffectOptions
             {
                 ClipboardRead = ClipboardReadPolicy.Allow, ClipboardWrite = ClipboardWritePolicy.Ask, Bell = BellStyle.Both,
-                Notifications = NotificationStyle.InApp, Progress = false, AllowWindowResize = true, ClipboardMaxBytes = 64 * 1024,
+                Notifications = NotificationStyle.InApp, Progress = false, AllowWindowResize = true, ClipboardMaxBytes = 100_001,
             };
             defaults.Update("cmd", 15);
             defaults.UpdateEffects(options);

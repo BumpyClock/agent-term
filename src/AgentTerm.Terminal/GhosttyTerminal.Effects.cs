@@ -5,8 +5,8 @@ namespace AgentTerm.Terminal;
 
 // Native effect callbacks: bell, desktop notification, progress, clipboard read and write, and window resize requests.
 // Callbacks run inside ghostty_terminal_vt_write while the caller holds the terminal lock. They copy their borrowed payload,
-// apply policy in TerminalEffects, queue the result, and return. They never touch UI, never wait on another thread, and never
-// let an exception cross the ABI. A callback that fails answers as a refusal.
+// apply policy in TerminalEffects, queue the result, and return. Clipboard access may wait for its owner thread
+// for a bounded time; the protocol requires a truthful reply inside the callback. Exceptions never cross the ABI.
 public sealed partial class GhosttyTerminal
 {
     private EffectsNative.Bell _bellCallback = null!;
@@ -146,18 +146,19 @@ public sealed partial class GhosttyTerminal
         var result = EffectsNative.WriteDenied;
         try
         {
+            var options = Effects.Options;
             long total = 0;
             for (nuint index = 0; index < request->ContentsLength; index++)
                 total += (long)request->Contents[index].Data.Length;
             var parts = new List<ClipboardPart>();
-            if (total <= Effects.Options.ClipboardMaxBytes)
+            if (total <= options.ClipboardMaxBytes)
                 for (nuint index = 0; index < request->ContentsLength; index++)
                 {
                     var content = request->Contents[index];
                     parts.Add(new ClipboardPart(content.Mime.ToManaged(), content.Data.ToBytes()));
                 }
             var decision = Effects.HandleWrite(new ClipboardWriteInput(Location(request->Location), parts,
-                request->Name.ToManaged(), total));
+                request->Name.ToManaged(), total), options);
             result = decision.Outcome switch
             {
                 ClipboardOutcome.Success => EffectsNative.WriteSuccess,
