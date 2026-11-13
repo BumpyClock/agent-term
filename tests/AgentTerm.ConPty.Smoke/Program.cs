@@ -3,6 +3,9 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using AgentTerm.Terminal;
 
+if (args.Contains("--transport-fixture")) { TransportChecks.RunFixture(false); return; }
+if (args.Contains("--transport-hold-fixture")) { TransportChecks.RunFixture(true); return; }
+
 if (args.Contains("--default-profile-only"))
 {
     await ShellProfileDiscoveryChecks.CheckDefaultResolutionAsync();
@@ -34,6 +37,8 @@ if (!OperatingSystem.IsWindows())
 }
 
 if (args.Contains("--history-search-only")) { await HistorySearchChecks.RunAsync(); return; }
+if (args.Contains("--transport-only")) { await TransportChecks.RunAsync(); return; }
+if (args.Contains("--smart-prompt-only")) { await SmartPromptChecks.RunAsync(); return; }
 
 if (args.Contains("--concurrent-frame-only"))
 {
@@ -118,6 +123,7 @@ if (args.Contains("--prompt-mode-only"))
 
 var timeout = TimeSpan.FromSeconds(20);
 await MailboxChecks.RunAsync();
+await TransportChecks.RunAsync();
 await ProgramStatusSessionChecks.RunAsync();
 ShellProfileDiscoveryChecks.Run();
 await TerminalEnvironmentChecks.RunAsync();

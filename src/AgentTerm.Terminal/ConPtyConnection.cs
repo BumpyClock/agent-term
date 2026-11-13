@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using Microsoft.Win32.SafeHandles;
 
 namespace AgentTerm.Terminal;
 
@@ -73,7 +74,7 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
                 IntPtr readerHandle = outputRead, writerHandle = inputWrite;
                 var reader = Task.Factory.StartNew(() => ReadOutput(readerHandle), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
                 var writer = Task.Factory.StartNew(() => WriteInput(writerHandle), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-                _ = Task.Factory.StartNew(() => Finish(reader, writer, readerHandle, writerHandle), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                _ = Task.Run(() => FinishAsync(reader, writer, readerHandle, writerHandle));
                 outputRead = inputWrite = IntPtr.Zero;
             }
             catch (Exception ex)
@@ -189,13 +190,20 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
         catch { }
     }
 
-    private void Finish(Task<Exception?> reader, Task<Exception?> writer, IntPtr outputRead, IntPtr inputWrite)
+    private async Task FinishAsync(Task<Exception?> reader, Task<Exception?> writer, IntPtr outputRead, IntPtr inputWrite)
     {
         Exception? error = null;
         int exitCode = 1;
         try
         {
-            if (Native.WaitForSingleObject(process, uint.MaxValue) != 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+            using (var exited = new ProcessExitWaitHandle(process))
+            {
+                var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var registration = ThreadPool.RegisterWaitForSingleObject(exited, static (state, _) =>
+                    ((TaskCompletionSource)state!).TrySetResult(), signal, Timeout.Infinite, executeOnlyOnce: true);
+                try { await signal.Task.ConfigureAwait(false); }
+                finally { registration.Unregister(null); }
+            }
             Check(Native.GetExitCodeProcess(process, out uint code));
             exitCode = unchecked((int)code);
             CloseInput();
@@ -203,8 +211,8 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
             lock (gate) { console = pseudoConsole; pseudoConsole = IntPtr.Zero; }
             // This can block while writing the final frame. The reader remains active.
             if (console != IntPtr.Zero) Native.ClosePseudoConsole(console);
-            Exception? readError = reader.GetAwaiter().GetResult();
-            Exception? writeError = writer.GetAwaiter().GetResult();
+            Exception? readError = await reader.ConfigureAwait(false);
+            Exception? writeError = await writer.ConfigureAwait(false);
             error = transportError ?? readError ?? writeError;
         }
         catch (Exception ex) { error = ex; }
@@ -241,7 +249,7 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
         }
     }
 
-    private Exception? WriteInput(IntPtr handle)
+    private unsafe Exception? WriteInput(IntPtr handle)
     {
         try
         {
@@ -250,9 +258,10 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
                 while (input.Reader.TryRead(out byte[]? bytes))
                 {
                     int offset = 0;
+                    fixed (byte* buffer = bytes)
                     while (offset < bytes.Length)
                     {
-                        if (!Native.WriteFile(handle, bytes.AsSpan(offset).ToArray(), bytes.Length - offset, out int written, IntPtr.Zero))
+                        if (!Native.WriteFile(handle, buffer + offset, bytes.Length - offset, out int written, IntPtr.Zero))
                         {
                             int error = Marshal.GetLastWin32Error();
                             if (error == 109 || error == 232) return null;
@@ -285,6 +294,12 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
 
     private static void Check(bool success) { if (!success) throw new Win32Exception(Marshal.GetLastWin32Error()); }
 
+    // FinishAsync owns the native process handle until the registered wait and pipe drains finish.
+    private sealed class ProcessExitWaitHandle : WaitHandle
+    {
+        internal ProcessExitWaitHandle(IntPtr processHandle) => SafeWaitHandle = new SafeWaitHandle(processHandle, ownsHandle: false);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct Coord(short X, short Y);
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -315,8 +330,7 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
         [LibraryImport("kernel32.dll", EntryPoint = "FreeEnvironmentStringsW")][return: MarshalAs(UnmanagedType.Bool)] public static partial bool FreeEnvironmentStrings(IntPtr environment);
         [LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "CreateProcessW", StringMarshalling = StringMarshalling.Utf16)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool CreateProcess(string? application, char[] command, IntPtr processAttributes, IntPtr threadAttributes, [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint flags, IntPtr environment, string? directory, ref StartupInfoEx startup, out ProcessInformation process);
         [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool ReadFile(IntPtr handle, [Out] byte[] buffer, int count, out int read, IntPtr overlapped);
-        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool WriteFile(IntPtr handle, byte[] buffer, int count, out int written, IntPtr overlapped);
-        [LibraryImport("kernel32.dll", SetLastError = true)] public static partial uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static unsafe partial bool WriteFile(IntPtr handle, byte* buffer, int count, out int written, IntPtr overlapped);
         [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool GetExitCodeProcess(IntPtr process, out uint exitCode);
         [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool TerminateProcess(IntPtr process, uint exitCode);
         [LibraryImport("kernel32.dll")][return: MarshalAs(UnmanagedType.Bool)] public static partial bool CloseHandle(IntPtr handle);
