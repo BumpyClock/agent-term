@@ -29,7 +29,7 @@ public sealed partial class GhosttyTerminal
         byte processingError = 0;
         ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 33, &processingError), "Could not read VT processing status.");
         report.AppendLine($"Grid {_columns} x {_rows}, cell pixels {_cellWidthPx} x {_cellHeightPx}");
-        report.AppendLine($"Host clipboard {_hostCapabilities.Clipboard}, host Kitty images {_hostCapabilities.KittyImages}");
+        report.AppendLine($"Host clipboard {_hostCapabilities.Clipboard || Effects.AdvertisesClipboardAccess}, host Kitty images {_hostCapabilities.KittyImages}");
         report.AppendLine($"Page resident bytes {memory.Values[2] + memory.Values[8]}, reserved bytes {memory.Values[1] + memory.Values[7]}");
         report.AppendLine($"Image bytes {memory.Values[5] + memory.Values[11]}, compression supported {memory.CompressionSupported != 0}");
         report.AppendLine($"VT processing error {processingError != 0} (sticky informational status; parsing continues)");

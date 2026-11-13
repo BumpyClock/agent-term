@@ -535,31 +535,37 @@ public sealed partial class TerminalSurface : UserControl
             {
                 drawing.DrawTextLayout(layouts.Get(device, cell.Text, width, cell.Bold, cell.Italic), x, y, foreground);
             }
-            if (cell.Underline)
-            {
-                var underline = cell.Selected ? foreground : cell.UnderlineColor is { } uc ? ToColor(uc) : foreground;
-                if (cell.Dim && !cell.Selected && cell.UnderlineColor is not null) underline = Color.FromArgb(255, (byte)(underline.R / 2), (byte)(underline.G / 2), (byte)(underline.B / 2));
-                var lineY = y + cellHeight - 2;
-                switch (cell.UnderlineStyle)
-                {
-                    case TerminalUnderlineStyle.Double:
-                        drawing.DrawLine(x, lineY - 2, x + width, lineY - 2, underline);
-                        goto default;
-                    case TerminalUnderlineStyle.Curly:
-                        for (float i = 0; i < width; i += 1) drawing.DrawLine(x + i, lineY + MathF.Sin(i * MathF.PI / 2), x + MathF.Min(i + 1, width), lineY + MathF.Sin((i + 1) * MathF.PI / 2), underline);
-                        break;
-                    case TerminalUnderlineStyle.Dotted:
-                    case TerminalUnderlineStyle.Dashed:
-                        var length = cell.UnderlineStyle == TerminalUnderlineStyle.Dotted ? 1 : 3;
-                        for (float i = 0; i < width; i += length * 2) drawing.DrawLine(x + i, lineY, x + MathF.Min(i + length, width), lineY, underline);
-                        break;
-                    default: drawing.DrawLine(x, lineY, x + width, lineY, underline); break;
-                }
-            }
-            if (cell.Overline) drawing.DrawLine(x, y + 1, x + width, y + 1, foreground);
-            if (cell.Strikethrough) drawing.DrawLine(x, y + cellHeight / 2, x + width, y + cellHeight / 2, foreground);
+            DrawDecorations(drawing, cell, x, y, width, cellHeight, foreground);
         }
         DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images, viewportClip);
+    }
+
+    private static void DrawDecorations(CanvasDrawingSession drawing, TerminalCell cell, float x, float y,
+        float width, float cellHeight, Color foreground, bool cursorText = false)
+    {
+        if (cell.Underline)
+        {
+            var underline = cursorText || cell.Selected ? foreground : cell.UnderlineColor is { } uc ? ToColor(uc) : foreground;
+            if (!cursorText && cell.Dim && !cell.Selected && cell.UnderlineColor is not null) underline = Color.FromArgb(255, (byte)(underline.R / 2), (byte)(underline.G / 2), (byte)(underline.B / 2));
+            var lineY = y + cellHeight - 2;
+            switch (cell.UnderlineStyle)
+            {
+                case TerminalUnderlineStyle.Double:
+                    drawing.DrawLine(x, lineY - 2, x + width, lineY - 2, underline);
+                    goto default;
+                case TerminalUnderlineStyle.Curly:
+                    for (float i = 0; i < width; i += 1) drawing.DrawLine(x + i, lineY + MathF.Sin(i * MathF.PI / 2), x + MathF.Min(i + 1, width), lineY + MathF.Sin((i + 1) * MathF.PI / 2), underline);
+                    break;
+                case TerminalUnderlineStyle.Dotted:
+                case TerminalUnderlineStyle.Dashed:
+                    var length = cell.UnderlineStyle == TerminalUnderlineStyle.Dotted ? 1 : 3;
+                    for (float i = 0; i < width; i += length * 2) drawing.DrawLine(x + i, lineY, x + MathF.Min(i + length, width), lineY, underline);
+                    break;
+                default: drawing.DrawLine(x, lineY, x + width, lineY, underline); break;
+            }
+        }
+        if (cell.Overline) drawing.DrawLine(x, y + 1, x + width, y + 1, foreground);
+        if (cell.Strikethrough) drawing.DrawLine(x, y + cellHeight / 2, x + width, y + cellHeight / 2, foreground);
     }
 
     private static void DrawCursor(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
@@ -588,6 +594,8 @@ public sealed partial class TerminalSurface : UserControl
             {
                 drawing.DrawTextLayout(layouts.Get(device, cell.Text, cursorWidth, cell.Bold, cell.Italic),
                     cx, cy, ToColor(frame.CursorText ?? cell.Background));
+                DrawDecorations(drawing, cell, cx, cy, cursorWidth, cellHeight,
+                    ToColor(frame.CursorText ?? cell.Background), cursorText: true);
             }
         }
     }

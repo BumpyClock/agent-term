@@ -74,3 +74,5 @@ Windows has no vertical text, zoom, copy, alias or grab pointer. They map to the
 
 - `tests/AgentTerm.Terminal.Smoke/HyperlinkChecks.cs`: policy matrix, native lookup (split writes, ST and BEL, reset, adjacent links, wrap, wide glyphs, spacer heads, reflow, scroll, alternate screen, ownership, disposal), pointer mapping, click routing.
 - `tests/AgentTerm.ConPty.Smoke/HyperlinkSessionChecks.cs`: a real shell prints OSC 8 and OSC 22, stale frame rejection, explicit pointer reset, disposal. Run alone with `--hyperlink-only`.
+
+Hover underlines refresh when the displayed cell foreground changes, including when the destination and span stay the same. Fractional scrolling moves and clips the overlay through the shared grid geometry.
