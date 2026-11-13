@@ -21,6 +21,8 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     public AgentState State { get; private set; } = AgentState.Idle;
     public AgentLocation? Location { get; private set; }
     private readonly Queue<AgentEvent> _requests = new();
+    /// <summary>Changes when pending approval/input membership changes, including requests behind the shown one.</summary>
+    public int RequestRevision { get; private set; }
     public AgentEvent? Request => _requests.TryPeek(out var request) ? request : null;
     /// <summary>The pending request when <paramref name="task"/> owns its turn, else null. A request is actionable only in its owning task's view.</summary>
     public AgentEvent? RequestFor(AgentTask? task) => Request is { } request && task?.Contains(request.Turn) == true ? request : null;
@@ -74,9 +76,6 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
             }
             if (_session is null)
             {
-                var description = await harness.DescribeAsync(location, token);
-                token.ThrowIfCancellationRequested();
-                if (!description.Available) throw new InvalidOperationException(description.Message);
                 var opened = await harness.OpenAsync(new(location, model, invokingTerminal), token);
                 if (token.IsCancellationRequested) { await opened.DisposeAsync(); token.ThrowIfCancellationRequested(); }
                 _session = opened;
@@ -155,14 +154,18 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
         if (RunningTask is { } task) task.LastOutcome = outcome ?? (state == AgentState.Failed ? WorkStatus.Failed : WorkStatus.Succeeded);
         if (_turn is { } turn) Timeline.Settle(turn);
         _operation?.Cancellation.Dispose(); _operation = null;
-        _requests.Clear(); State = state;
+        _requests.Clear(); RequestRevision++; State = state;
     }
-    private void UpdateRequestState() => State = Request switch
+    private void UpdateRequestState()
     {
-        ApprovalRequest => AgentState.WaitingForApproval,
-        QuestionRequest => AgentState.WaitingForInput,
-        _ => AgentState.Running,
-    };
+        RequestRevision++;
+        State = Request switch
+        {
+            ApprovalRequest => AgentState.WaitingForApproval,
+            QuestionRequest => AgentState.WaitingForInput,
+            _ => AgentState.Running,
+        };
+    }
     public async Task<bool> RespondAsync(AgentResponse response)
     {
         var id = Request switch { ApprovalRequest a => a.Request, QuestionRequest q => q.Request, _ => (Guid?)null };
@@ -207,7 +210,7 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     private async Task StopAsync(Guid turn, TurnOperation operation)
     {
         var starting = State == AgentState.Starting;
-        State = AgentState.Interrupting; _requests.Clear(); Changed?.Invoke();
+        State = AgentState.Interrupting; _requests.Clear(); RequestRevision++; Changed?.Invoke();
         if (starting)
         {
             operation.Cancellation.Cancel();

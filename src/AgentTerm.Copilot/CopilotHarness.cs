@@ -1,5 +1,3 @@
-using System.Threading.Channels;
-using System.Text;
 using Microsoft.Extensions.AI;
 using System.ComponentModel;
 using AgentTerm.Agents;
@@ -11,6 +9,7 @@ namespace AgentTerm.Copilot;
 
 public sealed class CopilotHarness : IAgentHarness
 {
+    private const string SignInMessage = "Sign in with Copilot CLI before using Agent mode. Dashboard gh sign-in is separate.";
     private static void Validate(AgentLocation location)
     {
         if (location.WslDistribution is not null) throw new NotSupportedException("Agent tools cannot run in WSL yet. Open a local Windows pane.");
@@ -31,10 +30,11 @@ public sealed class CopilotHarness : IAgentHarness
             await using var client = Create(location);
             await client.StartAsync(cancellationToken);
             var auth = await client.GetAuthStatusAsync(cancellationToken);
-            if (!auth.IsAuthenticated) return new(false, "Sign in with Copilot CLI before using Agent mode. Dashboard gh sign-in is separate.", []);
+            if (!auth.IsAuthenticated) return new(false, SignInMessage, []);
             var models = await client.ListModelsAsync(cancellationToken);
             return new(true, "Copilot ready", models.Select(m => m.Id).ToArray());
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) { return new(false, $"Copilot unavailable. {ex.Message}", []); }
     }
     public async Task<IAgentSession> OpenAsync(AgentOptions options, CancellationToken cancellationToken = default)
@@ -44,11 +44,18 @@ public sealed class CopilotHarness : IAgentHarness
         try
         {
             await client.StartAsync(cancellationToken);
+            var auth = await client.GetAuthStatusAsync(cancellationToken);
+            if (!auth.IsAuthenticated) throw new InvalidOperationException(SignInMessage);
             var adapter = new Session(client);
             await adapter.OpenAsync(options, cancellationToken);
             return adapter;
         }
-        catch { await client.DisposeAsync(); throw; }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { await client.DisposeAsync(); throw; }
+        catch (Exception ex)
+        {
+            await client.DisposeAsync();
+            throw new InvalidOperationException($"Copilot unavailable. {ex.Message}", ex);
+        }
     }
     internal sealed class Session(CopilotClient? client,
         Func<AgentPrompt, CancellationToken, Task>? send = null,
@@ -57,7 +64,9 @@ public sealed class CopilotHarness : IAgentHarness
         IHostTerminal? terminal = null,
         Func<Task>? approvalContinuation = null) : IAgentSession
     {
-        private readonly Channel<AgentEvent> _events = Channel.CreateUnbounded<AgentEvent>();
+        private readonly AgentEventMailbox _events = new();
+        internal (int Events, int Characters) PendingEvents => _events.Backlog;
+        internal const int ReconciliationLimit = 1024;
         private readonly Dictionary<Guid, TaskCompletionSource<AgentResponse>> _requests = [];
         private readonly CancellationTokenSource _lifetime = new();
         private CopilotSession? _native;
@@ -66,14 +75,21 @@ public sealed class CopilotHarness : IAgentHarness
         private bool _unusable;
         private Turn? _active;
         private Guid? _turn => _active?.Id;
-        private sealed class Turn(Guid id, CancellationToken lifetime)
+        private sealed class Turn(Guid id, CancellationToken lifetime) : IDisposable
         {
             public Guid Id { get; } = id;
             public CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
             public TaskCompletionSource Idle { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public Task? Stop;
             public string? Failure;
-            public Dictionary<string, StringBuilder> Messages { get; } = [];
+            public Dictionary<string, ResponseReconciliation> Messages { get; } = [];
+            public int MessageIdCharacters;
+            public void Dispose()
+            {
+                foreach (var response in Messages.Values) response.Dispose();
+                Messages.Clear();
+                Cancellation.Dispose();
+            }
         }
         private IHostTerminal? _terminal = terminal;
         private readonly HashSet<Task<TerminalExecutionResult>> _executions = [];
@@ -92,7 +108,7 @@ public sealed class CopilotHarness : IAgentHarness
                 Tools = [CopilotTool.DefineTool(
                     ([Description("Exact PowerShell command to execute in the invoking pane, preserving shell state.")] string command, ToolInvocation invocation) => RunInTerminalAsync(command, invocation.ToolCallId),
                     toolOptions: new CopilotToolOptions { SkipPermission = true, Defer = CopilotToolDefer.Never },
-                    factoryOptions: new AIFunctionFactoryOptions { Name = "run_in_terminal", Description = "Execute in the user's EXISTING pane PowerShell. Cwd returned by this tool is authoritative. Output is bounded ConPTY terminal text with ANSI stripped; cursor redraws are not reconstructed. Use this tool for all shell and file operations. No independent shell or native file tools are available. Interactive programs require deliberate user input handoff." })],
+                    factoryOptions: new AIFunctionFactoryOptions { Name = "run_in_terminal", Description = "Execute in the user's EXISTING pane PowerShell. Cwd returned by this tool is authoritative. Output is bounded terminal screen text when authenticated command boundaries remain intact, with a streamed transcript fallback when they do not. Use this tool for all shell and file operations. No independent shell or native file tools are available. Interactive programs require deliberate user input handoff." })],
                 OnPermissionRequest = async (request, invocation) =>
                 {
                     (string Detail, string? CallId) gate = request switch
@@ -141,7 +157,7 @@ public sealed class CopilotHarness : IAgentHarness
                     return new(TerminalExecutionStatus.Denied);
                 execution = _terminal.ExecuteAsync(new(command), owner.Cancellation.Token);
                 _executions.Add(execution);
-                _events.Writer.TryWrite(new ToolExecuting(owner.Id, callId));
+                Emit(new ToolExecuting(owner.Id, callId));
             }
             try { return await execution; }
             finally { lock (_gate) _executions.Remove(execution); }
@@ -159,7 +175,7 @@ public sealed class CopilotHarness : IAgentHarness
                 var id = Guid.NewGuid();
                 var completion = new TaskCompletionSource<AgentResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
                 lock (_requests) _requests.Add(id, completion);
-                _events.Writer.TryWrite(create(owner.Id, id));
+                Emit(create(owner.Id, id));
                 return AwaitAsync(id, completion.Task);
             }
         }
@@ -172,6 +188,35 @@ public sealed class CopilotHarness : IAgentHarness
         {
             lock (_requests) foreach (var request in _requests.Values) request.TrySetResult(new(Guid.Empty));
         }
+        private void Emit(AgentEvent item)
+        {
+            if (!_events.TryWrite(item) && !_unusable)
+                FailDelivery("Copilot output exceeded the pending event budget. The session was stopped; reopen it to continue.");
+        }
+        private void FailDelivery(string message)
+        {
+            _unusable = true;
+            DeclineRequests();
+            if (_active is { } owner)
+            {
+                owner.Failure ??= message;
+                owner.Stop ??= Task.Run(() => StopAsync(owner, default));
+            }
+            _events.Complete(new IOException(message));
+        }
+        private ResponseReconciliation? Response(Turn owner, string id)
+        {
+            if (owner.Messages.TryGetValue(id, out var response)) return response;
+            if (owner.Messages.Count == ReconciliationLimit || id.Length > 64 * 1024 - owner.MessageIdCharacters)
+            {
+                FailDelivery("Copilot exceeded the response count budget for one turn. The session was stopped; reopen it to continue.");
+                return null;
+            }
+            response = new ResponseReconciliation();
+            owner.Messages.Add(id, response);
+            owner.MessageIdCharacters += id.Length;
+            return response;
+        }
         internal void OnEvent(SessionEvent item)
         {
             lock (_gate) OnEventCore(item);
@@ -179,18 +224,20 @@ public sealed class CopilotHarness : IAgentHarness
         private void OnEventCore(SessionEvent item)
         {
             if (_turn is not { } turn) return;
+            // An overloaded stream must still observe idle so Stop can release native ownership.
+            if (_unusable && item is not SessionIdleEvent) return;
             if (item is ToolExecutionStartEvent started)
             {
                 _toolNames[started.Data.ToolCallId] = started.Data.ToolName;
-                _events.Writer.TryWrite(CopilotToolPresentation.Start(turn, started.Data.ToolCallId, started.Data.ToolName, started.Data.Arguments));
+                Emit(CopilotToolPresentation.Start(turn, started.Data.ToolCallId, started.Data.ToolName, started.Data.Arguments));
                 return;
             }
             if (item is ToolExecutionCompleteEvent completed)
             {
                 _toolNames.TryRemove(completed.Data.ToolCallId, out var name);
                 var presentation = CopilotToolPresentation.Complete(name ?? "", completed.Data.Result?.Content, completed.Data.Success);
-                _events.Writer.TryWrite(new ToolOutput(turn, completed.Data.ToolCallId, presentation.Text));
-                _events.Writer.TryWrite(new ToolCompleted(turn, completed.Data.ToolCallId, presentation.Status));
+                Emit(new ToolOutput(turn, completed.Data.ToolCallId, presentation.Text));
+                Emit(new ToolCompleted(turn, completed.Data.ToolCallId, presentation.Status));
                 return;
             }
             var owner = _active!;
@@ -203,24 +250,24 @@ public sealed class CopilotHarness : IAgentHarness
             if (item is AssistantMessageDeltaEvent delta)
             {
                 var id = delta.Data.MessageId;
-                owner.Messages.TryGetValue(id, out var prior);
-                if (prior is null) owner.Messages[id] = prior = new StringBuilder();
+                var prior = Response(owner, id);
+                if (prior is null) return;
                 prior.Append(delta.Data.DeltaContent);
-                _events.Writer.TryWrite(new TextDelta(turn, delta.Data.DeltaContent));
+                Emit(new TextDelta(turn, delta.Data.DeltaContent));
                 return;
             }
             if (item is AssistantMessageEvent message)
             {
                 var id = message.Data.MessageId;
                 var content = message.Data.Content;
-                owner.Messages.TryGetValue(id, out var prior);
-                if (prior is null) _events.Writer.TryWrite(new TextDelta(turn, content));
-                else if (content.StartsWith(prior.ToString(), StringComparison.Ordinal))
+                var prior = Response(owner, id);
+                if (prior is null) return;
+                if (prior.IsPrefixOf(content))
                 {
-                    if (content.Length > prior.Length) _events.Writer.TryWrite(new TextDelta(turn, content[prior.Length..]));
+                    if (content.Length > prior.Length) Emit(new TextDelta(turn, content[prior.Length..]));
                 }
-                else _events.Writer.TryWrite(new TextDelta(turn, "\n[Final response differs from streamed text]\n" + content));
-                owner.Messages[id] = new StringBuilder(content);
+                else Emit(new TextDelta(turn, "\n[Final response differs from streamed text]\n" + content));
+                prior.Replace(content);
                 return;
             }
             AgentEvent? normalized = item switch
@@ -233,11 +280,11 @@ public sealed class CopilotHarness : IAgentHarness
                 DeclineRequests();
                 _active = null;
                 owner.Idle.TrySetResult();
-                owner.Cancellation.Dispose();
+                owner.Dispose();
             }
-            if (normalized is not null) _events.Writer.TryWrite(normalized);
+            if (normalized is not null) Emit(normalized);
         }
-        public IAsyncEnumerable<AgentEvent> Events(CancellationToken cancellationToken = default) => _events.Reader.ReadAllAsync(cancellationToken);
+        public IAsyncEnumerable<AgentEvent> Events(CancellationToken cancellationToken = default) => _events.ReadAllAsync(cancellationToken);
         public async Task SubmitAsync(AgentPrompt prompt, CancellationToken cancellationToken = default)
         {
             lock (_gate)
@@ -256,7 +303,7 @@ public sealed class CopilotHarness : IAgentHarness
             catch
             {
                 lock (_gate) _unusable = true;
-                _events.Writer.TryComplete(new IOException("Copilot submission failed. Reopen the session."));
+                _events.Complete(new IOException("Copilot submission failed. Reopen the session."));
                 throw;
             }
         }
@@ -307,7 +354,7 @@ public sealed class CopilotHarness : IAgentHarness
                     var message = owner.Failure is { } failure
                         ? $"Copilot failed. {failure} Native idle was not confirmed. Reopen the session."
                         : "Copilot did not become idle. Reopen the session.";
-                    _events.Writer.TryComplete(new IOException(message, ex));
+                    _events.Complete(new IOException(message, ex));
                 }
             }
         }
@@ -321,7 +368,7 @@ public sealed class CopilotHarness : IAgentHarness
             {
                 _active?.Cancellation.Cancel();
                 _active?.Idle.TrySetCanceled();
-                _active?.Cancellation.Dispose();
+                _active?.Dispose();
                 _active = null;
             }
             _lifetime.Cancel(); _subscription?.Dispose();
@@ -330,7 +377,7 @@ public sealed class CopilotHarness : IAgentHarness
             try { await Task.WhenAll(executions); } catch (OperationCanceledException) { }
             if (_native is not null) await _native.DisposeAsync();
             if (client is not null) await client.DisposeAsync();
-            _events.Writer.TryComplete(); _lifetime.Dispose();
+            _events.Complete(); _lifetime.Dispose();
         }
     }
 }

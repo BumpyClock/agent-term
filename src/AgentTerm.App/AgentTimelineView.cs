@@ -223,7 +223,7 @@ internal sealed class AgentTimelineView : StackPanel
             {
                 row = entry switch
                 {
-                    TimelineWorkGroup group => new WorkRow(group, Mono, AwaitsApproval),
+                    TimelineWorkGroup group => new WorkRow(group, Mono, AwaitsApproval, () => controller.RequestRevision),
                     TimelineMessage { Role: MessageRole.User } message => new RequestRow(message, Mono),
                     TimelineMessage { Role: MessageRole.Assistant } message => new AnswerRow(message, Mono),
                     TimelineMessage message => new OutcomeRow(message, Mono),
@@ -373,7 +373,7 @@ internal sealed class AgentTimelineView : StackPanel
         }
     }
 
-    private sealed class WorkRow(TimelineWorkGroup group, FontFamily font, Func<TimelineTool, bool> awaitsApproval) : IRow
+    private sealed class WorkRow(TimelineWorkGroup group, FontFamily font, Func<TimelineTool, bool> awaitsApproval, Func<int> requestRevision) : IRow
     {
         private readonly StackPanel _root = new() { Spacing = 4 };
         private readonly DisclosureButton _header = new();
@@ -383,7 +383,8 @@ internal sealed class AgentTimelineView : StackPanel
         private readonly StackPanel _details = new() { Spacing = 4, Margin = new Thickness(AgentUi.Gutter, 0, 0, 0) };
         private readonly TextBlock _reasoning = AgentUi.Text("AgentDetailText");
         private readonly Dictionary<string, ToolCard> _cards = [];
-        private (bool Live, bool Last, string? Reasoning)? _shown;
+        private (bool Live, bool Last, int Revision, int Requests, bool Expanded)? _shown;
+        private bool _live, _last, _detailsShown;
         private string _reasoningShown = "";
         private bool _built;
         public FrameworkElement Element { get { Build(); return _root; } }
@@ -394,21 +395,18 @@ internal sealed class AgentTimelineView : StackPanel
             var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center, Children = { _failed, _header.Chevron } };
             _header.Content = AgentUi.Row(_icon, _label, trailing);
             _header.IsExpanded = group.Expanded;
-            _header.Toggled += expanded => { group.Expanded = expanded; Layout(); };
+            _header.Toggled += expanded => { group.Expanded = expanded; Update(_live, _last); };
             _details.Children.Add(_reasoning);
             _root.Children.Add(_header); _root.Children.Add(_details);
         }
         public void Update(bool live, bool last)
         {
             Build();
-            var changed = _shown != (live, last, group.Reasoning);
-            foreach (var tool in group.Tools)
-            {
-                if (!_cards.TryGetValue(tool.CallId, out var card)) { card = new ToolCard(tool, font, awaitsApproval); _cards.Add(tool.CallId, card); _details.Children.Add(card.Element); changed = true; }
-                changed |= card.Sync(live);
-            }
-            if (!changed) return;
-            _shown = (live, last, group.Reasoning);
+            _live = live;
+            _last = last;
+            var state = (live, last, group.Revision, requestRevision(), group.Expanded);
+            if (_shown == state) return;
+            _shown = state;
             var reasoningOnly = group.Tools.Count == 0;
             var thinking = live && reasoningOnly && last;
             var gated = group.Tools.LastOrDefault(t => t.Status == WorkStatus.Running && awaitsApproval(t));
@@ -426,9 +424,29 @@ internal sealed class AgentTimelineView : StackPanel
         private void Layout()
         {
             var single = group.Tools.Count == 1 && group.Reasoning is null;
+            var show = single || group.Expanded;
+            if (show)
+            {
+                foreach (var tool in group.Tools)
+                {
+                    if (!_cards.TryGetValue(tool.CallId, out var card))
+                    {
+                        card = new ToolCard(tool, font, awaitsApproval);
+                        _cards.Add(tool.CallId, card);
+                        _details.Children.Add(card.Element);
+                    }
+                    card.Sync(_live);
+                }
+            }
+            else if (_detailsShown)
+            {
+                // A previously visible call may still animate. Stop it once when its group collapses.
+                foreach (var card in _cards.Values) card.Sync(false);
+            }
+            _detailsShown = show;
             _header.Visibility = single ? Visibility.Collapsed : Visibility.Visible;
-            _details.Margin = new Thickness(AgentUi.Gutter, 0, 0, 0);
-            _details.Visibility = single || group.Expanded ? Visibility.Visible : Visibility.Collapsed;
+            _header.IsExpanded = group.Expanded;
+            _details.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 

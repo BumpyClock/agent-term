@@ -22,7 +22,9 @@ public sealed record TurnFailed(Guid Turn, string Message) : AgentEvent(Turn);
 public sealed record TurnInterrupted(Guid Turn) : AgentEvent(Turn);
 public interface IAgentHarness
 {
+    /// <summary>Explicit capability/model discovery. Submission opens directly without this preflight.</summary>
     Task<HarnessDescription> DescribeAsync(AgentLocation location, CancellationToken cancellationToken = default);
+    /// <summary>Opens an authenticated session, or throws an actionable availability error. Owns startup cleanup.</summary>
     Task<IAgentSession> OpenAsync(AgentOptions options, CancellationToken cancellationToken = default);
 }
 public interface IAgentSession : IAsyncDisposable

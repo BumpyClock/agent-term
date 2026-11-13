@@ -79,11 +79,10 @@ static class LifecycleChecks
             session.OnEvent(new AssistantMessageEvent { Data = new() { MessageId = "two", Content = "corrected final" } });
             session.OnEvent(Idle());
             await using var events = session.Events(timeout.Token).GetAsyncEnumerator();
-            Check(await events.MoveNextAsync() && events.Current is TextDelta a && a.Text == "final only", "Final-only message must be visible.");
-            Check(await events.MoveNextAsync() && events.Current is TextDelta b && b.Text == "stream", "Streamed content must be visible.");
-            Check(await events.MoveNextAsync() && events.Current is TextDelta c && c.Text == " tail", "Final message must emit only the missing suffix.");
-            Check(await events.MoveNextAsync() && events.Current is TextDelta correction && correction.Text == "\n[Final response differs from streamed text]\ncorrected final", "A differing final response is visible and labeled, not silently dropped.");
-            Check(await events.MoveNextAsync() && events.Current is TurnCompleted, "Native idle completes the turn without duplicating content.");
+            var text = "";
+            while (await events.MoveNextAsync() && events.Current is TextDelta delta) text += delta.Text;
+            Check(text == "final onlystream tail\n[Final response differs from streamed text]\ncorrected final", "Coalesced delivery preserves final-only text, suffix reconciliation, and labeled correction exactly.");
+            Check(events.Current is TurnCompleted, "Native idle completes the turn without duplicating content.");
         }
         Console.WriteLine("Copilot native error/idle, concurrent Stop and bounded drain checks passed.");
     }

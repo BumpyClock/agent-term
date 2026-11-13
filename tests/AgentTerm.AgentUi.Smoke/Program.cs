@@ -53,6 +53,7 @@ internal static class Program
                 return;
             }
             ProgramStatusUiChecks.Run();
+            await TimelineMaterializationChecks.RunAsync(window);
             if (Environment.GetCommandLineArgs().Contains("--program-activity"))
             {
                 await ProgramActivityChecks.RunAsync(window);

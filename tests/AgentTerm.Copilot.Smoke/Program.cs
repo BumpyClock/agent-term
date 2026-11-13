@@ -2,6 +2,7 @@ using AgentTerm.Agents;
 using AgentTerm.Copilot;
 using AgentTerm.Terminal;
 await LifecycleChecks.RunAsync();
+await DeliveryBudgetChecks.RunAsync();
 var normalizedStart = CopilotToolPresentation.Start(Guid.NewGuid(), "call-id", "run_in_terminal", new { command = "boat.exe --help", schema = "private" });
 if (normalizedStart.CallId != "call-id" || normalizedStart.Detail != "boat.exe --help" || normalizedStart.Category != ToolCategory.Command) throw new Exception("Typed tool start normalization failed.");
 foreach (var (result, success, expected) in new[] {

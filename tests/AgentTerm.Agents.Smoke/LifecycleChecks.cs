@@ -13,6 +13,7 @@ static class LifecycleChecks
             var thread = Environment.CurrentManagedThreadId;
             controller.Changed += () => Check(Environment.CurrentManagedThreadId == thread, "Controller mutations must stay on the UI context.");
             await controller.SubmitAsync("first", location);
+            Check(harness.DescribeCalls == 0 && harness.OpenCalls == 1, "Submission opens directly without a discovery client/model-list preflight.");
             var first = harness.Sessions.Single();
             await Task.Run(() => first.Emit(new TurnCompleted(first.Turn)));
             await wait(() => controller.CanSubmit);
@@ -51,9 +52,8 @@ static class LifecycleChecks
             await controller.SubmitAsync("fresh session", location);
             Check(harness.Sessions.Count == 3, "Retry after stream failure opens a fresh provider session.");
         }
-        foreach (var blockOpen in new[] { false, true })
         {
-            harness = new LifecycleHarness { BlockOpen = blockOpen, BlockDescribe = !blockOpen };
+            harness = new LifecycleHarness { BlockOpen = true };
             await using var controller = new AgentSessionController(harness);
             var submission = controller.SubmitAsync("must not send", location);
             await harness.Entered.Task;
@@ -96,6 +96,15 @@ static class LifecycleChecks
             Check(session.Disposed, "Failure cleanup completes after Stop.");
             Check(await controller.SubmitAsync("retry", location) && harness.Sessions.Count == 2, "Retry after failure cleanup opens a fresh session.");
         }
+        harness = new LifecycleHarness { OpenFailure = "Sign in with the provider before using Agent mode." };
+        await using (var controller = new AgentSessionController(harness))
+        {
+            Check(!await controller.SubmitAsync("requires login", location) && controller.State == AgentState.Failed, "Open owns availability errors after removing discovery preflight.");
+            Check(controller.Timeline.Entries.OfType<TimelineMessage>().Any(m => m.Role == MessageRole.Failure && m.Text == harness.OpenFailure), "The provider's actionable startup error reaches the user.");
+            Check(harness.DescribeCalls == 0 && harness.OpenCalls == 1 && harness.Sessions.Count == 0, "Unavailable startup does not discover models or retain a session.");
+            harness.OpenFailure = null;
+            Check(await controller.SubmitAsync("retry after login", location) && harness.OpenCalls == 2, "A failed open leaves retry available.");
+        }
         var late = new DeclineHarness();
         await using (var controller = new AgentSessionController(late))
         {
@@ -126,6 +135,7 @@ static class LifecycleChecks
             Check(session.Responses.Count == 2, "Settling does not decline anything further.");
         }
         Console.WriteLine("Controller lifecycle and UI-context checks passed.");
+        Console.WriteLine("Submission startup calls: discovery 0, open 1; availability failure and retry preserved.");
     }
     private sealed class DeclineHarness : IAgentHarness
     {
@@ -153,19 +163,23 @@ static class LifecycleChecks
     }
     private sealed class LifecycleHarness : IAgentHarness
     {
-        public bool BlockDescribe, BlockOpen;
+        public bool BlockOpen;
+        public int DescribeCalls, OpenCalls;
+        public string? OpenFailure;
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public CancellationToken StartupToken;
         public List<FakeSession> Sessions { get; } = [];
         public IHostTerminal? Binding;
-        public async Task<HarnessDescription> DescribeAsync(AgentLocation location, CancellationToken cancellationToken = default)
+        public Task<HarnessDescription> DescribeAsync(AgentLocation location, CancellationToken cancellationToken = default)
         {
-            if (BlockDescribe) { StartupToken = cancellationToken; Entered.SetResult(); await Release.Task; }
-            return new(true, "fixture", []);
+            DescribeCalls++;
+            return Task.FromResult(new HarnessDescription(true, "fixture", []));
         }
         public async Task<IAgentSession> OpenAsync(AgentOptions options, CancellationToken cancellationToken = default)
         {
+            OpenCalls++;
+            if (OpenFailure is { } failure) throw new InvalidOperationException(failure);
             if (BlockOpen) { StartupToken = cancellationToken; Entered.SetResult(); await Release.Task; }
             Binding = options.Terminal;
             var session = new FakeSession(); Sessions.Add(session); return session;

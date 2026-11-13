@@ -30,6 +30,7 @@ public sealed class TimelineWorkGroup(Guid turn) : TimelineEntry(turn)
 {
     private readonly List<TimelineTool> _tools = [];
     public IReadOnlyList<TimelineTool> Tools => _tools;
+    public int Revision { get; private set; }
     public bool Expanded { get; set; }
     public bool Active => _tools.Any(t => t.Status == WorkStatus.Running);
     public string? Reasoning { get; internal set; }
@@ -60,7 +61,8 @@ public sealed class TimelineWorkGroup(Guid turn) : TimelineEntry(turn)
             return label;
         }
     }
-    internal void Add(TimelineTool tool) { _tools.Add(tool); }
+    internal void Changed() => Revision++;
+    internal void Add(TimelineTool tool) { _tools.Add(tool); Changed(); }
 }
 
 public sealed class AgentTask
@@ -129,15 +131,18 @@ public sealed class AgentTimeline
                 while (_entries.OfType<TimelineWorkGroup>().Sum(g => g.Tools.Count) > 256) { _entries.RemoveAt(0); HasTrimmed = true; }
                 break;
             case ToolOutput output:
-                if (Find(output.Turn, output.CallId) is { } found) { found.Tool.Output = Bound(found.Tool.Output + output.Text); }
+                if (Find(output.Turn, output.CallId) is { } found && output.Text.Length > 0)
+                { found.Tool.Output = Bound(found.Tool.Output + output.Text); found.Group.Changed(); }
                 break;
             case ToolExecuting executing:
-                if (Find(executing.Turn, executing.CallId) is { } executed) executed.Tool.Executing = true;
+                if (Find(executing.Turn, executing.CallId) is { } executed && !executed.Tool.Executing)
+                { executed.Tool.Executing = true; executed.Group.Changed(); }
                 break;
             case ToolCompleted completed:
                 if (Find(completed.Turn, completed.CallId) is { } call)
                 {
                     call.Tool.Status = completed.Status;
+                    call.Group.Changed();
                     if (completed.Status is WorkStatus.Failed or WorkStatus.Cancelled)
                         Message(item.Turn, completed.Status == WorkStatus.Cancelled ? MessageRole.Cancelled : MessageRole.Failure,
                             (completed.Status == WorkStatus.Cancelled ? $"{call.Tool.Action} was cancelled" : $"{call.Tool.Action} failed") + (call.Tool.Output.Length > 0 ? "\n" + call.Tool.Output : ""));
@@ -146,7 +151,9 @@ public sealed class AgentTimeline
             case ReasoningSummary summary:
                 var work = _entries.LastOrDefault() as TimelineWorkGroup;
                 if (work is null || work.Turn != item.Turn) { work = new(item.Turn); Add(work); }
-                work.Reasoning = Bound(summary.Text); break;
+                var reasoning = Bound(summary.Text);
+                if (work.Reasoning != reasoning) { work.Reasoning = reasoning; work.Changed(); }
+                break;
         }
     }
     private (TimelineWorkGroup Group, TimelineTool Tool)? Find(Guid turn, string id)
@@ -159,6 +166,6 @@ public sealed class AgentTimeline
     {
         _blankPrefix = null;
         foreach (var group in _entries.OfType<TimelineWorkGroup>().Where(g => g.Turn == turn))
-        { foreach (var tool in group.Tools.Where(t => t.Status == WorkStatus.Running)) tool.Status = WorkStatus.Cancelled; }
+        { foreach (var tool in group.Tools.Where(t => t.Status == WorkStatus.Running)) { tool.Status = WorkStatus.Cancelled; group.Changed(); } }
     }
 }
