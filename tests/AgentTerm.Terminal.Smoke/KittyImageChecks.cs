@@ -5,6 +5,26 @@ using AgentTerm.Terminal;
 /// <summary>Kitty graphics through the native parser, render state and owned frame records.</summary>
 internal static class KittyImageChecks
 {
+    private static void CheckStableImageFrames()
+    {
+        using var terminal = Terminal();
+        Measure("empty");
+        terminal.Write(Apc("a=T,f=32,s=1,v=1,i=971,q=2,C=1", Rgba((255, 0, 0, 255))));
+        Measure("placed");
+        terminal.Write(Apc("a=d,d=A,q=2"));
+        Check(terminal.ReadFrame().Images.IsEmpty && terminal.ImageCacheBytes == 0, "Deleting the last stable image must clear converted pixels.");
+        Measure("deleted");
+
+        void Measure(string label)
+        {
+            var expected = terminal.ReadFrame().Images;
+            for (var warm = 0; warm < 50; warm++) terminal.ReadFrame();
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 1000; index++)
+                Check(ReferenceEquals(expected, terminal.ReadFrame().Images), "Unchanged frames must preserve their image snapshot.");
+            Console.WriteLine($"Stable {label} image frames, 1000 captures allocated {GC.GetAllocatedBytesForCurrentThread() - before} bytes.");
+        }
+    }
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
@@ -18,6 +38,7 @@ internal static class KittyImageChecks
 
     public static void Run()
     {
+        CheckStableImageFrames();
         CheckRequiresCellSize();
         CheckPlacementAndOwnership();
         CheckCaptureBufferLifetime();

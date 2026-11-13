@@ -20,6 +20,7 @@ public sealed partial class GhosttyTerminal
     private readonly Dictionary<ulong, TerminalImageData> _imagePixels = [];
     private readonly Dictionary<ulong, RawImage> _rawImages = [];
     private ImageCapture _lastImageCapture = new([], 0, 0);
+    private RawImage[]? _materializedImages;
     private ulong? _placementsGeneration, _retriedPlacements;
     private TerminalImages _images = TerminalImages.Empty;
 
@@ -131,7 +132,9 @@ public sealed partial class GhosttyTerminal
         ulong storageGeneration = 0;
         if (graphics != IntPtr.Zero && ImageNative.ghostty_kitty_graphics_get(graphics, 2, &storageGeneration) != 0) storageGeneration = 0;
         if (!_imageRescan && _scannedStorageGeneration == storageGeneration)
-            return _lastImageCapture = _lastImageCapture with { CellWidth = cell.Item1, CellHeight = cell.Item2 };
+            return (_lastImageCapture.CellWidth, _lastImageCapture.CellHeight) == cell
+                ? _lastImageCapture
+                : _lastImageCapture = _lastImageCapture with { CellWidth = cell.Item1, CellHeight = cell.Item2 };
         _imageRescan = false;
         _scannedStorageGeneration = storageGeneration;
         var seen = new HashSet<ulong>();
@@ -177,16 +180,24 @@ public sealed partial class GhosttyTerminal
     private unsafe TerminalImages CompleteImages(ImageCapture? capture)
     {
         if (capture is null) return TerminalImages.Empty;
-        var live = new HashSet<ulong>();
         var added = false;
-        foreach (var raw in capture.Images)
+        if (!ReferenceEquals(_materializedImages, capture.Images))
         {
-            live.Add(raw.Generation);
-            if (_imagePixels.ContainsKey(raw.Generation)) continue;
-            _imagePixels[raw.Generation] = raw.Materialize();
-            added = true;
+            if (capture.Images.Length == 0) _imagePixels.Clear();
+            else
+            {
+                var live = new HashSet<ulong>();
+                foreach (var raw in capture.Images)
+                {
+                    live.Add(raw.Generation);
+                    if (_imagePixels.ContainsKey(raw.Generation)) continue;
+                    _imagePixels[raw.Generation] = raw.Materialize();
+                    added = true;
+                }
+                foreach (var generation in _imagePixels.Keys.Where(key => !live.Contains(key)).ToArray()) _imagePixels.Remove(generation);
+            }
+            _materializedImages = capture.Images;
         }
-        foreach (var generation in _imagePixels.Keys.Where(key => !live.Contains(key)).ToArray()) _imagePixels.Remove(generation);
         ulong placementsGeneration = 0;
         StateGet(RenderStateData.ImageGeneration, &placementsGeneration);
         var cell = (Width: capture.CellWidth, Height: capture.CellHeight);
@@ -316,6 +327,7 @@ public sealed partial class GhosttyTerminal
         _imagePixels.Clear();
         _rawImages.Clear();
         _lastImageCapture = new([], 0, 0);
+        _materializedImages = null;
         _images = TerminalImages.Empty;
     }
 

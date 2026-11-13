@@ -2,6 +2,7 @@ using System.Text;
 using AgentTerm.Terminal;
 
 if (args.Contains("--search-frame-only")) { SearchFrameChecks.Run(); return; }
+if (args.Contains("--image-capture-only")) { PngDecoderChecks.Run(); KittyImageChecks.Run(); return; }
 SmoothScrollChecks.Run();
 if (args.Contains("--smooth-scroll-only")) { OverscanChecks.Run(); return; }
 if (args.Contains("--history-features-only")) { HistoryFeatureChecks.Run(); return; }
