@@ -106,6 +106,45 @@ internal sealed class DisclosureButton : Button
     }
 }
 
+internal interface ITimelineIndicatorPreferences
+{
+    bool Animate { get; }
+    bool HighContrast { get; }
+    event Action Changed;
+}
+
+internal sealed class TimelineIndicatorPreferences : ITimelineIndicatorPreferences
+{
+    private readonly UISettings _settings = new();
+    private readonly AccessibilitySettings _accessibility = new();
+    private Action? _changed;
+    public bool Animate => _settings.AnimationsEnabled;
+    public bool HighContrast => _accessibility.HighContrast;
+    public event Action Changed
+    {
+        add
+        {
+            if (_changed is null)
+            {
+                _settings.AnimationsEnabledChanged += SettingsChanged;
+                // ColorValuesChanged supports unpackaged hosts where HighContrastChanged throws.
+                _settings.ColorValuesChanged += SettingsChanged;
+            }
+            _changed += value;
+        }
+        remove
+        {
+            _changed -= value;
+            if (_changed is null)
+            {
+                _settings.AnimationsEnabledChanged -= SettingsChanged;
+                _settings.ColorValuesChanged -= SettingsChanged;
+            }
+        }
+    }
+    private void SettingsChanged(UISettings sender, object args) => _changed?.Invoke();
+}
+
 internal sealed class AgentTimelineView : StackPanel
 {
     private readonly Dictionary<Guid, IRow> _rows = [];
@@ -119,21 +158,39 @@ internal sealed class AgentTimelineView : StackPanel
     private AgentSessionController? _controller;
     private bool _active;
     private bool _working;
-    private (bool Trimmed, bool Activity, bool Working, bool Spinning)? _chrome;
+    private (bool Trimmed, bool Activity)? _chrome;
+    private readonly ITimelineIndicatorPreferences _preferences;
+    private bool _loaded;
     private readonly TextBlock _trimmed = AgentUi.Text("AgentHintText", "Earlier activity in this pane was trimmed.");
     private AgentTask? _task;
     public FontFamily Mono { get; set; } = new("Cascadia Mono, Consolas");
 
-    public AgentTimelineView()
+    public AgentTimelineView() : this(new TimelineIndicatorPreferences()) { }
+
+    internal AgentTimelineView(ITimelineIndicatorPreferences preferences)
     {
+        _preferences = preferences;
         Spacing = 6;
         var indicator = new Grid { Children = { _progress, _staticProgress } };
         _activityRow = AgentUi.Row(indicator, _activity);
         _elapsedTimer = DispatcherQueue.CreateTimer();
         _elapsedTimer.Interval = TimeSpan.FromSeconds(1);
         _elapsedTimer.Tick += (_, _) => { if (_controller is { } controller) _activity.Update(Status(controller, _task), _working && _active); };
-        Loaded += (_, _) => { if (_controller is { } controller) Update(controller, _task, _active); };
-        Unloaded += (_, _) => { _elapsedTimer.Stop(); _progress.IsActive = false; _chrome = null; };
+        Loaded += (_, _) =>
+        {
+            _loaded = true;
+            _preferences.Changed += PreferencesChanged;
+            if (_controller is { } controller) Update(controller, _task, _active);
+            else UpdateIndicatorPolicy();
+        };
+        Unloaded += (_, _) =>
+        {
+            _loaded = false;
+            _preferences.Changed -= PreferencesChanged;
+            _elapsedTimer.Stop();
+            UpdateIndicatorPolicy();
+            _chrome = null;
+        };
         _trimmed.Margin = new Thickness(AgentUi.Gutter, 0, 0, 0);
         Children.Add(_trimmed); Children.Add(_activityRow);
         AutomationProperties.SetName(this, "Agent conversation");
@@ -191,17 +248,27 @@ internal sealed class AgentTimelineView : StackPanel
         var cancellationShown = task?.LastOutcome == WorkStatus.Cancelled && controller.RunningTask != task
             && _entries.OfType<TimelineMessage>().Any(m => m.Role == MessageRole.Cancelled);
         var activity = status.Length > 0 && !cancellationShown;
-        var spinning = _working && active && IsLoaded && AgentUi.Animate && !AgentUi.HighContrast;
-        if (_chrome != (trimmed, activity, _working, spinning))
+        if (_chrome != (trimmed, activity))
         {
-            _chrome = (trimmed, activity, _working, spinning);
+            _chrome = (trimmed, activity);
             _trimmed.Visibility = trimmed ? Visibility.Visible : Visibility.Collapsed;
             _activityRow.Visibility = activity ? Visibility.Visible : Visibility.Collapsed;
-            _progress.Visibility = _working ? Visibility.Visible : Visibility.Collapsed;
-            _progress.IsActive = spinning;
-            _staticProgress.Visibility = _working && !spinning ? Visibility.Visible : Visibility.Collapsed;
         }
+        UpdateIndicatorPolicy();
         _activity.Update(status, _working && active);
+    }
+
+    private void PreferencesChanged() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (_loaded) UpdateIndicatorPolicy();
+    });
+
+    private void UpdateIndicatorPolicy()
+    {
+        var spinning = _working && _active && _loaded && _preferences.Animate && !_preferences.HighContrast;
+        _progress.Visibility = _working ? Visibility.Visible : Visibility.Collapsed;
+        _progress.IsActive = spinning;
+        _staticProgress.Visibility = _working && !spinning ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static string Status(AgentSessionController controller, AgentTask? task)

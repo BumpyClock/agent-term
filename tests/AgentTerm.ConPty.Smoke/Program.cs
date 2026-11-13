@@ -3,6 +3,12 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using AgentTerm.Terminal;
 
+if (args.Contains("--default-profile-only"))
+{
+    await ShellProfileDiscoveryChecks.CheckDefaultResolutionAsync();
+    return;
+}
+
 if (args.Contains("--status-fixture"))
 {
     ProgramStatusSessionChecks.RunFixture();

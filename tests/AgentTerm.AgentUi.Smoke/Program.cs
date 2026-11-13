@@ -46,6 +46,11 @@ internal static class Program
                 await PaneHeaderChecks.RunAsync(window);
                 return;
             }
+            if (Environment.GetCommandLineArgs().Contains("--timeline-preferences"))
+            {
+                await TimelinePreferenceChecks.RunAsync(window);
+                return;
+            }
             ProgramStatusUiChecks.Run();
             if (Environment.GetCommandLineArgs().Contains("--status-icons"))
             {

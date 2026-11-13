@@ -21,7 +21,8 @@ namespace AgentTerm_App;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly List<ShellProfile> _profiles = [.. ShellProfile.DiscoverBuiltIn()];
+    private readonly ShellProfileDiscovery _profileDiscovery = new(ShellProfile.DiscoverBuiltIn(), () => Task.Run(ShellProfile.DiscoverWsl));
+    private IReadOnlyList<ShellProfile> _profiles => _profileDiscovery.Profiles;
     private int _profileItems;
     private TerminalTab? _visibleTab;
     private SettingsWindow? _settingsWindow;
@@ -72,8 +73,8 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) => statusTimer.Stop();
         BuildProfileMenu();
-        AddTab(DefaultProfile);
         _ = AddWslProfilesAsync();
+        _ = AddDefaultTabAsync();
         AppWindow.Closing += Window_Closing;
         Closed += (_, _) => _settingsWindow?.Close();
     }
@@ -101,25 +102,19 @@ public sealed partial class MainWindow : Window
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
 
-    private ShellProfile DefaultProfile
+    private async Task AddDefaultTabAsync()
     {
-        get
-        {
-            var id = TerminalPreferences.Current.DefaultProfileId;
-            return _profiles.FirstOrDefault(profile => profile.Id == id) ?? ShellProfile.FromId(id)
-                ?? _profiles.FirstOrDefault() ?? ShellProfile.Default;
-        }
+        var profile = await _profileDiscovery.ResolveDefaultAsync(TerminalPreferences.Current.DefaultProfileId);
+        AddTab(profile);
     }
 
     private async Task AddWslProfilesAsync()
     {
-        var wsl = await Task.Run(ShellProfile.DiscoverWsl);
+        var wsl = await _profileDiscovery.DiscoverWslAsync();
         if (_closing) return;
         foreach (var profile in wsl)
         {
-            if (_profiles.Any(existing => existing.Id == profile.Id)) continue;
             ProfileMenu.Items.Insert(_profileItems++, CreateProfileItem(profile));
-            _profiles.Add(profile);
         }
     }
 
@@ -172,7 +167,7 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private void NewTabButton_Click(object sender, RoutedEventArgs args) => AddTab(DefaultProfile);
+    private void NewTabButton_Click(object sender, RoutedEventArgs args) => _ = AddDefaultTabAsync();
 
     private void SettingsButton_Click(object sender, RoutedEventArgs args) => ShowSettings();
 
@@ -342,7 +337,7 @@ public sealed partial class MainWindow : Window
             switch (e.Key)
             {
                 case VirtualKey.T:
-                    AddTab(DefaultProfile);
+                    _ = AddDefaultTabAsync();
                     break;
                 case VirtualKey.W when _visibleTab is { } tab:
                     await tab.CloseActivePaneAsync();

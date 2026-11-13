@@ -39,13 +39,6 @@ public sealed record ShellProfile(string Id, string Name, string Executable, str
         return FindWslDistributions(wsl).Select(distro => CreateWsl(wsl, distro)).ToArray();
     }
 
-    public static ShellProfile? FromId(string? id)
-    {
-        if (id is null || !id.StartsWith("wsl:", StringComparison.Ordinal) || id.Length == 4 || !OperatingSystem.IsWindows()) return null;
-        var distro = id[4..];
-        return distro.Any(char.IsControl) || WslExecutable() is not { } wsl ? null : CreateWsl(wsl, distro);
-    }
-
     private static string? WslExecutable()
     {
         var wsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "wsl.exe");
@@ -120,4 +113,33 @@ public sealed record ShellProfile(string Id, string Name, string Executable, str
 
     public static ShellProfile Default => DiscoverBuiltIn().FirstOrDefault() ?? DiscoverWsl().FirstOrDefault()
         ?? throw new FileNotFoundException("No supported Windows shell was found.");
+}
+
+/// <summary>One shared discovery result for default selection and the profile menu.</summary>
+public sealed class ShellProfileDiscovery
+{
+    private readonly List<ShellProfile> _profiles;
+    private readonly Lazy<Task<IReadOnlyList<ShellProfile>>> _discovery;
+    public IReadOnlyList<ShellProfile> Profiles => _profiles;
+
+    public ShellProfileDiscovery(IReadOnlyList<ShellProfile> builtIn, Func<Task<IReadOnlyList<ShellProfile>>> discoverWsl)
+    {
+        _profiles = [.. builtIn];
+        _discovery = new(async () =>
+        {
+            var wsl = await discoverWsl();
+            _profiles.AddRange(wsl);
+            return wsl;
+        });
+    }
+
+    public Task<IReadOnlyList<ShellProfile>> DiscoverWslAsync() => _discovery.Value;
+
+    public async Task<ShellProfile> ResolveDefaultAsync(string? id)
+    {
+        // A saved distro is usable only after authoritative registration discovery.
+        if (id?.StartsWith("wsl:", StringComparison.Ordinal) == true) await DiscoverWslAsync();
+        return _profiles.FirstOrDefault(profile => profile.Id == id) ?? _profiles.FirstOrDefault()
+            ?? throw new FileNotFoundException("No supported Windows shell was found.");
+    }
 }
