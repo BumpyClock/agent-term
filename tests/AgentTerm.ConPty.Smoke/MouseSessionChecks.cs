@@ -29,7 +29,31 @@ internal static class MouseSessionChecks
         session.Send("q");
         await session.Completion.WaitAsync(TimeSpan.FromSeconds(20));
         await SmartReleaseAsync(profile);
+        await HoldMappingAsync(profile);
         Console.WriteLine("Mouse ConPTY fixture passed press, release, wheel, Shift bypass, tracking disable, and Smart release/held-motion clamping.");
+    }
+
+    private static async Task HoldMappingAsync(ShellProfile profile)
+    {
+        await using var session = new TerminalSession(80, 24, profile);
+        session.Start();
+        await WaitAsync(session, "MOUSE_READY");
+        var displayed = session.ReadFrame();
+        session.Send("t");
+        await WaitAsync(session, "HOLD_READY");
+        var geometry = new TerminalMouseGeometry(800, 480, 10, 20);
+        var press = new TerminalMouseEvent(TerminalMouseAction.Press, TerminalMouseButton.Left, TerminalModifiers.None, 25, 65);
+        session.SendMouse(press, geometry, displayed);
+        await WaitAsync(session, "REPORT=1B5B3C303B333B344D");
+        session.SendMouse(press with { Action = TerminalMouseAction.Release }, geometry, displayed);
+        await WaitAsync(session, "REPORT=1B5B3C303B333B346D");
+        session.Send("u");
+        await WaitAsync(session, "HOLD_RELEASED");
+        var current = session.ReadFrame();
+        if (current.ActiveScreenOffset <= displayed.ActiveScreenOffset)
+            throw new Exception("The render-hold fixture did not scroll the live screen.");
+        session.Send("q");
+        await session.Completion.WaitAsync(TimeSpan.FromSeconds(20));
     }
 
     private static async Task SmartReleaseAsync(ShellProfile profile)
@@ -109,6 +133,18 @@ internal static class MouseSessionChecks
                 {
                     for (var i = 0; i < 30; i++) Console.Write($"history-{i}\r\n");
                     Console.Write("\x1b[H\x1b[2JSMART_READY");
+                    continue;
+                }
+                if (report.Count == 0 && value == 't')
+                {
+                    Console.Write("\x1b[?2026h");
+                    for (var i = 0; i < 50; i++) Console.Write($"held-history-{i}\r\n");
+                    Console.Write("HOLD_READY\r\n");
+                    continue;
+                }
+                if (report.Count == 0 && value == 'u')
+                {
+                    Console.Write("\x1b[?2026lHOLD_RELEASED\r\n");
                     continue;
                 }
                 if (report.Count == 0 && value == 'c')

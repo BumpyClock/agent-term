@@ -652,7 +652,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         var modifiers = Modifiers();
         if (action == TerminalMouseAction.Release && button is { } released && _applicationMouseButtons.Contains(released))
             modifiers &= ~TerminalModifiers.Shift;
-        if (!session.SendMouse(new(action, button, modifiers, (float)position.X, (float)position.Y), MouseGeometry()))
+        if (!session.SendMouse(new(action, button, modifiers, (float)position.X, (float)position.Y), MouseGeometry(), _presentedFrame))
             return false;
         _applicationMousePosition = position;
         if (action == TerminalMouseAction.Press) RefreshLocalInput(session);
@@ -674,7 +674,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state == SessionState.Running && _session is { } session)
             foreach (var button in _applicationMouseButtons)
                 session.SendMouse(new(TerminalMouseAction.Release, button, Modifiers() & ~TerminalModifiers.Shift,
-                    (float)_applicationMousePosition.X, (float)_applicationMousePosition.Y), MouseGeometry());
+                    (float)_applicationMousePosition.X, (float)_applicationMousePosition.Y), MouseGeometry(), _presentedFrame);
         _applicationMouseButtons.Clear();
     }
 

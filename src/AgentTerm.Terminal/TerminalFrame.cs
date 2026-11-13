@@ -33,6 +33,8 @@ public sealed record TerminalFrame(int Columns, int Rows, TerminalCell[] Cells,
     public TerminalViewport Viewport { get; init; }
     public bool HasSelection { get; init; }
     public long ContentVersion { get; init; }
+    /// <summary>Absolute history row of the active screen at capture time, for displayed-frame mouse mapping.</summary>
+    public long ActiveScreenOffset { get; init; }
     public TerminalColor SelectionBackground { get; init; } = new(45, 92, 150);
     public TerminalColor SelectionForeground { get; init; } = new(255, 255, 255);
     public TerminalColor? CursorText { get; init; }

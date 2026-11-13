@@ -30,7 +30,7 @@ public sealed partial class GhosttyTerminal
         EnsurePresentation();
         ScrollTo(ReadViewport().Offset + delta);
     }
-    /// <summary>The viewport the next frame presents, without capturing a frame.</summary>
+    /// <summary>Current viewport after presentation preparation. During a hold, use the displayed frame for input mapping.</summary>
     public TerminalViewport ReadPresentedViewport()
     {
         ThrowIfDisposed();
