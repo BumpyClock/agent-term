@@ -32,7 +32,7 @@ public sealed partial class GhosttyTerminal
             attrs->Conformance = 62;
             attrs->Features[0] = 22; // ANSI color, supported by the host renderer.
             attrs->FeatureCount = 1;
-            if (_hostCapabilities.Clipboard) attrs->Features[attrs->FeatureCount++] = 52;
+            if (_hostCapabilities.Clipboard || Effects.AdvertisesClipboardAccess) attrs->Features[attrs->FeatureCount++] = 52;
             attrs->DeviceType = 1;
             return 1;
         };

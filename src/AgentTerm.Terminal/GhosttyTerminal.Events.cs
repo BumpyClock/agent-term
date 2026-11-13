@@ -58,7 +58,6 @@ public sealed partial class GhosttyTerminal
         _protocolEvents = [];
         _titleChanged = (_, _) => Queue(() => new TerminalTitleChanged(ReadTitle()));
         _pwdChanged = (_, _) => Queue(() => new TerminalWorkingDirectoryChanged(ReadWorkingDirectory()));
-        _reset = (_, _) => Queue(() => new TerminalReset());
         unsafe
         {
             _semanticPrompt = (_, _, report) => Queue(() => SemanticPrompt(report));
@@ -66,9 +65,14 @@ public sealed partial class GhosttyTerminal
         }
         Register(EventsNative.TitleChanged, _titleChanged, "title");
         Register(EventsNative.PwdChanged, _pwdChanged, "working directory");
-        Register(EventsNative.Reset, _reset, "reset");
         Register(EventsNative.SemanticPrompt, _semanticPrompt, "semantic prompt");
         Register(EventsNative.ProgramStatus, _programStatus, "program status");
+    }
+
+    private void ConfigureResetEvents()
+    {
+        _reset = (_, _) => Queue(() => { Effects.Reset(clearHost: true); return new TerminalReset(); });
+        Register(EventsNative.Reset, _reset, "reset");
     }
 
     private void Register(int option, Delegate callback, string name) =>

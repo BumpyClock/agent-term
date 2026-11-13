@@ -11,7 +11,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
-internal static class StartupChecks
+internal static partial class StartupChecks
 {
     private static int _result;
     private static MainWindow? _activeWindow;
@@ -52,6 +52,15 @@ internal static class StartupChecks
                 var profile = new ShellProfile("startup-smoke", "Command Prompt",
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"), "/D /Q", Environment.CurrentDirectory);
                 var addTab = typeof(MainWindow).GetMethod("AddTab", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                if (Environment.GetCommandLineArgs().Contains("--libghostty"))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(Report)!);
+                    addTab.Invoke(window, [profile]);
+                    var tab = (TerminalTab)((TabViewItem)tabs.SelectedItem).Content;
+                    await AssertOutputAsync(tab, report, "libghostty fixture");
+                    await AssertLibghosttyAsync(tab, report);
+                    return;
+                }
                 if (Environment.GetCommandLineArgs().Contains("--tab-title"))
                 {
                     addTab.Invoke(window, [profile]);

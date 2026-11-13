@@ -35,6 +35,9 @@
             <NavigationViewItem x:Name="TabsItem" Content="Tabs">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE737;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Name="ProgramsItem" Content="Program requests">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE8BD;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItemHeader Content="Profiles" />
             <NavigationViewItem x:Name="DefaultsItem" Content="Defaults">
                 <NavigationViewItem.Icon><SymbolIcon Symbol="Font" /></NavigationViewItem.Icon>
@@ -92,6 +95,12 @@
                                 </ComboBox>
                             </Grid>
                         </Border>
+                    </StackPanel>
+                    <StackPanel x:Name="ProgramsPage" Spacing="20" Visibility="Collapsed">
+                        <TextBlock Text="Program requests" FontSize="26" FontWeight="SemiBold" />
+                        <TextBlock Text="What programs running in a pane may ask AgentTerm to do. Changes apply to open panes when saved."
+                                   Style="{StaticResource SettingDescription}" />
+                        <StackPanel x:Name="ProgramsHost" />
                     </StackPanel>
                     <StackPanel x:Name="DefaultsPage" Spacing="20" Visibility="Collapsed">
                         <TextBlock Text="Profile defaults" FontSize="26" FontWeight="SemiBold" />

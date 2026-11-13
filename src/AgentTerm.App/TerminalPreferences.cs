@@ -21,7 +21,7 @@ public sealed class TerminalPreferences
         string FontFamily = "", IReadOnlyDictionary<string, ProfileAppearanceOverride>? Profiles = null,
         double BackgroundOpacity = 0.8, string? TabPosition = null,
         TerminalColorScheme ColorScheme = TerminalColorScheme.Auto, string LightThemeId = "agent-light", string DarkThemeId = "agent-dark",
-        string? TerminalStartPosition = null);
+        string? TerminalStartPosition = null, TerminalEffectOptions? Effects = null);
     private Settings _settings = new();
     private IReadOnlyDictionary<string, ProfileAppearanceOverride> _profiles = NormalizeProfiles(null);
     private readonly string _path;
@@ -37,6 +37,8 @@ public sealed class TerminalPreferences
     public string DarkThemeId => _settings.DarkThemeId;
     public TabPosition TabPosition => ParseTabPosition(_settings.TabPosition);
     public TerminalStartPosition TerminalStartPosition => ParseTerminalStartPosition(_settings.TerminalStartPosition);
+    /// <summary>What programs may ask the terminal to do: clipboard, bell, notifications, progress, window resize.</summary>
+    public TerminalEffectOptions Effects => _settings.Effects ?? TerminalEffectOptions.Default;
     public IReadOnlyDictionary<string, ProfileAppearanceOverride> ProfileOverrides => _profiles;
     public string? LoadError { get; }
     public event Action? Changed;
@@ -49,6 +51,13 @@ public sealed class TerminalPreferences
             if (File.Exists(path))
             {
                 var json = JsonNode.Parse(File.ReadAllText(path));
+                TerminalEffectOptions? effects = null;
+                if (json is JsonObject effectsRoot && effectsRoot.TryGetPropertyValue("Effects", out var effectsNode))
+                {
+                    // A bad effects section must not discard the rest of the settings.
+                    effectsRoot.Remove("Effects");
+                    effects = ParseEffects(effectsNode);
+                }
                 if (json is JsonObject root)
                 {
                     MigrateLegacyTheme(root);
@@ -71,7 +80,8 @@ public sealed class TerminalPreferences
                         ColorScheme = NormalizeScheme(settings.ColorScheme),
                         LightThemeId = TerminalThemes.NormalizeId(settings.LightThemeId, true),
                         DarkThemeId = TerminalThemes.NormalizeId(settings.DarkThemeId, false),
-                        Profiles = _profiles
+                        Profiles = _profiles,
+                        Effects = effects
                     };
                 }
             }
@@ -105,6 +115,18 @@ public sealed class TerminalPreferences
             TerminalThemes.NormalizeId(darkThemeId ?? DarkThemeId, false),
             (terminalStartPosition is TerminalStartPosition.Top or TerminalStartPosition.Bottom
                 ? terminalStartPosition.Value : TerminalStartPosition).ToString());
+        Save(settings with { Effects = _settings.Effects }, profiles);
+    }
+
+    /// <summary>Saves what programs may ask the terminal to do. Open panes pick it up through <see cref="Changed"/>.</summary>
+    public void UpdateEffects(TerminalEffectOptions effects)
+    {
+        ArgumentNullException.ThrowIfNull(effects);
+        Save(_settings with { Effects = effects.Normalize() }, _profiles);
+    }
+
+    private void Save(Settings settings, IReadOnlyDictionary<string, ProfileAppearanceOverride> profiles)
+    {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var temporaryPath = _path + ".tmp";
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
@@ -113,6 +135,27 @@ public sealed class TerminalPreferences
         _profiles = profiles;
         Changed?.Invoke();
     }
+
+    private static TerminalEffectOptions ParseEffects(JsonNode? node)
+    {
+        if (node is not JsonObject values) return TerminalEffectOptions.Default;
+        var defaults = TerminalEffectOptions.Default;
+        return new TerminalEffectOptions
+        {
+            ClipboardWrite = ReadValue(values["ClipboardWrite"], defaults.ClipboardWrite),
+            ClipboardRead = ReadValue(values["ClipboardRead"], defaults.ClipboardRead),
+            ClipboardMaxBytes = values["ClipboardMaxBytes"] is JsonValue size && size.TryGetValue<int>(out var bytes) ? bytes : defaults.ClipboardMaxBytes,
+            Bell = ReadValue(values["Bell"], defaults.Bell),
+            Notifications = ReadValue(values["Notifications"], defaults.Notifications),
+            Progress = ReadFlag(values["Progress"], defaults.Progress),
+            AllowWindowResize = ReadFlag(values["AllowWindowResize"], defaults.AllowWindowResize),
+        }.Normalize();
+    }
+
+    private static T ReadValue<T>(JsonNode? node, T fallback) where T : struct, Enum =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) && Enum.TryParse<T>(text, true, out var parsed) ? parsed : fallback;
+
+    private static bool ReadFlag(JsonNode? node, bool fallback) => node is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : fallback;
 
     private static IReadOnlyDictionary<string, ProfileAppearanceOverride> NormalizeProfiles(
         IReadOnlyDictionary<string, ProfileAppearanceOverride>? profiles)

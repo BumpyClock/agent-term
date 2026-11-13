@@ -10,6 +10,13 @@ if (args.Contains("--host-only")) return;
 SnapshotArchiveChecks.Run();
 HistoryFeatureChecks.Run();
 if (args.Contains("--images-only")) { PngDecoderChecks.Run(); KittyImageChecks.Run(); return; }
+if (args.Contains("--effects-only"))
+{
+    EffectsChecks.Run();
+    EffectsHostChecks.Run();
+    return;
+}
+
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 ProgramTitleChecks.Run();
@@ -154,6 +161,8 @@ KittyImageChecks.Run();
 ProgramStatusChecks.Run();
 ProgramStatusPresentationChecks.Run();
 ThemeChecks.Run();
+EffectsChecks.Run();
+EffectsHostChecks.Run();
 InputChecks.Run();
 MouseChecks.Run();
 HyperlinkChecks.Run();

@@ -18,5 +18,6 @@
     <Compile Include="../../src/AgentTerm.App/TabSidebarLayout.cs" Link="TabSidebarLayout.cs" />
     <Compile Include="../../src/AgentTerm.App/GitHub/*.cs" LinkBase="GitHub" />
     <Compile Include="../../src/AgentTerm.App/PaneStatus/*.cs" LinkBase="PaneStatus" />
+    <Compile Include="../../src/AgentTerm.App/Effects/*.cs" LinkBase="Effects" />
   </ItemGroup>
 </Project>

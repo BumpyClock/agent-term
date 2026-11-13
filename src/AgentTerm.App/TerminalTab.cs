@@ -88,7 +88,13 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private string _title = "";
     internal string Title => _title.Length != 0 ? _title : _title = ComposeTitle();
 
-    private string ComposeTitle() => string.Join(" · ", _panes.Select(pane => PaneLabel(pane.Page)).Distinct().Take(2));
+    private string ComposeTitle()
+    {
+        var title = string.Join(" · ", _panes.Select(pane => PaneLabel(pane.Page)).Distinct().Take(2));
+        // Progress and unseen requests from any pane show on the tab, so a background tab can ask for attention.
+        var badge = _panes.Select(pane => pane.Page.EffectBadge).FirstOrDefault(value => value.Length != 0);
+        return badge is null ? title : title + " · " + badge;
+    }
 
     /// <summary>Picks up OSC 0 and OSC 2 titles. Called on the window's status tick.</summary>
     internal void RefreshTitle()
@@ -107,6 +113,8 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     internal bool IsClosing => _disposal is not null || (_panes.Count == 1 && _retiring is not null);
     internal event Action? TitleChanged;
     internal event Action? CloseRequested;
+    /// <summary>A pane asked to be shown, for example because the user clicked its Windows notification.</summary>
+    internal event Action? RevealRequested;
     private bool CanAnimate => _visible && _layout.IsLoaded && _disposal is null && _uiSettings.AnimationsEnabled;
 
     private void RaiseTitleChanged()
@@ -372,6 +380,13 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         page.SessionReady += () =>
         {
             if (ReferenceEquals(_active, pane)) page.FocusUnclaimedInput();
+        };
+        page.RevealRequested += () =>
+        {
+            if (IsClosing || ReferenceEquals(pane, _retiring) || !_panes.Contains(pane)) return;
+            // The window selects this tab first, which makes it visible. Only then can the pane become active.
+            RevealRequested?.Invoke();
+            if (ActivatePane(pane)) FocusActivePane();
         };
         view.GotFocus += (_, _) => ActivatePane(pane);
         view.SplitRequested += sideBySide =>

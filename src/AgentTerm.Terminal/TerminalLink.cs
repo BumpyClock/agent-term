@@ -132,7 +132,7 @@ public static class TerminalLinkPolicy
         if (uri.Host.Length != 0 || uri.IsUnc)
             return new(text, display, null, TerminalLinkDecision.Block, "File links to other machines are never opened.", true);
         var path = uri.LocalPath;
-        var name = Path.GetFileName(path.TrimEnd('\\', '/'));
+        var name = Path.GetFileName(path.Replace('\\', '/').TrimEnd('/'));
         // Windows drops trailing dots and spaces, and ":" selects an alternate data stream.
         if (name.EndsWith('.') || name.EndsWith(' ') || name.Contains(':') || path.StartsWith(@"\\", StringComparison.Ordinal))
             return new(text, display, null, TerminalLinkDecision.Block, "The file path is not a plain local path.", true);

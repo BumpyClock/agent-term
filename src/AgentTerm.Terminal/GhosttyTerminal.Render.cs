@@ -119,7 +119,7 @@ public sealed partial class GhosttyTerminal
 
     private FrameCapture CaptureMetadata() =>
         new(null, ReadViewport(), HasSelection(), ReadMode(ReverseColorsMode), _viewRevision, _theme)
-        { HoldGeneration = _holdActive ? _holdGeneration : -1, ContentVersion = ContentVersion, OverscanEnabled = _overscanEnabled };
+        { HoldGeneration = _holdActive ? _holdGeneration : -1, ContentVersion = ContentVersion, ActiveScreenOffset = ActiveTop, OverscanEnabled = _overscanEnabled };
 
     private unsafe TerminalFrame Materialize(FrameCapture capture)
     {
@@ -147,7 +147,7 @@ public sealed partial class GhosttyTerminal
             cursorHasColor != 0 ? cursorColor.ToColor() : reverse ? defaultBg : defaultFg)
             { WideTail = hasPosition && nativeCursor.WideTail != 0, PasswordInput = nativeCursor.PasswordInput != 0 };
         var images = CompleteImages(capture.ImageCapture);
-        if (dirty == RenderDirty.Clean && _frame is not null && current && ReferenceEquals(images, _frame.Images) && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
+        if (dirty == RenderDirty.Clean && _frame is not null && current && capture.ActiveScreenOffset == _frame.ActiveScreenOffset && ReferenceEquals(images, _frame.Images) && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
             (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background)
             return capture.Boundary || _frame.ContentVersion == capture.ContentVersion ? _frame : _frame = _frame with { ContentVersion = capture.ContentVersion };
         var previous = _frame;
@@ -262,7 +262,7 @@ public sealed partial class GhosttyTerminal
         if (reverse) (defaultFg, defaultBg) = (defaultBg, defaultFg);
         _frameReverse = reverse;
         _frame = new TerminalFrame(columns, rowsCount, cellsArray, cursor, defaultFg, defaultBg) {
-            Images = images, Viewport = viewport, HasSelection = hasSelection, ContentVersion = capture.ContentVersion,
+            Images = images, ActiveScreenOffset = capture.ActiveScreenOffset, Viewport = viewport, HasSelection = hasSelection, ContentVersion = capture.ContentVersion,
             OverscanAbove = above.ToArray(), OverscanBelow = below.ToArray(),
             SelectionBackground = (capture.Theme ?? TerminalThemes.All[0]).SelectionBackground,
             SelectionForeground = (capture.Theme ?? TerminalThemes.All[0]).SelectionForeground,
@@ -427,6 +427,7 @@ public sealed partial class GhosttyTerminal
         public bool Boundary { get; init; }
         public long HoldGeneration { get; init; } = -1;
         public long ContentVersion { get; init; }
+        public long ActiveScreenOffset { get; init; }
         public bool OverscanEnabled { get; init; }
         public ImageCapture? ImageCapture { get; init; }
     }

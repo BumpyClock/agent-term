@@ -88,7 +88,11 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     private async Task<int> CompleteAsync()
     {
         try { return await _connection.Completion.ConfigureAwait(false); }
-        finally { lock (_gate) _programStatus.EndCommand(); }
+        finally
+        {
+            lock (_gate) _programStatus.EndCommand();
+            EndEffects();
+        }
     }
 
     public void Start()
@@ -309,15 +313,16 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     }
 
     /// <summary>Returns true when application mouse tracking owns this event, including filtered events.</summary>
-    public bool SendMouse(TerminalMouseEvent mouse, TerminalMouseGeometry geometry)
+    public bool SendMouse(TerminalMouseEvent mouse, TerminalMouseGeometry geometry, TerminalFrame? displayed = null)
     {
         lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return true;
             if ((mouse.Modifiers & TerminalModifiers.Shift) != 0 || !_terminal.IsMouseTrackingEnabled) return false;
-            var viewport = _terminal.ReadPresentedViewport();
-            var activeY = mouse.Y - (_terminal.ActiveTop - viewport.Offset) * geometry.CellHeight;
+            var viewport = displayed?.Viewport ?? _terminal.ReadPresentedViewport();
+            var activeTop = displayed?.ActiveScreenOffset ?? _terminal.ActiveTop;
+            var activeY = mouse.Y - (activeTop - viewport.Offset) * geometry.CellHeight;
             if (mouse.Action == TerminalMouseAction.Release ||
                 mouse.Action == TerminalMouseAction.Motion && mouse.Button is (TerminalMouseButton.Left or TerminalMouseButton.Right or
                     TerminalMouseButton.Middle or TerminalMouseButton.Back or TerminalMouseButton.Forward))
@@ -336,7 +341,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
-            var bytes = _terminal.EncodePaste(text);
+            var bytes = _terminal.EncodeClipboardPaste(text);
             if (bytes.Length != 0) PrepareInput();
             _connection.Send(bytes);
         }
@@ -498,6 +503,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             events = TakeProtocolDispatch();
         }
         DispatchProtocolEvents(events);
+        FlushEffects();
         OutputAvailable?.Invoke();
     }
 

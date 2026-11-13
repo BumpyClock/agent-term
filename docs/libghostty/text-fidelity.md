@@ -5,3 +5,5 @@ Terminal frames retain underline style and resolved underline color, overline, b
 Blink phase changes repaint affected cells through the retained raster damage path. Static cells retain their raster content. Disabling animations leaves text visible, and hidden panes stop the shared blink timer.
 
 The renderer smoke suite checks distinct underline patterns and colors, overline, selection color overrides, hidden and blinking Unicode text, and hollow wide cursors. Its Windows pixel checks passed during integration. Native smoke tests cover style extraction and palette changes. Retained-surface lifecycle checks remain part of the integrated app verification.
+
+A focused block cursor redraws underline, overline, and strikethrough in its text color. The raster fixture checks each decoration while the cursor covers a decorated cell.

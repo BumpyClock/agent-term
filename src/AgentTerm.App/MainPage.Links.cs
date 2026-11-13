@@ -37,6 +37,7 @@ public sealed partial class MainPage
     private TerminalFrame? _hoverFrame;
     private TerminalGridGeometry? _hoverGeometry;
     private bool _hoverEmphasis;
+    private TerminalColor? _hoverColor;
     private bool _hoverLookedUp;
     private int _hoverColumn = -1, _hoverRow = -1;
     private Point _linkPointer;
@@ -130,7 +131,10 @@ public sealed partial class MainPage
     private void ApplyLinkHover(TerminalLink? link, bool lookedUp, TerminalFrame frame, int column, int row, bool emphasis)
     {
         var geometry = Terminal.Geometry;
-        var changed = emphasis != _hoverEmphasis || !SameLink(link, _hoverLink) || geometry != _hoverGeometry;
+        var index = row * frame.Columns + column;
+        var color = index >= 0 && index < frame.Cells.Length ? frame.Cells[index].Foreground : frame.Foreground;
+        var changed = emphasis != _hoverEmphasis || !SameLink(link, _hoverLink) || geometry != _hoverGeometry || color != _hoverColor;
+        _hoverColor = color;
         _hoverLink = link;
         _hoverLookedUp = lookedUp;
         _hoverFrame = frame;
@@ -156,6 +160,7 @@ public sealed partial class MainPage
         _hoverLookedUp = false;
         _hoverFrame = null;
         _hoverGeometry = null;
+        _hoverColor = null;
         _hoverColumn = _hoverRow = -1;
         _hoverEmphasis = false;
         if (_linkOverlay is not null) _linkOverlay.Visibility = Visibility.Collapsed;

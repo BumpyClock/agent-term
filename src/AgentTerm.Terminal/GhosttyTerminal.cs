@@ -53,6 +53,8 @@ public sealed partial class GhosttyTerminal : IDisposable
             ConfigureHost(restored != IntPtr.Zero);
             ConfigureSnapshot();
             ConfigureRenderHold();
+            ConfigureEffects();
+            ConfigureResetEvents();
             ThrowIfFailed(Native.ghostty_terminal_set(_handle, 2, Marshal.GetFunctionPointerForDelegate(_writePty)),
                 "Could not register terminal replies.");
         }
@@ -194,6 +196,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         DisposeInput();
         DisposeImages();
         DisposeRender();
+        DisposeEffects();
         _handle.Dispose();
         GC.SuppressFinalize(this);
     }
