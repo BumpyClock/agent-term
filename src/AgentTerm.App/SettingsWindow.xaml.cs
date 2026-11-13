@@ -368,8 +368,7 @@ internal sealed partial class SettingsWindow : Window
         try
         {
             _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides, OpacitySlider.Value / 100,
-                SelectedTabPosition, colorScheme, lightThemeId, darkThemeId, SelectedTerminalStartPosition);
-            _preferences.UpdateEffects(_programs.Options);
+                SelectedTabPosition, colorScheme, lightThemeId, darkThemeId, SelectedTerminalStartPosition, _programs.Options);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

@@ -105,7 +105,7 @@ public sealed class TerminalPreferences
     public void Update(string defaultProfileId, int fontSize, bool useAcrylic = false, string? fontFamily = null,
         IReadOnlyDictionary<string, ProfileAppearanceOverride>? profileOverrides = null, double? backgroundOpacity = null,
         TabPosition? tabPosition = null, TerminalColorScheme? colorScheme = null, string? lightThemeId = null, string? darkThemeId = null,
-        TerminalStartPosition? terminalStartPosition = null)
+        TerminalStartPosition? terminalStartPosition = null, TerminalEffectOptions? effects = null)
     {
         var profiles = profileOverrides is null ? _profiles : NormalizeProfiles(profileOverrides);
         var settings = new Settings(defaultProfileId, Math.Clamp(fontSize, 8, 36), useAcrylic,
@@ -115,7 +115,7 @@ public sealed class TerminalPreferences
             TerminalThemes.NormalizeId(darkThemeId ?? DarkThemeId, false),
             (terminalStartPosition is TerminalStartPosition.Top or TerminalStartPosition.Bottom
                 ? terminalStartPosition.Value : TerminalStartPosition).ToString());
-        Save(settings with { Effects = _settings.Effects }, profiles);
+        Save(settings with { Effects = effects?.Normalize() ?? _settings.Effects }, profiles);
     }
 
     /// <summary>Saves what programs may ask the terminal to do. Open panes pick it up through <see cref="Changed"/>.</summary>

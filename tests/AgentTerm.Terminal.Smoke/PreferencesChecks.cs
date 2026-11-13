@@ -7,6 +7,7 @@ internal static class PreferencesChecks
     {
         CheckThemes();
         CheckTerminalStartPosition();
+        CheckSaveTransaction();
         var path = Path.Combine(Path.GetTempPath(), "agent-term-settings-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
@@ -121,6 +122,84 @@ internal static class PreferencesChecks
             if (invalid.LoadError is null || invalid.FontSize != 14) throw new Exception("Invalid settings should report the failure and use defaults.");
         }
         finally { File.Delete(path); File.Delete(path + ".tmp"); }
+    }
+
+    private static void CheckSaveTransaction()
+    {
+        static void Check(bool condition, string message)
+        {
+            if (!condition) throw new Exception(message);
+        }
+        var path = Path.Combine(Path.GetTempPath(), "agent-term-transaction-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var preferences = new TerminalPreferences(path);
+            var initialProfiles = new Dictionary<string, ProfileAppearanceOverride> { ["pwsh"] = new(FontSize: 12) };
+            var initialEffects = new TerminalEffectOptions { Progress = false, Bell = BellStyle.Audible };
+            preferences.Update("cmd", 15, false, "Consolas", initialProfiles, 0.5, TabPosition.Left, TerminalColorScheme.Light,
+                "paper-light", "midnight-dark", TerminalStartPosition.Top, initialEffects);
+            Check(preferences.Effects == initialEffects && new TerminalPreferences(path).Effects == initialEffects,
+                "Update must persist the effects it is given.");
+
+            var observed = new List<(int Size, TabPosition Tab, TerminalEffectOptions Effects, int ReloadedSize, TerminalEffectOptions ReloadedEffects, int PwshSize)>();
+            preferences.Changed += () =>
+            {
+                var onDisk = new TerminalPreferences(path);
+                observed.Add((preferences.FontSize, preferences.TabPosition, preferences.Effects, onDisk.FontSize, onDisk.Effects,
+                    preferences.ResolveAppearance("pwsh").FontSize));
+            };
+
+            var requested = new TerminalEffectOptions
+            {
+                ClipboardRead = ClipboardReadPolicy.Allow, Bell = (BellStyle)99, Progress = true, ClipboardMaxBytes = 1, AllowWindowResize = true,
+            };
+            var expected = requested.Normalize();
+            preferences.Update("cmd", 21, true, "Consolas", new Dictionary<string, ProfileAppearanceOverride> { ["pwsh"] = new(FontSize: 30) },
+                0.5, TabPosition.Top, TerminalColorScheme.Light, "paper-light", "midnight-dark", TerminalStartPosition.Top, requested);
+            Check(observed.Count == 1, $"One Save must publish one change, got {observed.Count}.");
+            Check(observed[0] == (21, TabPosition.Top, expected, 21, expected, 30),
+                "The single change must expose the new appearance, profile overrides and normalized effects together, already on disk.");
+            Check(expected != requested && expected.ClipboardMaxBytes == TerminalEffectOptions.MinimumClipboardBytes,
+                "The fixture must exercise effect normalization.");
+            Check(new TerminalPreferences(path).Effects == expected && preferences.Effects == expected,
+                "Normalized effects must match in memory and after reload.");
+
+            preferences.Update("cmd", 22);
+            Check(observed.Count == 2 && preferences.Effects == expected && new TerminalPreferences(path).Effects == expected,
+                "Omitting effects must preserve the current effects.");
+
+            var disk = File.ReadAllBytes(path);
+            var size = preferences.FontSize;
+            var tab = preferences.TabPosition;
+            var profile = preferences.ResolveAppearance("pwsh");
+            var overrides = preferences.ProfileOverrides;
+            var scheme = preferences.ColorScheme;
+            var changes = observed.Count;
+            Directory.CreateDirectory(path + ".tmp");
+            try
+            {
+                preferences.Update("pwsh", 9, true, "Other", new Dictionary<string, ProfileAppearanceOverride>(), 0.1, TabPosition.Left,
+                    TerminalColorScheme.Dark, "agent-light", "agent-dark", TerminalStartPosition.Bottom,
+                    new TerminalEffectOptions { Progress = false, Bell = BellStyle.None });
+                throw new Exception("Blocking the staging file must fail the save.");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+            finally { Directory.Delete(path + ".tmp"); }
+            Check(File.ReadAllBytes(path).AsSpan().SequenceEqual(disk), "A failed save must leave the settings file unchanged.");
+            Check(preferences.FontSize == size && preferences.TabPosition == tab && preferences.ColorScheme == scheme &&
+                preferences.DefaultProfileId == "cmd" && preferences.Effects == expected && preferences.ResolveAppearance("pwsh") == profile &&
+                ReferenceEquals(preferences.ProfileOverrides, overrides) && observed.Count == changes,
+                "A failed save must not change memory, profile overrides or notify observers.");
+            var recovered = new TerminalPreferences(path);
+            Check(recovered.LoadError is null && recovered.FontSize == size && recovered.Effects == expected,
+                "The file must still load after a failed save.");
+        }
+        finally
+        {
+            File.Delete(path);
+            if (Directory.Exists(path + ".tmp")) Directory.Delete(path + ".tmp");
+            else File.Delete(path + ".tmp");
+        }
     }
 
     private static void CheckTerminalStartPosition()
