@@ -33,6 +33,8 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
+if (args.Contains("--history-search-only")) { await HistorySearchChecks.RunAsync(); return; }
+
 if (args.Contains("--concurrent-frame-only"))
 {
     await ConcurrentFrameChecks.RunAsync();

@@ -378,6 +378,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
             DrainHostResponses();
+            HistoryActivity();
             stopped = _stopTask is not null;
             widthChanged = columns != _columns;
             _columns = columns;
@@ -472,11 +473,16 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public bool Find(string query, bool forward, bool caseSensitive = false)
     {
-        lock (_renderGate) lock (_gate)
+        _searchOwner.Wait();
+        try
         {
-            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            return _terminal.Find(query, forward, caseSensitive);
+            lock (_renderGate) lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+                return _terminal.Find(query, forward, caseSensitive);
+            }
         }
+        finally { _searchOwner.Release(); }
     }
 
     private void MutateView(Action change)
@@ -485,6 +491,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             change();
+            ScheduleHistoryCompression();
         }
     }
 
@@ -493,6 +500,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_gate)
         {
             _terminal.Write(bytes.Span);
+            HistoryActivity();
             _osc.Feed(bytes.Span);
             if (_titlePending)
             {
@@ -542,13 +550,16 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         try { await StopAsync().ConfigureAwait(false); }
         finally
         {
+            await _searchOwner.WaitAsync().ConfigureAwait(false);
             lock (_renderGate) lock (_gate)
             {
+                _historyIdle?.Dispose();
                 _connection.OutputReceived -= ProcessOutput;
                 _terminal.Dispose();
                 _commandMailbox?.Dispose();
                 _commandMailbox = null;
             }
+            _searchOwner.Release();
         }
     }
 

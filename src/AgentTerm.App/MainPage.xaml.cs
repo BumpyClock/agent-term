@@ -164,6 +164,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state == SessionState.Disposed) return;
         if (!visible)
         {
+            CancelFind();
             StopRefresh();
             Terminal.SuspendRendering();
             PaneStatus.Refresh(PaneStatus.Directory, false, DateTimeOffset.UtcNow);
@@ -390,6 +391,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void RefreshChrome(TerminalSession session)
     {
+        RefreshFindHistory(session);
         RefreshAgentChrome();
         PaneStatus.Refresh(session.ReadWorkingDirectory(), _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
     }
@@ -536,6 +538,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         FindBar.Visibility = Visibility.Visible;
         FindBox.Focus(FocusState.Keyboard);
         FindBox.SelectAll();
+        FindMatch(true);
     }
 
     private void FindBox_TextChanged(object sender, TextChangedEventArgs e) => FindMatch(true);
@@ -560,27 +563,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void CloseFind()
     {
+        CancelFind();
+        ReleaseFind();
         FindBar.Visibility = Visibility.Collapsed;
         FocusTerminal();
-    }
-
-    private void FindMatch(bool forward)
-    {
-        if (_session is not { } session || FindBox is null || FindStatus is null || FindMatchCase is null) return;
-        try
-        {
-            if (FindBox.Text.Length == 0)
-            {
-                session.Find(string.Empty, forward, FindMatchCase.IsChecked == true);
-                FindStatus.Text = string.Empty;
-                RefreshOutput(session);
-                return;
-            }
-            var found = session.Find(FindBox.Text, forward, FindMatchCase.IsChecked == true);
-            FindStatus.Text = found ? string.Empty : "No matches";
-            RefreshOutput(session);
-        }
-        catch (Exception exception) { ShowInteractionFailure(exception); }
     }
 
     private void HistoryScrollBar_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -872,7 +858,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         var zoomShortcut = (mods & TerminalModifiers.Control) != 0 && (mods & (TerminalModifiers.Alt | TerminalModifiers.Super)) == 0 &&
             (keyCode is 0xBB or 0xBD or 0x6B or 0x6D or 0x30 or 0x60);
         var historyShortcut = ctrlShift && key is VirtualKey.Up or VirtualKey.Down or VirtualKey.PageUp or VirtualKey.PageDown or VirtualKey.Home or VirtualKey.End;
-        var shortcut = findShortcut || taskShortcut || zoomShortcut || (ctrlShift && (key is VirtualKey.Tab or VirtualKey.V || (key == VirtualKey.C && hasSelection))) ||
+        var promptShortcut = mods == (TerminalModifiers.Control | TerminalModifiers.Alt | TerminalModifiers.Shift) && key is VirtualKey.Up or VirtualKey.Down;
+        var shortcut = promptShortcut || findShortcut || taskShortcut || zoomShortcut || (ctrlShift && (key is VirtualKey.Tab or VirtualKey.V || (key == VirtualKey.C && hasSelection))) ||
             ((mods == TerminalModifiers.Shift && key == VirtualKey.Insert) || (mods == TerminalModifiers.Control && key == VirtualKey.V)) || selectionCopy || historyShortcut ||
             (key == VirtualKey.Escape && mods == TerminalModifiers.None && hasSelection);
         try
@@ -882,6 +869,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 _keyboard.KeyDown(physical, (uint)key, mods, status.WasKeyDown, TerminalKeyboardInput.Route.Shortcut);
                 e.Handled = true;
                 if (status.WasKeyDown && !historyShortcut && !zoomShortcut) return;
+                if (promptShortcut)
+                {
+                    session.NavigatePrompt(key == VirtualKey.Up ? -1 : 1);
+                    RefreshOutput(session);
+                    return;
+                }
                 if (findShortcut)
                 {
                     ShowFind();
@@ -1175,6 +1168,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private Task ReleaseSessionAsync()
     {
+        CancelFind();
         StopRefresh();
         CancelSelectionGesture();
         if (_session is not { } session)
@@ -1202,6 +1196,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         if (!IsLoaded)
         {
+            CancelFind();
             StopRefresh();
             Terminal.SuspendRendering();
         }

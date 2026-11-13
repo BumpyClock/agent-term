@@ -1,14 +1,16 @@
 using System.Text;
 using AgentTerm.Terminal;
 
+if (args.Contains("--history-features-only")) { HistoryFeatureChecks.Run(); return; }
 if (args.Contains("--snapshot-only")) { SnapshotArchiveChecks.Run(); return; }
 HostContractChecks.Run();
 if (args.Contains("--host-only")) return;
 SnapshotArchiveChecks.Run();
-ProgramTitleChecks.Run();
-if (args.Contains("--program-title-only")) return;
+HistoryFeatureChecks.Run();
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
+ProgramTitleChecks.Run();
+if (args.Contains("--program-title-only")) return;
 NativeProtocolChecks.Run();
 FidelityChecks.Run();
 LiveEdgeChecks.Run();
