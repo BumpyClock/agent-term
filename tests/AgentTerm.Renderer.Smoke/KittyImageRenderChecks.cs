@@ -17,6 +17,8 @@ internal static class KittyImageRenderChecks
         CheckCropScaleOffsetAndClip(device);
         CheckTerminalFrame(device);
         CheckBitmapCache(device);
+        CheckManyCurrentCrops(device);
+        CheckOverscanLayers(device);
         Console.WriteLine("Kitty image render checks passed layers, alpha, crop, scale, offsets, clipping and bitmap cache.");
     }
 
@@ -142,6 +144,56 @@ internal static class KittyImageRenderChecks
         if (cache.Get(device, outside) is not null) throw new Exception("A source rectangle outside the image must not draw.");
         cache.Clear();
         if (cache.Count != 0 || cache.Bytes != 0) throw new Exception("Clearing must release every bitmap.");
+    }
+
+    private static void CheckManyCurrentCrops(CanvasDevice device)
+    {
+        using var cache = new TerminalSurface.ImageBitmaps();
+        var image = Solid(2048, 2048, 255, 0, 0);
+        var placements = Enumerable.Range(0, 100).Select(i => Place(image,
+            TerminalImageLayer.AboveText, i, 0, 1, 20, sourceX: i, sourceWidth: 2048 - i)).ToArray();
+        using var target = new CanvasRenderTarget(device, 100, 20, 96);
+        using (var drawing = target.CreateDrawingSession())
+        {
+            drawing.Clear(Windows.UI.Color.FromArgb(255, 0, 0, 0));
+            foreach (var placement in placements)
+            {
+                var entry = cache.Get(device, placement, drawing)!;
+                drawing.DrawImage(entry.Bitmap, new Windows.Foundation.Rect(placement.Column, 0, 1, 20),
+                    new Windows.Foundation.Rect(0, 0, entry.Bitmap.SizeInPixels.Width, entry.Bitmap.SizeInPixels.Height));
+                if (cache.Bytes > TerminalSurface.ImageBitmaps.Budget)
+                    throw new Exception("Current-frame crops must fit the bitmap budget at every admission.");
+            }
+        }
+        cache.Trim(new TerminalImages(placements, 10, 20));
+        for (var x = 0; x < 100; x++) Expect(target, x, 10, 255, 0, 0,
+            "Every placement must survive eviction and pending drawing-resource release.");
+    }
+
+    private static void CheckOverscanLayers(CanvasDevice device)
+    {
+        foreach (var layer in Enum.GetValues<TerminalImageLayer>())
+        {
+            var text = new TerminalCell("M", 1, White, Black, false, false, false, false, false, false);
+            var frame = Frame(3, 2, _ => null,
+                Place(Solid(1, 1, 255, 0, 0), layer, 0, 2, 10, 20),
+                Place(Solid(1, 1, 255, 0, 0), layer, 1, 1, 10, 40)) with
+            {
+                OverscanBelow = [new TerminalOverscanRow(2, [text with { Text = "", Background = Blue }, text, text])],
+            };
+            using var target = Draw(device, frame, 30, 40, -10);
+            using var reference = Draw(device, frame with { Images = TerminalImages.Empty }, 30, 40, -10);
+            Expect(target, 0, 39, layer == TerminalImageLayer.BelowBackground ? (byte)0 : (byte)255,
+                0, layer == TerminalImageLayer.BelowBackground ? (byte)200 : (byte)0,
+                "A wholly below-grid image must respect overscan backgrounds in its layer.");
+            Expect(target, 19, 30, 255, 0, 0, "A crossing image must extend into the fractional overscan viewport.");
+            var glyph = reference.GetPixelColors(10, 30, 10, 10);
+            var painted = target.GetPixelColors(10, 30, 10, 10);
+            var white = Enumerable.Range(0, glyph.Length).Where(i => glyph[i].R > 200 && glyph[i].G > 200 && glyph[i].B > 200).ToArray();
+            if (white.Length == 0) throw new Exception("Overscan fixture must contain visible text.");
+            if (white.Any(i => layer == TerminalImageLayer.AboveText ? painted[i].G != 0 : painted[i].G < 200))
+                throw new Exception("Overscan text and images must use the ordinary layer order.");
+        }
     }
 
     private static CanvasRenderTarget Draw(CanvasDevice device, TerminalFrame frame, int width, int height, float top = 0)

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
 [assembly: InternalsVisibleTo("AgentTerm.Terminal.Smoke")]
+[assembly: InternalsVisibleTo("AgentTerm.Renderer.Smoke")]
 [assembly: InternalsVisibleTo("AgentTerm.ConPty.Smoke")]
 
 namespace AgentTerm.Terminal;

@@ -87,6 +87,21 @@ public static class PngDecoder
             if (passWidth > 0 && passHeight > 0) expected += passHeight * (1 + ((long)passWidth * bitsPerPixel + 7) / 8);
         }
         if (expected > Array.MaxLength) return null;
+        // Validate the exact inflated length with fixed scratch space before trusting IHDR for an allocation.
+        // A second pass costs decompression time, but malformed tiny streams cannot force image-sized buffers.
+        compressed.Position = 0;
+        using (var probe = new ZLibStream(compressed, CompressionMode.Decompress, leaveOpen: true))
+        {
+            Span<byte> scratch = stackalloc byte[8192];
+            long total = 0;
+            int count;
+            while ((count = probe.Read(scratch)) != 0)
+            {
+                total += count;
+                if (total > expected) return null;
+            }
+            if (total != expected) return null;
+        }
         var inflated = new byte[expected];
         compressed.Position = 0;
         using (var zlib = new ZLibStream(compressed, CompressionMode.Decompress))

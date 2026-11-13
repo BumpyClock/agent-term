@@ -89,4 +89,4 @@ public sealed partial class GhosttyTerminal
     }
 }
 
-public sealed record TerminalHostCapabilities(bool Clipboard = false, bool KittyImages = false, uint KittyImageStorageLimitBytes = 64 * 1024 * 1024);
+public sealed record TerminalHostCapabilities(bool Clipboard = false, bool KittyImages = false, uint KittyImageStorageLimitBytes = TerminalImages.DefaultStorageLimit);

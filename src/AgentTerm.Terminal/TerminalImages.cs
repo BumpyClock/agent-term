@@ -31,7 +31,7 @@ public sealed class TerminalImageData
 {
     private readonly byte[] _pixels;
 
-    public TerminalImageData(uint id, ulong generation, int width, int height, byte[] premultipliedRgba)
+    internal TerminalImageData(uint id, ulong generation, int width, int height, byte[] premultipliedRgba)
     {
         ArgumentNullException.ThrowIfNull(premultipliedRgba);
         if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width), "Image size must be positive.");
@@ -84,6 +84,8 @@ public sealed record TerminalImagePlacement(
 /// </summary>
 public sealed record TerminalImages(IReadOnlyList<TerminalImagePlacement> Placements, int CellPixelWidth, int CellPixelHeight)
 {
+    public const uint DefaultStorageLimit = 64 * 1024 * 1024;
+
     public static TerminalImages Empty { get; } = new([], 0, 0);
     public bool IsEmpty => Placements.Count == 0;
 }

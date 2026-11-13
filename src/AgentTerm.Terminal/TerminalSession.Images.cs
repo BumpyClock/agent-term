@@ -7,7 +7,7 @@ public sealed partial class TerminalSession
     /// holds several screenshots while bounding memory: decoded pixels live natively, as an owned frame copy, and
     /// as device bitmaps for drawn images.
     /// </summary>
-    public const ulong DefaultImageStorageLimit = 64UL * 1024 * 1024;
+    public const ulong DefaultImageStorageLimit = TerminalImages.DefaultStorageLimit;
 
     private void ConfigureImages()
     {

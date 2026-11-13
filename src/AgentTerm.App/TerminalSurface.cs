@@ -398,7 +398,7 @@ public sealed partial class TerminalSurface : UserControl
         {
             using (var drawing = _renderTarget.CreateDrawingSession())
                 DrawFrameCore(drawing, frame, CellWidth, CellHeight, _glyphLayouts, false, false,
-                    _terminalFontSize, _acrylicBackground, TerminalFontFamily, true, top, _cursorPhase, _imageBitmaps);
+                    _terminalFontSize, _acrylicBackground, TerminalFontFamily, true, top, _cursorPhase, _imageBitmaps, (float)ActualHeight);
             _imageBitmaps.Trim(frame.Images);
         }
         else if (!ReferenceEquals(previous!.Cells, frame.Cells) || _paintedTextPhase != _cursorPhase && HasBlinkingText)
@@ -466,27 +466,34 @@ public sealed partial class TerminalSurface : UserControl
         using var images = new ImageBitmaps();
         DrawFrameCore(drawing, frame, cellWidth, cellHeight, layouts, focused, cursorPhase, fontSize,
             transparentBackground, fontFamily, hideCursor, gridTop, textPhase, images);
+        drawing.Flush(); // Submit draws before the temporary bitmap owner is disposed.
     }
 
     private static void DrawFrameCore(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, GlyphLayouts layouts, bool focused, bool cursorPhase, float fontSize, bool transparentBackground,
-        string fontFamily, bool hideCursor, float gridTop, bool textPhase = true, ImageBitmaps? images = null)
+        string fontFamily, bool hideCursor, float gridTop, bool textPhase = true, ImageBitmaps? images = null, float? surfaceHeight = null)
     {
         layouts.Configure(fontFamily, fontSize, cellWidth, cellHeight);
         layouts.FitGrid(frame.Cells.Length);
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
+        var overscan = frame.OverscanAbove.Length != 0 || frame.OverscanBelow.Length != 0;
+        Rect? viewportClip = overscan ? new Rect(0, 0, frame.Columns * cellWidth,
+            surfaceHeight ?? frame.Rows * cellHeight) : null;
         DrawCells(drawing, frame, cellWidth, cellHeight, layouts, gridTop,
-            0, TerminalGridGeometry.VisibleRows(frame), 0, frame.Columns, textPhase, images);
-        DrawOverscan(drawing, frame, cellWidth, cellHeight, layouts, gridTop, textPhase);
+            frame.OverscanAbove.Length != 0 ? -1 : 0,
+            frame.OverscanBelow.Length != 0 ? frame.Rows + 1 : TerminalGridGeometry.VisibleRows(frame),
+            0, frame.Columns, textPhase, images, viewportClip);
         DrawCursor(drawing, frame, cellWidth, cellHeight, layouts, focused, cursorPhase, hideCursor, gridTop, textPhase);
     }
 
     private static void DrawCells(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, GlyphLayouts layouts, float gridTop,
-        int firstRow, int endRow, int firstColumn, int endColumn, bool textPhase, ImageBitmaps? images = null)
+        int firstRow, int endRow, int firstColumn, int endColumn, bool textPhase, ImageBitmaps? images = null, Rect? viewportClip = null)
     {
+        TerminalCell CellAt(int row, int col) => row < 0 ? frame.OverscanAbove[0].Cells[col]
+            : row >= frame.Rows ? frame.OverscanBelow[0].Cells[col] : frame.Cells[row * frame.Columns + col];
         var device = drawing.Device;
-        DrawImages(drawing, frame, TerminalImageLayer.BelowBackground, cellWidth, cellHeight, gridTop, images);
+        DrawImages(drawing, frame, TerminalImageLayer.BelowBackground, cellWidth, cellHeight, gridTop, images, viewportClip);
         var antialiasing = drawing.Antialiasing;
         drawing.Antialiasing = CanvasAntialiasing.Aliased;
         for (var row = firstRow; row < endRow; row++)
@@ -500,7 +507,7 @@ public sealed partial class TerminalSurface : UserControl
                 var color = frame.Background;
                 if (col < endColumn)
                 {
-                    var cell = frame.Cells[row * frame.Columns + col];
+                    var cell = CellAt(row, col);
                     fill = cell.Selected || cell.Background != frame.Background;
                     color = cell.Selected ? frame.SelectionBackground : cell.Background;
                 }
@@ -513,11 +520,11 @@ public sealed partial class TerminalSurface : UserControl
             }
         }
         drawing.Antialiasing = antialiasing;
-        DrawImages(drawing, frame, TerminalImageLayer.BelowText, cellWidth, cellHeight, gridTop, images);
+        DrawImages(drawing, frame, TerminalImageLayer.BelowText, cellWidth, cellHeight, gridTop, images, viewportClip);
         for (var row = firstRow; row < endRow; row++)
         for (var col = firstColumn; col < endColumn; col++)
         {
-            var cell = frame.Cells[row * frame.Columns + col];
+            var cell = CellAt(row, col);
             if (cell.Width == 0 || cell.Hidden || (cell.Blink && !textPhase)) continue;
             var foreground = cell.Selected ? ToColor(frame.SelectionForeground) : ToColor(cell.Foreground);
             if (cell.Dim && !cell.Selected) foreground = Color.FromArgb(255, (byte)(foreground.R / 2), (byte)(foreground.G / 2), (byte)(foreground.B / 2));
@@ -552,7 +559,7 @@ public sealed partial class TerminalSurface : UserControl
             if (cell.Overline) drawing.DrawLine(x, y + 1, x + width, y + 1, foreground);
             if (cell.Strikethrough) drawing.DrawLine(x, y + cellHeight / 2, x + width, y + cellHeight / 2, foreground);
         }
-        DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images);
+        DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images, viewportClip);
     }
 
     private static void DrawCursor(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,

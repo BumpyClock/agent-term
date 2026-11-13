@@ -23,6 +23,7 @@ internal static class KittyImageChecks
         CheckFormatsAndCompression();
         CheckCropScaleOffsetAndLayers();
         CheckScrollingAndScreens();
+        CheckPlacementHandoff();
         CheckVirtualPlacement();
         CheckRepliesAndDisabledMedia();
         CheckStorageLimit();
@@ -53,6 +54,15 @@ internal static class KittyImageChecks
         var anchored = terminal.ReadFrame();
         Check(anchored.Viewport.TotalRows == 5 && anchored.Images.Placements.Any(p => p.Image.Id == 71),
             "Images below the last text row remain visible in bottom-anchored mode.");
+        var anchoredCapture = terminal.BeginFrame();
+        terminal.Write("\x1b[6;1H"u8);
+        terminal.Write(Apc("a=T,f=32,s=1,v=1,i=72,q=2,C=1", red));
+        terminal.Write("\x1b[H\x1b[?2026h"u8);
+        terminal.CompleteFrame(anchoredCapture);
+        var imageBoundary = terminal.ReadFrame();
+        Check(imageBoundary.Viewport.TotalRows == 6 && imageBoundary.Images.Placements.Any(p => p.Image.Id == 72),
+            "In-flight presentation scanning includes the exact image extent without borrowing image iterators.");
+        terminal.Write("\x1b[?2026l"u8);
     }
 
     private static GhosttyTerminal Terminal(ushort columns = 8, ushort rows = 4)
@@ -207,16 +217,47 @@ internal static class KittyImageChecks
         Check(reset.Images.IsEmpty && terminal.ImageCacheBytes == 0, $"A full reset must delete every image, got {reset.Images.Placements.Count} placements and {terminal.ImageCacheBytes} bytes.");
     }
 
+    private static void CheckPlacementHandoff()
+    {
+        using var terminal = Terminal(8, 4);
+        terminal.Write(Apc("a=T,f=32,s=1,v=1,i=6,r=2,c=1,q=2", Rgba((7, 7, 7, 255))));
+        var first = terminal.ReadFrame().Images.Placements.Single();
+        var capture = terminal.BeginFrame();
+        terminal.Write("\r\n\r\n\r\n\x1b[?2026h"u8);
+        terminal.CompleteFrame(capture);
+        var boundary = terminal.ReadFrame().Images.Placements.Single();
+        Check(boundary.Row == -1 && ReferenceEquals(first.Image, boundary.Image),
+            $"A replacement render state must rebuild placement rows even when its local generation repeats, got {boundary.Row}.");
+        terminal.Write("\x1b[?2026l"u8);
+    }
+
     private static void CheckVirtualPlacement()
     {
         using var terminal = Terminal(8, 4);
         terminal.Write(Apc("a=T,U=1,f=32,s=2,v=1,i=7,c=2,r=1,q=2", Rgba((1, 1, 1, 255), (2, 2, 2, 255))));
         Check(terminal.ReadFrame().Images.IsEmpty, "A virtual placement draws nothing until placeholder cells exist.");
         terminal.Write(Encoding.UTF8.GetBytes("\x1b[2;3H\x1b[38;5;7m\U0010EEEE\u0305\u0305\U0010EEEE\u0305\u030D\x1b[0m"));
-        var placement = terminal.ReadFrame().Images.Placements.Single();
+        var virtualFrame = terminal.ReadFrame();
+        var placeholders = virtualFrame.Cells.Where(c => c.Text.StartsWith("\U0010EEEE", StringComparison.Ordinal)).ToArray();
+        Check(placeholders.Length == 2 && placeholders.All(c => c.Hidden && c.Width == 1),
+            "Placeholder cells retain their grapheme and extent but suppress glyphs, including cursor redraws.");
+        var placement = virtualFrame.Images.Placements.Single();
         Check(placement.Kind == TerminalImagePlacementKind.Virtual && placement.Column == 2 && placement.Row == 1 && placement.Columns == 2,
             $"Placeholder cells must position a virtual placement, got {placement.Kind} {placement.Column},{placement.Row} {placement.Columns}.");
         Check(placement.Layer == TerminalImageLayer.BelowText, "Virtual placements draw below text.");
+        terminal.Write("\x1b[2;3H"u8);
+        var cursorFrame = terminal.ReadFrame();
+        Check(cursorFrame.Cursor is { Column: 2, Row: 1 } && cursorFrame.Cells[10].Hidden,
+            "A cursor on a placeholder must use the same suppressed canonical cell.");
+        terminal.SetOverscanEnabled(true);
+        terminal.Write("\x1b[4;1H\r\n\r\n\r\n"u8);
+        terminal.ScrollTo(2);
+        var overscan = terminal.ReadFrame().OverscanAbove.SelectMany(r => r.Cells)
+            .Where(c => c.Text.StartsWith("\U0010EEEE", StringComparison.Ordinal)).ToArray();
+        Check(overscan.Length == 2 && overscan.All(c => c.Hidden && c.Width == 1),
+            "Overscan placeholders preserve graphemes and extent while suppressing glyphs.");
+        terminal.ScrollToBottom();
+
 
         terminal.Write(Apc("a=t,f=32,s=1,v=1,i=8,q=2", Rgba((3, 3, 3, 255))));
         terminal.Write("\x1b[1;1H"u8);

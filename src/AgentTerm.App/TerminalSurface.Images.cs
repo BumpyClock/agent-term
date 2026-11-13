@@ -16,11 +16,11 @@ public sealed partial class TerminalSurface
     private readonly ImageBitmaps _imageBitmaps = new();
 
     private static void DrawImages(CanvasDrawingSession drawing, TerminalFrame frame, TerminalImageLayer layer,
-        float cellWidth, float cellHeight, float gridTop, ImageBitmaps? bitmaps)
+        float cellWidth, float cellHeight, float gridTop, ImageBitmaps? bitmaps, Rect? viewportClip = null)
     {
         var images = frame.Images;
         if (bitmaps is null || images.IsEmpty || images.CellPixelWidth <= 0 || images.CellPixelHeight <= 0) return;
-        var grid = new Rect(0, gridTop, frame.Columns * cellWidth, TerminalGridGeometry.VisibleRows(frame) * cellHeight);
+        var grid = viewportClip ?? new Rect(0, gridTop, frame.Columns * cellWidth, TerminalGridGeometry.VisibleRows(frame) * cellHeight);
         if (grid.Width <= 0 || grid.Height <= 0) return;
         // Placements are in native pixels of one cell. Map them so a placement spanning n cells spans n drawn cells.
         float scaleX = cellWidth / images.CellPixelWidth, scaleY = cellHeight / images.CellPixelHeight;
@@ -32,10 +32,18 @@ public sealed partial class TerminalSurface
                 if (placement.Layer != layer) continue;
                 var target = PlacementBounds(placement, cellWidth, cellHeight, gridTop, scaleX, scaleY);
                 if (target.Width <= 0 || target.Height <= 0 || !Intersects(target, grid)) continue;
-                if (bitmaps.Get(drawing.Device, placement) is not { } bitmap) continue;
+                if (bitmaps.Get(drawing.Device, placement, drawing) is not { } bitmap) continue;
                 clip ??= drawing.CreateLayer(1, grid);
                 var size = bitmap.Bitmap.SizeInPixels;
-                drawing.DrawImage(bitmap.Bitmap, target, new Rect(0, 0, size.Width, size.Height), 1, CanvasImageInterpolation.Linear);
+                try { drawing.DrawImage(bitmap.Bitmap, target, new Rect(0, 0, size.Width, size.Height), 1, CanvasImageInterpolation.Linear); }
+                finally
+                {
+                    if (bitmap.Transient)
+                    {
+                        drawing.Flush();
+                        bitmap.Bitmap.Dispose();
+                    }
+                }
             }
         }
         finally { clip?.Dispose(); }
@@ -55,8 +63,8 @@ public sealed partial class TerminalSurface
     /// Device bitmaps keyed by image generation, which uniquely names a version of an image's pixels, and the source
     /// rectangle. A cropped placement gets a bitmap of just its crop, because filtered sampling of a rectangle inside a
     /// larger bitmap blends in pixels from outside the crop at its edges. Bitmaps belong to one device: a new device,
-    /// a lost device or a released canvas clears them. Bitmaps the current frame draws always stay; others are evicted
-    /// oldest first above <see cref="Budget"/>, which keeps recently scrolled-away images cheap to bring back without
+    /// a lost device or a released canvas clears them. Bitmaps are evicted oldest first, including current-frame crops,
+    /// above <see cref="Budget"/>, which keeps recently scrolled-away images cheap to bring back without
     /// holding every image the session ever showed.
     /// </summary>
     internal sealed class ImageBitmaps : IDisposable
@@ -75,12 +83,13 @@ public sealed partial class TerminalSurface
         internal sealed record Entry(CanvasBitmap Bitmap, float Scale, long Bytes)
         {
             public long Used { get; set; }
+            public bool Transient { get; init; }
         }
 
         internal int Count => _entries.Count;
         internal long Bytes => _bytes;
 
-        internal Entry? Get(CanvasDevice device, TerminalImagePlacement placement)
+        internal Entry? Get(CanvasDevice device, TerminalImagePlacement placement, CanvasDrawingSession? drawing = null)
         {
             if (!ReferenceEquals(device, _device))
             {
@@ -97,22 +106,34 @@ public sealed partial class TerminalSurface
             if (key.Width <= 0 || key.Height <= 0 || key.X < 0 || key.Y < 0 ||
                 (long)key.X + key.Width > image.Width || (long)key.Y + key.Height > image.Height) return null;
             var (pixels, width, height, scale) = FitToDevice(Crop(image, key), key.Width, key.Height, device.MaximumBitmapSizeInPixels);
+            // Submit draws that reference evicted resources before releasing their wrappers.
+            // Oversized crops are drawn once and disposed by DrawImages, never admitted to the cache.
+            if (_bytes + (long)width * height * 4 > Budget)
+            {
+                drawing?.Flush();
+                EvictTo(Math.Max(0, Budget - (long)width * height * 4));
+            }
             var bitmap = CanvasBitmap.CreateFromBytes(device, pixels, width, height,
                 DirectXPixelFormat.R8G8B8A8UIntNormalized, 96, CanvasAlphaMode.Premultiplied);
             entry = new Entry(bitmap, scale, (long)width * height * 4) { Used = ++_clock };
+            if (entry.Bytes > Budget) return entry with { Transient = true };
             _entries.Add(key, entry);
             _bytes += entry.Bytes;
             return entry;
         }
 
-        /// <summary>Evicts bitmaps the frame does not draw until the cache fits its budget.</summary>
+        /// <summary>Evicts oldest bitmaps, including current-frame crops, until the cache fits its budget.</summary>
         internal void Trim(TerminalImages current)
         {
             if (_bytes <= Budget) return;
-            var keep = current.Placements.Select(Key.For).ToHashSet();
-            foreach (var (key, entry) in _entries.Where(e => !keep.Contains(e.Key)).OrderBy(e => e.Value.Used).ToArray())
+            EvictTo(Budget);
+        }
+
+        private void EvictTo(long limit)
+        {
+            foreach (var (key, entry) in _entries.OrderBy(e => e.Value.Used).ToArray())
             {
-                if (_bytes <= Budget) break;
+                if (_bytes <= limit) break;
                 entry.Bitmap.Dispose();
                 _entries.Remove(key);
                 _bytes -= entry.Bytes;

@@ -36,7 +36,7 @@ public sealed partial class GhosttyTerminal
     /// allocates and never lets an exception cross the native boundary.
     /// </summary>
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static unsafe byte DecodePng(IntPtr userdata, IntPtr allocator, byte* data, nuint length, SysImage* output)
+    internal static unsafe byte DecodePng(IntPtr userdata, IntPtr allocator, byte* data, nuint length, SysImage* output)
     {
         byte* buffer = null;
         nuint size = 0;
@@ -44,16 +44,14 @@ public sealed partial class GhosttyTerminal
         {
             if (length < 24 || length > int.MaxValue) return 0;
             var png = new ReadOnlySpan<byte>(data, (int)length);
-            long width = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png[16..]);
-            long height = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png[20..]);
-            if (width == 0 || height == 0 || width * height > PngDecoder.MaxPixels) return 0;
+            ulong width = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png[16..]);
+            ulong height = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png[20..]);
+            if (width == 0 || height == 0 || width * height > (ulong)PngDecoder.MaxPixels) return 0;
             size = (nuint)(width * height * 4);
-            // The library's allocator enforces the storage limit, so ask it first and skip decoding oversized images.
+            var pixels = PngDecoder.TryDecode(png, out var decodedWidth, out var decodedHeight);
+            if (pixels is null || (ulong)decodedWidth != width || (ulong)decodedHeight != height) return 0;
             buffer = ImageNative.ghostty_alloc(allocator, size);
             if (buffer is null) return 0;
-            var pixels = PngDecoder.TryDecode(png, out var decodedWidth, out var decodedHeight);
-            if (pixels is null || decodedWidth != width || decodedHeight != height)
-                return 0;
             pixels.CopyTo(new Span<byte>(buffer, pixels.Length));
             output->Width = (uint)width;
             output->Height = (uint)height;
@@ -67,7 +65,7 @@ public sealed partial class GhosttyTerminal
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private unsafe struct SysImage { public uint Width, Height; public byte* Data; public nuint Length; }
+    internal unsafe struct SysImage { public uint Width, Height; public byte* Data; public nuint Length; }
 
     /// <summary>Bytes of decoded pixels held for the active screen's placed images.</summary>
     public long ImageCacheBytes => _imagePixels.Values.Sum(image => image.ByteCount);
@@ -165,7 +163,7 @@ public sealed partial class GhosttyTerminal
             if (result == -4) continue; // Pixels still arriving. The storage generation changes when they land.
             ThrowIfFailed(result, "Could not read image pixels.");
             var channels = format switch { 0 => 3, 1 => 4, 3 => 2, 4 => 1, _ => 0 };
-            if (channels == 0 || width == 0 || height == 0 || (ulong)width * height * 4 > (ulong)Array.MaxLength ||
+            if (channels == 0 || width == 0 || height == 0 || (ulong)width * height > (ulong)Array.MaxLength / 4 ||
                 pixels.Length != (nuint)((ulong)width * height * (ulong)channels)) continue;
             var copy = GC.AllocateUninitializedArray<byte>(checked((int)pixels.Length));
             Marshal.Copy(pixels.Data, copy, 0, copy.Length);
@@ -241,19 +239,20 @@ public sealed partial class GhosttyTerminal
         return _images;
     }
 
-    private unsafe int LastImageRow()
+    private unsafe int LastImageRow(IntPtr state)
     {
         if (_cellHeightPx == 0) return -1;
-        EnsureImageIterator();
-        using var lease = new HandleLease(_imageIteratorHandle);
-        var iterator = lease.Raw;
-        StateGet(RenderStateData.ImageIterator, &iterator);
+        ThrowIfFailed(ImageNative.ghostty_render_state_image_iterator_new(IntPtr.Zero, out var iterator), "Could not create presentation images.");
+        using var owned = new ImageIteratorHandle(iterator);
+        ThrowIfFailed(RenderNative.ghostty_render_state_get(state, RenderStateData.ImageIterator, &iterator), "Could not read presentation images.");
         var last = -1;
         while (ImageNative.ghostty_render_state_image_iterator_next(iterator) != 0)
         {
             int row = 0;
             uint height = 0, offset = 0;
-            ImageGet(7, &row); ImageGet(13, &height); ImageGet(11, &offset);
+            ImageNative.ghostty_render_state_image_get(iterator, 7, &row);
+            ImageNative.ghostty_render_state_image_get(iterator, 13, &height);
+            ImageNative.ghostty_render_state_image_get(iterator, 11, &offset);
             if (height == 0) continue;
             var end = row + ((long)offset + height + _cellHeightPx - 1) / _cellHeightPx - 1;
             last = (int)Math.Max(last, Math.Min(_rows - 1, end));

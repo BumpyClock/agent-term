@@ -234,7 +234,7 @@ public sealed partial class GhosttyTerminal
                 var selected = column >= selectionStart && column <= selectionEnd;
                 var width = (byte)((CellWide)wide == CellWide.Wide ? 2 : (CellWide)wide >= CellWide.SpacerTail ? 0 : 1);
                 bool bold = style.Has(StyleFlags.Bold), italic = style.Has(StyleFlags.Italic), underline = style.Has(StyleFlags.UnderlineMask),
-                    strikethrough = style.Has(StyleFlags.Strikethrough), dim = style.Has(StyleFlags.Faint), hidden = style.Has(StyleFlags.Invisible);
+                    strikethrough = style.Has(StyleFlags.Strikethrough), dim = style.Has(StyleFlags.Faint), hidden = style.Has(StyleFlags.Invisible) || text.StartsWith("\U0010EEEE", StringComparison.Ordinal);
                 var underlineStyle = (TerminalUnderlineStyle)((style.Flags >> 8) & 7);
                 TerminalColor? underlineColor = style.UnderlineTag == 1 ? palette[style.UnderlineR].ToColor() : style.UnderlineTag == 2 ? new TerminalColor(style.UnderlineR, style.UnderlineG, style.UnderlineB) : null;
                 bool overline = style.Has(StyleFlags.Overline), textBlink = style.Has(StyleFlags.Blink);
@@ -304,6 +304,7 @@ public sealed partial class GhosttyTerminal
     /// <summary>Frees the render state with the iterators that borrow from it. The next capture rebuilds every row.</summary>
     private void RetireRender()
     {
+        _placementsGeneration = _retriedPlacements = null;
         _renderState = _rowIterator = _cellIterator = IntPtr.Zero;
         _renderCells?.Dispose(); _renderRows?.Dispose(); _render?.Dispose();
         _renderCells = null; _renderRows = null; _render = null;
@@ -377,7 +378,7 @@ public sealed partial class GhosttyTerminal
         void LocalStateGet(RenderStateData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_get(presentationState, key, value), "Could not read presentation state.");
         void LocalRowGet(RenderRowData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_get(rowIterator, key, value), "Could not read presentation row.");
         void LocalCellGet(RenderCellData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_cells_get(cellIterator, key, value), "Could not read presentation cell.");
-        return Math.Max(last, LastImageRow());
+        return Math.Max(last, LastImageRow(state.Raw));
     }
 
     private unsafe (TerminalColor Fg, TerminalColor Bg) CellColors(TerminalColor fg, TerminalColor bg, bool inverse, IntPtr iterator = default)

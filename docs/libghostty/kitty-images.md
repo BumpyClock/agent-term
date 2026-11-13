@@ -24,7 +24,7 @@ Each screen stores up to 64 MiB of decoded images (`TerminalSession.DefaultImage
 
 1. libghostty-vt storage holds decoded pixels for the active screen, up to the storage limit.
 2. `GhosttyTerminal` holds an immutable raw capture and one premultiplied RGBA copy of each image that has a placement on the active screen. The copy is dropped when the image is replaced, deleted, or its screen is no longer active. `ImageCacheBytes` reports the premultiplied cache, excluding raw captures and retained frames.
-3. `TerminalSurface` holds device bitmaps. Bitmaps for the current frame always stay. Others are evicted oldest first above 64 MiB. A hidden pane, a released canvas and a lost device free all bitmaps.
+3. `TerminalSurface` holds device bitmaps. The cache admits at most 64 MiB, evicting oldest entries including current-frame crops before an upload. Pending drawing commands are flushed before eviction. A single crop above 64 MiB is transient and released after its draw is flushed, so peak bitmap ownership is bounded by the larger of 64 MiB and one device-sized crop, independent of placement count. A hidden pane, a released canvas and a lost device free all bitmaps.
 
 ## How a frame gets its images.
 
@@ -37,7 +37,7 @@ Render-hold callbacks also freeze an independent capture of image pixels at the 
 
 `TerminalFrame.Images` is a `TerminalImages` record. Placements are sorted in draw order. Each placement references an immutable `TerminalImageData` whose `Generation` uniquely names its pixels. An unchanged image list keeps its instance, so a frame whose images changed without text changes still gets a new frame with the same cell array.
 
-PNG decoding is a process-wide libghostty-vt callback. `PngDecoder` is a bounded managed decoder for every PNG 1.2 color type, bit depth and Adam7 interlacing. It asks the library's allocator for the output first, so images over the storage limit are rejected before decoding.
+PNG decoding is a process-wide libghostty-vt callback. `PngDecoder` is a bounded managed decoder for every PNG 1.2 color type, bit depth and Adam7 interlacing. It validates the exact inflated length with an 8 KiB scratch buffer before allocating an IHDR-sized managed buffer. Valid input is decompressed again to decode pixels. The native callback decodes before requesting native output memory, so impossible dimensions or a short inflated stream never request a large native allocation. The library still enforces its storage limit when native output is allocated.
 
 ## Pixel geometry.
 
@@ -45,7 +45,7 @@ libghostty-vt positions images only when it knows the cell size in device pixels
 
 ## Drawing.
 
-`TerminalSurface` draws each layer at its place in the cell paint order. A cropped placement gets a bitmap of just its source rectangle, so filtered scaling does not blend pixels from outside the crop. Images are clipped to the visible grid. Images larger than the device bitmap limit are resampled to fit. The cursor overlay draws above images.
+`TerminalSurface` draws each layer at its place in the cell paint order. A cropped placement gets a bitmap of just its source rectangle, so filtered scaling does not blend pixels from outside the crop. Visible and overscan cells share one ordered composition with images at the original frame coordinates. Fractional scrolling clips images to the surface viewport after applying the fractional origin. Images larger than the device bitmap limit are resampled to fit. The cursor overlay draws above images.
 
 ## Tests.
 
@@ -54,3 +54,9 @@ libghostty-vt positions images only when it knows the cell size in device pixels
 3. `tests/AgentTerm.ConPty.Smoke/KittyImageSessionChecks.cs` sends raw and chunked PNG images from PowerShell through ConPTY. Run it alone with `--images-only`.
 
 Images below the last text row count as content in bottom-anchored mode. Offline archive viewers set cell geometry before drawing restored images. Standalone terminals enable image storage explicitly; application sessions enable the renderer and its 64 MiB limit together.
+
+Placement-list generations belong to a render-state instance. Retiring, adopting or recovering that state invalidates both placement and retry generations. Pixel generations retain their independent immutable identity. Only the terminal assembly constructs image data; renderer smoke tests have friend visibility for fixtures. `TerminalImages.DefaultStorageLimit` defines the shared host/session default.
+
+Kitty U+10EEEE placeholder cells retain their text, grapheme extent, selection and native image metadata. Canonical materialization marks them hidden for drawing, which also suppresses glyphs in cursor redraws and overscan rows.
+
+Review regressions cover repeated placement generations after scrolling handoff and allocator recovery, unsigned maximum IHDR dimensions, bounded allocation for huge IHDR with tiny compressed data, 100 current-frame near-full crops, pending-draw resource disposal, and half-row overscan image/background/text order in all three layers. Renderer regressions require the parent's consolidated raster run.
