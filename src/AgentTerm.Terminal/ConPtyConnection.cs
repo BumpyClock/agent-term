@@ -1,12 +1,11 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading.Channels;
 
 namespace AgentTerm.Terminal;
 
 /// <summary>A single Windows pseudoconsole session. Output memory is valid only during the callback.</summary>
-public sealed class ConPtyConnection : IAsyncDisposable
+public sealed partial class ConPtyConnection : IAsyncDisposable
 {
     private readonly object gate = new();
     private readonly short columns;
@@ -62,7 +61,7 @@ public sealed class ConPtyConnection : IAsyncDisposable
                 Check(Native.UpdateProcThreadAttribute(attributes, 0, (nuint)0x00020016, pseudoConsole, (nuint)IntPtr.Size, IntPtr.Zero, IntPtr.Zero));
                 // Explicit null standard handles prevent redirected parent handles from being duplicated into the child.
                 var startup = new StartupInfoEx { StartupInfo = new StartupInfo { cb = Marshal.SizeOf<StartupInfoEx>(), flags = 0x100 }, AttributeList = attributes };
-                var command = new StringBuilder($"\"{executable}\" {arguments}");
+                var command = $"\"{executable}\" {arguments}\0".ToCharArray();
                 environment = CreateChildEnvironment();
                 Check(Native.CreateProcess(null, command, IntPtr.Zero, IntPtr.Zero, false, 0x00080400, environment, workingDirectory, ref startup, out var info));
                 process = info.Process;
@@ -302,24 +301,24 @@ public sealed class ConPtyConnection : IAsyncDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct ProcessInformation { public IntPtr Process, Thread; public uint ProcessId, ThreadId; }
 
-    private static class Native
+    private static partial class Native
     {
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool CreatePipe(out IntPtr read, out IntPtr write, IntPtr attributes, int size);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool CreatePipe(out IntPtr read, out IntPtr write, IntPtr attributes, int size);
         // The bundled host forwards OSC replies that older inbox ConPTY versions discard.
-        [DllImport("conpty.dll", EntryPoint = "ConptyCreatePseudoConsole")] public static extern int CreatePseudoConsole(Coord size, IntPtr input, IntPtr output, uint flags, out IntPtr console);
-        [DllImport("conpty.dll", EntryPoint = "ConptyResizePseudoConsole")] public static extern int ResizePseudoConsole(IntPtr console, Coord size);
-        [DllImport("conpty.dll", EntryPoint = "ConptyClosePseudoConsole")] public static extern void ClosePseudoConsole(IntPtr console);
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref nuint size);
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, nuint attribute, IntPtr value, nuint size, IntPtr previous, IntPtr returnSize);
-        [DllImport("kernel32.dll")] public static extern void DeleteProcThreadAttributeList(IntPtr list);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetEnvironmentStringsW")] public static extern IntPtr GetEnvironmentStrings();
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "FreeEnvironmentStringsW")] public static extern bool FreeEnvironmentStrings(IntPtr environment);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateProcessW")] public static extern bool CreateProcess(string? application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string? directory, ref StartupInfoEx startup, out ProcessInformation process);
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool ReadFile(IntPtr handle, byte[] buffer, int count, out int read, IntPtr overlapped);
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool WriteFile(IntPtr handle, byte[] buffer, int count, out int written, IntPtr overlapped);
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
-        [DllImport("kernel32.dll", SetLastError = true)] public static extern bool TerminateProcess(IntPtr process, uint exitCode);
-        [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
+        [LibraryImport("conpty.dll", EntryPoint = "ConptyCreatePseudoConsole")] public static partial int CreatePseudoConsole(Coord size, IntPtr input, IntPtr output, uint flags, out IntPtr console);
+        [LibraryImport("conpty.dll", EntryPoint = "ConptyResizePseudoConsole")] public static partial int ResizePseudoConsole(IntPtr console, Coord size);
+        [LibraryImport("conpty.dll", EntryPoint = "ConptyClosePseudoConsole")] public static partial void ClosePseudoConsole(IntPtr console);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref nuint size);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool UpdateProcThreadAttribute(IntPtr list, uint flags, nuint attribute, IntPtr value, nuint size, IntPtr previous, IntPtr returnSize);
+        [LibraryImport("kernel32.dll")] public static partial void DeleteProcThreadAttributeList(IntPtr list);
+        [LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "GetEnvironmentStringsW")] public static partial IntPtr GetEnvironmentStrings();
+        [LibraryImport("kernel32.dll", EntryPoint = "FreeEnvironmentStringsW")][return: MarshalAs(UnmanagedType.Bool)] public static partial bool FreeEnvironmentStrings(IntPtr environment);
+        [LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "CreateProcessW", StringMarshalling = StringMarshalling.Utf16)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool CreateProcess(string? application, char[] command, IntPtr processAttributes, IntPtr threadAttributes, [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint flags, IntPtr environment, string? directory, ref StartupInfoEx startup, out ProcessInformation process);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool ReadFile(IntPtr handle, [Out] byte[] buffer, int count, out int read, IntPtr overlapped);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool WriteFile(IntPtr handle, byte[] buffer, int count, out int written, IntPtr overlapped);
+        [LibraryImport("kernel32.dll", SetLastError = true)] public static partial uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+        [LibraryImport("kernel32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] public static partial bool TerminateProcess(IntPtr process, uint exitCode);
+        [LibraryImport("kernel32.dll")][return: MarshalAs(UnmanagedType.Bool)] public static partial bool CloseHandle(IntPtr handle);
     }
 }

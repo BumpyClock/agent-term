@@ -24,6 +24,13 @@ public sealed partial class MainPage
     private bool _startingTask;
     private PromptInputOwner _inputOwner = PromptInputOwner.Terminal;
     private string? _promptFont;
+    private CoalescedUpdate? _agentUpdate;
+    private readonly List<AgentTask> _expiredCards = [];
+    private bool _followOutput = true;
+    private (string Heading, string? Tip)? _surfaceTitle;
+    private ChromeState? _chrome;
+    private readonly record struct ChromeState(ShellPromptState Shell, bool Owns, bool EntryUnavailable, string? Placeholder, string? Hint,
+        bool ReadOnly, FocusState Focus, bool CanSend, bool ApprovalPending, bool Busy, bool CanInterrupt, AgentState Agent, bool TaskShown, bool Animate);
 
     private bool AgentBusy => _agent.HasActiveTurn;
     internal void AttachAgentControls(PaneHeader header) => header.AgentBar = _agentBar;
@@ -48,8 +55,6 @@ public sealed partial class MainPage
     {
         if (AgentReply is null || _agent is null) return;
         var session = _session;
-        var state = session?.PromptState ?? ShellPromptState.Unknown;
-        var owns = session?.AgentOwnsTerminal == true;
         if (_promptFont != Terminal.TerminalFontFamily)
         {
             _promptFont = Terminal.TerminalFontFamily;
@@ -57,45 +62,53 @@ public sealed partial class MainPage
             AgentReply.FontFamily = PromptGlyph.FontFamily = PromptHint.FontFamily = RequestPanel.DetailFont = _timelineView.Mono = font;
         }
         var request = _agent.Request;
-        if (_surfaceOpen)
-        {
-            AgentReply.PlaceholderText = request switch
+        var text = AgentReply.Text;
+        var busy = AgentBusy;
+        var readOnly = busy && request is not QuestionRequest { AllowFreeform: true };
+        var state = new ChromeState(session?.PromptState ?? ShellPromptState.Unknown, session?.AgentOwnsTerminal == true, session?.AgentEntryAvailable == false,
+            !_surfaceOpen ? null : request switch
             {
                 QuestionRequest { AllowFreeform: true } => "Answer the agent",
                 QuestionRequest => "Pick an answer above",
-                _ when AgentBusy => PausedReply,
+                _ when busy => PausedReply,
                 _ when _agent.CurrentTask?.Turns.Count == 0 => "Ask the agent",
                 _ => "Ask a follow up",
-            };
-            PromptHint.Text = _promptFailure ?? (request switch
+            },
+            !_surfaceOpen ? null : _promptFailure ?? (request switch
             {
                 QuestionRequest { AllowFreeform: true } => "Enter answer · Shift+Enter new line",
                 QuestionRequest => "",
-                _ when AgentBusy => AgentReply.Text.Length > 0 ? PausedReply : "",
+                _ when busy => text.Length > 0 ? PausedReply : "",
                 _ => "Enter send · Shift+Enter new line",
-            });
-            PromptHint.Visibility = PromptHint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }),
+            readOnly, AgentReply.FocusState, CanSend(text), request is ApprovalRequest, busy, _agent.CanInterrupt, _agent.State, !_surfaceOpen, _viewActive && IsLoaded);
+        if (_chrome == state) return;
+        _chrome = state;
+        if (state.Placeholder is { } placeholder) AgentReply.PlaceholderText = placeholder;
+        if (state.Hint is { } hint)
+        {
+            PromptHint.Text = hint;
+            PromptHint.Visibility = hint.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
-        AgentReply.IsReadOnly = AgentBusy && request is not QuestionRequest { AllowFreeform: true };
+        AgentReply.IsReadOnly = readOnly;
         UpdatePromptGlyph();
-        SubmitPrompt.IsEnabled = CanSend(AgentReply.Text);
-        SubmitPrompt.Opacity = AgentReply.IsReadOnly ? 0 : 1;
-        SubmitPrompt.IsHitTestVisible = !AgentReply.IsReadOnly;
+        SubmitPrompt.IsEnabled = state.CanSend;
+        SubmitPrompt.Opacity = readOnly ? 0 : 1;
+        SubmitPrompt.IsHitTestVisible = !readOnly;
 
-        _agentBar.ShowInteract(owns);
-        _agentBar.ShowShellStatus(state, session?.AgentEntryAvailable == false);
+        _agentBar.ShowInteract(state.Owns);
+        _agentBar.ShowShellStatus(state.Shell, state.EntryUnavailable);
 
-        var approvalPending = request is ApprovalRequest;
-        StopShortcut.Visibility = approvalPending ? Visibility.Collapsed : Visibility.Visible;
-        var stopTip = approvalPending ? "Stop the agent's current turn" : "Stop the agent's current turn (Ctrl+C)";
+        StopShortcut.Visibility = state.ApprovalPending ? Visibility.Collapsed : Visibility.Visible;
+        var stopTip = state.ApprovalPending ? "Stop the agent's current turn" : "Stop the agent's current turn (Ctrl+C)";
         if (_stopTip != stopTip) { _stopTip = stopTip; ToolTipService.SetToolTip(StopAgentButton, stopTip); }
-        StopAgentButton.Opacity = AgentBusy ? 1 : 0;
-        StopAgentButton.IsEnabled = _agent.CanInterrupt;
-        StopAgentButton.IsHitTestVisible = AgentBusy;
-        AutomationProperties.SetAccessibilityView(StopAgentButton, AgentBusy ? AccessibilityView.Content : AccessibilityView.Raw);
-        ToolTipService.SetToolTip(LeaveSurfaceButton, AgentBusy ? "Back to the terminal. The agent keeps working."
+        StopAgentButton.Opacity = busy ? 1 : 0;
+        StopAgentButton.IsEnabled = state.CanInterrupt;
+        StopAgentButton.IsHitTestVisible = busy;
+        AutomationProperties.SetAccessibilityView(StopAgentButton, busy ? AccessibilityView.Content : AccessibilityView.Raw);
+        ToolTipService.SetToolTip(LeaveSurfaceButton, busy ? "Back to the terminal. The agent keeps working."
             : "Back to the terminal. This conversation is saved in its task card.");
-        _agentBar.ShowTask(_agent.State, !_surfaceOpen, _viewActive && IsLoaded);
+        _agentBar.ShowTask(state.Agent, state.TaskShown, state.Animate);
     }
 
     private bool CanSend(string text)
@@ -105,39 +118,48 @@ public sealed partial class MainPage
         return _agent.Request is QuestionRequest { AllowFreeform: true } || (_agent.CanSubmit && _agent.Request is null);
     }
 
-    private void AgentChanged()
+    private CoalescedUpdate AgentUpdate => LazyInitializer.EnsureInitialized(ref _agentUpdate, () => new(
+        () => DispatcherQueue.TryEnqueue(() => CompositionTarget.Rendering += AgentUpdate_Rendering),
+        () => { if (_state != SessionState.Disposed && _viewActive) RefreshAgent(IsLoaded); }));
+    private void AgentChanged() => AgentUpdate.Request();
+    private void AgentUpdate_Rendering(object? sender, object args)
     {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_state == SessionState.Disposed) return;
-            if (_surfaceOpen) UpdateSurface(AgentOutput.ScrollableHeight - AgentOutput.VerticalOffset < 24);
-            foreach (var (task, entry) in _cards.ToArray())
-            {
-                if (!_agent.Tasks.Contains(task)) RemoveCard(task);
-                else entry.Card.Update(_agent, _viewActive && IsLoaded);
-            }
-            RefreshAgentChrome();
-        });
+        CompositionTarget.Rendering -= AgentUpdate_Rendering;
+        AgentUpdate.Run();
     }
 
-    private void SetAgentAnimation(bool active)
+    private void SetAgentAnimation(bool active) => RefreshAgent(active);
+
+    private void RefreshAgent(bool active)
     {
-        if (_surfaceOpen) _timelineView.Update(_agent, _agent.CurrentTask, active);
-        foreach (var entry in _cards.Values) entry.Card.Update(_agent, active);
+        if (_surfaceOpen) UpdateSurface(active);
+        foreach (var (task, entry) in _cards.ToArray())
+        {
+            if (!_agent.Tasks.Contains(task)) RemoveCard(task);
+            else entry.Card.Update(_agent, active);
+        }
         RefreshAgentChrome();
     }
 
-    private void UpdateSurface(bool follow)
+    private void UpdateSurface(bool active)
     {
-        if (!AgentTimelineHost.Children.Contains(_timelineView)) AgentTimelineHost.Children.Add(_timelineView);
+        if (!AgentTimelineHost.Children.Contains(_timelineView))
+        {
+            AgentTimelineHost.Children.Add(_timelineView);
+            AgentOutput.VerticalAnchorRatio = 1;
+            AgentOutput.ViewChanged += (_, _) => _followOutput = AgentOutput.ScrollableHeight - AgentOutput.VerticalOffset < 24;
+            AgentTimelineHost.SizeChanged += (_, _) => { if (_followOutput) AgentOutput.ChangeView(null, AgentOutput.ScrollableHeight, null, true); };
+        }
         var task = _agent.CurrentTask;
-        _timelineView.Update(_agent, task, _viewActive && IsLoaded);
-        SurfaceTitle.Text = task is { Turns.Count: > 0 } ? "Agent task" : "New agent task";
-        ToolTipService.SetToolTip(SurfaceTitle, task?.Title);
+        _timelineView.Update(_agent, task, active);
+        var heading = task is { Turns.Count: > 0 } ? "Agent task" : "New agent task";
+        if (_surfaceTitle != (heading, task?.Title))
+        {
+            _surfaceTitle = (heading, task?.Title);
+            SurfaceTitle.Text = heading;
+            ToolTipService.SetToolTip(SurfaceTitle, task?.Title);
+        }
         RequestPanel.Update();
-        if (!follow) return;
-        AgentOutput.UpdateLayout();
-        AgentOutput.ChangeView(null, AgentOutput.ScrollableHeight, null, true);
     }
 
     private bool PaneInputFocused()
@@ -183,7 +205,10 @@ public sealed partial class MainPage
             AgentSurface.Visibility = Visibility.Visible;
             UpdateInputOwner(handoff);
         }
-        UpdateSurface(true);
+        UpdateSurface(_viewActive && IsLoaded);
+        _followOutput = true;
+        AgentOutput.UpdateLayout();
+        AgentOutput.ChangeView(null, AgentOutput.ScrollableHeight, null, true);
         RefreshAgentChrome();
     }
 
@@ -287,22 +312,23 @@ public sealed partial class MainPage
         if (_cards.Count == 0) return;
         var geometry = Terminal.GeometryFor(frame);
         var cell = geometry.CellHeight;
-        foreach (var (task, entry) in _cards.ToArray())
+        var shown = !_surfaceOpen && !frame.Viewport.IsAlternateScreen;
+        var cursorRow = frame.Viewport.Offset + frame.Cursor.Row;
+        var width = Math.Max(0, Math.Min(TaskCardLayer.ActualWidth, geometry.Columns * geometry.CellWidth));
+        var height = Math.Max(0, 2 * cell - 4);
+        var bottom = TaskCardLayer.ActualHeight;
+        foreach (var (task, entry) in _cards)
         {
-            var row = entry.Session == _session ? entry.Session.ReadAnchor(entry.Anchor) : null;
-            if (row is null) { RemoveCard(task); continue; }
-            var frameRow = row.Value - frame.Viewport.Offset;
+            if (entry.Session != _session) { _expiredCards.Add(task); continue; }
+            if (!shown) { entry.Card.Place(false, 0, 0, 0); continue; }
+            if (entry.Session.ReadAnchor(entry.Anchor) is not { } row) { _expiredCards.Add(task); continue; }
+            var frameRow = row - frame.Viewport.Offset;
             var top = geometry.RowTop(frameRow);
-            var cursorRow = frame.Viewport.Offset + frame.Cursor.Row;
-            var overlapsPrompt = row.Value <= cursorRow && cursorRow < row.Value + 2;
-            var visible = !_surfaceOpen && !frame.Viewport.IsAlternateScreen && !overlapsPrompt
-                && top > -2 * cell && top < TaskCardLayer.ActualHeight && geometry.RowsBlank(frame, frameRow, 2);
-            entry.Card.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            if (!visible) continue;
-            Canvas.SetTop(entry.Card, top + 2);
-            entry.Card.Width = Math.Max(0, Math.Min(TaskCardLayer.ActualWidth, geometry.Columns * geometry.CellWidth));
-            entry.Card.Height = Math.Max(0, 2 * cell - 4);
+            var overlapsPrompt = row <= cursorRow && cursorRow < row + 2;
+            entry.Card.Place(!overlapsPrompt && top > -2 * cell && top < bottom && geometry.RowsBlank(frame, frameRow, 2), top + 2, width, height);
         }
+        foreach (var task in _expiredCards) RemoveCard(task);
+        _expiredCards.Clear();
     }
 
     private void RemoveCard(AgentTask task)

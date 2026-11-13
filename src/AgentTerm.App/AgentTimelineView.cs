@@ -19,10 +19,12 @@ internal static class AgentUi
         File = Glyph(0xE8A5), Edit = Glyph(0xE70F), Tool = Glyph(0xE90F), Idea = Glyph(0xE82F), Info = Glyph(0xE946),
         Stop = Glyph(0xE73B), CopyGlyph = Glyph(0xE8C8), Person = Glyph(0xE77B), Agent = Glyph(0xE99A), Shield = Glyph(0xEA18);
     private static readonly UISettings Settings = new();
+    private static readonly AccessibilitySettings Accessibility = new();
     public static string Glyph(int code) => ((char)code).ToString();
     public static Style Style(string key) => (Style)Application.Current.Resources[key];
     public static FontFamily Symbols => (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"];
     public static bool Animate => Settings.AnimationsEnabled;
+    public static bool HighContrast => Accessibility.HighContrast;
     public static string TaskStatus(AgentSessionController controller, AgentTask? task) => controller.RunningTask == task && task is not null
         ? controller.State switch
         {
@@ -104,9 +106,50 @@ internal sealed class DisclosureButton : Button
     }
 }
 
+internal interface ITimelineIndicatorPreferences
+{
+    bool Animate { get; }
+    bool HighContrast { get; }
+    event Action Changed;
+}
+
+internal sealed class TimelineIndicatorPreferences : ITimelineIndicatorPreferences
+{
+    private readonly UISettings _settings = new();
+    private readonly AccessibilitySettings _accessibility = new();
+    private Action? _changed;
+    public bool Animate => _settings.AnimationsEnabled;
+    public bool HighContrast => _accessibility.HighContrast;
+    public event Action Changed
+    {
+        add
+        {
+            if (_changed is null)
+            {
+                _settings.AnimationsEnabledChanged += SettingsChanged;
+                // ColorValuesChanged supports unpackaged hosts where HighContrastChanged throws.
+                _settings.ColorValuesChanged += SettingsChanged;
+            }
+            _changed += value;
+        }
+        remove
+        {
+            _changed -= value;
+            if (_changed is null)
+            {
+                _settings.AnimationsEnabledChanged -= SettingsChanged;
+                _settings.ColorValuesChanged -= SettingsChanged;
+            }
+        }
+    }
+    private void SettingsChanged(UISettings sender, object args) => _changed?.Invoke();
+}
+
 internal sealed class AgentTimelineView : StackPanel
 {
     private readonly Dictionary<Guid, IRow> _rows = [];
+    private readonly List<IRow> _ordered = [];
+    private readonly List<TimelineEntry> _entries = [];
     private readonly ActivityLabel _activity = new();
     private readonly ProgressRing _progress = new() { Width = 20, Height = 20, MinWidth = 20, MinHeight = 20 };
     private readonly FontIcon _staticProgress = AgentUi.Icon(AgentUi.Glyph(0xE917));
@@ -114,20 +157,40 @@ internal sealed class AgentTimelineView : StackPanel
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _elapsedTimer;
     private AgentSessionController? _controller;
     private bool _active;
+    private bool _working;
+    private (bool Trimmed, bool Activity)? _chrome;
+    private readonly ITimelineIndicatorPreferences _preferences;
+    private bool _loaded;
     private readonly TextBlock _trimmed = AgentUi.Text("AgentHintText", "Earlier activity in this pane was trimmed.");
     private AgentTask? _task;
     public FontFamily Mono { get; set; } = new("Cascadia Mono, Consolas");
 
-    public AgentTimelineView()
+    public AgentTimelineView() : this(new TimelineIndicatorPreferences()) { }
+
+    internal AgentTimelineView(ITimelineIndicatorPreferences preferences)
     {
+        _preferences = preferences;
         Spacing = 6;
         var indicator = new Grid { Children = { _progress, _staticProgress } };
         _activityRow = AgentUi.Row(indicator, _activity);
         _elapsedTimer = DispatcherQueue.CreateTimer();
         _elapsedTimer.Interval = TimeSpan.FromSeconds(1);
-        _elapsedTimer.Tick += (_, _) => { if (_controller is { } controller) Update(controller, _task, _active); };
-        Loaded += (_, _) => { if (_controller is { } controller) Update(controller, _task, _active); };
-        Unloaded += (_, _) => { _elapsedTimer.Stop(); _progress.IsActive = false; };
+        _elapsedTimer.Tick += (_, _) => { if (_controller is { } controller) _activity.Update(Status(controller, _task), _working && _active); };
+        Loaded += (_, _) =>
+        {
+            _loaded = true;
+            _preferences.Changed += PreferencesChanged;
+            if (_controller is { } controller) Update(controller, _task, _active);
+            else UpdateIndicatorPolicy();
+        };
+        Unloaded += (_, _) =>
+        {
+            _loaded = false;
+            _preferences.Changed -= PreferencesChanged;
+            _elapsedTimer.Stop();
+            UpdateIndicatorPolicy();
+            _chrome = null;
+        };
         _trimmed.Margin = new Thickness(AgentUi.Gutter, 0, 0, 0);
         Children.Add(_trimmed); Children.Add(_activityRow);
         AutomationProperties.SetName(this, "Agent conversation");
@@ -139,19 +202,23 @@ internal sealed class AgentTimelineView : StackPanel
         _active = active;
         if (task != _task)
         {
-            foreach (var row in _rows.Values) Children.Remove(row.Element);
+            foreach (var row in _ordered) Children.Remove(row.Element);
             _rows.Clear();
+            _ordered.Clear();
             _task = task;
         }
-        var entries = controller.Timeline.Entries.Where(e => task?.Contains(e.Turn) == true).ToArray();
-        _trimmed.Visibility = controller.Timeline.HasTrimmed && task is not null && task.Turns.Count > 0 && !controller.Timeline.Entries.Any(e => e.Turn == task.Turns[0])
-            ? Visibility.Visible : Visibility.Collapsed;
-        var retained = entries.Select(e => e.Id).ToHashSet();
-        foreach (var id in _rows.Keys.Where(id => !retained.Contains(id)).ToArray()) { Children.Remove(_rows[id].Element); _rows.Remove(id); }
-        var running = controller.State is AgentState.Running or AgentState.Starting && controller.RunningTask == task;
-        var index = 1;
-        foreach (var entry in entries)
+        _entries.Clear();
+        foreach (var entry in controller.Timeline.Entries) if (task?.Contains(entry.Turn) == true) _entries.Add(entry);
+        var trimmed = controller.Timeline.HasTrimmed && task is not null && task.Turns.Count > 0 && !controller.Timeline.Entries.Any(e => e.Turn == task.Turns[0]);
+        if (_entries.Count(e => _rows.ContainsKey(e.Id)) != _rows.Count)
         {
+            var retained = _entries.Select(e => e.Id).ToHashSet();
+            foreach (var id in _rows.Keys.Where(id => !retained.Contains(id)).ToArray()) { Children.Remove(_rows[id].Element); _ordered.Remove(_rows[id]); _rows.Remove(id); }
+        }
+        var running = controller.State is AgentState.Running or AgentState.Starting && controller.RunningTask == task;
+        for (var index = 0; index < _entries.Count; index++)
+        {
+            var entry = _entries[index];
             if (!_rows.TryGetValue(entry.Id, out var row))
             {
                 row = entry switch
@@ -163,27 +230,52 @@ internal sealed class AgentTimelineView : StackPanel
                     _ => throw new InvalidOperationException("Unknown timeline entry."),
                 };
                 _rows.Add(entry.Id, row);
-                Children.Insert(index, row.Element);
+                _ordered.Insert(index, row);
+                Children.Insert(index + 1, row.Element);
             }
-            else if (Children.IndexOf(row.Element) != index) { Children.Remove(row.Element); Children.Insert(index, row.Element); }
-            row.Update(active && running, entry == entries[^1]);
-            index++;
+            else if (_ordered[index] != row)
+            {
+                _ordered.Remove(row); _ordered.Insert(index, row);
+                Children.Remove(row.Element); Children.Insert(index + 1, row.Element);
+            }
+            row.Update(active && running, index == _entries.Count - 1);
         }
-        var toolsRunning = entries.OfType<TimelineWorkGroup>().Any(g => g.Active);
-        var thinking = entries.LastOrDefault() is TimelineWorkGroup { Reasoning: not null, Tools.Count: 0 };
-        var working = running && !toolsRunning && !thinking;
-        var status = AgentUi.TaskStatus(controller, task);
-        var ownsTurn = controller.HasActiveTurn && controller.RunningTask == task;
-        if (ownsTurn && controller.TurnElapsed.TotalSeconds >= 3)
-            status += " · " + controller.TurnElapsed.ToString(@"m\:ss");
-        if (ownsTurn && active && IsLoaded && controller.State is AgentState.Starting or AgentState.Running or AgentState.Interrupting) _elapsedTimer.Start(); else _elapsedTimer.Stop();
+        var toolsRunning = _entries.OfType<TimelineWorkGroup>().Any(g => g.Active);
+        var thinking = _entries.LastOrDefault() is TimelineWorkGroup { Reasoning: not null, Tools.Count: 0 };
+        _working = running && !toolsRunning && !thinking;
+        var status = Status(controller, task);
+        if (controller.HasActiveTurn && controller.RunningTask == task && active && IsLoaded && controller.State is AgentState.Starting or AgentState.Running or AgentState.Interrupting) _elapsedTimer.Start(); else _elapsedTimer.Stop();
         var cancellationShown = task?.LastOutcome == WorkStatus.Cancelled && controller.RunningTask != task
-            && entries.OfType<TimelineMessage>().Any(m => m.Role == MessageRole.Cancelled);
-        _activityRow.Visibility = status.Length > 0 && !cancellationShown ? Visibility.Visible : Visibility.Collapsed;
-        _progress.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
-        _progress.IsActive = working && active && IsLoaded && AgentUi.Animate && !new AccessibilitySettings().HighContrast;
-        _staticProgress.Visibility = working && !_progress.IsActive ? Visibility.Visible : Visibility.Collapsed;
-        _activity.Update(status, working && active);
+            && _entries.OfType<TimelineMessage>().Any(m => m.Role == MessageRole.Cancelled);
+        var activity = status.Length > 0 && !cancellationShown;
+        if (_chrome != (trimmed, activity))
+        {
+            _chrome = (trimmed, activity);
+            _trimmed.Visibility = trimmed ? Visibility.Visible : Visibility.Collapsed;
+            _activityRow.Visibility = activity ? Visibility.Visible : Visibility.Collapsed;
+        }
+        UpdateIndicatorPolicy();
+        _activity.Update(status, _working && active);
+    }
+
+    private void PreferencesChanged() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (_loaded) UpdateIndicatorPolicy();
+    });
+
+    private void UpdateIndicatorPolicy()
+    {
+        var spinning = _working && _active && _loaded && _preferences.Animate && !_preferences.HighContrast;
+        _progress.Visibility = _working ? Visibility.Visible : Visibility.Collapsed;
+        _progress.IsActive = spinning;
+        _staticProgress.Visibility = _working && !spinning ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static string Status(AgentSessionController controller, AgentTask? task)
+    {
+        var status = AgentUi.TaskStatus(controller, task);
+        return controller.HasActiveTurn && controller.RunningTask == task && controller.TurnElapsed.TotalSeconds >= 3
+            ? status + " · " + controller.TurnElapsed.ToString(@"m\:ss") : status;
     }
 
     private bool AwaitsApproval(TimelineTool tool) => _controller?.AwaitsApproval(tool.CallId) == true;
@@ -213,6 +305,7 @@ internal sealed class AgentTimelineView : StackPanel
     private sealed class RequestRow(TimelineMessage message, FontFamily font) : IRow
     {
         private readonly TextBlock _text = MonoText("AgentRequestText", font);
+        private string? _shown;
         private FrameworkElement? _element;
         public FrameworkElement Element => _element ??= Build();
         private Grid Build()
@@ -224,19 +317,22 @@ internal sealed class AgentTimelineView : StackPanel
         public void Update(bool live, bool last)
         {
             _ = Element;
-            if (_text.Text != message.Text) { _text.Text = message.Text; AutomationProperties.SetName(_text, "You asked: " + message.Text); }
+            if (_shown == message.Text) return;
+            _text.Text = _shown = message.Text;
+            AutomationProperties.SetName(_text, "You asked: " + _shown);
         }
     }
 
     private sealed class AnswerRow(TimelineMessage message, FontFamily font) : IRow
     {
         private readonly TextBlock _text = MonoText("AgentBodyText", font);
+        private string? _shown;
         private FrameworkElement? _element;
         public FrameworkElement Element => _element ??= AgentUi.Row(AgentUi.Icon(AgentUi.Agent), _text);
         public void Update(bool live, bool last)
         {
             _ = Element;
-            if (_text.Text != message.Text) _text.Text = message.Text;
+            if (_shown != message.Text) _text.Text = _shown = message.Text;
         }
     }
 
@@ -244,6 +340,7 @@ internal sealed class AgentTimelineView : StackPanel
     {
         private readonly TextBlock _label = AgentUi.Text("AgentLabelText");
         private readonly TextBlock _detail = MonoText("AgentDetailText", font);
+        private string? _shown;
         private FrameworkElement? _element;
         public FrameworkElement Element => _element ??= Build();
         private Grid Build()
@@ -265,6 +362,8 @@ internal sealed class AgentTimelineView : StackPanel
         public void Update(bool live, bool last)
         {
             _ = Element;
+            if (_shown == message.Text) return;
+            _shown = message.Text;
             var label = AgentUi.FirstLine(message.Text, out var detail);
             _label.Text = label;
             _detail.Text = detail;
@@ -284,6 +383,8 @@ internal sealed class AgentTimelineView : StackPanel
         private readonly StackPanel _details = new() { Spacing = 4, Margin = new Thickness(AgentUi.Gutter, 0, 0, 0) };
         private readonly TextBlock _reasoning = AgentUi.Text("AgentDetailText");
         private readonly Dictionary<string, ToolCard> _cards = [];
+        private (bool Live, bool Last, string? Reasoning)? _shown;
+        private string _reasoningShown = "";
         private bool _built;
         public FrameworkElement Element { get { Build(); return _root; } }
         private void Build()
@@ -300,11 +401,14 @@ internal sealed class AgentTimelineView : StackPanel
         public void Update(bool live, bool last)
         {
             Build();
+            var changed = _shown != (live, last, group.Reasoning);
             foreach (var tool in group.Tools)
             {
-                if (!_cards.TryGetValue(tool.CallId, out var card)) { card = new ToolCard(tool, font, awaitsApproval); _cards.Add(tool.CallId, card); _details.Children.Add(card.Element); }
-                card.Refresh(live);
+                if (!_cards.TryGetValue(tool.CallId, out var card)) { card = new ToolCard(tool, font, awaitsApproval); _cards.Add(tool.CallId, card); _details.Children.Add(card.Element); changed = true; }
+                changed |= card.Sync(live);
             }
+            if (!changed) return;
+            _shown = (live, last, group.Reasoning);
             var reasoningOnly = group.Tools.Count == 0;
             var thinking = live && reasoningOnly && last;
             var gated = group.Tools.LastOrDefault(t => t.Status == WorkStatus.Running && awaitsApproval(t));
@@ -315,7 +419,7 @@ internal sealed class AgentTimelineView : StackPanel
             var failed = group.Tools.Any(t => t.Status == WorkStatus.Failed);
             _failed.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
             AutomationProperties.SetName(_header, label + (failed ? ", includes a failed call" : ""));
-            if (_reasoning.Text != (group.Reasoning ?? "")) _reasoning.Text = group.Reasoning ?? "";
+            if (_reasoningShown != (group.Reasoning ?? "")) _reasoning.Text = _reasoningShown = group.Reasoning ?? "";
             _reasoning.Visibility = group.Reasoning is null ? Visibility.Collapsed : Visibility.Visible;
             Layout();
         }
@@ -344,6 +448,8 @@ internal sealed class AgentTimelineView : StackPanel
         private readonly Button _more = new() { Style = AgentUi.Style("AgentQuietButtonStyle"), FontSize = 12 };
         private bool _showAll;
         private bool _live;
+        private (bool Live, WorkStatus Status, bool Executing, string Output, bool Awaiting)? _synced;
+        private string? _outputShown;
         public FrameworkElement Element => _card;
         public ToolCard(TimelineTool tool, FontFamily font, Func<TimelineTool, bool> awaitsApproval)
         {
@@ -373,9 +479,17 @@ internal sealed class AgentTimelineView : StackPanel
             _header.ContextFlyout = menu;
             _card.Child = new StackPanel { Children = { _header, _body } };
         }
-        public void Refresh(bool? live = null)
+        public bool Sync(bool live)
         {
-            if (live is { } active) _live = active;
+            var state = (live, _tool.Status, _tool.Executing, _tool.Output, _awaitsApproval(_tool));
+            if (_synced == state) return false;
+            _synced = state;
+            _live = live;
+            Refresh();
+            return true;
+        }
+        private void Refresh()
+        {
             var command = _tool.Command.Length > 0 ? _tool.Command : _tool.Action;
             var line = AgentUi.FirstLine(command, out var more);
             if (_command.Text != line) _command.Text = line;
@@ -396,7 +510,7 @@ internal sealed class AgentTimelineView : StackPanel
             if (_body.Visibility == Visibility.Collapsed) return;
             _fullCommand.Text = command;
             _fullCommand.Visibility = command.Contains('\n') || command.Length > 80 ? Visibility.Visible : Visibility.Collapsed;
-            if (_output.Text != _tool.Output) _output.Text = _tool.Output;
+            if (_outputShown != _tool.Output) _output.Text = _outputShown = _tool.Output;
             _output.Visibility = _tool.Output.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             var lines = _tool.Output.Count(c => c == '\n') + 1;
             var clamped = lines > AgentUi.OutputLines || _tool.Output.Length > AgentUi.OutputLines * 120;

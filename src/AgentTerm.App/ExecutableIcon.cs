@@ -6,7 +6,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace AgentTerm_App;
 
-internal static class ExecutableIcon
+internal static partial class ExecutableIcon
 {
     public static byte[]? Read(string executable)
     {
@@ -106,33 +106,33 @@ internal static class ExecutableIcon
 
     private delegate bool EnumResourceNameCallback(IntPtr module, IntPtr type, IntPtr name, IntPtr parameter);
 
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern SafeFileHandle CreateFile(string file, uint access, uint sharing, IntPtr security, uint creation, uint flags, IntPtr template);
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial SafeFileHandle CreateFile(string file, uint access, uint sharing, IntPtr security, uint creation, uint flags, IntPtr template);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DeviceIoControl(SafeFileHandle file, uint code, IntPtr input, int inputSize, byte[] output, int outputSize, out int returned, IntPtr overlapped);
+    private static partial bool DeviceIoControl(SafeFileHandle file, uint code, IntPtr input, int inputSize, Span<byte> output, int outputSize, out int returned, IntPtr overlapped);
 
-    [DllImport("kernel32.dll", EntryPoint = "LoadLibraryExW", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern IntPtr LoadLibraryEx(string file, IntPtr reserved, uint flags);
+    [LibraryImport("kernel32.dll", EntryPoint = "LoadLibraryExW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr LoadLibraryEx(string file, IntPtr reserved, uint flags);
 
-    [DllImport("kernel32.dll", EntryPoint = "EnumResourceNamesW", ExactSpelling = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "EnumResourceNamesW")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumResourceNames(IntPtr module, IntPtr type, EnumResourceNameCallback callback, IntPtr parameter);
+    private static partial bool EnumResourceNames(IntPtr module, IntPtr type, EnumResourceNameCallback callback, IntPtr parameter);
 
-    [DllImport("kernel32.dll", EntryPoint = "FindResourceW", ExactSpelling = true)]
-    private static extern IntPtr FindResource(IntPtr module, IntPtr name, IntPtr type);
+    [LibraryImport("kernel32.dll", EntryPoint = "FindResourceW")]
+    private static partial IntPtr FindResource(IntPtr module, IntPtr name, IntPtr type);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
-    private static extern uint SizeofResource(IntPtr module, IntPtr resource);
+    [LibraryImport("kernel32.dll")]
+    private static partial uint SizeofResource(IntPtr module, IntPtr resource);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
-    private static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr LoadResource(IntPtr module, IntPtr resource);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
-    private static extern IntPtr LockResource(IntPtr resource);
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr LockResource(IntPtr resource);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool FreeLibrary(IntPtr module);
+    private static partial bool FreeLibrary(IntPtr module);
 }

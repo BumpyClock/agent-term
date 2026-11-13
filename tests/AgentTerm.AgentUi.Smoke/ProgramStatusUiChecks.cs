@@ -40,6 +40,16 @@ internal static class ProgramStatusUiChecks
             status.Update([pi with { Status = pi.Status with { State = state } }]);
             Check(ReferenceEquals(tab.IconSource, piIcon), "Pi identity must survive activity and completion changes while running.");
         }
+        foreach (var agent in new[] { "claude", "Claude-Code", "codex", "gemini", "copilot", "cursor-agent", "opencode", "qwen", "cline" })
+        {
+            var report = Report("", ProgramState.Idle, agent, "Waiting for input");
+            status.Update([report]);
+            var mark = tab.IconSource;
+            Check(mark is PathIconSource { Data: not null }, $"{agent} must have a built-in mark even without a PATH executable icon.");
+            status.Update([report with { Status = report.Status with { State = ProgramState.Working } }]);
+            Check(ReferenceEquals(tab.IconSource, mark), $"{agent} identity must survive activity changes while running.");
+        }
+        status.Update([pi]);
         var retained = pi with { Status = pi.Status with { State = ProgramState.Done, IsActive = false } };
         status.Update([retained]);
         Check(ReferenceEquals(tab.IconSource, shell) && AutomationProperties.GetHelpText(tab).Contains("Done"), "Shell readiness must restore shell identity without losing completion details.");
@@ -323,6 +333,38 @@ internal static class ProgramStatusUiChecks
         await CaptureAsync(canvas, "icon-pi-working");
         status.Update([pi with { Status = pi.Status with { IsActive = false } }]);
         Check(ReferenceEquals(tab.IconSource, shell), "Exiting idle Pi must restore shell identity.");
+        var claude = Report("", ProgramState.Idle, "claude", "Ready");
+        status.Update([claude]);
+        await Task.Delay(100);
+        var claudeIcon = Descendants(icon).OfType<PathIcon>().Single();
+        Check(claudeIcon.Data is not null && claudeIcon.ActualWidth > 0, "Claude identity must render its built-in mark.");
+        var highContrast = new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        var claudeBrand = Windows.UI.Color.FromArgb(255, 0xD9, 0x77, 0x57);
+        Check(highContrast ? claudeIcon.Foreground is not SolidColorBrush { Color: var c } || c != claudeBrand : claudeIcon.Foreground is SolidColorBrush { Color: var b } && b == claudeBrand,
+            "Claude must render in its brand color, or the system foreground in high contrast.");
+        await CaptureAsync(canvas, "icon-claude-idle");
+        status.Update([claude with { Status = claude.Status with { State = ProgramState.Working } }]);
+        await Task.Delay(100);
+        Check(Descendants(icon).OfType<PathIcon>().Single().Data is not null, "Claude identity must stay visible inside its activity ring.");
+        await CaptureAsync(canvas, "icon-claude-working");
+        var sidebarIcon = new ProgramStatusIcon { Tab = tab };
+        canvas.Children.Add(sidebarIcon);
+        await Task.Delay(100);
+        Check(Descendants(sidebarIcon).OfType<PathIcon>().Single().Data is not null, "A second view of the same tab must render the mark without sharing its geometry.");
+        canvas.Children.Remove(sidebarIcon);
+        status.Update([Report("", ProgramState.Idle, "codex", "Ready")]);
+        await Task.Delay(100);
+        var codexIcon = Descendants(icon).OfType<PathIcon>().Single();
+        Check(codexIcon.Data is not null && codexIcon.ReadLocalValue(IconElement.ForegroundProperty) == DependencyProperty.UnsetValue, "Codex has a black-and-white brand, so its mark must follow the theme foreground.");
+        await CaptureAsync(canvas, "icon-codex-idle");
+        foreach (var agent in new[] { "gemini", "qwen", "copilot", "cursor", "opencode", "cline" })
+        {
+            status.Update([Report("", ProgramState.Idle, agent, "Ready")]);
+            await Task.Delay(100);
+            await CaptureAsync(canvas, $"icon-{agent}-idle");
+        }
+        status.Update([claude with { Status = claude.Status with { IsActive = false } }]);
+        Check(ReferenceEquals(tab.IconSource, shell), "Exiting an agent must restore shell identity.");
         Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% progress and static completion passed. Motion enabled={moving}.");
     }
 

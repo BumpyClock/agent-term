@@ -31,7 +31,6 @@
                         <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
                     </Style>
                 </Flyout.FlyoutPresenterStyle>
-                <local:GitHubDashboardView x:Name="Dashboard" />
             </Flyout>
         </FlyoutBase.AttachedFlyout>
     </Button>

@@ -2,6 +2,12 @@
 
 A running shell and a populated terminal snapshot do not establish that the canvas painted. Startup checks require executed commands, painted output, visible pixels and automatic input focus.
 
+## Default shell discovery.
+
+Built-in defaults open immediately. WSL discovery runs asynchronously and supplies both the profile menu and saved default selection. A saved WSL default waits for registered distributions, then opens its matching profile or falls back to the first built-in shell. The plus button and new-tab shortcut use the same selection. Closing the window while discovery is pending prevents a late tab from opening.
+
+The headless `AgentTerm.ConPty.Smoke --default-profile-only` fixture injects pending discovery and checks immediate built-in selection, present and removed saved distributions, and shared menu/new-tab results. The `AgentTerm.AgentUi.Smoke --timeline-preferences` fixture toggles injected motion and contrast preferences during a quiet turn, checks subscription release and restoration on unload/reload, and preserves existing rows. It requires an interactive Windows desktop and does not change system settings.
+
 ## Canvas lifetime.
 
 Do not force synchronous tab-list layout during loading. Reentrant `TabList.UpdateLayout()` reproduced blank startup despite populated shell output. Sidebar scrolling is queued after loading instead.

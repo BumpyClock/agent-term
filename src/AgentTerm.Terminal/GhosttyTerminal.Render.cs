@@ -10,6 +10,8 @@ public sealed partial class GhosttyTerminal
     private RenderHandle? _render;
     private RenderRowsHandle? _renderRows;
     private RenderCellsHandle? _renderCells;
+    // Borrowed from the handles above, which own their lifetime.
+    private IntPtr _renderState, _rowIterator, _cellIterator;
     private TerminalFrame? _frame;
     private long? _holdStarted;
     private long? _frameRefreshAt;
@@ -20,41 +22,40 @@ public sealed partial class GhosttyTerminal
         ? TimeSpan.FromMilliseconds(Math.Max(0, deadline - Environment.TickCount64)) : null;
 
     /// <summary>Captures an owned snapshot of the visible terminal grid.</summary>
-    public unsafe TerminalFrame ReadFrame()
+    public TerminalFrame ReadFrame() => CompleteFrame(BeginFrame());
+
+    /// <summary>
+    /// First phase of <see cref="ReadFrame"/>. Copies terminal state into the render state, so it needs the same
+    /// exclusion as any terminal call. Pass the result to <see cref="CompleteFrame"/>, and keep other render-state
+    /// users (<see cref="ReadFrame"/>, scrolling, anchors, presented viewport reads, disposal) out until it returns.
+    /// </summary>
+    internal FrameCapture BeginFrame()
     {
         ThrowIfDisposed();
         _frameRefreshAt = null;
-        if (_render is null)
-        {
-            ThrowIfFailed(RenderNative.ghostty_render_state_new(IntPtr.Zero, out var state), "Could not create render state.");
-            _render = new RenderHandle(state);
-        }
-        if (_renderRows is null)
-        {
-            ThrowIfFailed(RenderNative.ghostty_render_state_row_iterator_new(IntPtr.Zero, out var rows), "Could not create render row iterator.");
-            _renderRows = new RenderRowsHandle(rows);
-        }
-        if (_renderCells is null)
-        {
-            ThrowIfFailed(RenderNative.ghostty_render_state_row_cells_new(IntPtr.Zero, out var cells), "Could not create render cell iterator.");
-            _renderCells = new RenderCellsHandle(cells);
-        }
-
-        if (!_preparingPresentation && ReadMode(2026))
+        EnsureRender();
+        if (ReadMode(2026))
         {
             _holdStarted ??= Environment.TickCount64;
             if (_frame is not null && _viewRevision == _capturedViewRevision && Environment.TickCount64 - _holdStarted.Value < 1000)
             {
                 _frameRefreshAt = _holdStarted.Value + 1000;
-                return _frame;
+                return new FrameCapture(_frame, default, false, false, 0, null);
             }
         }
         else _holdStarted = null;
         EnsurePresentation();
-        var viewport = ReadViewport();
-        var hasSelection = HasSelection();
-        var reverse = ReadMode(5);
-        ThrowIfFailed(RenderNative.ghostty_render_state_update(_render, _handle), "Could not update render state.");
+        var capture = new FrameCapture(null, ReadViewport(), HasSelection(), ReadMode(5), _viewRevision, _theme);
+        ThrowIfFailed(RenderNative.ghostty_render_state_begin_update(_renderState, _raw), "Could not update render state.");
+        return capture;
+    }
+
+    /// <summary>Second phase of <see cref="ReadFrame"/>. Reads only the render state, so terminal writes may run meanwhile.</summary>
+    internal unsafe TerminalFrame CompleteFrame(FrameCapture capture)
+    {
+        if (capture.Held is { } held) return held;
+        ThrowIfFailed(RenderNative.ghostty_render_state_end_update(_renderState), "Could not update render state.");
+        var (viewport, hasSelection, reverse, current) = (capture.Viewport, capture.HasSelection, capture.Reverse, capture.ViewRevision == _capturedViewRevision);
         int dirty = 0;
         StateGet(3, &dirty);
 
@@ -68,62 +69,63 @@ public sealed partial class GhosttyTerminal
         ushort x = 0, y = 0; int cursorStyle = 0;
         StateGet(11, &visible); StateGet(12, &blink); StateGet(14, &hasPosition); StateGet(10, &cursorStyle);
         if (hasPosition != 0) { StateGet(15, &x); StateGet(16, &y); }
-        var cursorResult = RenderNative.ghostty_render_state_get(_render, 7, &cursorColor);
+        var cursorResult = RenderNative.ghostty_render_state_get(_renderState, 7, &cursorColor);
         if (cursorResult != 0 && cursorResult != -4) ThrowIfFailed(cursorResult, "Could not read cursor color.");
         var cursor = new TerminalCursor(x, y, visible != 0 && hasPosition != 0, blink != 0,
             cursorStyle == 0 ? TerminalCursorShape.Bar : cursorStyle == 2 ? TerminalCursorShape.Underline : TerminalCursorShape.Block,
             cursorResult == 0 ? cursorColor.ToColor() : reverse ? defaultBg : defaultFg);
-        if (dirty == 0 && _frame is not null && _viewRevision == _capturedViewRevision && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
+        if (dirty == 0 && _frame is not null && current && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
             (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background) return _frame;
         var previous = _frame;
         var captureAll = dirty == 2 || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
             previous.Viewport != viewport || previous.HasSelection != hasSelection || reverse != _frameReverse ||
             (reverse ? defaultBg : defaultFg) != previous.Foreground || (reverse ? defaultFg : defaultBg) != previous.Background ||
-            (_viewRevision != _capturedViewRevision && hasSelection);
+            (!current && hasSelection);
+        var sameShape = previous is not null && previous.Columns == columns && previous.Rows == rowsCount;
         var cellsArray = captureAll ? new TerminalCell[columns * rowsCount] : previous!.Cells;
         var cellsChanged = captureAll;
-        var rowHandle = _renderRows!;
-        var cellHandle = _renderCells!;
-        var rowPtr = rowHandle.DangerousGetHandle();
+        var rowPtr = _rowIterator;
         StateGet(4, &rowPtr);
-        var index = 0;
         byte* scratch = stackalloc byte[64];
-        while (RenderNative.ghostty_render_state_row_iterator_next(rowHandle) != 0)
+        var capturedRows = 0;
+        while (true)
         {
-            byte rowDirty = 0;
-            ThrowIfFailed(RenderNative.ghostty_render_state_row_get(rowHandle, 1, &rowDirty), "Could not read render row dirty state.");
-            if (!captureAll && rowDirty == 0)
+            int row;
+            if (captureAll)
             {
-                index += columns;
-                continue;
+                if (RenderNative.ghostty_render_state_row_iterator_next(_rowIterator) == 0) break;
+                row = capturedRows++;
             }
+            else
+            {
+                ushort dirtyRow = 0;
+                if (RenderNative.ghostty_render_state_row_iterator_next_dirty(_rowIterator, &dirtyRow) == 0) break;
+                row = dirtyRow;
+            }
+            if (row >= rowsCount) throw new InvalidOperationException("Render state returned an incomplete grid.");
             if (!cellsChanged)
             {
                 cellsArray = (TerminalCell[])cellsArray.Clone();
                 cellsChanged = true;
             }
-            var cellPtr = cellHandle.DangerousGetHandle();
-            ThrowIfFailed(RenderNative.ghostty_render_state_row_get(rowHandle, 3, &cellPtr), "Could not read render row.");
-            while (RenderNative.ghostty_render_state_row_cells_next(cellHandle) != 0)
+            var cellPtr = _cellIterator;
+            RowGet(3, &cellPtr);
+            var index = row * columns;
+            var end = index + columns;
+            while (RenderNative.ghostty_render_state_row_cells_next(_cellIterator) != 0)
             {
+                if (index == end) throw new InvalidOperationException("Render state returned an incomplete grid.");
                 ulong raw = 0;
                 Style style = default;
                 int wide = 0;
                 CellGet(1, &raw); CellGet(2, &style);
                 ThrowIfFailed(RenderNative.ghostty_cell_get(raw, 3, &wide), "Could not read cell width.");
-                var fg = defaultFg; var bg = defaultBg;
-                Rgb color = default;
-                var result = RenderNative.ghostty_render_state_row_cells_get(cellHandle, 6, &color);
-                if (result == 0) fg = color.ToColor(); else if (result != -4) ThrowIfFailed(result, "Could not read cell foreground.");
-                result = RenderNative.ghostty_render_state_row_cells_get(cellHandle, 5, &color);
-                if (result == 0) bg = color.ToColor(); else if (result != -4) ThrowIfFailed(result, "Could not read cell background.");
-                if (((style.Flags & 16) != 0) ^ reverse) (fg, bg) = (bg, fg);
-
+                var (fg, bg) = CellColors(defaultFg, defaultBg, ((style.Flags & 16) != 0) ^ reverse);
+                var old = sameShape ? previous!.Cells[index] : null;
                 var buffer = new ByteBuffer { Pointer = scratch, Capacity = 64 };
-                result = RenderNative.ghostty_render_state_row_cells_get(cellHandle, 9, &buffer);
+                var result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, 9, &buffer);
                 string text;
-                if (result == 0) text = buffer.Length == 1 && scratch[0] < AsciiText.Length
-                    ? AsciiText[scratch[0]] : Encoding.UTF8.GetString(scratch, checked((int)buffer.Length));
+                if (result == 0) text = CellText(new ReadOnlySpan<byte>(scratch, checked((int)buffer.Length)), old?.Text);
                 else
                 {
                     if (result != -3) ThrowIfFailed(result, "Could not read cell text.");
@@ -132,24 +134,23 @@ public sealed partial class GhosttyTerminal
                     {
                         buffer = new ByteBuffer { Pointer = ptr, Capacity = (nuint)bytes.Length };
                         CellGet(9, &buffer);
-                        text = Encoding.UTF8.GetString(bytes);
                     }
+                    text = CellText(bytes, old?.Text);
                 }
                 byte selected = 0;
-                CellGet(7, &selected);
+                if (hasSelection) CellGet(7, &selected);
                 var width = (byte)(wide == 1 ? 2 : wide >= 2 ? 0 : 1);
-                var old = previous?.Columns == columns && previous.Rows == rowsCount ? previous.Cells[index] : null;
+                bool bold = (style.Flags & 1) != 0, italic = (style.Flags & 2) != 0, underline = (style.Flags & 0x700) != 0,
+                    strikethrough = (style.Flags & 64) != 0, dim = (style.Flags & 4) != 0, hidden = (style.Flags & 32) != 0;
                 cellsArray[index++] = old is not null && old.Text == text && old.Width == width && old.Foreground == fg && old.Background == bg &&
-                    old.Bold == ((style.Flags & 1) != 0) && old.Italic == ((style.Flags & 2) != 0) && old.Underline == ((style.Flags & 0x700) != 0) &&
-                    old.Strikethrough == ((style.Flags & 64) != 0) && old.Dim == ((style.Flags & 4) != 0) && old.Hidden == ((style.Flags & 32) != 0) &&
-                    old.Selected == (selected != 0)
+                    old.Bold == bold && old.Italic == italic && old.Underline == underline && old.Strikethrough == strikethrough &&
+                    old.Dim == dim && old.Hidden == hidden && old.Selected == (selected != 0)
                     ? old
-                    : new TerminalCell(text, width, fg, bg,
-                        (style.Flags & 1) != 0, (style.Flags & 2) != 0, (style.Flags & 0x700) != 0,
-                        (style.Flags & 64) != 0, (style.Flags & 4) != 0, (style.Flags & 32) != 0) { Selected = selected != 0 };
+                    : new TerminalCell(text, width, fg, bg, bold, italic, underline, strikethrough, dim, hidden) { Selected = selected != 0 };
             }
+            if (index != end) throw new InvalidOperationException("Render state returned an incomplete grid.");
         }
-        if (index != cellsArray.Length) throw new InvalidOperationException("Render state returned an incomplete grid.");
+        if (captureAll && capturedRows != rowsCount) throw new InvalidOperationException("Render state returned an incomplete grid.");
         for (var i = 0; cellsChanged && i + 1 < cellsArray.Length; i++)
             if (cellsArray[i].Width == 2 && cellsArray[i].Selected && cellsArray[i + 1].Width == 0)
                 cellsArray[i + 1] = cellsArray[i + 1] with { Selected = true };
@@ -157,25 +158,115 @@ public sealed partial class GhosttyTerminal
         _frameReverse = reverse;
         _frame = new TerminalFrame(columns, rowsCount, cellsArray, cursor, defaultFg, defaultBg) {
             Viewport = viewport, HasSelection = hasSelection,
-            SelectionBackground = (_theme ?? TerminalThemes.All[0]).SelectionBackground,
-            SelectionForeground = (_theme ?? TerminalThemes.All[0]).SelectionForeground,
-            CursorText = _theme is null ? null : _theme.CursorText ?? background.ToColor(),
+            SelectionBackground = (capture.Theme ?? TerminalThemes.All[0]).SelectionBackground,
+            SelectionForeground = (capture.Theme ?? TerminalThemes.All[0]).SelectionForeground,
+            CursorText = capture.Theme is null ? null : capture.Theme.CursorText ?? background.ToColor(),
         };
-        _capturedViewRevision = _viewRevision;
-        ThrowIfFailed(RenderNative.ghostty_render_state_clean(_render), "Could not clear render dirty state.");
+        _capturedViewRevision = capture.ViewRevision;
+        ThrowIfFailed(RenderNative.ghostty_render_state_clean(_renderState), "Could not clear render dirty state.");
         return _frame;
+    }
+
+    private void EnsureRender()
+    {
+        if (_render is null)
+        {
+            ThrowIfFailed(RenderNative.ghostty_render_state_new(IntPtr.Zero, out var state), "Could not create render state.");
+            _render = new RenderHandle(state);
+            _renderState = state;
+        }
+        if (_renderRows is null)
+        {
+            ThrowIfFailed(RenderNative.ghostty_render_state_row_iterator_new(IntPtr.Zero, out var rows), "Could not create render row iterator.");
+            _renderRows = new RenderRowsHandle(rows);
+            _rowIterator = rows;
+        }
+        if (_renderCells is null)
+        {
+            ThrowIfFailed(RenderNative.ghostty_render_state_row_cells_new(IntPtr.Zero, out var cells), "Could not create render cell iterator.");
+            _renderCells = new RenderCellsHandle(cells);
+            _cellIterator = cells;
+        }
+    }
+
+    /// <summary>
+    /// The lowest active row at or below the cursor that a frame would draw. Updates the render state without
+    /// cleaning it, so the next frame still sees every change.
+    /// </summary>
+    private unsafe int LastContentRow()
+    {
+        EnsureRender();
+        var last = ReadActiveCursorRow();
+        var reverse = ReadMode(5);
+        ThrowIfFailed(RenderNative.ghostty_render_state_update(_renderState, _raw), "Could not update render state.");
+        Rgb foreground = default, background = default;
+        StateGet(6, &foreground); StateGet(5, &background);
+        TerminalColor defaultFg = foreground.ToColor(), defaultBg = background.ToColor(), frameBg = reverse ? defaultFg : defaultBg;
+        var rowPtr = _rowIterator;
+        StateGet(4, &rowPtr);
+        byte* scratch = stackalloc byte[64];
+        for (var row = 0; RenderNative.ghostty_render_state_row_iterator_next(_rowIterator) != 0; row++)
+        {
+            if (row <= last) continue;
+            var cellPtr = _cellIterator;
+            RowGet(3, &cellPtr);
+            while (RenderNative.ghostty_render_state_row_cells_next(_cellIterator) != 0)
+            {
+                ulong raw = 0; int tag = 0; ushort styleId = 0; uint codepoint = 0;
+                CellGet(1, &raw);
+                ThrowIfFailed(RenderNative.ghostty_cell_get(raw, 2, &tag), "Could not read cell content.");
+                ThrowIfFailed(RenderNative.ghostty_cell_get(raw, 6, &styleId), "Could not read cell style.");
+                ThrowIfFailed(RenderNative.ghostty_cell_get(raw, 1, &codepoint), "Could not read cell codepoint.");
+                if (tag == 0 && styleId == 0 && (codepoint == 0 || codepoint <= char.MaxValue && char.IsWhiteSpace((char)codepoint))) continue;
+                Style style = default;
+                CellGet(2, &style);
+                if ((style.Flags & (0x700 | 64)) != 0 || CellColors(defaultFg, defaultBg, ((style.Flags & 16) != 0) ^ reverse).Bg != frameBg) { last = row; break; }
+                var buffer = new ByteBuffer { Pointer = scratch, Capacity = 64 };
+                var result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, 9, &buffer);
+                if (result == -3) { last = row; break; }
+                ThrowIfFailed(result, "Could not read cell text.");
+                if (!string.IsNullOrWhiteSpace(CellText(new ReadOnlySpan<byte>(scratch, checked((int)buffer.Length)), null))) { last = row; break; }
+            }
+        }
+        return last;
+    }
+
+    private unsafe (TerminalColor Fg, TerminalColor Bg) CellColors(TerminalColor fg, TerminalColor bg, bool inverse)
+    {
+        Rgb color = default;
+        var result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, 6, &color);
+        if (result == 0) fg = color.ToColor(); else if (result != -4) ThrowIfFailed(result, "Could not read cell foreground.");
+        result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, 5, &color);
+        if (result == 0) bg = color.ToColor(); else if (result != -4) ThrowIfFailed(result, "Could not read cell background.");
+        return inverse ? (bg, fg) : (fg, bg);
+    }
+
+    /// <summary>Decodes cell text, returning <paramref name="previous"/> when it already holds the same characters.</summary>
+    private static string CellText(ReadOnlySpan<byte> utf8, string? previous)
+    {
+        if (utf8.Length == 1 && utf8[0] < AsciiText.Length) return AsciiText[utf8[0]];
+        if (utf8.IsEmpty) return string.Empty;
+        Span<char> chars = utf8.Length <= 256 ? stackalloc char[utf8.Length] : new char[utf8.Length];
+        chars = chars[..Encoding.UTF8.GetChars(utf8, chars)];
+        return previous is not null && chars.SequenceEqual(previous) ? previous : new string(chars);
     }
 
     private unsafe bool ReadMode(ushort mode)
     {
         var value = new Mode { Value = mode };
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 37, &value), "Could not read terminal mode.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 37, &value), "Could not read terminal mode.");
         return value.Enabled != 0;
     }
-    private unsafe void StateGet(int key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_get(_render!, key, value), "Could not read render state.");
-    private unsafe void CellGet(int key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_cells_get(_renderCells!, key, value), "Could not read render cell.");
-    private void DisposeRender() { _renderCells?.Dispose(); _renderRows?.Dispose(); _render?.Dispose(); }
+    private unsafe void StateGet(int key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_get(_renderState, key, value), "Could not read render state.");
+    private unsafe void RowGet(int key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_get(_rowIterator, key, value), "Could not read render row.");
+    private unsafe void CellGet(int key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_cells_get(_cellIterator, key, value), "Could not read render cell.");
+    private void DisposeRender()
+    {
+        _renderState = _rowIterator = _cellIterator = IntPtr.Zero;
+        _renderCells?.Dispose(); _renderRows?.Dispose(); _render?.Dispose();
+    }
 
+    internal readonly record struct FrameCapture(TerminalFrame? Held, TerminalViewport Viewport, bool HasSelection, bool Reverse, long ViewRevision, TerminalTheme? Theme);
     [StructLayout(LayoutKind.Sequential)] private struct Mode { public ushort Value; public byte Enabled; }
     [StructLayout(LayoutKind.Sequential)] private struct Rgb { public byte R, G, B; public readonly TerminalColor ToColor() => new(R, G, B); }
     [StructLayout(LayoutKind.Explicit, Size = 16)] private struct Style { [FieldOffset(12)] public ushort Flags; }
@@ -183,23 +274,28 @@ public sealed partial class GhosttyTerminal
     private sealed class RenderHandle : SafeHandleZeroOrMinusOneIsInvalid { public RenderHandle(IntPtr value) : base(true) => SetHandle(value); protected override bool ReleaseHandle() { RenderNative.ghostty_render_state_free(handle); return true; } }
     private sealed class RenderRowsHandle : SafeHandleZeroOrMinusOneIsInvalid { public RenderRowsHandle(IntPtr value) : base(true) => SetHandle(value); protected override bool ReleaseHandle() { RenderNative.ghostty_render_state_row_iterator_free(handle); return true; } }
     private sealed class RenderCellsHandle : SafeHandleZeroOrMinusOneIsInvalid { public RenderCellsHandle(IntPtr value) : base(true) => SetHandle(value); protected override bool ReleaseHandle() { RenderNative.ghostty_render_state_row_cells_free(handle); return true; } }
-    private static unsafe class RenderNative
+
+    // SuppressGCTransition marks getters that only copy render or terminal state. They never block or call back.
+    private static unsafe partial class RenderNative
     {
         private const string Lib = "ghostty-vt";
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_terminal_get(TerminalHandle terminal, int key, void* value);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_new(IntPtr allocator, out IntPtr state);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_render_state_free(IntPtr state);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_update(RenderHandle state, TerminalHandle terminal);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_get(RenderHandle state, int key, void* value);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_clean(RenderHandle state);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_row_iterator_new(IntPtr allocator, out IntPtr rows);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_render_state_row_iterator_free(IntPtr rows);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern byte ghostty_render_state_row_iterator_next(RenderRowsHandle rows);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_row_get(RenderRowsHandle rows, int key, void* value);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_row_cells_new(IntPtr allocator, out IntPtr cells);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_render_state_row_cells_free(IntPtr cells);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern byte ghostty_render_state_row_cells_next(RenderCellsHandle cells);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_render_state_row_cells_get(RenderCellsHandle cells, int key, void* value);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_cell_get(ulong cell, int key, void* value);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_terminal_get(IntPtr terminal, int key, void* value);
+        [LibraryImport(Lib)] internal static partial int ghostty_render_state_new(IntPtr allocator, out IntPtr state);
+        [LibraryImport(Lib)] internal static partial void ghostty_render_state_free(IntPtr state);
+        [LibraryImport(Lib)] internal static partial int ghostty_render_state_update(IntPtr state, IntPtr terminal);
+        [LibraryImport(Lib)] internal static partial int ghostty_render_state_begin_update(IntPtr state, IntPtr terminal);
+        [LibraryImport(Lib)] internal static partial int ghostty_render_state_end_update(IntPtr state);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_render_state_get(IntPtr state, int key, void* value);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_render_state_clean(IntPtr state);
+        [LibraryImport(Lib)] internal static partial int ghostty_render_state_row_iterator_new(IntPtr allocator, out IntPtr rows);
+        [LibraryImport(Lib)] internal static partial void ghostty_render_state_row_iterator_free(IntPtr rows);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial byte ghostty_render_state_row_iterator_next(IntPtr rows);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial byte ghostty_render_state_row_iterator_next_dirty(IntPtr rows, ushort* y);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_render_state_row_get(IntPtr rows, int key, void* value);
+        [LibraryImport(Lib)] internal static partial int ghostty_render_state_row_cells_new(IntPtr allocator, out IntPtr cells);
+        [LibraryImport(Lib)] internal static partial void ghostty_render_state_row_cells_free(IntPtr cells);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial byte ghostty_render_state_row_cells_next(IntPtr cells);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_render_state_row_cells_get(IntPtr cells, int key, void* value);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_cell_get(ulong cell, int key, void* value);
     }
 }

@@ -10,6 +10,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
@@ -19,6 +20,7 @@
     <Compile Include="../../src/AgentTerm.App/ProgramStatusPresentation.cs" Link="ProgramStatusPresentation.cs" />
     <Compile Include="../../src/AgentTerm.App/TabProgramStatus.cs" Link="TabProgramStatus.cs" />
     <Compile Include="../../src/AgentTerm.App/ProgramStatusIcon.cs" Link="ProgramStatusIcon.cs" />
+    <Compile Include="../../src/AgentTerm.App/AgentMarks.cs" Link="AgentMarks.cs" />
     <Compile Include="../../src/AgentTerm.App/ExecutableIcon.cs" Link="ExecutableIcon.cs" />
     <Compile Include="../../src/AgentTerm.App/ProgramStatusCard.cs" Link="ProgramStatusCard.cs" />
     <Compile Include="../../src/AgentTerm.App/SidebarTabItem.cs" Link="SidebarTabItem.cs" />

@@ -121,6 +121,7 @@ using (var terminal = new GhosttyTerminal(20, 4))
 }
 
 
+OscScannerEquivalenceChecks.Run();
 RenderChecks.Run();
 ProgramStatusChecks.Run();
 ProgramStatusPresentationChecks.Run();

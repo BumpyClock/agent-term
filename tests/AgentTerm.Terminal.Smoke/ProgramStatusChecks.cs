@@ -91,5 +91,29 @@ internal static class ProgramStatusChecks
         Check(protocol.ReadStatuses().Count == 256 && protocol.ReadStatuses().Any(r => r.Id == "task0") && !protocol.ReadStatuses().Any(r => r.Id == "task1"), "Record cap must evict the least recently updated record.");
         Report(scanner, "state=clear");
         Check(protocol.ReadStatuses().Count == 0, "Root clear must remove every record.");
+
+        var version = protocol.Version;
+        var snapshot = protocol.ReadStatuses();
+        protocol.EndCommand();
+        protocol.Reset();
+        Report(scanner, "state=clear:id=missing");
+        Check(protocol.Version == version && ReferenceEquals(snapshot, protocol.ReadStatuses()), "No-op cleanup must keep the status version and snapshot.");
+        Report(scanner, "state=done:id=versioned");
+        Check(protocol.Version > version && !ReferenceEquals(snapshot, protocol.ReadStatuses()), "A report must advance the status version and snapshot.");
+        version = protocol.Version;
+        snapshot = protocol.ReadStatuses();
+        Check(ReferenceEquals(snapshot, protocol.ReadStatuses()), "Unchanged statuses must reuse one snapshot.");
+        protocol.EndCommand();
+        Check(protocol.Version > version && protocol.ReadStatuses().Single() is { IsActive: false }, "Deactivating a record must advance the status version.");
+        version = protocol.Version;
+        protocol.EndCommand();
+        Check(protocol.Version == version, "Repeated prompt cleanup must not advance the status version.");
+        Report(scanner, "state=working:id=versioned/child");
+        version = protocol.Version;
+        Report(scanner, "state=idle:id=versioned:app=codex");
+        Check(protocol.Version > version && protocol.ReadStatuses().Single(r => r.Id == "versioned/child").EffectiveApp == "codex", "Parent changes must refresh inherited apps in the next snapshot.");
+        version = protocol.Version;
+        protocol.Reset();
+        Check(protocol.Version > version && protocol.ReadStatuses().Count == 0, "Reset must advance the status version.");
     }
 }

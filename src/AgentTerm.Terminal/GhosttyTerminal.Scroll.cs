@@ -24,7 +24,20 @@ public sealed partial class GhosttyTerminal
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 29, (IntPtr)(&lines)), "Could not configure scrollback lines.");
     }
 
-    public void ScrollLines(int delta) => ScrollTo(ReadFrame().Viewport.Offset + delta);
+    public void ScrollLines(int delta)
+    {
+        ThrowIfDisposed();
+        EnsurePresentation();
+        ScrollTo(ReadViewport().Offset + delta);
+    }
+    /// <summary>The viewport the next frame presents, without capturing a frame.</summary>
+    public TerminalViewport ReadPresentedViewport()
+    {
+        ThrowIfDisposed();
+        EnsurePresentation();
+        return ReadViewport();
+    }
+    public bool IsAlternateScreen { get { ThrowIfDisposed(); return ActiveScreen() != 0; } }
     public void ScrollTo(long offset)
     {
         ThrowIfDisposed();
@@ -98,7 +111,7 @@ public sealed partial class GhosttyTerminal
         else
         {
             Native.Selection existing = default;
-            var result = RenderNative.ghostty_terminal_get(_handle, 31, &existing);
+            var result = RenderNative.ghostty_terminal_get(_raw, 31, &existing);
             if (result == -4) return;
             ThrowIfFailed(result, "Could not read selection anchor.");
             anchor = existing.Start;
@@ -135,7 +148,7 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         Native.Selection selection = default;
-        var result = RenderNative.ghostty_terminal_get(_handle, 31, &selection);
+        var result = RenderNative.ghostty_terminal_get(_raw, 31, &selection);
         if (result == -4) return null;
         ThrowIfFailed(result, "Could not read selection.");
         ThrowIfFailed(Native.ghostty_formatter_terminal_new(IntPtr.Zero, out var formatter, _handle), "Could not create selection formatter.");
@@ -157,7 +170,7 @@ public sealed partial class GhosttyTerminal
     private unsafe int ActiveScreen()
     {
         int screen = 0;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 6, &screen), "Could not read active screen.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 6, &screen), "Could not read active screen.");
         return screen;
     }
     private void CheckSelectionScreen()
@@ -178,8 +191,9 @@ public sealed partial class GhosttyTerminal
     }
     private unsafe TerminalViewport ReadNativeViewport()
     {
+        ThrowIfDisposed();
         Scrollbar bar = default;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 9, &bar), "Could not read terminal scrollbar.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 9, &bar), "Could not read terminal scrollbar.");
         return new TerminalViewport(checked((long)bar.Total), checked((long)bar.Offset), checked((int)bar.Length), ActiveScreen() != 0);
     }
     private void CaptureSelectedViewport()
@@ -208,10 +222,11 @@ public sealed partial class GhosttyTerminal
             _viewRevision++;
         }
     }
-    private unsafe bool HasSelection()
+    public unsafe bool HasSelection()
     {
+        ThrowIfDisposed();
         Native.Selection selection = default;
-        var result = RenderNative.ghostty_terminal_get(_handle, 31, &selection);
+        var result = RenderNative.ghostty_terminal_get(_raw, 31, &selection);
         if (result == -4) return false;
         ThrowIfFailed(result, "Could not read selection.");
         return true;
@@ -243,21 +258,21 @@ public sealed partial class GhosttyTerminal
     internal sealed class TrackedHandle : SafeHandleZeroOrMinusOneIsInvalid { public TrackedHandle(IntPtr p) : base(true) => SetHandle(p); protected override bool ReleaseHandle() { ScrollNative.ghostty_tracked_grid_ref_free(handle); return true; } }
     private sealed class GestureHandle : SafeHandleZeroOrMinusOneIsInvalid { public GestureHandle(IntPtr p) : base(true) => SetHandle(p); protected override bool ReleaseHandle() { ScrollNative.ghostty_selection_gesture_free(handle, IntPtr.Zero); return true; } }
     private sealed class GestureEventHandle : SafeHandleZeroOrMinusOneIsInvalid { public GestureEventHandle(IntPtr p) : base(true) => SetHandle(p); protected override bool ReleaseHandle() { ScrollNative.ghostty_selection_gesture_event_free(handle); return true; } }
-    private static unsafe class ScrollNative
+    private static unsafe partial class ScrollNative
     {
         private const string Lib = "ghostty-vt";
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_terminal_grid_ref_track(TerminalHandle terminal, Native.Point point, out IntPtr tracked);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_tracked_grid_ref_point(TrackedHandle tracked, int tag, out Native.PointValue point);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_tracked_grid_ref_snapshot(TrackedHandle tracked, out Native.GridRef reference);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_tracked_grid_ref_free(IntPtr tracked);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_terminal_scroll_viewport(TerminalHandle terminal, ScrollBehavior behavior);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_selection_gesture_new(IntPtr allocator, out IntPtr gesture);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_selection_gesture_free(IntPtr gesture, IntPtr terminal);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_selection_gesture_reset(GestureHandle gesture, TerminalHandle terminal);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_selection_gesture_event_new(IntPtr allocator, out IntPtr ev, int type);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_selection_gesture_event_free(IntPtr ev);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_selection_gesture_event_set(GestureEventHandle ev, int option, void* value);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_selection_gesture_event(GestureHandle gesture, TerminalHandle terminal, GestureEventHandle ev, Native.Selection* selection);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ghostty_formatter_set")] internal static extern int ghostty_formatter_set(FormatterHandle formatter, int option, void* value);
+        [LibraryImport(Lib)] internal static partial int ghostty_terminal_grid_ref_track(TerminalHandle terminal, Native.Point point, out IntPtr tracked);
+        [LibraryImport(Lib)] internal static partial int ghostty_tracked_grid_ref_point(TrackedHandle tracked, int tag, out Native.PointValue point);
+        [LibraryImport(Lib)] internal static partial int ghostty_tracked_grid_ref_snapshot(TrackedHandle tracked, out Native.GridRef reference);
+        [LibraryImport(Lib)] internal static partial void ghostty_tracked_grid_ref_free(IntPtr tracked);
+        [LibraryImport(Lib)] internal static partial int ghostty_terminal_scroll_viewport(TerminalHandle terminal, ScrollBehavior behavior);
+        [LibraryImport(Lib)] internal static partial int ghostty_selection_gesture_new(IntPtr allocator, out IntPtr gesture);
+        [LibraryImport(Lib)] internal static partial void ghostty_selection_gesture_free(IntPtr gesture, IntPtr terminal);
+        [LibraryImport(Lib)] internal static partial void ghostty_selection_gesture_reset(GestureHandle gesture, TerminalHandle terminal);
+        [LibraryImport(Lib)] internal static partial int ghostty_selection_gesture_event_new(IntPtr allocator, out IntPtr ev, int type);
+        [LibraryImport(Lib)] internal static partial void ghostty_selection_gesture_event_free(IntPtr ev);
+        [LibraryImport(Lib)] internal static partial int ghostty_selection_gesture_event_set(GestureEventHandle ev, int option, void* value);
+        [LibraryImport(Lib)] internal static partial int ghostty_selection_gesture_event(GestureHandle gesture, TerminalHandle terminal, GestureEventHandle ev, Native.Selection* selection);
+        [LibraryImport(Lib, EntryPoint = "ghostty_formatter_set")] internal static partial int ghostty_formatter_set(FormatterHandle formatter, int option, void* value);
     }
 }

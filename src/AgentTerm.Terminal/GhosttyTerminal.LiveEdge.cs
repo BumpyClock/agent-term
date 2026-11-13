@@ -19,12 +19,13 @@ public sealed partial class GhosttyTerminal
 
     public unsafe int ReadActiveCursorRow()
     {
+        ThrowIfDisposed();
         ushort row = 0;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 4, &row), "Could not read active cursor row.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 4, &row), "Could not read active cursor row.");
         return row;
     }
 
-    public long ActiveTop => ReadNativeViewport().TotalRows - _rows;
+    public long ActiveTop { get { ThrowIfDisposed(); return ReadNativeViewport().TotalRows - _rows; } }
 
     private void EnsurePresentation()
     {
@@ -42,15 +43,7 @@ public sealed partial class GhosttyTerminal
             if (_bottomAnchored && !original.IsAlternateScreen)
             {
                 NativeScroll(original.MaximumOffset);
-                var active = ReadFrame();
-                var last = ReadActiveCursorRow();
-                for (var row = active.Rows - 1; row > last; row--)
-                {
-                    if (active.Cells.Skip(row * active.Columns).Take(active.Columns).Any(c =>
-                        !string.IsNullOrWhiteSpace(c.Text) || c.Background != active.Background || c.Underline || c.Strikethrough))
-                    { last = row; break; }
-                }
-                _presentedTotal = original.TotalRows - original.Rows + last + 1;
+                _presentedTotal = original.TotalRows - original.Rows + LastContentRow() + 1;
             }
             var maximum = Math.Max(0, (_presentedTotal ?? original.TotalRows) - original.Rows);
             var target = _following && !HasSelection() ? maximum : Math.Min(original.Offset, maximum);

@@ -32,6 +32,10 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private bool _shown;
     private Task _paneClose = Task.CompletedTask;
     private Task? _disposal;
+    private readonly List<(Pane Pane, IReadOnlyList<ProgramStatus> Statuses)> _statusSources = [];
+    private IReadOnlyList<PaneProgramStatus> _programStatuses = [];
+    private int _titleVersion;
+    private int _readTitleVersion = -1;
 
     internal TerminalTab(ShellProfile profile, Style splitterStyle)
     {
@@ -51,10 +55,33 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         };
     }
 
-    internal IReadOnlyList<PaneProgramStatus> ReadProgramStatuses() => _panes
-        .Where(pane => !ReferenceEquals(pane, _retiring))
-        .SelectMany((pane, index) => pane.Page.ReadProgramStatuses()
-            .Select(status => new PaneProgramStatus(index + 1, pane.Page.Profile.Name, status))).ToArray();
+    internal bool TryReadProgramStatusChange(out IReadOnlyList<PaneProgramStatus> statuses)
+    {
+        var changed = _readTitleVersion != _titleVersion;
+        _readTitleVersion = _titleVersion;
+        var count = 0;
+        foreach (var pane in _panes)
+        {
+            if (ReferenceEquals(pane, _retiring)) continue;
+            var current = pane.Page.ReadProgramStatuses();
+            if (count == _statusSources.Count) { _statusSources.Add((pane, current)); changed = true; }
+            else if (!ReferenceEquals(_statusSources[count].Pane, pane) || !ReferenceEquals(_statusSources[count].Statuses, current))
+            {
+                _statusSources[count] = (pane, current);
+                changed = true;
+            }
+            count++;
+        }
+        if (count < _statusSources.Count)
+        {
+            _statusSources.RemoveRange(count, _statusSources.Count - count);
+            changed = true;
+        }
+        if (changed) _programStatuses = _statusSources.SelectMany((source, index) => source.Statuses
+            .Select(status => new PaneProgramStatus(index + 1, source.Pane.Page.Profile.Name, status))).ToArray();
+        statuses = _programStatuses;
+        return changed;
+    }
 
     internal string Title => string.Join(" · ", _panes.Select(pane => pane.Page.Profile.Name).Distinct().Take(2));
     internal ShellProfile PrimaryProfile => _panes[0].Page.Profile;
@@ -64,6 +91,12 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     internal event Action? TitleChanged;
     internal event Action? CloseRequested;
     private bool CanAnimate => _visible && _layout.IsLoaded && _disposal is null && _uiSettings.AnimationsEnabled;
+
+    private void RaiseTitleChanged()
+    {
+        _titleVersion++;
+        TitleChanged?.Invoke();
+    }
 
     internal void SetVisible(bool visible)
     {
@@ -136,7 +169,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         branch.Children.Add(splitter);
         _active = next;
         UpdateFocus();
-        TitleChanged?.Invoke();
+        RaiseTitleChanged();
         FocusActivePane();
         if (CanAnimate) _motion.Enter(next.View);
     }
@@ -181,7 +214,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         old.View.Dispose();
         _retiring = null;
         UpdateFocus();
-        TitleChanged?.Invoke();
+        RaiseTitleChanged();
         FocusActivePane();
         if (previousBounds is not null)
         {

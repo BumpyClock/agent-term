@@ -21,7 +21,9 @@ namespace AgentTerm_App;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly IReadOnlyList<ShellProfile> _profiles = ShellProfile.Discover();
+    private readonly ShellProfileDiscovery _profileDiscovery = new(ShellProfile.DiscoverBuiltIn(), () => Task.Run(ShellProfile.DiscoverWsl));
+    private IReadOnlyList<ShellProfile> _profiles => _profileDiscovery.Profiles;
+    private int _profileItems;
     private TerminalTab? _visibleTab;
     private SettingsWindow? _settingsWindow;
     private bool _closing;
@@ -45,17 +47,34 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         var statusTimer = DispatcherQueue.CreateTimer();
         statusTimer.Interval = TimeSpan.FromMilliseconds(250);
-        statusTimer.Tick += (_, _) =>
+        void UpdateProgramStatuses()
         {
             if (_closing) return;
             foreach (var item in Tabs.TabItems.OfType<TabViewItem>())
-                if (item.Content is TerminalTab { IsClosing: false } tab && item.Tag is TabProgramStatus status)
-                    status.Update(tab.ReadProgramStatuses());
-        };
+                if (item.Content is TerminalTab { IsClosing: false } tab && item.Tag is TabProgramStatus status &&
+                    tab.TryReadProgramStatusChange(out var statuses))
+                    status.Update(statuses);
+        }
+        statusTimer.Tick += (_, _) => UpdateProgramStatuses();
         statusTimer.Start();
+        var minimized = false;
+        AppWindow.Changed += (window, _) =>
+        {
+            var current = window.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+            if (current == minimized) return;
+            minimized = current;
+            PaneStatus.GitStatusHub.Shared.Paused = minimized;
+            if (minimized) statusTimer.Stop();
+            else if (!_closing)
+            {
+                UpdateProgramStatuses();
+                statusTimer.Start();
+            }
+        };
         Closed += (_, _) => statusTimer.Stop();
         BuildProfileMenu();
-        AddTab(DefaultProfile);
+        _ = AddWslProfilesAsync();
+        _ = AddDefaultTabAsync();
         AppWindow.Closing += Window_Closing;
         Closed += (_, _) => _settingsWindow?.Close();
     }
@@ -80,24 +99,40 @@ public sealed partial class MainWindow : Window
         titleBar.ButtonPressedBackgroundColor = highContrast ? null : Windows.UI.Color.FromArgb(40, overlay, overlay, overlay);
     }
 
-    [DllImport("dwmapi.dll", ExactSpelling = true)]
-    private static extern int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
 
-    private ShellProfile DefaultProfile => _profiles.FirstOrDefault(profile =>
-        profile.Id == TerminalPreferences.Current.DefaultProfileId) ?? _profiles.FirstOrDefault() ?? ShellProfile.Default;
+    private async Task AddDefaultTabAsync()
+    {
+        var profile = await _profileDiscovery.ResolveDefaultAsync(TerminalPreferences.Current.DefaultProfileId);
+        AddTab(profile);
+    }
+
+    private async Task AddWslProfilesAsync()
+    {
+        var wsl = await _profileDiscovery.DiscoverWslAsync();
+        if (_closing) return;
+        foreach (var profile in wsl)
+        {
+            ProfileMenu.Items.Insert(_profileItems++, CreateProfileItem(profile));
+        }
+    }
+
+    private MenuFlyoutItem CreateProfileItem(ShellProfile profile)
+    {
+        var item = new MenuFlyoutItem { Text = profile.Name };
+        item.Click += (_, _) =>
+        {
+            if (Down(VirtualKey.Menu) && _visibleTab is { } tab) tab.SplitDuplicate(profile);
+            else AddTab(profile);
+        };
+        return item;
+    }
 
     private void BuildProfileMenu()
     {
-        foreach (var profile in _profiles)
-        {
-            var item = new MenuFlyoutItem { Text = profile.Name };
-            item.Click += (_, _) =>
-            {
-                if (Down(VirtualKey.Menu) && _visibleTab is { } tab) tab.SplitDuplicate(profile);
-                else AddTab(profile);
-            };
-            ProfileMenu.Items.Add(item);
-        }
+        foreach (var profile in _profiles) ProfileMenu.Items.Add(CreateProfileItem(profile));
+        _profileItems = _profiles.Count;
 
         ProfileMenu.Items.Add(new MenuFlyoutSeparator());
         var splitRight = new MenuFlyoutItem { Text = "Split right", KeyboardAcceleratorTextOverride = "Alt+Shift++" };
@@ -132,7 +167,7 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private void NewTabButton_Click(object sender, RoutedEventArgs args) => AddTab(DefaultProfile);
+    private void NewTabButton_Click(object sender, RoutedEventArgs args) => _ = AddDefaultTabAsync();
 
     private void SettingsButton_Click(object sender, RoutedEventArgs args) => ShowSettings();
 
@@ -180,23 +215,46 @@ public sealed partial class MainWindow : Window
         Tabs.SelectedItem = item;
     }
 
+    private static readonly Dictionary<string, Task<BitmapImage?>> ShellIcons = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TabViewItem, string> AppliedIcons = new();
+
     private static async Task SetShellIconAsync(TabViewItem item, TerminalTab tab)
     {
         var profile = tab.PrimaryProfile;
         var status = (TabProgramStatus)item.Tag;
-        status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+        if (AppliedIcons.TryGetValue(item, out var applied) && applied == profile.Executable) return;
+        AppliedIcons.Remove(item);
+        if (!ShellIcons.TryGetValue(profile.Executable, out var load))
+        {
+            status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+            ShellIcons[profile.Executable] = load = LoadShellIconAsync(profile.Executable);
+        }
+        else if (!load.IsCompleted) status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+        var image = await load;
+        if (tab.PrimaryProfile.Id != profile.Id || tab.PrimaryProfile.Executable != profile.Executable) return;
+        if (image is null)
+        {
+            status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+            return;
+        }
+        AppliedIcons.AddOrUpdate(item, profile.Executable);
+        status.SetShellIcon(new ImageIconSource { ImageSource = image });
+    }
+
+    private static async Task<BitmapImage?> LoadShellIconAsync(string executable)
+    {
         try
         {
-            var icon = await Task.Run(() => ExecutableIcon.Read(profile.Executable));
-            if (icon is null) return;
+            var icon = await Task.Run(() => ExecutableIcon.Read(executable));
+            if (icon is null) return null;
             using var stream = new MemoryStream(icon).AsRandomAccessStream();
             var image = new BitmapImage { DecodePixelWidth = 32 };
             await image.SetSourceAsync(stream);
-            if (tab.PrimaryProfile.Id == profile.Id)
-                status.SetShellIcon(new ImageIconSource { ImageSource = image });
+            return image;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
         {
+            return null;
         }
     }
 
@@ -280,7 +338,7 @@ public sealed partial class MainWindow : Window
             switch (e.Key)
             {
                 case VirtualKey.T:
-                    AddTab(DefaultProfile);
+                    _ = AddDefaultTabAsync();
                     break;
                 case VirtualKey.W when _visibleTab is { } tab:
                     await tab.CloseActivePaneAsync();

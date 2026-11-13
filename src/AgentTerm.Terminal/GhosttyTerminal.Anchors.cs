@@ -37,8 +37,8 @@ public sealed partial class GhosttyTerminal
         if (result == -4) { ReleaseAnchor(anchor); return null; }
         ThrowIfFailed(result, "Could not read terminal anchor.");
         // History rows always sit above the shell cursor. An anchor below it survived an in-place clear.
-        var frame = ReadFrame();
-        if (!frame.Viewport.IsAlternateScreen && frame.Viewport.IsAtBottom && point.Y > frame.Viewport.Offset + frame.Cursor.Row)
+        var viewport = ReadPresentedViewport();
+        if (!viewport.IsAlternateScreen && viewport.IsAtBottom && point.Y > ActiveTop + ReadActiveCursorRow())
         {
             ReleaseAnchor(anchor);
             return null;

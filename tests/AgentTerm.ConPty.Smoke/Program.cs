@@ -3,6 +3,12 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using AgentTerm.Terminal;
 
+if (args.Contains("--default-profile-only"))
+{
+    await ShellProfileDiscoveryChecks.CheckDefaultResolutionAsync();
+    return;
+}
+
 if (args.Contains("--status-fixture"))
 {
     ProgramStatusSessionChecks.RunFixture();
@@ -24,6 +30,12 @@ if (args.Contains("--mouse-fixture"))
 if (!OperatingSystem.IsWindows())
 {
     Console.WriteLine("AgentTerm.ConPty smoke checks require Windows. Skipped.");
+    return;
+}
+
+if (args.Contains("--concurrent-frame-only"))
+{
+    await ConcurrentFrameChecks.RunAsync();
     return;
 }
 
@@ -80,6 +92,7 @@ await TerminalEnvironmentChecks.RunAsync();
 await FullScreenChecks.RunAsync();
 await MouseSessionChecks.RunAsync();
 await ScrollbackSessionChecks.RunAsync();
+await ConcurrentFrameChecks.RunAsync();
 await ProfileChecks.RunAsync();
 await DirectoryChecks.RunAsync();
 await SmartPromptChecks.RunAsync();

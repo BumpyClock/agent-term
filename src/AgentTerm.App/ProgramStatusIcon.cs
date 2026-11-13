@@ -66,8 +66,18 @@ internal sealed partial class ProgramStatusIcon : ContentControl
             {
                 ImageIconSource image => new ImageIcon { Source = image.ImageSource },
                 FontIconSource font => new FontIcon { Glyph = font.Glyph, FontFamily = font.FontFamily, FontSize = 16 },
+                PathIconSource path => new Viewbox
+                {
+                    Child = new PathIcon { Data = AgentMarks.CreateGeometry(path), Width = AgentMarks.ViewBoxSize, Height = AgentMarks.ViewBoxSize }
+                },
                 _ => null
             };
+        }
+        if (_icon.Content is Viewbox { Child: PathIcon mark })
+        {
+            // High contrast replaces brand color with the system foreground.
+            if (_source is PathIconSource { Foreground: { } brand } && !_accessibility.HighContrast) mark.Foreground = brand;
+            else mark.ClearValue(IconElement.ForegroundProperty);
         }
         var primary = (tab.Tag as TabProgramStatus)?.Primary;
         var working = primary?.State == AgentTerm.Terminal.ProgramState.Working;

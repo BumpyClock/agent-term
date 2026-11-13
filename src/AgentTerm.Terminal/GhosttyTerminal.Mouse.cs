@@ -30,7 +30,7 @@ public sealed partial class GhosttyTerminal
         get
         {
             ThrowIfDisposed();
-            ThrowIfFailed(MouseNative.ghostty_terminal_get(_handle, 11, out var enabled),
+            ThrowIfFailed(MouseNative.ghostty_terminal_get(_raw, 11, out var enabled),
                 "Could not read libghostty-vt mouse tracking mode.");
             return enabled != 0;
         }
@@ -121,7 +121,7 @@ public sealed partial class GhosttyTerminal
         protected override bool ReleaseHandle() { MouseNative.ghostty_mouse_event_free(handle); return true; }
     }
 
-    private static class MouseNative
+    private static partial class MouseNative
     {
         private const string Library = "ghostty-vt";
 
@@ -136,32 +136,32 @@ public sealed partial class GhosttyTerminal
             internal uint PaddingTop, PaddingBottom, PaddingRight, PaddingLeft;
         }
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_terminal_get(TerminalHandle terminal, int data, out byte enabled);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_encoder_new(IntPtr allocator, out IntPtr encoder);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_mouse_encoder_free(IntPtr encoder);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_encoder_set_from_terminal(MouseEncoderHandle encoder, TerminalHandle terminal);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern unsafe int ghostty_mouse_encoder_set(MouseEncoderHandle encoder, int option, void* value);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_event_new(IntPtr allocator, out IntPtr mouseEvent);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_mouse_event_free(IntPtr mouseEvent);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_event_set_action(MouseEventHandle mouseEvent, TerminalMouseAction action);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_event_set_button(MouseEventHandle mouseEvent, TerminalMouseButton button);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_event_clear_button(MouseEventHandle mouseEvent);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_event_set_mods(MouseEventHandle mouseEvent, ushort mods);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_mouse_event_set_position(MouseEventHandle mouseEvent, Position position);
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern unsafe int ghostty_mouse_encoder_encode(MouseEncoderHandle encoder, MouseEventHandle mouseEvent,
+        [LibraryImport(Library), SuppressGCTransition]
+        internal static partial int ghostty_terminal_get(IntPtr terminal, int data, out byte enabled);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_encoder_new(IntPtr allocator, out IntPtr encoder);
+        [LibraryImport(Library)]
+        internal static partial void ghostty_mouse_encoder_free(IntPtr encoder);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_encoder_set_from_terminal(MouseEncoderHandle encoder, TerminalHandle terminal);
+        [LibraryImport(Library)]
+        internal static unsafe partial int ghostty_mouse_encoder_set(MouseEncoderHandle encoder, int option, void* value);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_event_new(IntPtr allocator, out IntPtr mouseEvent);
+        [LibraryImport(Library)]
+        internal static partial void ghostty_mouse_event_free(IntPtr mouseEvent);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_event_set_action(MouseEventHandle mouseEvent, TerminalMouseAction action);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_event_set_button(MouseEventHandle mouseEvent, TerminalMouseButton button);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_event_clear_button(MouseEventHandle mouseEvent);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_event_set_mods(MouseEventHandle mouseEvent, ushort mods);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_mouse_event_set_position(MouseEventHandle mouseEvent, Position position);
+        [LibraryImport(Library)]
+        internal static unsafe partial int ghostty_mouse_encoder_encode(MouseEncoderHandle encoder, MouseEventHandle mouseEvent,
             byte* buffer, nuint length, out nuint written);
     }
 }

@@ -82,15 +82,15 @@ public sealed partial class GhosttyTerminal
         public SearchHandle(IntPtr ptr) : base(true) => SetHandle(ptr);
         protected override bool ReleaseHandle() { SearchNative.ghostty_search_free(handle); return true; }
     }
-    private static unsafe class SearchNative
+    private static unsafe partial class SearchNative
     {
         private const string Lib = "ghostty-vt";
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_search_new(IntPtr allocator, out IntPtr search, TerminalHandle terminal);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern void ghostty_search_free(IntPtr search);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_search_set(SearchHandle search, int option, void* value);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_search_get(SearchHandle search, int data, void* value);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_search_run(SearchHandle search);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_search_select_next(SearchHandle search);
-        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] internal static extern int ghostty_search_select_prev(SearchHandle search);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_new(IntPtr allocator, out IntPtr search, TerminalHandle terminal);
+        [LibraryImport(Lib)] internal static partial void ghostty_search_free(IntPtr search);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_set(SearchHandle search, int option, void* value);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_get(SearchHandle search, int data, void* value);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_run(SearchHandle search);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_select_next(SearchHandle search);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_select_prev(SearchHandle search);
     }
 }

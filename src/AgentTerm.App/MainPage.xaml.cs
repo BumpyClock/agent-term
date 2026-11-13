@@ -44,10 +44,13 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private readonly long _blinkStarted = Environment.TickCount64;
     private bool _renderingSubscribed;
     private bool _frameRefreshQueued;
+    private bool _frameRefreshPending;
     private int _outputRefreshQueued;
     private volatile bool _acceptOutputNotifications;
     private TerminalFrame? _presentedFrame;
+    private (double Maximum, double ViewportSize, double LargeChange, double Value, bool Enabled)? _scrollBarState;
     private readonly UISettings _uiSettings = new();
+    private bool _animationsEnabled;
     private readonly DispatcherQueueTimer _selectionTimer;
     private bool _updatingScrollBar;
     private int _wheelDelta;
@@ -123,6 +126,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _selectionTimer = DispatcherQueue.CreateTimer();
         _selectionTimer.Interval = TimeSpan.FromMilliseconds(50);
         _selectionTimer.Tick += SelectionTimer_Tick;
+        _animationsEnabled = _uiSettings.AnimationsEnabled;
+        _uiSettings.AnimationsEnabledChanged += UISettings_AnimationsEnabledChanged;
         ActualThemeChanged += Page_ActualThemeChanged;
         ApplyDisplayMode();
     }
@@ -281,6 +286,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void StopRefresh()
     {
         _acceptOutputNotifications = false;
+        _frameRefreshPending = false;
         _chromeTimer.Stop();
         _cursorTimer.Stop();
         _synchronizedRefreshTimer.Stop();
@@ -299,17 +305,26 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         })) Interlocked.Exchange(ref _outputRefreshQueued, 0);
     }
 
+    private bool CanRefreshFrames => _viewActive && IsLoaded && !_surfaceOpen && _state == SessionState.Running;
+
     private void RequestFrameRefresh()
     {
-        if (_frameRefreshQueued || _renderingSubscribed || !_viewActive || !IsLoaded || _surfaceOpen || _state != SessionState.Running) return;
-        CompositionTarget.Rendering += Refresh_Rendering;
-        _renderingSubscribed = true;
+        if (_frameRefreshQueued || !CanRefreshFrames) return;
+        if (_renderingSubscribed) _frameRefreshPending = true;
+        else RefreshFrameNow();
     }
+
+    private void UISettings_AnimationsEnabledChanged(UISettings sender, UISettingsAnimationsEnabledChangedEventArgs args) =>
+        _dispatcher.TryEnqueue(() =>
+        {
+            _animationsEnabled = sender.AnimationsEnabled;
+            UpdateCursorBlink();
+        });
 
     private void UpdateCursorBlink()
     {
-        if (_viewActive && IsLoaded && !_surfaceOpen && _state == SessionState.Running &&
-            _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused && _uiSettings.AnimationsEnabled)
+        if (CanRefreshFrames && _animationsEnabled &&
+            _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused)
         {
             if (!_cursorTimer.IsRunning) _cursorTimer.Start();
         }
@@ -324,20 +339,31 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         CompositionTarget.Rendering -= Refresh_Rendering;
         _renderingSubscribed = false;
-        if (_frameRefreshQueued || !_viewActive || !IsLoaded || _surfaceOpen || _state != SessionState.Running) return;
+        if (!_frameRefreshPending || _frameRefreshQueued || !CanRefreshFrames) return;
+        _frameRefreshPending = false;
         _frameRefreshQueued = DispatcherQueue.TryEnqueue(RefreshQueuedFrame);
     }
 
-    private async void RefreshQueuedFrame()
+    private void RefreshQueuedFrame()
     {
         _frameRefreshQueued = false;
-        if (!_viewActive || !IsLoaded || _surfaceOpen || _state != SessionState.Running || _session is not { } session) return;
+        RefreshFrameNow();
+    }
+
+    private async void RefreshFrameNow()
+    {
+        if (!CanRefreshFrames || _session is not { } session) return;
         try
         {
             RefreshTerminalFrame(session);
             UpdateCursorBlink();
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
+    }
+
+    private void RefreshLocalInput(TerminalSession session)
+    {
+        if (_presentedFrame is { } frame && (frame.HasSelection || !frame.Viewport.IsAtBottom)) RefreshTerminalFrame(session);
     }
 
     private void RefreshOutput(TerminalSession session)
@@ -356,12 +382,21 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         if (!_startingTask && session.PromptState == ShellPromptState.Ready && session.TakeAgentRequest() is { } request)
             _ = StartTaskAsync(request, explicitHandoff: false);
+        _frameRefreshPending = false;
         var frame = session.ReadFrame();
         _synchronizedRefreshTimer.Stop();
-        if (_viewActive && IsLoaded && !_surfaceOpen && _state == SessionState.Running && session.PendingFrameRefreshDelay is { } delay)
+        if (CanRefreshFrames)
         {
-            _synchronizedRefreshTimer.Interval = delay > TimeSpan.Zero ? delay : TimeSpan.FromMilliseconds(1);
-            _synchronizedRefreshTimer.Start();
+            if (!_renderingSubscribed)
+            {
+                CompositionTarget.Rendering += Refresh_Rendering;
+                _renderingSubscribed = true;
+            }
+            if (session.PendingFrameRefreshDelay is { } delay)
+            {
+                _synchronizedRefreshTimer.Interval = delay > TimeSpan.Zero ? delay : TimeSpan.FromMilliseconds(1);
+                _synchronizedRefreshTimer.Start();
+            }
         }
         var previous = _presentedFrame;
         if (!ReferenceEquals(previous, frame))
@@ -377,15 +412,21 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
         else if (refreshCards) RefreshTaskCards(frame);
         if (!refreshCards && previous?.Viewport == frame.Viewport) return;
+        var viewport = frame.Viewport;
+        (double Maximum, double ViewportSize, double LargeChange, double Value, bool Enabled) state =
+            (viewport.MaximumOffset, viewport.Rows, Math.Max(1, viewport.Rows - 1), viewport.Offset, viewport.MaximumOffset > 0);
+        if (_scrollBarState == state) return;
+        var written = _scrollBarState;
+        _scrollBarState = state;
         _updatingScrollBar = true;
         try
         {
-            HistoryScrollBar.Maximum = frame.Viewport.MaximumOffset;
-            HistoryScrollBar.ViewportSize = frame.Viewport.Rows;
-            HistoryScrollBar.LargeChange = Math.Max(1, frame.Viewport.Rows - 1);
-            HistoryScrollBar.SmallChange = 1;
-            HistoryScrollBar.Value = frame.Viewport.Offset;
-            HistoryScrollBar.IsEnabled = frame.Viewport.MaximumOffset > 0;
+            if (written?.Maximum != state.Maximum) HistoryScrollBar.Maximum = state.Maximum;
+            if (written?.ViewportSize != state.ViewportSize) HistoryScrollBar.ViewportSize = state.ViewportSize;
+            if (written?.LargeChange != state.LargeChange) HistoryScrollBar.LargeChange = state.LargeChange;
+            if (written is null) HistoryScrollBar.SmallChange = 1;
+            if (written?.Value != state.Value) HistoryScrollBar.Value = state.Value;
+            if (written?.Enabled != state.Enabled) HistoryScrollBar.IsEnabled = state.Enabled;
         }
         finally { _updatingScrollBar = false; }
     }
@@ -418,8 +459,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         GridSizeText.Text = $"{_columns} x {_rows}";
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SystemParametersInfo(uint action, uint parameter, out uint value, uint flags);
+    [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SystemParametersInfo(uint action, uint parameter, out uint value, uint flags);
 
     private int WheelLines()
     {
@@ -598,7 +640,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (!session.SendMouse(new(action, button, modifiers, (float)position.X, (float)position.Y), MouseGeometry()))
             return false;
         _applicationMousePosition = position;
-        if (action == TerminalMouseAction.Press) RefreshTerminalFrame(session);
+        if (action == TerminalMouseAction.Press) RefreshLocalInput(session);
         return true;
     }
 
@@ -645,7 +687,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 FocusTerminal(FocusState.Pointer);
                 e.Handled = true;
-                if (session.ReadFrame().HasSelection) CopySelection(session);
+                if (_presentedFrame?.HasSelection == true) CopySelection(session);
                 else await PasteAsync(session);
                 return;
             }
@@ -653,7 +695,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             FocusTerminal(FocusState.Pointer);
             if (!Terminal.Geometry.TryCellAt(point.Position, out var column, out var row))
             {
-                if (!Down(VirtualKey.Shift) && session.ReadFrame().HasSelection) { session.ClearSelection(); RefreshOutput(session); }
+                if (!Down(VirtualKey.Shift) && _presentedFrame?.HasSelection == true) { session.ClearSelection(); RefreshOutput(session); }
                 e.Handled = true;
                 return;
             }
@@ -667,7 +709,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _selectionClicks = _clickCount;
             _selectionMoved = false;
             _selecting = true;
-            if (Down(VirtualKey.Shift) && session.ReadFrame().HasSelection)
+            if (Down(VirtualKey.Shift) && _presentedFrame?.HasSelection == true)
             {
                 session.ExtendSelection(column, row);
                 _selectionMoved = true;
@@ -801,7 +843,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         const TerminalModifiers ctrlAlt = TerminalModifiers.Control | TerminalModifiers.Alt;
         var altGr = (mods & ctrlAlt) == ctrlAlt && Down(VirtualKey.RightMenu);
         var ctrlShift = mods == (TerminalModifiers.Control | TerminalModifiers.Shift);
-        var hasSelection = session.ReadFrame().HasSelection;
+        var hasSelection = _presentedFrame?.HasSelection == true;
         var selectionCopy = (key == VirtualKey.C && mods == TerminalModifiers.Control && hasSelection) ||
             (key == VirtualKey.Insert && mods == TerminalModifiers.Control && hasSelection) ||
             (key == VirtualKey.Enter && mods == TerminalModifiers.None && hasSelection);
@@ -813,7 +855,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         var historyShortcut = ctrlShift && key is VirtualKey.Up or VirtualKey.Down or VirtualKey.PageUp or VirtualKey.PageDown or VirtualKey.Home or VirtualKey.End;
         var shortcut = findShortcut || taskShortcut || zoomShortcut || (ctrlShift && (key is VirtualKey.Tab or VirtualKey.V || (key == VirtualKey.C && hasSelection))) ||
             ((mods == TerminalModifiers.Shift && key == VirtualKey.Insert) || (mods == TerminalModifiers.Control && key == VirtualKey.V)) || selectionCopy || historyShortcut ||
-            (key == VirtualKey.Escape && mods == TerminalModifiers.None && session.ReadFrame().HasSelection);
+            (key == VirtualKey.Escape && mods == TerminalModifiers.None && hasSelection);
         try
         {
             if (shortcut || (status.WasKeyDown && _keyboard.IsShortcut(physical)))
@@ -886,7 +928,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 e.Handled = true;
                 session.SendKey(virtualKey, mods, action);
-                RefreshTerminalFrame(session);
+                RefreshLocalInput(session);
             }
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
@@ -928,7 +970,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_session == session && _state == SessionState.Running)
             {
                 session.Paste(text);
-                RefreshTerminalFrame(session);
+                RefreshLocalInput(session);
             }
         }
         catch (Exception exception) { ShowClipboardFailure(exception); }
@@ -971,7 +1013,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             session.SendKey(0, TerminalModifiers.None, TerminalKeyAction.Press, text);
-            RefreshTerminalFrame(session);
+            RefreshLocalInput(session);
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
     }
@@ -989,7 +1031,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_keyboard.Text(physical, text) is { } input)
             {
                 session.SendKey(input.Key, input.Modifiers, input.Action, input.Text);
-                RefreshTerminalFrame(session);
+                RefreshLocalInput(session);
             }
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
@@ -1159,6 +1201,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         await ReleaseSessionAsync();
         TerminalPreferences.Current.Changed -= PreferencesChanged;
         ActualThemeChanged -= Page_ActualThemeChanged;
+        _uiSettings.AnimationsEnabledChanged -= UISettings_AnimationsEnabledChanged;
         Terminal.ReleaseResources();
     }
 }

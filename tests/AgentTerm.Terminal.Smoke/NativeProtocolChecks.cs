@@ -24,7 +24,7 @@ internal static class NativeProtocolChecks
         var captureProtocol = new ShellPromptProtocol("capture");
         var capture = new CommandOutputCapture("a:fixture");
         scanner.Sequence += captureProtocol.Accept;
-        scanner.OutputByte += capture.Feed;
+        scanner.Output += capture.Feed;
         captureProtocol.Marker += capture.Marker;
         void Feed(string wire)
         {

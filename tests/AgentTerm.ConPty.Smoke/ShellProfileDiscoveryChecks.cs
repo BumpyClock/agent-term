@@ -25,11 +25,42 @@ internal static class ShellProfileDiscoveryChecks
             }
             finally { LocalFree(argv); }
         }
+        if (ShellProfile.DiscoverBuiltIn().Any(p => p.Id.StartsWith("wsl", StringComparison.Ordinal)))
+            throw new Exception("Built-in discovery must not include WSL profiles.");
         var profiles = ShellProfile.Discover();
         if (profiles.Any(p => p.Id is "pwsh" or "powershell" && p.Arguments != "-NoLogo"))
             throw new Exception("PowerShell profiles must load the user's shell profile.");
         if (profiles.Any(p => p.Id == "wsl" || p.Id.StartsWith("wsl:", StringComparison.Ordinal) && p.Name != p.Id[4..]))
             throw new Exception("WSL profiles must represent individual installed distributions.");
+    }
+
+    public static async Task CheckDefaultResolutionAsync()
+    {
+        var builtIn = new ShellProfile("pwsh", "PowerShell", "pwsh.exe", "-NoLogo", ".");
+        var ubuntu = new ShellProfile("wsl:Ubuntu", "Ubuntu", "wsl.exe", "--distribution Ubuntu", ".");
+        var pending = new TaskCompletionSource<IReadOnlyList<ShellProfile>>();
+        var calls = 0;
+        var discovery = new ShellProfileDiscovery([builtIn], () => { calls++; return pending.Task; });
+        var menu = discovery.DiscoverWslAsync();
+        var present = discovery.ResolveDefaultAsync("wsl:Ubuntu");
+        var absent = discovery.ResolveDefaultAsync("wsl:Removed");
+        if (menu.IsCompleted || present.IsCompleted || absent.IsCompleted)
+            throw new Exception("WSL defaults must wait asynchronously for registration discovery.");
+        foreach (var id in new string?[] { null, "pwsh", "removed-built-in" })
+        {
+            var immediate = discovery.ResolveDefaultAsync(id);
+            if (!immediate.IsCompletedSuccessfully || await immediate != builtIn)
+                throw new Exception("Built-in startup must complete while WSL discovery is pending.");
+        }
+        // Reaching here while discovery is pending represents the first-paint opportunity.
+        pending.SetResult([ubuntu]);
+        if (await present != ubuntu || await absent != builtIn)
+            throw new Exception("Only registered WSL defaults may override the built-in fallback.");
+        if (!(await menu).SequenceEqual([ubuntu]) || !discovery.Profiles.SequenceEqual([builtIn, ubuntu]) || calls != 1)
+            throw new Exception("Menu and default selection must share one discovery result.");
+        if (await discovery.ResolveDefaultAsync("wsl:Removed") != builtIn || calls != 1)
+            throw new Exception("New-tab selection must retain the registered-profile fallback.");
+        Console.WriteLine("Default profile checks passed. Pending discovery, built-in immediate startup, present/absent WSL, shared menu and new-tab result.");
     }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

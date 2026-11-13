@@ -18,6 +18,7 @@ internal static class GridGeometryChecks
         TopAligned();
         CardRows();
         LiveTerminalLaunch(device);
+        CursorOriginInsideRoundedBounds(device);
         Console.WriteLine("Grid geometry checks passed.");
     }
 
@@ -125,6 +126,32 @@ internal static class GridGeometryChecks
             throw new Exception("No prompt cells may be drawn above the bottom row at launch.");
         terminal.SetBottomAnchored(false);
         Expect(terminal.ReadFrame().Viewport.TopInset == 0, "Legacy presentation has no inset.");
+    }
+
+    private static void CursorOriginInsideRoundedBounds(CanvasDevice device)
+    {
+        var cursor = new TerminalCursor(1, 1, true, false, TerminalCursorShape.Block, CursorColor);
+        var frame = Frame(6, 4, new TerminalViewport(2, 0, 6, false), _ => Background, cursor);
+        foreach (var resize in new[] { true })
+        {
+            var first = TerminalGridGeometry.For(frame, resize ? 120.25 : 120, CellWidth, CellHeight,
+                bottomAligned: resize);
+            var next = TerminalGridGeometry.For(frame, resize ? 121.25 : 120, CellWidth, CellHeight,
+                bottomAligned: resize);
+            var firstKey = TerminalSurface.CursorOverlayGeometry(first, cursor.Column, cursor.Row, 1);
+            var nextKey = TerminalSurface.CursorOverlayGeometry(next, cursor.Column, cursor.Row, 1);
+            Expect(firstKey.Bounds == nextKey.Bounds, "Fixture must move inside one rounded overlay bounds bucket.");
+            Expect(firstKey != nextKey && nextKey.GridTop == next.Top,
+                "Resize and fractional scrolling must change the overlay geometry key at the exact grid origin.");
+            using var oldRaster = new CanvasRenderTarget(device, 40, 140, 96);
+            using var newRaster = new CanvasRenderTarget(device, 40, 140, 96);
+            using (var drawing = oldRaster.CreateDrawingSession())
+                TerminalSurface.DrawFrame(drawing, frame, CellWidth, CellHeight, true, true, gridTop: (float)firstKey.GridTop);
+            using (var drawing = newRaster.CreateDrawingSession())
+                TerminalSurface.DrawFrame(drawing, frame, CellWidth, CellHeight, true, true, gridTop: (float)nextKey.GridTop);
+            Expect(!oldRaster.GetPixelBytes().AsSpan().SequenceEqual(newRaster.GetPixelBytes()),
+                "A stationary cursor must move its raster when only the exact grid origin changes.");
+        }
     }
 
     private static TerminalFrame Frame(int rows, int columns, TerminalViewport viewport, Func<int, TerminalColor> background, TerminalCursor cursor)
