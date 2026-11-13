@@ -1,28 +1,22 @@
 # Terminal startup and tab attachment.
 
-The blank-window regression can leave a running shell behind an empty terminal surface. A successful shell command or a populated terminal snapshot does not establish that the canvas painted.
+A running shell and a populated terminal snapshot do not establish that the canvas painted. Startup checks require executed commands, painted output, visible pixels and automatic input focus.
 
-## Reproduced trigger.
+## Canvas lifetime.
 
-An isolated experiment restored only synchronous `TabList.UpdateLayout()` inside `ApplyTabPosition(Left)`, reached from `Tabs_Loaded`. Five of five fresh launches then had populated shell output but no initialized canvas or painted raster. Removing that call painted in five of five launches with the same probe and settings. The sidebar now queues `ScrollIntoView` after loading instead of forcing layout during loading.
+Do not force synchronous tab-list layout during loading. Reentrant `TabList.UpdateLayout()` reproduced blank startup despite populated shell output. Sidebar scrolling is queued after loading instead.
 
-This establishes reentrant layout as a sufficient trigger. The native Win2D initialization mechanism was not inspected. Raw local evidence was saved under `artifacts/startup-sol-high/`.
+Each active, loaded terminal attachment owns a fresh CanvasControl. Suspension or unloading releases the canvas, retained raster and glyph layouts. Terminal frames, input and shell sessions remain on the surface. Repeated activation preserves the current canvas. A tab covered by the agent surface stays suspended until the terminal becomes visible.
 
-## Canvas ownership across tab switches.
+Reusing a canvas after a tab switch exposed an extra Unloaded event and then stopped drawing. Win2D's [native load bookkeeping](https://github.com/microsoft/Win2D/blob/winappsdk/main/winrt/lib/xaml/BaseControl.h) explains a possible mechanism. The deployed native counter and upstream producer were not established. Fresh canvas ownership prevents old attachment bookkeeping from crossing into the next attachment. ReadyToDraw alone does not establish native loaded state.
 
-A later Top-layout test reproduced blank output after reusing an initialized canvas. Managed event tracing observed one `Loaded`, two `Unloaded` events and another `Loaded` on the same canvas. The shell continued executing commands and supplied a populated frame, but neither normal nor diagnostic invalidation produced a draw.
+## Focus and input.
 
-Win2D's [native load bookkeeping](https://github.com/microsoft/Win2D/blob/winappsdk/main/winrt/lib/xaml/BaseControl.h) and [render callback](https://github.com/microsoft/Win2D/blob/winappsdk/main/winrt/lib/xaml/CanvasControl.cpp) explain how an excess unload can leave native rendering disabled. This is an inference from managed traces and upstream source, not a direct read of the deployed native counter. `ReadyToDraw` reports device readiness and did not establish native loaded state in the failing test. The upstream producer of the extra unload is not established.
+Each pane requests focus from its own Loaded event, after its input exists. Deferred requests preserve an intentional user focus change and require the same active, loaded pane.
 
-The pane now creates a canvas for each active, loaded attachment and releases it on suspension or unloading. Terminal frames, input and shell sessions survive on the surface. Repeated activation keeps the current canvas. No failure detector, retry timer or canvas-recovery loop is used.
+During startup the terminal remains enabled and focusable, while its text box is read-only until Running. Input handlers also gate shell input on Running. This prevents startup text from entering an invisible editing buffer and disappearing.
 
-Five fresh Top trials and five Left trials passed the full startup sequence after this change. Every owned process exited, and the user's settings file hash stayed unchanged. The recorded matrix is local under `artifacts/review-sol/final-startup-matrix.json`.
-
-## Focus ownership.
-
-Automatic focus checks exposed two independent ordering defects. The page allowed `FocusTerminal()` during `Starting` while disabling the terminal in that state, so the input could not receive focus. Splitting a pane also requested focus before the new page and input were loaded. The terminal now remains enabled and focusable during startup. Its text box stays read-only until `Running`, so startup keystrokes cannot enter the hidden editing buffer and disappear. Each pane requests focus from its own `Loaded` event. Deferred requests still preserve a user focus change and require the same active, loaded pane.
-
-## Regression command.
+## Regression checks.
 
 Run on an interactive Windows desktop from the repository root.
 
@@ -30,16 +24,10 @@ Run on an interactive Windows desktop from the repository root.
 pwsh -NoProfile -File scripts/check-startup.ps1 -Trials 5
 ```
 
-The script builds an isolated startup executable and launches fresh Left and Top layout trials. It changes only the process's in-memory tab preference. It does not save user settings or close user sessions.
+The script builds an isolated startup executable and launches fresh Left and Top layout trials. It changes only in-memory preferences, does not save user settings or close user sessions, and exits after writing each report. A failure or timeout fails the script.
 
-The checks require shell command execution, a painted marker, nonblank raster pixels and automatic input focus without an explicit focus repair. They also exercise rapid tab creation and switching, splits and pane closure, hidden raster release, idle subscription drain, output after idle, resize, and a synchronized update that must paint after its deadline with no further output.
+Checks cover executed and painted markers, nonblank rasters, automatic focus, rapid tab switching, splits, pane closure, hidden resource release, idle wakeup, synchronized-output deadlines, click and wheel selection clearing without process echo, hidden-cursor idle draws, covered-tab activation, startup read-only input and resize. The normal Windows check script runs one trial per layout and retained-raster parity.
 
-Review regressions also cover application mouse click and wheel selection clearing before any process echo, an invisible blinking cursor with no idle draws, switching back to a tab covered by the agent surface, and startup read-only input retaining focus. Both Left and Top layouts passed these checks after the review fixes.
+## Known resize limit.
 
-Each process writes its report and exits. A nonzero exit or timeout fails the script. The normal Windows check script runs one trial per layout and the retained-raster parity fixture.
-
-## Resize qualification limit.
-
-A longer working-directory prompt exposed a CMD reflow artifact after a narrow-to-wide window resize. The new command executed and its output marker appeared at the beginning of a row, followed by stale trailing prompt text. Native `ReadText`, captured cells, supplied cells and painted cells agreed. No lost command or raster mismatch was observed. A bounded console probe passed six resize stages against both the baseline and current terminal libraries, so the GUI artifact's upstream cause and baseline status remain unproven.
-
-The startup check requires a fresh marker at the beginning of an output row in native text, the captured frame and the painted frame. It does not assert that CMD reflow clears unrelated trailing cells. The trailing-text artifact remains a limitation, not a claimed fix.
+CMD can leave stale trailing prompt text after narrow-to-wide GUI resize. Executed command markers, native text, supplied cells and painted cells agreed in the observed case. The startup check requires a fresh marker at the beginning of an output row; it does not require unrelated trailing cells to clear. The artifact's upstream cause and baseline status remain unproven.

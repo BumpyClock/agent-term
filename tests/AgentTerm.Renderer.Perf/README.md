@@ -11,8 +11,11 @@ Use Windows with the .NET 10 SDK, Python 3, and PowerShell 7. Build the pinned n
 The build script exports the baseline revision's terminal library and renderer with `git archive` into the output directory and builds both fixtures. It never changes the Git index or working tree.
 
 ```powershell
+git fetch origin 5606a460c7dbca60db3c2f78805c29d63c6802cc
 pwsh -NoProfile -File scripts/build-terminal-perf.ps1 -BaselineRevision 5606a46 -OutputDirectory artifacts/perf-comparison
 ```
+
+The fetch retrieves the recorded pre-optimization baseline from PR #10's history when it is absent from a fresh clone after the squash merge.
 
 The baseline side compiles `src/AgentTerm.Terminal`, `src/AgentTerm.Agents` and `src/AgentTerm.App/TerminalSurface.cs` exactly as they were at that revision. The current side compiles the working tree. `artifacts/perf-comparison/build-inputs.json` records the revision, file hashes, whether the working tree was dirty, and both executable paths. The fixture project accepts `-p:TerminalProject=<csproj>` and `-p:TerminalSurfaceSource=<file>` for other baselines.
 

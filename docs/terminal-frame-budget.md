@@ -31,7 +31,7 @@ A change in surface size, DPI, cell size, font, transparency, grid top, top inse
 
 ## Hidden panes.
 
-`SetActive(false)`, `Page_Unloaded` and opening the agent surface call `TerminalSurface.SuspendRendering`. It releases the canvas, retained raster and cached glyph layouts. `ResumeRendering` creates a canvas once the surface is loaded, and the next draw repaints everything because no painted frame remains. Each canvas belongs to one active attachment. This also prevents old native load bookkeeping from crossing tab attachments. See [the startup evidence](terminal-startup.md#canvas-ownership-across-tab-switches).
+`SetActive(false)`, `Page_Unloaded` and opening the agent surface call `TerminalSurface.SuspendRendering`. It releases the canvas, retained raster and cached glyph layouts. `ResumeRendering` creates a canvas once the surface is loaded, and the next draw repaints everything because no painted frame remains. Each canvas belongs to one active attachment. This also prevents old native load bookkeeping from crossing tab attachments. See [canvas lifetime](terminal-startup.md#canvas-lifetime).
 
 Computed, not measured. At the fixture geometry of 3840 by 2054 device pixels, one retained raster is 3840 × 2054 × 4 B, about 31.5 MB. Ten hidden maximized tabs no longer keep about 315 MB of these rasters. Suspension releases the pane's canvas reference and event handlers as well. Actual GPU residency and collection of retired framework objects were not measured.
 
@@ -41,8 +41,10 @@ Each surface caches clipped `CanvasTextLayout` objects keyed by text, width, bol
 
 Twice the cell count leaves room for the visible glyph set and recent replacements in the measured grids. Text that keeps changing, such as streamed CJK, evicts older entries. Memory stays bounded at 65,536 layouts per visible surface. Grids with more distinct glyph keys than this cap can still churn. Suspended surfaces hold none.
 
-## Evidence.
+## Measurement and checks.
 
-Current measurements, commands and build inputs are in [docs/performance](performance/README.md). Older intermediate results are kept there as history with their limits. The first investigation of the original stall is in [the 2026-11-12 investigation](terminal-performance-20261112.md).
+The 2026-11-12 native-fixture comparison used five alternating trials per side, 720 updates at 60 Hz over 12 seconds, and a 284 by 76 grid at 144 DPI with FiraCode Nerd Font at 14 DIP. Optimized snapshot-plus-draw callback p95 ranged from 9.88 to 11.43 ms, with a median of 10.66 ms. All ten final rasters matched, and optimized panes made zero terminal reads during two seconds of silence. Code and scheduling changed together. These measurements cover the fixture and the claim boundary above, not displayed FPS.
+
+The [fixture README](../tests/AgentTerm.Renderer.Perf/README.md) documents reproducible workloads, comparisons and validation gates. Dated trial dumps and investigation notes are retained in [PR #10](https://github.com/BumpyClock/agent-term/pull/10)'s review history rather than the source tree.
 
 Raster parity is checked by `--verify-transitions` in the fixture and runs from `scripts/check.ps1`. Startup and focus regressions run through [check-startup.ps1](../scripts/check-startup.ps1).
