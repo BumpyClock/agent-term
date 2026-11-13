@@ -80,7 +80,7 @@ public sealed partial class TerminalSurface : UserControl
 
     internal TerminalGridGeometry Geometry => _frame is { } frame ? GeometryFor(frame) : new(0, 0, 0, CellWidth, CellHeight);
     internal TerminalGridGeometry GeometryFor(TerminalFrame frame) =>
-        TerminalGridGeometry.For(frame, ActualHeight, CellWidth, CellHeight, _bottomAligned);
+        TerminalGridGeometry.For(frame, ActualHeight, CellWidth, CellHeight, _bottomAligned, _scrollFraction);
 
     private TerminalFrame? _frame;
     private bool _cursorPhase = true;
@@ -376,6 +376,8 @@ public sealed partial class TerminalSurface : UserControl
     {
         var metrics = (ActualWidth, ActualHeight, _canvas!.Dpi, CellWidth, CellHeight,
             _terminalFontSize, TerminalFontFamily, _acrylicBackground, top);
+        var originChanged = _rasterMetrics.GridTop != top;
+        _rasterMetrics.GridTop = top;
         if (_renderTarget is null || _rasterMetrics != metrics)
         {
             ResetRaster();
@@ -383,7 +385,7 @@ public sealed partial class TerminalSurface : UserControl
             _rasterMetrics = metrics;
         }
         var previous = _paintedFrame;
-        var full = previous is null || previous.Columns != frame.Columns || previous.Rows != frame.Rows ||
+        var full = originChanged || frame.OverscanAbove.Length != 0 || frame.OverscanBelow.Length != 0 || previous is null || previous.Columns != frame.Columns || previous.Rows != frame.Rows ||
             previous.Viewport.TopInset != frame.Viewport.TopInset || previous.Background != frame.Background ||
             previous.SelectionBackground != frame.SelectionBackground || previous.SelectionForeground != frame.SelectionForeground;
         _glyphLayouts.Configure(TerminalFontFamily, _terminalFontSize, CellWidth, CellHeight);
@@ -469,6 +471,7 @@ public sealed partial class TerminalSurface : UserControl
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
         DrawCells(drawing, frame, cellWidth, cellHeight, layouts, gridTop,
             0, TerminalGridGeometry.VisibleRows(frame), 0, frame.Columns, textPhase);
+        DrawOverscan(drawing, frame, cellWidth, cellHeight, layouts, gridTop, textPhase);
         DrawCursor(drawing, frame, cellWidth, cellHeight, layouts, focused, cursorPhase, hideCursor, gridTop, textPhase);
     }
 
@@ -648,10 +651,10 @@ internal readonly record struct TerminalGridGeometry(double Top, int Columns, in
 
     internal static int VisibleRows(TerminalFrame frame) => Math.Clamp(frame.Rows - frame.Viewport.TopInset, 0, frame.Rows);
 
-    internal static TerminalGridGeometry For(TerminalFrame frame, double surfaceHeight, float cellWidth, float cellHeight, bool bottomAligned)
+    internal static TerminalGridGeometry For(TerminalFrame frame, double surfaceHeight, float cellWidth, float cellHeight, bool bottomAligned, double scrollFraction = 0)
     {
         var remainder = bottomAligned ? surfaceHeight - frame.Rows * cellHeight : 0;
-        return new(remainder + frame.Viewport.TopInset * cellHeight, frame.Columns, VisibleRows(frame), cellWidth, cellHeight);
+        return new(remainder + (frame.Viewport.TopInset - scrollFraction) * cellHeight, frame.Columns, VisibleRows(frame), cellWidth, cellHeight);
     }
 
     internal double RowTop(long frameRow) => Top + frameRow * CellHeight;

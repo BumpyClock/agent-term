@@ -53,7 +53,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool _animationsEnabled;
     private readonly DispatcherQueueTimer _selectionTimer;
     private bool _updatingScrollBar;
-    private int _wheelDelta;
     private int _zoomWheelDelta;
     private int _applicationWheelDelta;
     private int _applicationHorizontalWheelDelta;
@@ -172,6 +171,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             CancelSelectionGesture();
             return;
         }
+        if (_surfaceOpen) StopSmoothScroll(false);
         if (!_surfaceOpen) Terminal.ResumeRendering();
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
@@ -302,6 +302,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void StopRefresh()
     {
+        StopSmoothScroll(false);
         _acceptOutputNotifications = false;
         _frameRefreshPending = false;
         _chromeTimer.Stop();
@@ -318,6 +319,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (!_dispatcher.TryEnqueue(() =>
         {
             Interlocked.Exchange(ref _outputRefreshQueued, 0);
+            StopSmoothScroll(false);
             RequestFrameRefresh();
         })) Interlocked.Exchange(ref _outputRefreshQueued, 0);
     }
@@ -335,6 +337,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _dispatcher.TryEnqueue(() =>
         {
             _animationsEnabled = sender.AnimationsEnabled;
+            if (!_animationsEnabled) StopSmoothScroll();
             UpdateCursorBlink();
         });
 
@@ -469,6 +472,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         var rows = (ushort)Math.Clamp(Math.Floor(Terminal.ActualHeight / Terminal.CellHeight), 1, 1000);
         if (columns != _columns || rows != _rows || HostCellWidth != _hostCellWidth || HostCellHeight != _hostCellHeight)
         {
+            StopSmoothScroll(false);
             _columns = columns;
             _rows = rows;
             _hostCellWidth = HostCellWidth;
@@ -576,6 +580,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (_updatingScrollBar || _session is not { } session) return;
+            StopSmoothScroll(false);
             session.ScrollTo((long)Math.Round(e.NewValue));
             RefreshOutput(session);
 
@@ -592,6 +597,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var delta = point.Properties.MouseWheelDelta;
             if (Down(VirtualKey.Control))
             {
+                StopSmoothScroll();
                 _zoomWheelDelta += delta;
                 var zoomNotches = _zoomWheelDelta / 120;
                 _zoomWheelDelta %= 120;
@@ -599,8 +605,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 e.Handled = true;
                 return;
             }
-            if (_state == SessionState.Running && !Down(VirtualKey.Shift) && session.IsMouseTrackingEnabled)
+            if (_state == SessionState.Running && !TerminalScrollAnimation.UseHistoryScrolling(session.IsMouseTrackingEnabled, Down(VirtualKey.Shift)))
             {
+                StopSmoothScroll();
                 bool horizontal = point.Properties.IsHorizontalMouseWheel;
                 ref int remainder = ref (horizontal ? ref _applicationHorizontalWheelDelta : ref _applicationWheelDelta);
                 remainder += delta;
@@ -615,14 +622,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 return;
             }
             if (point.Properties.IsHorizontalMouseWheel) return;
-            _wheelDelta += delta;
-            var notches = _wheelDelta / 120;
-            _wheelDelta %= 120;
-            if (notches != 0)
-            {
-                session.ScrollLines(-notches * WheelLines());
-                RefreshOutput(session);
-            }
+            ScrollHistoryWheel(session, -delta / 120.0 * WheelLines());
             e.Handled = true;
 
         }
@@ -672,6 +672,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async void Terminal_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        StopSmoothScroll();
         try
         {
             if (_session is not { } session) return;
@@ -847,6 +848,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private async void Terminal_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (_session is not { } session || _state is not (SessionState.Running or SessionState.Idle)) return;
+        StopSmoothScroll();
         if (_composition.IsComposing) return;
         if (TryShowLinkMenuFromKeyboard(e)) return;
         var status = e.KeyStatus;
@@ -1019,6 +1021,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Input_CompositionStarted(TextBox sender, TextCompositionStartedEventArgs args)
     {
+        StopSmoothScroll();
         _composition.Start(sender.Text);
         _textKey = null;
         Terminal.SetCompositionVisible(true);
@@ -1040,6 +1043,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async void Input_TextChanging(TextBox sender, TextBoxTextChangingEventArgs args)
     {
+        StopSmoothScroll();
         if (_clearingInput || _composition.IsComposing) return;
         var text = sender.Text;
         var physical = _textKey;
@@ -1166,7 +1170,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _session?.EndSelection();
             Terminal.ReleasePointerCaptures();
         }
-        _wheelDelta = 0;
         _zoomWheelDelta = 0;
         _applicationWheelDelta = 0;
         _applicationHorizontalWheelDelta = 0;

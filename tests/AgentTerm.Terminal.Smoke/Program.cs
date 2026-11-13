@@ -1,6 +1,8 @@
 using System.Text;
 using AgentTerm.Terminal;
 
+SmoothScrollChecks.Run();
+if (args.Contains("--smooth-scroll-only")) { OverscanChecks.Run(); return; }
 if (args.Contains("--history-features-only")) { HistoryFeatureChecks.Run(); return; }
 if (args.Contains("--snapshot-only")) { SnapshotArchiveChecks.Run(); return; }
 HostContractChecks.Run();

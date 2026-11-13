@@ -1,5 +1,11 @@
-# Overscan capture
+# Smooth history scrolling.
 
-`GhosttyTerminal.SetOverscanEnabled(true)` requests one additional native row on each available side of the viewport. The visible `TerminalFrame.Cells` grid retains its existing dimensions. `OverscanAbove` and `OverscanBelow` contain separately owned rows with signed viewport coordinates. A frame remains stable after later captures. Capture is opt-in and does not itself change scrolling or draw the extra rows.
+The terminal animates mouse wheel and high resolution wheel/trackpad history scrolling over 140 milliseconds. Small wheel deltas accumulate. Each tick advances the native integer viewport and translates the remaining fraction of one row. One native extra row below the viewport fills the exposed edge even for multi-row wheel events. History limits clamp the destination. There is no elastic overscroll.
 
-A host must translate and clip all terminal layers together when implementing fractional scrolling. It must also map pointer and caret coordinates through the same offset and retain application mouse reporting. Those surface and input changes are not yet implemented.
+Application mouse reporting retains wheel ownership. Shift temporarily routes the wheel to history. Ctrl plus wheel retains font zoom. Horizontal wheel behavior is unchanged. Windows accessibility animation settings disable scroll animation and move immediately. Scrollbar and keyboard history commands remain immediate.
+
+Cursor overlay, IME caret, pointer mapping, selection, and task anchors use TerminalSurface.Geometry, including its fractional Top. Pointer press snaps the current position before starting selection or application reporting. Output, key input, IME input, resize, hiding, and unload cancel motion at the nearest current row. The scrollbar follows each native integer viewport. The image module must use the same Geometry.Top.
+
+The dispatcher timer runs only during active scrolling. Native overscan is enabled only during animation, then disabled and recaptured. Normal output retains dirty-row capture. Animation deliberately captures the bounded full visible grid plus at most one row per side. Captured cell arrays preserve graphemes, width spacers, resolved palette/inverse colors, decorations and selection. They remain owned and stable across later captures. FrameCapture freezes the overscan request under terminal ownership so completion never reads the live request.
+
+Headless checks cover multi-row crossings, fractional positions, small-delta accumulation, limits, interruption, reduced motion, reporting override, coordinate/caret mapping, selection and actual native overscan pixels. Integrated interactive verification belongs to the parent sequential GUI pass.

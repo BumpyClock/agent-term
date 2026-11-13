@@ -13,6 +13,15 @@ internal static class OverscanChecks
             frame.OverscanAbove[0].ViewportY != -1 || frame.OverscanBelow[0].ViewportY != 3 ||
             frame.OverscanAbove[0].Cells[0].Text != "o" || frame.OverscanBelow[0].Cells[0].Text != "f")
             throw new InvalidOperationException("Overscan must capture owned rows at signed viewport coordinates.");
+        var begin = typeof(GhosttyTerminal).GetMethod("BeginFrame", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var end = typeof(GhosttyTerminal).GetMethod("CompleteFrame", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        terminal.ScrollTo(1);
+        var capture = begin.Invoke(terminal, null);
+        terminal.SetOverscanEnabled(false);
+        var frozen = (TerminalFrame)end.Invoke(terminal, [capture])!;
+        if (frozen.OverscanAbove.Length != 1 || frozen.OverscanBelow.Length != 1)
+            throw new InvalidOperationException("Completion must use its frozen overscan request even after a later request change.");
+        terminal.SetOverscanEnabled(true);
         terminal.ScrollToBottom();
         var bottom = terminal.ReadFrame();
         if (bottom.OverscanBelow.Length != 0 || frame.OverscanBelow[0].Cells[0].Text != "f")

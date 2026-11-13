@@ -40,13 +40,13 @@ public sealed partial class GhosttyTerminal
             if (_frame is not null && _viewRevision == _capturedViewRevision && Environment.TickCount64 - _holdStarted.Value < 1000)
             {
                 _frameRefreshAt = _holdStarted.Value + 1000;
-                return new FrameCapture(_frame, default, false, false, 0, null);
+                return new FrameCapture(_frame, default, false, false, 0, null, false);
             }
         }
         else _holdStarted = null;
         EnsurePresentation();
         ConfigureOverscan(_overscanEnabled);
-        var capture = new FrameCapture(null, ReadViewport(), HasSelection(), ReadMode(5), _viewRevision, _theme) { ContentVersion = ContentVersion };
+        var capture = new FrameCapture(null, ReadViewport(), HasSelection(), ReadMode(5), _viewRevision, _theme, _overscanEnabled) { ContentVersion = ContentVersion };
         ThrowIfFailed(RenderNative.ghostty_render_state_begin_update(_renderState, _raw), "Could not update render state.");
         return capture;
     }
@@ -82,7 +82,7 @@ public sealed partial class GhosttyTerminal
             (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background)
             return _frame.ContentVersion == capture.ContentVersion ? _frame : _frame = _frame with { ContentVersion = capture.ContentVersion };
         var previous = _frame;
-        var captureAll = _overscanEnabled || dirty == 2 || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
+        var captureAll = capture.OverscanEnabled || dirty == 2 || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
             previous.Viewport != viewport || previous.HasSelection != hasSelection || reverse != _frameReverse ||
             (reverse ? defaultBg : defaultFg) != previous.Foreground || (reverse ? defaultFg : defaultBg) != previous.Background ||
             (!current && hasSelection);
@@ -103,7 +103,7 @@ public sealed partial class GhosttyTerminal
             {
                 if (RenderNative.ghostty_render_state_row_iterator_next(_rowIterator) == 0) break;
                 row = 0;
-                if (_overscanEnabled) RowGet(6, &row); else row = capturedRows;
+                if (capture.OverscanEnabled) RowGet(6, &row); else row = capturedRows;
                 capturedRows++;
             }
             else
@@ -292,7 +292,7 @@ public sealed partial class GhosttyTerminal
         _renderCells?.Dispose(); _renderRows?.Dispose(); _render?.Dispose();
     }
 
-    internal readonly record struct FrameCapture(TerminalFrame? Held, TerminalViewport Viewport, bool HasSelection, bool Reverse, long ViewRevision, TerminalTheme? Theme)
+    internal readonly record struct FrameCapture(TerminalFrame? Held, TerminalViewport Viewport, bool HasSelection, bool Reverse, long ViewRevision, TerminalTheme? Theme, bool OverscanEnabled)
     {
         public long ContentVersion { get; init; }
     }

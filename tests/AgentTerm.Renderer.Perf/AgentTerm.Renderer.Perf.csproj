@@ -12,6 +12,7 @@
     <SelfContained>true</SelfContained>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <TerminalSurfaceSource Condition="'$(TerminalSurfaceSource)' == ''">$(MSBuildThisFileDirectory)../../src/AgentTerm.App/TerminalSurface.cs</TerminalSurfaceSource>
+    <TerminalSurfaceScrollingSource>$([System.IO.Path]::GetDirectoryName('$(TerminalSurfaceSource)'))/TerminalSurface.Scrolling.cs</TerminalSurfaceScrollingSource>
     <TerminalProject Condition="'$(TerminalProject)' == ''">$(MSBuildThisFileDirectory)../../src/AgentTerm.Terminal/AgentTerm.Terminal.csproj</TerminalProject>
   </PropertyGroup>
   <ItemGroup>
@@ -20,5 +21,6 @@
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <ProjectReference Include="$(TerminalProject)" />
     <Compile Include="$(TerminalSurfaceSource)" Link="TerminalSurface.cs" />
+    <Compile Include="$(TerminalSurfaceScrollingSource)" Link="TerminalSurface.Scrolling.cs" Condition="Exists('$(TerminalSurfaceScrollingSource)')" />
   </ItemGroup>
 </Project>
