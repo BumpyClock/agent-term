@@ -53,7 +53,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool _animationsEnabled;
     private readonly DispatcherQueueTimer _selectionTimer;
     private bool _updatingScrollBar;
-    private int _wheelDelta;
     private int _zoomWheelDelta;
     private int _applicationWheelDelta;
     private int _applicationHorizontalWheelDelta;
@@ -123,6 +122,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         Terminal.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(Terminal_PointerReleased), true);
         Terminal.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(Terminal_PointerCaptureLost), true);
         Terminal.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Terminal_PointerWheelChanged), true);
+        InitializeLinks();
         ShellText.Text = profile.Name;
         _chromeTimer = DispatcherQueue.CreateTimer();
         _chromeTimer.Interval = TimeSpan.FromMilliseconds(250);
@@ -134,6 +134,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _synchronizedRefreshTimer.IsRepeating = false;
         _synchronizedRefreshTimer.Tick += (_, _) => RequestFrameRefresh();
         Terminal.MetricsChanged += UpdateGridSize;
+        ConfigureHostUi();
         SetFontSize(_appearance.FontSize);
         Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
         TerminalPreferences.Current.Changed += PreferencesChanged;
@@ -163,12 +164,14 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state == SessionState.Disposed) return;
         if (!visible)
         {
+            CancelFind();
             StopRefresh();
             Terminal.SuspendRendering();
             PaneStatus.Refresh(PaneStatus.Directory, false, DateTimeOffset.UtcNow);
             CancelSelectionGesture();
             return;
         }
+        if (_surfaceOpen) StopSmoothScroll(false);
         if (!_surfaceOpen) Terminal.ResumeRendering();
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
@@ -228,7 +231,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             SetState(SessionState.Running);
             StatusText.Text = "Running · Local session";
             UpdateGridSize();
-            session.Resize(_columns, _rows);
+            session.Resize(_columns, _rows, HostCellWidth, HostCellHeight);
             RefreshOutput(session);
             if (_viewActive) StartRefresh();
             SessionReady?.Invoke();
@@ -299,6 +302,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void StopRefresh()
     {
+        StopSmoothScroll(false);
         _acceptOutputNotifications = false;
         _frameRefreshPending = false;
         _chromeTimer.Stop();
@@ -315,6 +319,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (!_dispatcher.TryEnqueue(() =>
         {
             Interlocked.Exchange(ref _outputRefreshQueued, 0);
+            StopSmoothScroll(false);
             RequestFrameRefresh();
         })) Interlocked.Exchange(ref _outputRefreshQueued, 0);
     }
@@ -332,13 +337,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _dispatcher.TryEnqueue(() =>
         {
             _animationsEnabled = sender.AnimationsEnabled;
+            if (!_animationsEnabled) StopSmoothScroll();
             UpdateCursorBlink();
         });
 
     private void UpdateCursorBlink()
     {
         if (CanRefreshFrames && _animationsEnabled &&
-            _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused)
+            (Terminal.HasBlinkingText ||
+             _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused))
         {
             if (!_cursorTimer.IsRunning) _cursorTimer.Start();
         }
@@ -353,7 +360,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         CompositionTarget.Rendering -= Refresh_Rendering;
         _renderingSubscribed = false;
-        if (!_frameRefreshPending || _frameRefreshQueued || !CanRefreshFrames) return;
+        if ((!_frameRefreshPending && !_scrollAnimation.IsActive) || _frameRefreshQueued || !CanRefreshFrames) return;
         _frameRefreshPending = false;
         _frameRefreshQueued = DispatcherQueue.TryEnqueue(RefreshQueuedFrame);
     }
@@ -369,7 +376,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (!CanRefreshFrames || _session is not { } session) return;
         try
         {
-            RefreshTerminalFrame(session);
+            var scrolling = _scrollTick != 0;
+            AdvanceSmoothScroll(session);
+            RefreshTerminalFrame(session, refreshCards: scrolling);
             UpdateCursorBlink();
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
@@ -388,6 +397,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void RefreshChrome(TerminalSession session)
     {
+        RefreshFindHistory(session);
         RefreshAgentChrome();
         PaneStatus.Refresh(session.ReadWorkingDirectory(), _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
     }
@@ -413,10 +423,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             }
         }
         var previous = _presentedFrame;
+        if (frame.OverscanBelow.Length == 0) Terminal.SetScrollFraction(0);
         if (!ReferenceEquals(previous, frame))
         {
             _presentedFrame = frame;
             Terminal.SetFrame(frame);
+            UpdateCursorBlink();
             RefreshTaskCards(frame);
             if (_terminalBackground != frame.Background)
             {
@@ -425,6 +437,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             }
         }
         else if (refreshCards) RefreshTaskCards(frame);
+        RefreshLinkFeedback();
         if (!refreshCards && previous?.Viewport == frame.Viewport) return;
         var viewport = frame.Viewport;
         (double Maximum, double ViewportSize, double LargeChange, double Value, bool Enabled) state =
@@ -460,13 +473,16 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (Terminal.ActualWidth <= 0 || Terminal.ActualHeight <= 0) return;
         var columns = (ushort)Math.Clamp(Math.Floor(Terminal.ActualWidth / Terminal.CellWidth), 2, 1000);
         var rows = (ushort)Math.Clamp(Math.Floor(Terminal.ActualHeight / Terminal.CellHeight), 1, 1000);
-        if (columns != _columns || rows != _rows)
+        if (columns != _columns || rows != _rows || HostCellWidth != _hostCellWidth || HostCellHeight != _hostCellHeight)
         {
+            StopSmoothScroll(false);
             _columns = columns;
             _rows = rows;
+            _hostCellWidth = HostCellWidth;
+            _hostCellHeight = HostCellHeight;
             if (_state is SessionState.Running or SessionState.Idle && _session is not null)
             {
-                _session.Resize(columns, rows);
+                _session.Resize(columns, rows, _hostCellWidth, _hostCellHeight);
                 RefreshOutput(_session);
             }
         }
@@ -531,6 +547,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         FindBar.Visibility = Visibility.Visible;
         FindBox.Focus(FocusState.Keyboard);
         FindBox.SelectAll();
+        FindMatch(true);
     }
 
     private void FindBox_TextChanged(object sender, TextChangedEventArgs e) => FindMatch(true);
@@ -555,27 +572,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void CloseFind()
     {
+        CancelFind();
+        ReleaseFind();
         FindBar.Visibility = Visibility.Collapsed;
         FocusTerminal();
-    }
-
-    private void FindMatch(bool forward)
-    {
-        if (_session is not { } session || FindBox is null || FindStatus is null || FindMatchCase is null) return;
-        try
-        {
-            if (FindBox.Text.Length == 0)
-            {
-                session.Find(string.Empty, forward, FindMatchCase.IsChecked == true);
-                FindStatus.Text = string.Empty;
-                RefreshOutput(session);
-                return;
-            }
-            var found = session.Find(FindBox.Text, forward, FindMatchCase.IsChecked == true);
-            FindStatus.Text = found ? string.Empty : "No matches";
-            RefreshOutput(session);
-        }
-        catch (Exception exception) { ShowInteractionFailure(exception); }
     }
 
     private void HistoryScrollBar_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -583,6 +583,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (_updatingScrollBar || _session is not { } session) return;
+            StopSmoothScroll(false);
             session.ScrollTo((long)Math.Round(e.NewValue));
             RefreshOutput(session);
 
@@ -599,6 +600,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var delta = point.Properties.MouseWheelDelta;
             if (Down(VirtualKey.Control))
             {
+                StopSmoothScroll();
                 _zoomWheelDelta += delta;
                 var zoomNotches = _zoomWheelDelta / 120;
                 _zoomWheelDelta %= 120;
@@ -606,8 +608,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 e.Handled = true;
                 return;
             }
-            if (_state == SessionState.Running && !Down(VirtualKey.Shift) && session.IsMouseTrackingEnabled)
+            if (_state == SessionState.Running && !TerminalScrollAnimation.UseHistoryScrolling(session.IsMouseTrackingEnabled, Down(VirtualKey.Shift)))
             {
+                StopSmoothScroll();
                 bool horizontal = point.Properties.IsHorizontalMouseWheel;
                 ref int remainder = ref (horizontal ? ref _applicationHorizontalWheelDelta : ref _applicationWheelDelta);
                 remainder += delta;
@@ -622,14 +625,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 return;
             }
             if (point.Properties.IsHorizontalMouseWheel) return;
-            _wheelDelta += delta;
-            var notches = _wheelDelta / 120;
-            _wheelDelta %= 120;
-            if (notches != 0)
-            {
-                session.ScrollLines(-notches * WheelLines());
-                RefreshOutput(session);
-            }
+            ScrollHistoryWheel(session, -delta / 120.0 * WheelLines());
             e.Handled = true;
 
         }
@@ -679,10 +675,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async void Terminal_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        StopSmoothScroll();
         try
         {
             if (_session is not { } session) return;
             var point = e.GetCurrentPoint(Terminal);
+            if (HandleLinkPress(e, point)) return;
             var button = ChangedMouseButton(point);
             if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
             if (!_selecting && button is not null && SendApplicationMouse(point.Position, TerminalMouseAction.Press, button))
@@ -701,6 +699,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 FocusTerminal(FocusState.Pointer);
                 e.Handled = true;
+                if (TryShowLinkMenu(point.Position)) return;
                 if (_presentedFrame?.HasSelection == true) CopySelection(session);
                 else await PasteAsync(session);
                 return;
@@ -744,6 +743,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (_session is not { } session) return;
+            if (_linkPress is not null) { e.Handled = true; return; }
             var point = e.GetCurrentPoint(Terminal);
             if (!_selecting)
             {
@@ -775,6 +775,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             if (_session is not { } session) return;
             var releasedPoint = e.GetCurrentPoint(Terminal);
+            if (HandleLinkRelease(e, releasedPoint)) return;
             if (_selecting && ChangedMouseButton(releasedPoint) is { } releasedButton && releasedButton != TerminalMouseButton.Left)
             {
                 e.Handled = true;
@@ -808,6 +809,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         try
         {
+            CancelLinkPress();
             ReleaseApplicationMouse();
             if (!_selecting) return;
             _selecting = false;
@@ -849,7 +851,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private async void Terminal_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (_session is not { } session || _state is not (SessionState.Running or SessionState.Idle)) return;
+        StopSmoothScroll();
         if (_composition.IsComposing) return;
+        if (TryShowLinkMenuFromKeyboard(e)) return;
         var status = e.KeyStatus;
         var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
         var key = IsSidedModifier(e.OriginalKey) ? e.OriginalKey : e.Key;
@@ -867,7 +871,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         var zoomShortcut = (mods & TerminalModifiers.Control) != 0 && (mods & (TerminalModifiers.Alt | TerminalModifiers.Super)) == 0 &&
             (keyCode is 0xBB or 0xBD or 0x6B or 0x6D or 0x30 or 0x60);
         var historyShortcut = ctrlShift && key is VirtualKey.Up or VirtualKey.Down or VirtualKey.PageUp or VirtualKey.PageDown or VirtualKey.Home or VirtualKey.End;
-        var shortcut = findShortcut || taskShortcut || zoomShortcut || (ctrlShift && (key is VirtualKey.Tab or VirtualKey.V || (key == VirtualKey.C && hasSelection))) ||
+        var promptShortcut = mods == (TerminalModifiers.Control | TerminalModifiers.Alt | TerminalModifiers.Shift) && key is VirtualKey.Up or VirtualKey.Down;
+        var shortcut = promptShortcut || findShortcut || taskShortcut || zoomShortcut || (ctrlShift && (key is VirtualKey.Tab or VirtualKey.V || (key == VirtualKey.C && hasSelection))) ||
             ((mods == TerminalModifiers.Shift && key == VirtualKey.Insert) || (mods == TerminalModifiers.Control && key == VirtualKey.V)) || selectionCopy || historyShortcut ||
             (key == VirtualKey.Escape && mods == TerminalModifiers.None && hasSelection);
         try
@@ -877,6 +882,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 _keyboard.KeyDown(physical, (uint)key, mods, status.WasKeyDown, TerminalKeyboardInput.Route.Shortcut);
                 e.Handled = true;
                 if (status.WasKeyDown && !historyShortcut && !zoomShortcut) return;
+                if (promptShortcut)
+                {
+                    session.NavigatePrompt(key == VirtualKey.Up ? -1 : 1);
+                    RefreshOutput(session);
+                    return;
+                }
                 if (findShortcut)
                 {
                     ShowFind();
@@ -1013,6 +1024,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Input_CompositionStarted(TextBox sender, TextCompositionStartedEventArgs args)
     {
+        StopSmoothScroll();
         _composition.Start(sender.Text);
         _textKey = null;
         Terminal.SetCompositionVisible(true);
@@ -1034,6 +1046,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async void Input_TextChanging(TextBox sender, TextBoxTextChangingEventArgs args)
     {
+        StopSmoothScroll();
         if (_clearingInput || _composition.IsComposing) return;
         var text = sender.Text;
         var physical = _textKey;
@@ -1151,6 +1164,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void CancelSelectionGesture()
     {
+        ResetLinkInteraction();
         ReleaseApplicationMouse();
         _selectionTimer.Stop();
         if (_selecting)
@@ -1159,7 +1173,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _session?.EndSelection();
             Terminal.ReleasePointerCaptures();
         }
-        _wheelDelta = 0;
         _zoomWheelDelta = 0;
         _applicationWheelDelta = 0;
         _applicationHorizontalWheelDelta = 0;
@@ -1170,6 +1183,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private Task ReleaseSessionAsync()
     {
+        CancelFind();
         StopRefresh();
         CancelSelectionGesture();
         if (_session is not { } session)
@@ -1197,6 +1211,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         if (!IsLoaded)
         {
+            CancelFind();
             StopRefresh();
             Terminal.SuspendRendering();
         }

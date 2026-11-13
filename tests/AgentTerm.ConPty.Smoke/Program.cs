@@ -33,6 +33,8 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
+if (args.Contains("--history-search-only")) { await HistorySearchChecks.RunAsync(); return; }
+
 if (args.Contains("--concurrent-frame-only"))
 {
     await ConcurrentFrameChecks.RunAsync();
@@ -75,6 +77,12 @@ if (args.Contains("--resize-anchor-only"))
     return;
 }
 
+if (args.Contains("--hyperlink-only"))
+{
+    await HyperlinkSessionChecks.RunAsync();
+    return;
+}
+
 if (args.Contains("--title-only"))
 {
     await TitleChecks.RunAsync();
@@ -102,6 +110,7 @@ await ConcurrentFrameChecks.RunAsync();
 await ProfileChecks.RunAsync();
 await DirectoryChecks.RunAsync();
 await TitleChecks.RunAsync();
+await HyperlinkSessionChecks.RunAsync();
 await SmartPromptChecks.RunAsync();
 await NativeStartupChecks.RunAsync();
 await PromptModeChecks.ProbeAsync();

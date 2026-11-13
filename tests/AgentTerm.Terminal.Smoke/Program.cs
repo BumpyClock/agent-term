@@ -1,11 +1,20 @@
 using System.Text;
 using AgentTerm.Terminal;
 
-ProgramTitleChecks.Run();
-if (args.Contains("--program-title-only")) return;
+SmoothScrollChecks.Run();
+if (args.Contains("--smooth-scroll-only")) { OverscanChecks.Run(); return; }
+if (args.Contains("--history-features-only")) { HistoryFeatureChecks.Run(); return; }
+if (args.Contains("--snapshot-only")) { SnapshotArchiveChecks.Run(); return; }
+HostContractChecks.Run();
+if (args.Contains("--host-only")) return;
+SnapshotArchiveChecks.Run();
+HistoryFeatureChecks.Run();
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
+ProgramTitleChecks.Run();
+if (args.Contains("--program-title-only")) return;
 NativeProtocolChecks.Run();
+FidelityChecks.Run();
 LiveEdgeChecks.Run();
 if (args.Contains("--gate0-only")) return;
 
@@ -142,6 +151,7 @@ ProgramStatusPresentationChecks.Run();
 ThemeChecks.Run();
 InputChecks.Run();
 MouseChecks.Run();
+HyperlinkChecks.Run();
 ScrollbackChecks.Run();
 PreferencesChecks.Run();
 TabPositionChecks.Run();

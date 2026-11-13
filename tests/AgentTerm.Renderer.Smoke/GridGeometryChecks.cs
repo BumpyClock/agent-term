@@ -132,12 +132,12 @@ internal static class GridGeometryChecks
     {
         var cursor = new TerminalCursor(1, 1, true, false, TerminalCursorShape.Block, CursorColor);
         var frame = Frame(6, 4, new TerminalViewport(2, 0, 6, false), _ => Background, cursor);
-        foreach (var resize in new[] { true })
+        foreach (var resize in new[] { true, false })
         {
             var first = TerminalGridGeometry.For(frame, resize ? 120.25 : 120, CellWidth, CellHeight,
-                bottomAligned: resize);
+                bottomAligned: resize, scrollFraction: resize ? 0 : .0125);
             var next = TerminalGridGeometry.For(frame, resize ? 121.25 : 120, CellWidth, CellHeight,
-                bottomAligned: resize);
+                bottomAligned: resize, scrollFraction: resize ? 0 : .0625);
             var firstKey = TerminalSurface.CursorOverlayGeometry(first, cursor.Column, cursor.Row, 1);
             var nextKey = TerminalSurface.CursorOverlayGeometry(next, cursor.Column, cursor.Row, 1);
             Expect(firstKey.Bounds == nextKey.Bounds, "Fixture must move inside one rounded overlay bounds bucket.");

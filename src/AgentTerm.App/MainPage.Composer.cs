@@ -203,6 +203,7 @@ public sealed partial class MainPage
         if (!_surfaceOpen)
         {
             var handoff = explicitHandoff || PaneInputFocused();
+            StopSmoothScroll(false);
             _surfaceOpen = true;
             Terminal.SuspendRendering();
             _cursorTimer.Stop();

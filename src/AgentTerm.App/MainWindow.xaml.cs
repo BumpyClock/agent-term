@@ -76,6 +76,7 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) => statusTimer.Stop();
         BuildProfileMenu();
+        ConfigureArchiveMenu();
         _ = AddWslProfilesAsync();
         _ = AddDefaultTabAsync();
         AppWindow.Closing += Window_Closing;

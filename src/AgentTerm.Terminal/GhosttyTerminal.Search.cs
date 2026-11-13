@@ -9,43 +9,109 @@ public sealed partial class GhosttyTerminal
     private SearchHandle? _search;
     private string? _searchQuery;
     private bool _searchCaseSensitive;
+    private Native.Selection[]? _searchCandidates;
 
     /// <summary>Finds the next match in screen order and selects it. Search wraps at either end.</summary>
     public unsafe bool Find(string query, bool forward, bool caseSensitive = false)
     {
-        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(query);
-        if (query.Length == 0)
+        PrepareSearch(query, caseSensitive);
+        if (query.Length == 0) return false;
+        ThrowIfFailed(SearchNative.ghostty_search_run(_search!), "Could not search terminal history.");
+        return SelectSearchMatch(forward, caseSensitive, query);
+    }
+
+    /// <summary>Incremental search for a single-dispatcher owner such as an offline viewer. Cancel and await an old search before starting another.</summary>
+    public async Task<bool> FindIncrementallyAsync(string query, bool forward, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+        PrepareSearch(query, false);
+        if (query.Length == 0) return false;
+        while (true)
         {
-            _search?.Dispose(); _search = null; _searchQuery = null;
-            return false;
-        }
-        if (_search is null || _searchQuery != query || _searchCaseSensitive != caseSensitive)
-        {
-            _search?.Dispose(); _search = null; _searchQuery = null;
-            ThrowIfFailed(SearchNative.ghostty_search_new(IntPtr.Zero, out var ptr, _handle), "Could not create terminal search.");
-            _search = new SearchHandle(ptr);
-            var bytes = Encoding.UTF8.GetBytes(query);
-            fixed (byte* p = bytes)
+            cancellationToken.ThrowIfCancellationRequested();
+            FeedSearch();
+            int status;
+            do
             {
-                var needle = new SearchString { Pointer = p, Length = (nuint)bytes.Length };
-                ThrowIfFailed(SearchNative.ghostty_search_set(_search, 1, &needle), "Could not set terminal search text.");
-            }
-            _searchQuery = query;
-            _searchCaseSensitive = caseSensitive;
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfDisposed();
+                status = TickSearch();
+                await Task.Delay(1, cancellationToken);
+            } while (status == 0);
+            if (status == 2) return SelectSearchMatch(forward, false, query);
         }
-        var originalOffset = ReadViewport().Offset;
-        ThrowIfFailed(SearchNative.ghostty_search_run(_search), "Could not search terminal history.");
+    }
+
+    internal unsafe void PrepareSearch(string query, bool caseSensitive)
+    {
+        ThrowIfDisposed();
+        if (_search is not null && _searchQuery == query && _searchCaseSensitive == caseSensitive) return;
+        _searchCandidates = null;
+        DisposeSearch(); _search = null; _searchQuery = null;
+        if (query.Length == 0) return;
+        ThrowIfFailed(SearchNative.ghostty_search_new(IntPtr.Zero, out var ptr, _handle), "Could not create search.");
+        _search = new SearchHandle(ptr);
+        var bytes = Encoding.UTF8.GetBytes(query);
+        fixed (byte* p = bytes)
+        {
+            var needle = new SearchString { Pointer = p, Length = (nuint)bytes.Length };
+            ThrowIfFailed(SearchNative.ghostty_search_set(_search, 1, &needle), "Could not set search text.");
+        }
+        _searchQuery = query; _searchCaseSensitive = caseSensitive;
+    }
+    internal void FeedSearch()
+    {
+        _searchCandidates = null;
+        ThrowIfFailed(SearchNative.ghostty_search_feed(_search!), "Could not feed search.");
+    }
+    internal unsafe int TickSearch()
+    {
+        int status = 0;
+        ThrowIfFailed(SearchNative.ghostty_search_tick(_search!, &status), "Could not advance search.");
+        return status;
+    }
+    internal unsafe long SearchCount()
+    {
         nuint count = 0;
-        ThrowIfFailed(SearchNative.ghostty_search_get(_search, 3, &count), "Could not read terminal search count.");
-        for (nuint i = 0; i < count; i++)
+        ThrowIfFailed(SearchNative.ghostty_search_get(_search!, 3, &count), "Could not read search count.");
+        return checked((long)count);
+    }
+    // The session checks the output/reflow revision before formatting each snapshot.
+    // These references are never published to the app and are replaced after every feed.
+    internal unsafe void CaptureSearchCandidates()
+    {
+        _searchCandidates = new Native.Selection[checked((int)SearchCount())];
+        fixed (Native.Selection* ptr = _searchCandidates)
+        {
+            var buffer = new SearchSelectionBuffer { Pointer = ptr, Capacity = (nuint)_searchCandidates.Length };
+            ThrowIfFailed(SearchNative.ghostty_search_get(_search!, 6, &buffer), "Could not read search candidates.");
+        }
+    }
+    internal bool ExactSearchCandidate(int index, string query) =>
+        string.Equals(FormatSearchMatch(_searchCandidates![index]), query, StringComparison.Ordinal);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct SearchSelectionBuffer
+    {
+        public Native.Selection* Pointer;
+        public nuint Capacity;
+        public nuint Length;
+    }
+    internal unsafe bool SelectSearchMatch(bool forward, bool caseSensitive, string query, long maxCandidates = long.MaxValue)
+    {
+        var originalOffset = ReadViewport().Offset;
+        nuint count = 0;
+        ThrowIfFailed(SearchNative.ghostty_search_get(_search!, 3, &count), "Could not read terminal search count.");
+        for (nuint i = 0; i < count && i < (nuint)maxCandidates; i++)
         {
             // Native next goes toward older rows; screen-forward goes toward newer rows.
-            var result = forward ? SearchNative.ghostty_search_select_prev(_search) : SearchNative.ghostty_search_select_next(_search);
+            var result = forward ? SearchNative.ghostty_search_select_prev(_search!) : SearchNative.ghostty_search_select_next(_search!);
             if (result == -4) break;
             ThrowIfFailed(result, "Could not select terminal search match.");
             Native.Selection match = default;
-            ThrowIfFailed(SearchNative.ghostty_search_get(_search, 5, &match), "Could not read terminal search match.");
+            ThrowIfFailed(SearchNative.ghostty_search_get(_search!, 5, &match), "Could not read terminal search match.");
             if (caseSensitive && !string.Equals(FormatSearchMatch(match), query, StringComparison.Ordinal)) continue;
             ThrowIfFailed(Native.ghostty_terminal_set(_handle, 22, (IntPtr)(&match)), "Could not highlight terminal search match.");
             if (_gesture is not null) ScrollNative.ghostty_selection_gesture_reset(_gesture, _handle);
@@ -62,6 +128,32 @@ public sealed partial class GhosttyTerminal
         return false;
     }
 
+    // Read both snapshots together. Native search owns the tracked match; no borrowed
+    // grid reference survives this call or a terminal mutation.
+    internal unsafe bool IsSearchMatchSelected()
+    {
+        ThrowIfDisposed();
+        if (_search is null) return false;
+        Native.Selection match = default, selected = default;
+        var result = SearchNative.ghostty_search_get(_search, 5, &match);
+        if (result == -4) return false;
+        ThrowIfFailed(result, "Could not read selected search match.");
+        result = RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.Selection, &selected);
+        if (result == -4) return false;
+        ThrowIfFailed(result, "Could not read terminal selection.");
+        if (match.Rectangle != selected.Rectangle ||
+            !match.Start.Equals(selected.Start) || !match.End.Equals(selected.End)) return false;
+        var text = FormatSearchMatch(selected);
+        if (_searchCaseSensitive) return string.Equals(text, _searchQuery, StringComparison.Ordinal);
+        if (text.Length != _searchQuery!.Length) return false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            static char Fold(char c) => c is >= 'A' and <= 'Z' ? (char)(c + ('a' - 'A')) : c;
+            if (Fold(text[i]) != Fold(_searchQuery[i])) return false;
+        }
+        return true;
+    }
+
     private unsafe string FormatSearchMatch(Native.Selection selection)
     {
         ThrowIfFailed(Native.ghostty_formatter_terminal_new(IntPtr.Zero, out var ptr, _handle), "Could not create search formatter.");
@@ -75,7 +167,11 @@ public sealed partial class GhosttyTerminal
         finally { Native.ghostty_free(IntPtr.Zero, output, length); }
     }
 
-    private void DisposeSearch() => _search?.Dispose();
+    private void DisposeSearch()
+    {
+        _searchCandidates = null;
+        _search?.Dispose();
+    }
     [StructLayout(LayoutKind.Sequential)] private unsafe struct SearchString { public byte* Pointer; public nuint Length; }
     private sealed class SearchHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
@@ -89,6 +185,8 @@ public sealed partial class GhosttyTerminal
         [LibraryImport(Lib)] internal static partial void ghostty_search_free(IntPtr search);
         [LibraryImport(Lib)] internal static partial int ghostty_search_set(SearchHandle search, int option, void* value);
         [LibraryImport(Lib)] internal static partial int ghostty_search_get(SearchHandle search, int data, void* value);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_feed(SearchHandle search);
+        [LibraryImport(Lib)] internal static partial int ghostty_search_tick(SearchHandle search, int* status);
         [LibraryImport(Lib)] internal static partial int ghostty_search_run(SearchHandle search);
         [LibraryImport(Lib)] internal static partial int ghostty_search_select_next(SearchHandle search);
         [LibraryImport(Lib)] internal static partial int ghostty_search_select_prev(SearchHandle search);

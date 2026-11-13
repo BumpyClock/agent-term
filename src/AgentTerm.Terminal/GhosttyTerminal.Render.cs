@@ -40,12 +40,13 @@ public sealed partial class GhosttyTerminal
             if (_frame is not null && _viewRevision == _capturedViewRevision && Environment.TickCount64 - _holdStarted.Value < 1000)
             {
                 _frameRefreshAt = _holdStarted.Value + 1000;
-                return new FrameCapture(_frame, default, false, false, 0, null);
+                return new FrameCapture(_frame, default, false, false, 0, null, false);
             }
         }
         else _holdStarted = null;
         EnsurePresentation();
-        var capture = new FrameCapture(null, ReadViewport(), HasSelection(), ReadMode(5), _viewRevision, _theme);
+        ConfigureOverscan(_overscanEnabled);
+        var capture = new FrameCapture(null, ReadViewport(), HasSelection(), ReadMode(5), _viewRevision, _theme, _overscanEnabled) { ContentVersion = ContentVersion };
         ThrowIfFailed(RenderNative.ghostty_render_state_begin_update(_renderState, _raw), "Could not update render state.");
         return capture;
     }
@@ -65,19 +66,23 @@ public sealed partial class GhosttyTerminal
         StateGet(6, &foreground); StateGet(5, &background);
         var defaultFg = foreground.ToColor();
         var defaultBg = background.ToColor();
-        byte visible = 0, blink = 0, hasPosition = 0;
+        byte visible = 0, blink = 0, hasPosition = 0, wideTail = 0, password = 0;
+        Rgb* palette = stackalloc Rgb[256];
+        StateGet(9, palette);
+        StateGet(13, &password);
         ushort x = 0, y = 0; int cursorStyle = 0;
         StateGet(11, &visible); StateGet(12, &blink); StateGet(14, &hasPosition); StateGet(10, &cursorStyle);
-        if (hasPosition != 0) { StateGet(15, &x); StateGet(16, &y); }
+        if (hasPosition != 0) { StateGet(15, &x); StateGet(16, &y); StateGet(17, &wideTail); }
         var cursorResult = RenderNative.ghostty_render_state_get(_renderState, 7, &cursorColor);
         if (cursorResult != 0 && cursorResult != -4) ThrowIfFailed(cursorResult, "Could not read cursor color.");
         var cursor = new TerminalCursor(x, y, visible != 0 && hasPosition != 0, blink != 0,
-            cursorStyle == 0 ? TerminalCursorShape.Bar : cursorStyle == 2 ? TerminalCursorShape.Underline : TerminalCursorShape.Block,
-            cursorResult == 0 ? cursorColor.ToColor() : reverse ? defaultBg : defaultFg);
+            cursorStyle == 0 ? TerminalCursorShape.Bar : cursorStyle == 2 ? TerminalCursorShape.Underline : cursorStyle == 3 ? TerminalCursorShape.Hollow : TerminalCursorShape.Block,
+            cursorResult == 0 ? cursorColor.ToColor() : reverse ? defaultBg : defaultFg) { WideTail = wideTail != 0, PasswordInput = password != 0 };
         if (dirty == 0 && _frame is not null && current && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
-            (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background) return _frame;
+            (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background)
+            return _frame.ContentVersion == capture.ContentVersion ? _frame : _frame = _frame with { ContentVersion = capture.ContentVersion };
         var previous = _frame;
-        var captureAll = dirty == 2 || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
+        var captureAll = capture.OverscanEnabled || dirty == 2 || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
             previous.Viewport != viewport || previous.HasSelection != hasSelection || reverse != _frameReverse ||
             (reverse ? defaultBg : defaultFg) != previous.Foreground || (reverse ? defaultFg : defaultBg) != previous.Background ||
             (!current && hasSelection);
@@ -88,13 +93,18 @@ public sealed partial class GhosttyTerminal
         StateGet(4, &rowPtr);
         byte* scratch = stackalloc byte[64];
         var capturedRows = 0;
+        var visibleRows = 0;
+        var above = new List<TerminalOverscanRow>();
+        var below = new List<TerminalOverscanRow>();
         while (true)
         {
             int row;
             if (captureAll)
             {
                 if (RenderNative.ghostty_render_state_row_iterator_next(_rowIterator) == 0) break;
-                row = capturedRows++;
+                row = 0;
+                if (capture.OverscanEnabled) RowGet(6, &row); else row = capturedRows;
+                capturedRows++;
             }
             else
             {
@@ -102,15 +112,18 @@ public sealed partial class GhosttyTerminal
                 if (RenderNative.ghostty_render_state_row_iterator_next_dirty(_rowIterator, &dirtyRow) == 0) break;
                 row = dirtyRow;
             }
-            if (row >= rowsCount) throw new InvalidOperationException("Render state returned an incomplete grid.");
+            if (row < -1 || row > rowsCount) throw new InvalidOperationException("Render state returned an unexpected overscan row.");
+            var extra = row < 0 || row >= rowsCount;
+            if (!extra) visibleRows++;
             if (!cellsChanged)
             {
                 cellsArray = (TerminalCell[])cellsArray.Clone();
                 cellsChanged = true;
             }
+            var rowCells = extra ? new TerminalCell[columns] : cellsArray;
             var cellPtr = _cellIterator;
             RowGet(3, &cellPtr);
-            var index = row * columns;
+            var index = extra ? 0 : row * columns;
             var end = index + columns;
             while (RenderNative.ghostty_render_state_row_cells_next(_cellIterator) != 0)
             {
@@ -121,7 +134,7 @@ public sealed partial class GhosttyTerminal
                 CellGet(1, &raw); CellGet(2, &style);
                 ThrowIfFailed(RenderNative.ghostty_cell_get(raw, 3, &wide), "Could not read cell width.");
                 var (fg, bg) = CellColors(defaultFg, defaultBg, ((style.Flags & 16) != 0) ^ reverse);
-                var old = sameShape ? previous!.Cells[index] : null;
+                var old = !extra && sameShape ? previous!.Cells[index] : null;
                 var buffer = new ByteBuffer { Pointer = scratch, Capacity = 64 };
                 var result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, 9, &buffer);
                 string text;
@@ -142,22 +155,34 @@ public sealed partial class GhosttyTerminal
                 var width = (byte)(wide == 1 ? 2 : wide >= 2 ? 0 : 1);
                 bool bold = (style.Flags & 1) != 0, italic = (style.Flags & 2) != 0, underline = (style.Flags & 0x700) != 0,
                     strikethrough = (style.Flags & 64) != 0, dim = (style.Flags & 4) != 0, hidden = (style.Flags & 32) != 0;
-                cellsArray[index++] = old is not null && old.Text == text && old.Width == width && old.Foreground == fg && old.Background == bg &&
+                var underlineStyle = (TerminalUnderlineStyle)((style.Flags >> 8) & 7);
+                TerminalColor? underlineColor = style.UnderlineTag == 1 ? palette[style.UnderlineR].ToColor() : style.UnderlineTag == 2 ? new TerminalColor(style.UnderlineR, style.UnderlineG, style.UnderlineB) : null;
+                bool overline = (style.Flags & 128) != 0, textBlink = (style.Flags & 8) != 0;
+                rowCells[index++] = old is not null && old.Text == text && old.Width == width && old.Foreground == fg && old.Background == bg &&
                     old.Bold == bold && old.Italic == italic && old.Underline == underline && old.Strikethrough == strikethrough &&
-                    old.Dim == dim && old.Hidden == hidden && old.Selected == (selected != 0)
+                    old.Dim == dim && old.Hidden == hidden && old.Selected == (selected != 0) && old.UnderlineStyle == underlineStyle &&
+                    old.UnderlineColor == underlineColor && old.Overline == overline && old.Blink == textBlink
                     ? old
-                    : new TerminalCell(text, width, fg, bg, bold, italic, underline, strikethrough, dim, hidden) { Selected = selected != 0 };
+                    : new TerminalCell(text, width, fg, bg, bold, italic, underline, strikethrough, dim, hidden) { Selected = selected != 0, UnderlineStyle = underlineStyle, UnderlineColor = underlineColor, Overline = overline, Blink = textBlink };
             }
             if (index != end) throw new InvalidOperationException("Render state returned an incomplete grid.");
+            if (extra)
+            {
+                for (var i = 0; i + 1 < rowCells.Length; i++)
+                    if (rowCells[i].Width == 2 && rowCells[i].Selected && rowCells[i + 1].Width == 0)
+                        rowCells[i + 1] = rowCells[i + 1] with { Selected = true };
+                (row < 0 ? above : below).Add(new TerminalOverscanRow(row, rowCells));
+            }
         }
-        if (captureAll && capturedRows != rowsCount) throw new InvalidOperationException("Render state returned an incomplete grid.");
+        if (captureAll && visibleRows != rowsCount) throw new InvalidOperationException("Render state returned an incomplete grid.");
         for (var i = 0; cellsChanged && i + 1 < cellsArray.Length; i++)
             if (cellsArray[i].Width == 2 && cellsArray[i].Selected && cellsArray[i + 1].Width == 0)
                 cellsArray[i + 1] = cellsArray[i + 1] with { Selected = true };
         if (reverse) (defaultFg, defaultBg) = (defaultBg, defaultFg);
         _frameReverse = reverse;
         _frame = new TerminalFrame(columns, rowsCount, cellsArray, cursor, defaultFg, defaultBg) {
-            Viewport = viewport, HasSelection = hasSelection,
+            Viewport = viewport, HasSelection = hasSelection, ContentVersion = capture.ContentVersion,
+            OverscanAbove = above.ToArray(), OverscanBelow = below.ToArray(),
             SelectionBackground = (capture.Theme ?? TerminalThemes.All[0]).SelectionBackground,
             SelectionForeground = (capture.Theme ?? TerminalThemes.All[0]).SelectionForeground,
             CursorText = capture.Theme is null ? null : capture.Theme.CursorText ?? background.ToColor(),
@@ -196,6 +221,7 @@ public sealed partial class GhosttyTerminal
     private unsafe int LastContentRow()
     {
         EnsureRender();
+        ConfigureOverscan(false);
         var last = ReadActiveCursorRow();
         var reverse = ReadMode(5);
         ThrowIfFailed(RenderNative.ghostty_render_state_update(_renderState, _raw), "Could not update render state.");
@@ -220,7 +246,7 @@ public sealed partial class GhosttyTerminal
                 if (tag == 0 && styleId == 0 && (codepoint == 0 || codepoint <= char.MaxValue && char.IsWhiteSpace((char)codepoint))) continue;
                 Style style = default;
                 CellGet(2, &style);
-                if ((style.Flags & (0x700 | 64)) != 0 || CellColors(defaultFg, defaultBg, ((style.Flags & 16) != 0) ^ reverse).Bg != frameBg) { last = row; break; }
+                if ((style.Flags & (0x700 | 64 | 128)) != 0 || CellColors(defaultFg, defaultBg, ((style.Flags & 16) != 0) ^ reverse).Bg != frameBg) { last = row; break; }
                 var buffer = new ByteBuffer { Pointer = scratch, Capacity = 64 };
                 var result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, 9, &buffer);
                 if (result == -3) { last = row; break; }
@@ -266,10 +292,13 @@ public sealed partial class GhosttyTerminal
         _renderCells?.Dispose(); _renderRows?.Dispose(); _render?.Dispose();
     }
 
-    internal readonly record struct FrameCapture(TerminalFrame? Held, TerminalViewport Viewport, bool HasSelection, bool Reverse, long ViewRevision, TerminalTheme? Theme);
+    internal readonly record struct FrameCapture(TerminalFrame? Held, TerminalViewport Viewport, bool HasSelection, bool Reverse, long ViewRevision, TerminalTheme? Theme, bool OverscanEnabled)
+    {
+        public long ContentVersion { get; init; }
+    }
     [StructLayout(LayoutKind.Sequential)] private struct Mode { public ushort Value; public byte Enabled; }
     [StructLayout(LayoutKind.Sequential)] private struct Rgb { public byte R, G, B; public readonly TerminalColor ToColor() => new(R, G, B); }
-    [StructLayout(LayoutKind.Explicit, Size = 16)] private struct Style { [FieldOffset(12)] public ushort Flags; }
+    [StructLayout(LayoutKind.Explicit, Size = 16)] private struct Style { [FieldOffset(8)] public byte UnderlineTag; [FieldOffset(9)] public byte UnderlineR; [FieldOffset(10)] public byte UnderlineG; [FieldOffset(11)] public byte UnderlineB; [FieldOffset(12)] public ushort Flags; }
     [StructLayout(LayoutKind.Sequential)] private unsafe struct ByteBuffer { public byte* Pointer; public nuint Capacity, Length; }
     private sealed class RenderHandle : SafeHandleZeroOrMinusOneIsInvalid { public RenderHandle(IntPtr value) : base(true) => SetHandle(value); protected override bool ReleaseHandle() { RenderNative.ghostty_render_state_free(handle); return true; } }
     private sealed class RenderRowsHandle : SafeHandleZeroOrMinusOneIsInvalid { public RenderRowsHandle(IntPtr value) : base(true) => SetHandle(value); protected override bool ReleaseHandle() { RenderNative.ghostty_render_state_row_iterator_free(handle); return true; } }

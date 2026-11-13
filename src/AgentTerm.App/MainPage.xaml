@@ -49,9 +49,23 @@
                         AutomationProperties.Name="Close search" ToolTipService.ToolTip="Close search (Escape)">
                     <FontIcon Glyph="&#xE711;" FontSize="12" />
                 </Button>
-                <Grid Grid.Row="1" Grid.ColumnSpan="4" ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                <Grid Grid.Row="1" Grid.ColumnSpan="4" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                     <CheckBox x:Name="FindMatchCase" MinWidth="0" Content="Match case" Checked="FindMatchCase_Changed"
                               Unchecked="FindMatchCase_Changed" VerticalAlignment="Center" />
+                    <DropDownButton Grid.Column="2" Content="History" AutomationProperties.Name="Terminal history actions">
+                        <DropDownButton.Flyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Text="Previous prompt (Ctrl+Alt+Shift+Up)" Click="PreviousPrompt_Click" />
+                                <MenuFlyoutItem Text="Next prompt (Ctrl+Alt+Shift+Down)" Click="NextPrompt_Click" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Copy selection with formatting" Click="CopyRich_Click" />
+                                <MenuFlyoutItem Text="Export history as HTML" Click="ExportHtml_Click" />
+                                <MenuFlyoutItem Text="Export history as styled VT" Click="ExportVt_Click" />
+                                <MenuFlyoutItem Text="Export selection as HTML" Click="ExportSelectionHtml_Click" />
+                                <MenuFlyoutItem Text="Export selection as styled VT" Click="ExportSelectionVt_Click" />
+                            </MenuFlyout>
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
                     <TextBlock x:Name="FindStatus" Grid.Column="1" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"
                                AutomationProperties.LiveSetting="Polite" />
                 </Grid>
