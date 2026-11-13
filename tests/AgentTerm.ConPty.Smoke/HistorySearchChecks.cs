@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using AgentTerm.Agents;
 using AgentTerm.Terminal;
 
 internal static class HistorySearchChecks
@@ -17,16 +18,32 @@ internal static class HistorySearchChecks
                 await Task.Delay(20);
             }
         }
+        // Owned agent output is the screen result: CR progress rewrites collapse to what the terminal displays.
+        var owned = await session.ExecuteAsync(new("Write-Host -NoNewline ('10%' + [char]13 + '20%' + [char]13 + 'done 100%'); Write-Output ''; Write-Output ('after-' + 'progress')")).WaitAsync(TimeSpan.FromSeconds(25));
+        if (owned.Status != TerminalExecutionStatus.Completed || owned.Output.Replace("\r\n", "\n") != "done 100%\nafter-progress\n")
+            throw new Exception("Owned output must be screen-semantic: " + System.Text.Json.JsonSerializer.Serialize(owned.Output));
+        var frame = session.ReadFrame();
+        var outputRow = Enumerable.Range(0, frame.Rows).Last(row => string.Concat(Enumerable.Range(0, frame.Columns).Select(c => frame.Cells[row * frame.Columns + c].Text)).StartsWith("after-progress"));
+        var semantic = session.ReadCommandOutput(frame.Viewport.Offset + outputRow, 0);
+        if (semantic is null || !semantic.Contains("done 100%") || !semantic.Contains("after-progress"))
+            throw new Exception("Native semantic output must cover the shell's OSC 133 output region: " + semantic);
         var promptBottom = session.ReadFrame().Viewport.MaximumOffset;
         session.NavigatePrompt(-1);
         if (session.ReadFrame().Viewport.Offset >= promptBottom) throw new Exception("Default PowerShell integration must provide native prompt navigation markers.");
         session.ScrollTo(promptBottom);
-        session.Send("1..14000 | ForEach-Object { 'needle row ' + $_ }; ('HISTORY_' + 'READY')\r");
+        // One console write per row costs PowerShell about 1 ms of CPU each, which dominated this fixture on a loaded
+        // machine. A single batched write produces the same rows in well under a second.
+        session.Send("[Console]::Out.Write(((1..14000 -replace '^','needle row ') -join \"`r`n\") + \"`r`n\"); ('HISTORY_' + 'READY')\r");
         var deadline = Stopwatch.StartNew();
+        var retained = 0;
         while (!session.ReadText().Contains("HISTORY_READY") || session.PromptState != ShellPromptState.Ready ||
-            session.ExportHistory(TerminalExportFormat.Plain)!.Split("needle row").Length < 1001)
+            (retained = (await session.ExportHistoryAsync(TerminalExportFormat.Plain))!.Text.Split("needle row").Length - 1) < 1000)
         {
-            if (deadline.Elapsed > TimeSpan.FromSeconds(60)) throw new Exception("History fixture timed out.");
+            if (deadline.Elapsed > TimeSpan.FromSeconds(60))
+            {
+                var screen = session.ReadText().TrimEnd();
+                throw new Exception($"History fixture timed out: prompt {session.PromptState}, {retained} retained rows, screen tail <{screen[^Math.Min(200, screen.Length)..]}>.");
+            }
             await Task.Delay(20);
         }
         using var cancel = new CancellationTokenSource();

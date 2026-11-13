@@ -9,6 +9,7 @@ HostContractChecks.Run();
 if (args.Contains("--host-only")) return;
 SnapshotArchiveChecks.Run();
 HistoryFeatureChecks.Run();
+SearchFrameChecks.Run();
 if (args.Contains("--images-only")) { PngDecoderChecks.Run(); KittyImageChecks.Run(); return; }
 if (args.Contains("--effects-only"))
 {

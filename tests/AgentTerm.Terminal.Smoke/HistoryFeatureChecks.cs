@@ -46,6 +46,7 @@ internal static class HistoryFeatureChecks
         prompts.NavigatePrompt(1);
         Check(prompts.ReadFrame().Viewport.Offset >= previous, "Prompt navigation must remain usable after reflow.");
         SearchOwnershipChecks.RunAsync().GetAwaiter().GetResult();
+        HistoryGapChecks.Run();
         Console.WriteLine("History feature checks passed.");
     }
 }

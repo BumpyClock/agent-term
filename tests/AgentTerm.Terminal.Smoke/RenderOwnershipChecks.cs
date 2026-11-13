@@ -260,7 +260,7 @@ internal static class RenderOwnershipChecks
         var texts = frame.Cells.Take(frame.Columns).Where(cell => cell.Width != 0).Select(cell => cell.Text).ToArray();
         Check(Encoding.UTF8.GetByteCount(combining) > 64 && texts[0] == combining, $"a cluster over 64 UTF-8 bytes must stay whole, got {texts[0].Length} chars.");
         Check(texts.Contains(family) && texts.Contains(flag) && texts.Contains(thumbs) && texts.Contains(heart), $"ZWJ, flag, skin-tone and variation clusters must stay whole, got {string.Join(" ", texts.Skip(1).Select(t => string.Join(",", t.EnumerateRunes().Select(r => r.Value.ToString("X")))))}.");
-        var wide = Array.FindIndex(frame.Cells, cell => cell.Text == "界");
+        var wide = Array.FindIndex(frame.Cells.ToArray(), cell => cell.Text == "界");
         Check(frame.Cells[wide].Width == 2 && frame.Cells[wide + 1].Width == 0, "CJK cells need a spacer tail.");
         Check(Row(frame, 0) == combining + "|" + family + "|" + flag + "|" + thumbs + "|" + heart + "|界", "row text must round-trip.");
     }

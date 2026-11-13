@@ -20,10 +20,21 @@ public sealed partial class TerminalSession
 
     public string ReadDiagnosticReport()
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             return _terminal.ReadDiagnosticReport();
+        }
+    }
+
+    public bool UnknownSequenceDiagnosticsEnabled { get { lock (_gate) return _terminal.UnknownSequenceDiagnosticsEnabled; } }
+
+    public void SetUnknownSequenceDiagnostics(bool enabled)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            _terminal.SetUnknownSequenceDiagnostics(enabled);
         }
     }
 }

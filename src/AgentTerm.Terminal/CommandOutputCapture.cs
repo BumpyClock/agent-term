@@ -1,8 +1,15 @@
 using System.Text;
 namespace AgentTerm.Terminal;
 
+/// <summary>
+/// One owned command's output. The streamed transcript is lossless up to <see cref="Limit"/> characters: decoded text in
+/// stream order, CSI and control strings removed, CR and other C0 controls kept. <see cref="Resolve"/> may replace it
+/// with the final screen result, which applies CR rewrites and cursor movement as the terminal displayed them.
+/// See docs/libghostty/command-output.md for the contract between the two.
+/// </summary>
 public sealed class CommandOutputCapture(string? commandId = null)
 {
+    public const int Limit = 64000;
     private readonly string _start = "Command started [" + commandId + "]";
     private readonly string _end = "Command ended [" + commandId + "]";
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
@@ -13,9 +20,35 @@ public sealed class CommandOutputCapture(string? commandId = null)
     private int _matched;
     private int _replayed;
     private int _ansi;
+    private string? _screen;
+    private bool _screenTruncated;
+    internal string StartFence => _start;
+    internal string EndFence => _end;
     public bool Ended { get; private set; }
-    public bool Truncated { get; private set; }
-    public string Text => (_text.Length > 0 && char.IsHighSurrogate(_text[^1]) ? _text.ToString(0, _text.Length - 1) : _text.ToString()).TrimStart('\r', '\n');
+    /// <summary>True once <see cref="Resolve"/> ran; later output can no longer change the result.</summary>
+    public bool Resolved { get; private set; }
+    /// <summary>True when <see cref="Text"/> came from the screen rather than the streamed transcript.</summary>
+    public bool FromScreen => _screen is not null;
+    public bool Truncated => _screen is not null ? _screenTruncated : TranscriptTruncated;
+    public bool TranscriptTruncated { get; private set; }
+    /// <summary>The result: the screen text when resolved from the screen, otherwise the transcript.</summary>
+    public string Text => _screen ?? Transcript;
+    public string Transcript => (_text.Length > 0 && char.IsHighSurrogate(_text[^1]) ? _text.ToString(0, _text.Length - 1) : _text.ToString()).TrimStart('\r', '\n');
+
+    /// <summary>
+    /// Settles the result once the command ended. A screen result replaces the transcript only when the terminal could
+    /// prove the region; null keeps the transcript. The screen result shares the transcript's limit and leading-newline rule.
+    /// </summary>
+    public void Resolve(string? screen)
+    {
+        if (Resolved) return;
+        Resolved = true;
+        if (screen is null) return;
+        screen = screen.TrimStart('\r', '\n');
+        _screenTruncated = screen.Length > Limit;
+        if (_screenTruncated) screen = screen[..(char.IsHighSurrogate(screen[Limit - 1]) ? Limit - 1 : Limit)];
+        _screen = screen;
+    }
     public void Marker(string message)
     {
         if (commandId is not null) return;
@@ -77,11 +110,11 @@ public sealed class CommandOutputCapture(string? commandId = null)
     }
     private void Append(char ch)
     {
-        if (_text.Length < 64000) _text.Append(ch);
-        else Truncated = true;
+        if (_text.Length < Limit) _text.Append(ch);
+        else TranscriptTruncated = true;
         if (commandId is null || (_replayed > 0 && ch < (char)32)) return;
         _replayed = ch == _start[_replayed] ? _replayed + 1 : ch == _start[0] ? 1 : 0;
         if (_replayed < _start.Length) return;
-        _replayed = 0; _text.Clear(); Truncated = false;
+        _replayed = 0; _text.Clear(); TranscriptTruncated = false;
     }
 }

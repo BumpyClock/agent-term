@@ -11,6 +11,7 @@ internal static class RenderChecks
     public static void Run()
     {
         CheckSnapshotOwnership();
+        CheckBackgroundPresence();
         OverscanChecks.Run();
         using var terminal = new GhosttyTerminal(12, 3);
         terminal.Write(Encoding.UTF8.GetBytes("\x1b]4;1;rgb:12/34/56\x1b\\\x1b[1;3;4;9;2;8;38;2;10;20;30;48;2;40;50;60mA\x1b[0;7;38;5;1;48;2;1;2;3mB\x1b[0m界e\u0301"));
@@ -54,6 +55,23 @@ internal static class RenderChecks
         Check(terminal.PendingFrameRefreshDelay is null, "Releasing synchronized output must clear its refresh deadline.");
     }
 
+    private static void CheckBackgroundPresence()
+    {
+        using var terminal = new GhosttyTerminal(8, 2);
+        var bg = terminal.ReadFrame().Background;
+        terminal.Write(Encoding.ASCII.GetBytes($"\x1b[?25l\x1b[0m \x1b[48;2;{bg.R};{bg.G};{bg.B}m \x1b[0;7m \x1b[0;7;38;2;{bg.R};{bg.G};{bg.B}m "));
+        var normal = terminal.ReadFrame();
+        Check(!normal.Cells[0].HasBackground && normal.Cells[1].HasBackground && normal.Cells[1].Background == bg,
+            "Explicit default-colored backgrounds must remain distinguishable from the default background.");
+        Check(normal.Cells[2].HasBackground && normal.Cells[3].HasBackground && normal.Cells[3].Background == bg,
+            "Inverse cells must cover the background even when their effective color equals the default.");
+        terminal.Write("\x1b[?5h"u8);
+        var reverse = terminal.ReadFrame();
+        Check(!reverse.Cells[0].HasBackground && reverse.Cells[1].HasBackground == false &&
+            reverse.Cells[2].HasBackground && reverse.Cells[3].HasBackground,
+            "Reverse-screen mode must follow the effective color source while preserving inverse backgrounds.");
+    }
+
     private static void CheckSnapshotOwnership()
     {
         using var terminal = new GhosttyTerminal(12, 4);
@@ -65,6 +83,8 @@ internal static class RenderChecks
         var edited = terminal.ReadFrame();
         Check(string.Concat(edited.Cells.Skip(24).Take(5).Select(cell => cell.Text)) == "THIRD", "A dirty row must expose its new text.");
         Check(original.Cells.SequenceEqual(originalCells), "A later dirty-row capture must not mutate an older snapshot.");
+        Check(original.Cells.SharesRowWith(edited.Cells, 0) && !original.Cells.SharesRowWith(edited.Cells, 2),
+            "A sparse capture must retain unchanged rows and replace the dirty row.");
         for (var index = 0; index < original.Cells.Length; index++)
             if (index < 24 || index >= 29)
                 Check(edited.Cells[index] == originalCells[index], "Editing one row must preserve all other cell values.");
@@ -74,6 +94,10 @@ internal static class RenderChecks
         Check(moved.Cursor.Column == 6 && moved.Cursor.Row == 1 && moved.Cursor.Shape == TerminalCursorShape.Bar,
             "A cursor-only update must publish the new cursor.");
         Check(moved.Cells.SequenceEqual(edited.Cells), "A cursor-only update must preserve cell values.");
+        terminal.Write("\x1b[1;1HFIRST"u8);
+        var afterDroppedFrame = terminal.ReadFrame();
+        Check(!original.Cells.SharesRowWith(afterDroppedFrame.Cells, 0) && !original.Cells.SharesRowWith(afterDroppedFrame.Cells, 2),
+            "Comparing retained frames must reveal all changed rows even when an intermediate frame was dropped.");
 
         terminal.BeginSelection(0, 0);
         terminal.ExtendSelection(2, 0);

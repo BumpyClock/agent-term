@@ -205,12 +205,13 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             if (_prompt.State != ShellPromptState.Ready)
                 return new(TerminalExecutionStatus.Unsupported, Message: "Integrated PowerShell must be ready.");
             owned = new();
+            ReleaseOwnedOutputStart();
             _owned = owned;
         }
         lock (_gate)
         {
             try { SubmitCommand(request.Command, owned.Id); }
-            catch { _owned = null; throw; }
+            catch { ReleaseOwnedOutputStart(); _owned = null; throw; }
         }
         using var cancel = cancellationToken.Register(() =>
         {
@@ -240,7 +241,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             var shellExited = exited.IsCompleted;
             if (owned.Completion.Task.IsCompleted) return owned.Completion.Task.Result;
             if (!shellExited) return null;
-            lock (_gate) { if (_owned == owned) _owned = null; }
+            lock (_gate) { if (_owned == owned) { ReleaseOwnedOutputStart(); _owned = null; } }
             return new(TerminalExecutionStatus.Exited, owned.Capture.Text);
         }
     }
@@ -422,6 +423,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         _mailboxPending = null;
         _prompt.State = ShellPromptState.Ready;
         if (_owned is not { } owned || owned.Id != pending) return;
+        ReleaseOwnedOutputStart();
         _owned = null;
         owned.Completion.TrySetResult(new(TerminalExecutionStatus.Completed, owned.Capture.Text, false,
             Message: message.EndsWith(";read", StringComparison.Ordinal)
@@ -498,6 +500,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             }
             if (_mailboxPending is null && _owned is { } owned && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == owned.Id && owned.Capture.Ended)
             {
+                ResolveOwnedOutput(owned);
                 _owned = null;
                 owned.Completion.TrySetResult(new(owned.Interrupted ? TerminalExecutionStatus.Interrupted : TerminalExecutionStatus.Completed,
                     owned.Capture.Text, _prompt.LastCommandSucceeded, _prompt.LastExitCode,
@@ -538,6 +541,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
                 {
                     _historyIdle?.Dispose();
                     _connection.OutputReceived -= ProcessOutput;
+                    ReleaseOwnedOutputStart();
                     _terminal.Dispose();
                     _commandMailbox?.Dispose();
                     _commandMailbox = null;

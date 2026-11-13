@@ -120,7 +120,19 @@ internal static class SmartPromptChecks
     }
     private static async Task CardAnchorAsync(TerminalSession session, int pid)
     {
-        async Task Ready() { using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25)); while (session.PromptState != ShellPromptState.Ready) await Task.Delay(25, timeout.Token); }
+        async Task Ready()
+        {
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            while (session.PromptState != ShellPromptState.Ready)
+            {
+                if (waited.Elapsed > TimeSpan.FromSeconds(25))
+                {
+                    var screen = session.ReadText().TrimEnd();
+                    throw new Exception($"Card anchor: prompt not ready after {waited.Elapsed.TotalSeconds:F1}s: {session.PromptState}, history version {session.HistoryVersion}, screen tail <{screen[^Math.Min(200, screen.Length)..]}>.");
+                }
+                await Task.Delay(25);
+            }
+        }
         string Row(long screenRow)
         {
             session.ScrollTo(screenRow);
@@ -153,7 +165,8 @@ internal static class SmartPromptChecks
         var reflowed = session.ReadAnchor(anchor) ?? throw new Exception("Card anchor: resize expired the anchor.");
         Check(Row(reflowed - 1) == "before-card" && Row(reflowed) == "", "resize keeps the anchor on its reserved row");
         Check(session.ProcessId == pid && (await session.ExecuteAsync(new("Write-Output ('card-' + $cardValue)"))).Output.Contains("card-7"), "the reservation keeps the same shell and its state");
-        session.SubmitCommand("1..10100 | ForEach-Object { 'trim-' + $_ }"); await Ready();
+        // One batched write: per-row console writes cost PowerShell about 1 ms of CPU each and exceeded the wait under load.
+        session.SubmitCommand("[Console]::Out.Write(((1..10100 -replace '^','trim-') -join \"`r`n\") + \"`r`n\")"); await Ready();
         Check(session.ReadAnchor(anchor) is null && anchor.Expired, "history trimming expires the anchor");
         var cleared = session.ReserveRows() ?? throw new Exception("Card anchor: second reservation refused.");
         await Ready();

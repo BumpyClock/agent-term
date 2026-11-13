@@ -1,12 +1,28 @@
+using System.Diagnostics;
+
 namespace AgentTerm.Terminal;
 
 public sealed record TerminalSearchProgress(long Matches, bool Complete, bool Found = false)
 {
     public long HistoryVersion { get; init; }
+    /// <summary>1-based position of the selected match in screen order, oldest first. Set only on a complete result that found a match.</summary>
+    public long? SelectedOrdinal { get; init; }
 }
+
+/// <summary>Formatted history owned by the caller. Bytes are UTF-8 exactly as the native formatter produced them.</summary>
+public sealed record TerminalHistoryExport(TerminalExportFormat Format, byte[] Utf8)
+{
+    public string Text => System.Text.Encoding.UTF8.GetString(Utf8);
+}
+
+/// <summary>HTML and plain text of one selection, formatted in a single terminal exclusion.</summary>
+public sealed record TerminalSelectionCopy(string Html, string Text);
 
 public sealed partial class TerminalSession
 {
+    // Yield between batches after this target duration. One native call can exceed it; this is not a hard bound.
+    private static readonly TimeSpan SearchSlice = TimeSpan.FromMilliseconds(2);
+    private const int ProvisionalDelayMs = 100, ProgressIntervalMs = 50, StaleRetryDelayMs = 16;
     private readonly SemaphoreSlim _searchOwner = new(1, 1);
     private Timer? _historyIdle;
     private ulong? _compressionToken;
@@ -14,19 +30,47 @@ public sealed partial class TerminalSession
     public long HistoryVersion { get { lock (_gate) return _terminal.ContentVersion; } }
 
     public void NavigatePrompt(int delta) => MutateView(() => _terminal.NavigatePrompt(delta));
-    public string? ExportHistory(TerminalExportFormat format, bool selectionOnly = false)
-    {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            var result = _terminal.ExportHistory(format, selectionOnly);
-            ScheduleHistoryCompression();
-            return result;
-        }
-    }
 
-    /// <summary>Search yields between native steps. One owner excludes query changes and disposal; the terminal lock protects each step.</summary>
-    /// <param name="retainSelection">Refresh counts without advancing a still-valid selected query match.</param>
+    /// <summary>
+    /// Formats history or the selection on the thread pool. _gate is held only for the native format call; decoding and
+    /// file writes happen after it is released. Null means selection export without a selection.
+    /// </summary>
+    public Task<TerminalHistoryExport?> ExportHistoryAsync(TerminalExportFormat format, bool selectionOnly = false, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfClosed();
+                var bytes = _terminal.ExportHistoryUtf8(format, selectionOnly);
+                cancellationToken.ThrowIfCancellationRequested();
+                ScheduleHistoryCompression();
+                return bytes is null ? null : new TerminalHistoryExport(format, bytes);
+            }
+        }, cancellationToken);
+
+    /// <summary>Formats the selection as HTML and plain text from one terminal snapshot. Null without a selection.</summary>
+    public Task<TerminalSelectionCopy?> CopySelectionRichAsync(CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            byte[]? html;
+            string? text;
+            lock (_gate)
+            {
+                ThrowIfClosed();
+                html = _terminal.ExportHistoryUtf8(TerminalExportFormat.Html, true);
+                text = html is null ? null : _terminal.ReadSelectionText();
+            }
+            return html is null || text is null ? null : new TerminalSelectionCopy(System.Text.Encoding.UTF8.GetString(html), text);
+        }, cancellationToken);
+
+    /// <summary>Search yields between native step batches. One owner excludes query changes and disposal; the terminal lock protects each batch.</summary>
+    /// <param name="retainSelection">
+    /// Automatic refresh. Keeps a still-valid selected query match without advancing, and never replaces a selection the
+    /// search does not own. Counts and highlights still update.
+    /// </param>
     public async Task<TerminalSearchProgress> FindAsync(string query, bool forward, bool caseSensitive = false,
         IProgress<TerminalSearchProgress>? progress = null, CancellationToken cancellationToken = default, bool retainSelection = false)
     {
@@ -36,125 +80,163 @@ public sealed partial class TerminalSession
         {
             lock (_gate)
             {
-                ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+                ThrowIfClosed();
                 _terminal.PrepareSearch(query, caseSensitive);
             }
             if (query.Length == 0) return new(0, true);
-            return await Task.Run(async () =>
-            {
-                var started = System.Diagnostics.Stopwatch.StartNew();
-                bool selectedDuringSearch;
-                lock (_gate)
-                {
-                    ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                    selectedDuringSearch = retainSelection && _terminal.IsSearchMatchSelected();
-                }
-                while (true)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    long version;
-                    lock (_gate)
-                    {
-                        ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                        version = _terminal.ContentVersion;
-                        _terminal.FeedSearch();
-                    }
-                    bool selected;
-                    lock (_gate)
-                    {
-                        ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                        if (_terminal.ContentVersion != version) continue;
-                        selected = selectedDuringSearch && _terminal.IsSearchMatchSelected();
-                    }
-                    if (!selected && started.ElapsedMilliseconds >= 100)
-                    {
-                        long matches;
-                        lock (_renderGate) lock (_gate)
-                        {
-                            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                            if (_terminal.ContentVersion != version) continue;
-                            selected = _terminal.SelectSearchMatch(forward, caseSensitive, query, 32);
-                            matches = caseSensitive ? (selected ? 1 : 0) : _terminal.SearchCount();
-                        }
-                        if (selected) selectedDuringSearch = true;
-                        if (selected) progress?.Report(new(matches, false, true) { HistoryVersion = version });
-                    }
-                    int status;
-                    do
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        long matches;
-                        lock (_gate)
-                        {
-                            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                            if (_terminal.ContentVersion != version) { status = 1; break; }
-                            // Native 1.0.1 tickHistory still reads a live tracked pin despite the independent-tick header contract.
-                            status = _terminal.TickSearch();
-                            matches = caseSensitive ? 0 : _terminal.SearchCount();
-                        }
-                        progress?.Report(new(matches, false));
-                        await Task.Delay(1, cancellationToken).ConfigureAwait(false);
-                    } while (status == 0);
-                    if (status != 2) continue;
-                    long count, exact = 0;
-                    lock (_gate)
-                    {
-                        ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                        if (_terminal.ContentVersion != version) continue;
-                        count = _terminal.SearchCount();
-                    }
-                    if (caseSensitive)
-                    {
-                        lock (_gate)
-                        {
-                            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                            if (_terminal.ContentVersion != version) continue;
-                            _terminal.CaptureSearchCandidates();
-                        }
-                        for (long i = 0; i < count; i++)
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            lock (_gate)
-                            {
-                                if (_terminal.ContentVersion != version || _disposeTask is not null) break;
-                                if (_terminal.ExactSearchCandidate(checked((int)i), query)) exact++;
-                            }
-                            if ((i & 31) == 0) await Task.Delay(1, cancellationToken).ConfigureAwait(false);
-                        }
-                    }
-                    bool found;
-                    lock (_gate)
-                    {
-                        ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                        if (_terminal.ContentVersion != version) continue;
-                        found = selectedDuringSearch && _terminal.IsSearchMatchSelected();
-                    }
-                    for (long i = 0; !found && i < count && (!caseSensitive || exact != 0); i++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        lock (_renderGate) lock (_gate)
-                        {
-                            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                            if (_terminal.ContentVersion != version) break;
-                            found = _terminal.SelectSearchMatch(forward, caseSensitive, query, 1);
-                        }
-                        if (found || !caseSensitive) break;
-                        if ((i & 31) == 0) await Task.Delay(1, cancellationToken).ConfigureAwait(false);
-                    }
-                    lock (_gate)
-                    {
-                        ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                        if (_terminal.ContentVersion != version) continue;
-                        found = found && _terminal.IsSearchMatchSelected();
-                    }
-                    var result = new TerminalSearchProgress(caseSensitive ? exact : count, true, found) { HistoryVersion = version };
-                    progress?.Report(result);
-                    return result;
-                }
-            }, cancellationToken).ConfigureAwait(false);
+            return await Task.Run(() => SearchAsync(forward, progress, retainSelection, cancellationToken), cancellationToken).ConfigureAwait(false);
         }
         finally { _searchOwner.Release(); }
     }
+
+    private async Task<TerminalSearchProgress> SearchAsync(bool forward, IProgress<TerminalSearchProgress>? progress, bool retain, CancellationToken token)
+    {
+        var started = Stopwatch.StartNew();
+        long reportedAt = -ProgressIntervalMs;
+        bool owned, keepUserSelection;
+        lock (_gate)
+        {
+            ThrowIfClosed();
+            owned = retain && _terminal.IsSearchMatchSelected();
+            keepUserSelection = retain && !owned && _terminal.HasUserSelection();
+        }
+        void Report(long matches)
+        {
+            if (started.ElapsedMilliseconds - reportedAt < ProgressIntervalMs) return;
+            reportedAt = started.ElapsedMilliseconds;
+            progress?.Report(new(matches, false));
+        }
+        // A long search shows its first match early. The status stays provisional until completion.
+        void Provisional(long version)
+        {
+            if (owned || keepUserSelection || started.ElapsedMilliseconds < ProvisionalDelayMs) return;
+            bool selected;
+            long matches;
+            lock (_renderGate) lock (_gate)
+            {
+                ThrowIfClosed();
+                if (_terminal.ContentVersion != version) return;
+                selected = _terminal.SelectSearchMatch(forward, 32);
+                matches = _terminal.SearchNeedsExactFilter ? (selected ? 1 : 0) : _terminal.SearchCount();
+            }
+            if (!selected) return;
+            owned = true;
+            progress?.Report(new(matches, false, true) { HistoryVersion = version });
+        }
+
+        long? fed = null;
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            if (fed is { } previous)
+            {
+                bool changed;
+                lock (_gate) { ThrowIfClosed(); changed = _terminal.ContentVersion != previous; }
+                // Output changed the content mid-search. Let a burst settle before re-feeding instead of chasing every chunk.
+                if (changed) await Task.Delay(StaleRetryDelayMs, token).ConfigureAwait(false);
+            }
+            long version;
+            GhosttyTerminal.SearchResults? completed;
+            lock (_gate)
+            {
+                ThrowIfClosed();
+                fed = version = _terminal.ContentVersion;
+                completed = _terminal.CompletedSearch;
+                if (completed is null) _terminal.FeedSearch();
+            }
+            if (completed is null) Provisional(version);
+            int status = completed is null ? 0 : 2;
+            var stale = false;
+            while (status == 0)
+            {
+                token.ThrowIfCancellationRequested();
+                long matches;
+                lock (_gate)
+                {
+                    ThrowIfClosed();
+                    if (_terminal.ContentVersion != version) { stale = true; break; }
+                    // Native 1.0.1 tickHistory reads the live tracked history.start_pin despite the header's
+                    // independent-tick contract, so every tick stays serialized with terminal mutations.
+                    var slice = Stopwatch.GetTimestamp();
+                    do status = _terminal.TickSearch(); while (status == 0 && Stopwatch.GetElapsedTime(slice) < SearchSlice);
+                    matches = _terminal.SearchNeedsExactFilter ? 0 : _terminal.SearchCount();
+                }
+                Report(matches);
+                await Task.Yield();
+            }
+            if (stale || status != 2) continue;
+
+            long count, exact;
+            bool[]? exactFlags = null;
+            lock (_gate)
+            {
+                ThrowIfClosed();
+                if (_terminal.ContentVersion != version) continue;
+                count = completed?.Candidates ?? _terminal.SearchCount();
+                exact = completed?.Matches ?? count;
+                exactFlags = completed?.ExactFlags;
+                if (completed is null && _terminal.SearchNeedsExactFilter) exactFlags = new bool[_terminal.CaptureSearchCandidates()];
+            }
+            if (completed is null && exactFlags is not null)
+            {
+                exact = 0;
+                for (var i = 0; i < exactFlags.Length && !stale;)
+                {
+                    token.ThrowIfCancellationRequested();
+                    lock (_gate)
+                    {
+                        ThrowIfClosed();
+                        if (_terminal.ContentVersion != version) { stale = true; break; }
+                        var slice = Stopwatch.GetTimestamp();
+                        do { if (exactFlags[i] = _terminal.ExactSearchCandidate(i)) exact++; i++; }
+                        while (i < exactFlags.Length && Stopwatch.GetElapsedTime(slice) < SearchSlice);
+                    }
+                    Report(exact);
+                    Provisional(version);
+                    await Task.Yield();
+                }
+                if (stale) continue;
+            }
+
+            bool found;
+            lock (_gate)
+            {
+                ThrowIfClosed();
+                if (_terminal.ContentVersion != version) continue;
+                if (completed is null) _terminal.CompleteSearch(count, exact, exactFlags);
+                found = owned && _terminal.IsSearchMatchSelected();
+            }
+            bool Exact(long index) => exactFlags is null || index < exactFlags.Length && exactFlags[index];
+            for (long steps = 0; !found && !keepUserSelection && exact != 0 && steps < count;)
+            {
+                token.ThrowIfCancellationRequested();
+                lock (_renderGate) lock (_gate)
+                {
+                    ThrowIfClosed();
+                    if (_terminal.ContentVersion != version) { stale = true; break; }
+                    var slice = Stopwatch.GetTimestamp();
+                    do { found = _terminal.SelectSearchMatch(forward, 1, Exact); steps++; }
+                    while (!found && steps < count && Stopwatch.GetElapsedTime(slice) < SearchSlice);
+                }
+                if (!found) await Task.Yield();
+            }
+            if (stale) continue;
+            long? ordinal = null;
+            lock (_gate)
+            {
+                ThrowIfClosed();
+                if (_terminal.ContentVersion != version) continue;
+                found = found && _terminal.IsSearchMatchSelected();
+                if (found && _terminal.SearchSelectedIndex() is { } index)
+                    ordinal = exactFlags is null ? count - index : exact - exactFlags.AsSpan(0, (int)Math.Min(index, exactFlags.Length)).Count(true);
+            }
+            var result = new TerminalSearchProgress(exact, true, found) { HistoryVersion = version, SelectedOrdinal = ordinal };
+            progress?.Report(result);
+            return result;
+        }
+    }
+
+    private void ThrowIfClosed() => ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
 
     // Called with _gate held after output or reflow. The timer is one-shot and has no idle polling path.
     private void HistoryActivity()

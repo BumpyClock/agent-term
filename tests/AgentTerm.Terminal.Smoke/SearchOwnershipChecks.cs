@@ -19,8 +19,10 @@ internal static class SearchOwnershipChecks
             bool replaced = false;
             var result = await session.FindAsync("needle", true, true, new ProgressAction(value =>
             {
-                // Exact-case filtering yields after finding provisional matches. Replace one before completion.
-                if (replaced || value.Complete || !session.HasSelection) return;
+                // Progress runs on the search thread, so pausing here pushes a fast search past the provisional delay.
+                // Then replace the provisional match before completion.
+                if (replaced || value.Complete) return;
+                if (!session.HasSelection) { Thread.Sleep(120); return; }
                 replaced = true;
                 if (clearWithOutput)
                 {
@@ -42,6 +44,7 @@ internal static class SearchOwnershipChecks
         }
         await CheckRefreshAsync();
         await CheckLifetimeAsync();
+        await CheckCachedNavigationAsync();
         Console.WriteLine("Search ownership checks passed.");
     }
     private static async Task CheckRefreshAsync()
@@ -85,6 +88,36 @@ internal static class SearchOwnershipChecks
         await disposal.WaitAsync(TimeSpan.FromSeconds(10));
         try { await session.FindAsync("needle", true); throw new Exception("Disposed search must fail."); }
         catch (ObjectDisposedException) { }
+    }
+
+    private static async Task CheckCachedNavigationAsync()
+    {
+        await using var session = new TerminalSession(60, 4);
+        var terminal = (GhosttyTerminal)typeof(TerminalSession).GetField("_terminal", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session)!;
+        terminal.Write(Encoding.UTF8.GetBytes(string.Concat(Enumerable.Range(0, 2000).Select(i => i % 2 == 0 ? "needle\r\n" : "NEEDLE\r\n"))));
+        var first = await session.FindAsync("needle", false, true);
+        if (!first.Found || first.Matches != 1000 || first.SelectedOrdinal is null) throw new Exception("Exact-case fixture must find 1000 matches with an ordinal.");
+        var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+        var previous = first;
+        for (var i = 0; i < 20; i++)
+        {
+            // Capture highlights between navigation calls, as the app does. It feeds native search independently.
+            session.ReadFrame();
+            var next = await session.FindAsync("needle", true, true);
+            var expected = previous.SelectedOrdinal % previous.Matches + 1;
+            if (next.Matches != first.Matches || next.SelectedOrdinal != expected || session.ReadSelectionText() != "needle")
+                throw new Exception("Repeated exact navigation must retain counts, order, and exact selected text across highlight feeds.");
+            previous = next;
+        }
+        Console.WriteLine($"Exact navigation allocated {GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore} bytes across 20 actions including frame capture.");
+        terminal.Write("needle\r\n"u8);
+        var changed = await session.FindAsync("needle", true, true);
+        if (changed.Matches != 1001) throw new Exception("New output must invalidate cached exact counts.");
+        terminal.Resize(4, 4);
+        if ((await session.FindAsync("needle", true, true)).Matches != 1001) throw new Exception("Reflow must preserve exact matching after cache invalidation.");
+        terminal.Write("\u001bcNEEDLE"u8);
+        if ((await session.FindAsync("needle", true, true)).Matches != 0 || (await session.FindAsync("NEEDLE", true, true)).Matches != 1)
+            throw new Exception("Reset and query replacement must discard exact classification.");
     }
 
     private sealed class ProgressAction(Action<TerminalSearchProgress> action) : IProgress<TerminalSearchProgress>
