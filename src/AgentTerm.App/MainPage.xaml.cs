@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
@@ -45,9 +46,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private bool _renderingSubscribed;
     private bool _frameRefreshQueued;
     private bool _frameRefreshPending;
+    private bool _captureInFlight;
+    private bool _captureRequested;
+    private bool _captureCards;
+    private bool _agentHandoffReadRunning;
+    private (TerminalSession Session, string Request)? _pendingAgentHandoff;
     private int _outputRefreshQueued;
     private volatile bool _acceptOutputNotifications;
     private TerminalFrame? _presentedFrame;
+    private TerminalPointerMode _pointerMode;
     private (double Maximum, double ViewportSize, double LargeChange, double Value, bool Enabled)? _scrollBarState;
     private readonly UISettings _uiSettings = new();
     private bool _animationsEnabled;
@@ -76,9 +83,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private System.Collections.Generic.IReadOnlyList<ProgramStatus>? _terminalPrograms;
     private System.Collections.Generic.IReadOnlyList<ProgramStatus> _combinedPrograms = [];
     private ProgramStatus? _reportedAgentStatus;
+    private TerminalSession? _metadataSession;
+    private bool _metadataReadInFlight;
+    private long _metadataReadStarted;
+    private string _metadataTitle = "";
+    private System.Collections.Generic.IReadOnlyList<ProgramStatus> _metadataPrograms = [];
     internal System.Collections.Generic.IReadOnlyList<ProgramStatus> ReadProgramStatuses()
     {
-        var records = _session?.ReadProgramStatuses() ?? [];
+        if (_session is { } session) RefreshSessionMetadata(session);
+        var records = _metadataSession == _session ? _metadataPrograms : [];
         if (AgentProgramStatus is not { } agent) return records;
         if (!ReferenceEquals(records, _terminalPrograms) || agent != _reportedAgentStatus)
         {
@@ -90,7 +103,14 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     }
 
     public ShellProfile Profile { get; }
-    internal string ProgramTitle => _session?.Title ?? "";
+    internal string ProgramTitle
+    {
+        get
+        {
+            if (_session is { } session) RefreshSessionMetadata(session);
+            return _metadataSession == _session ? _metadataTitle : "";
+        }
+    }
     internal PaneStatus.PaneStatusMonitor PaneStatus { get; } = new();
     internal TerminalColor TerminalBackground => _terminalBackground ?? CurrentTheme.Background;
     private TerminalTheme CurrentTheme => TerminalThemes.Resolve(_appearance.ColorScheme, _appearance.LightThemeId, _appearance.DarkThemeId,
@@ -178,7 +198,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         EffectsViewed();
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
-            session.SetTheme(CurrentTheme);
+            var theme = CurrentTheme;
+            QueueSessionUpdate(session, s => s.SetTheme(theme));
             UpdateGridSize();
             RefreshOutput(session);
             if (_state == SessionState.Running) StartRefresh();
@@ -235,7 +256,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             SetState(SessionState.Running);
             StatusText.Text = "Running · Local session";
             UpdateGridSize();
-            session.Resize(_columns, _rows, HostCellWidth, HostCellHeight);
+            var columns = _columns;
+            var rows = _rows;
+            var cellWidth = HostCellWidth;
+            var cellHeight = HostCellHeight;
+            QueueSessionUpdate(session, s => s.Resize(columns, rows, cellWidth, cellHeight));
             RefreshOutput(session);
             if (_viewActive) StartRefresh();
             SessionReady?.Invoke();
@@ -308,6 +333,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         StopSmoothScroll(false);
         _acceptOutputNotifications = false;
+        Interlocked.Exchange(ref _outputRefreshQueued, 0);
         _frameRefreshPending = false;
         _chromeTimer.Stop();
         _cursorTimer.Stop();
@@ -320,9 +346,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void Session_OutputAvailable()
     {
         if (!_acceptOutputNotifications || Volatile.Read(ref _surfaceOpen) || Interlocked.Exchange(ref _outputRefreshQueued, 1) != 0) return;
-        if (!_dispatcher.TryEnqueue(() =>
+        var queued = PerformanceCapture.Enabled ? Stopwatch.GetTimestamp() : 0;
+        if (!_dispatcher.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
-            Interlocked.Exchange(ref _outputRefreshQueued, 0);
+            if (queued != 0) PerformanceCapture.Record(PerformanceMetric.OutputQueueDelay, Stopwatch.GetElapsedTime(queued).TotalMilliseconds, Terminal.CapturePaneId);
+            if (!CanRefreshFrames)
+            {
+                Interlocked.Exchange(ref _outputRefreshQueued, 0);
+                return;
+            }
             StopSmoothScroll(false);
             RequestFrameRefresh();
         })) Interlocked.Exchange(ref _outputRefreshQueued, 0);
@@ -366,7 +398,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _renderingSubscribed = false;
         if ((!_frameRefreshPending && !_scrollAnimation.IsActive) || _frameRefreshQueued || !CanRefreshFrames) return;
         _frameRefreshPending = false;
-        _frameRefreshQueued = DispatcherQueue.TryEnqueue(RefreshQueuedFrame);
+        _frameRefreshQueued = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RefreshQueuedFrame);
     }
 
     private void RefreshQueuedFrame()
@@ -403,29 +435,128 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         RefreshFindHistory(session);
         RefreshAgentChrome();
-        PaneStatus.Refresh(session.ReadWorkingDirectory(), _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
+        RefreshSessionMetadata(session);
     }
 
-    private void RefreshTerminalFrame(TerminalSession session, bool refreshCards = false)
+    private async void RefreshSessionMetadata(TerminalSession session)
     {
-        if (!_startingTask && session.PromptState == ShellPromptState.Ready && session.TakeAgentRequest() is { } request)
-            _ = StartTaskAsync(request, explicitHandoff: false);
-        _frameRefreshPending = false;
-        var frame = session.ReadFrame();
-        _synchronizedRefreshTimer.Stop();
-        if (CanRefreshFrames)
+        if (_session != session || _state == SessionState.Disposed || _metadataReadInFlight) return;
+        var now = Stopwatch.GetTimestamp();
+        if (_metadataSession == session && Stopwatch.GetElapsedTime(_metadataReadStarted, now).TotalMilliseconds < 250) return;
+        _metadataReadInFlight = true;
+        _metadataReadStarted = now;
+        try
         {
-            if (!_renderingSubscribed)
+            var metadata = await session.DispatchAsync(owner =>
+                (Title: owner.Title, Programs: owner.ReadProgramStatuses(), Directory: owner.ReadWorkingDirectory()));
+            if (_session != session || _state == SessionState.Disposed) return;
+            _metadataSession = session;
+            _metadataTitle = metadata.Title;
+            _metadataPrograms = metadata.Programs;
+            PaneStatus.Refresh(metadata.Directory, _viewActive && _state == SessionState.Running, DateTimeOffset.UtcNow);
+        }
+        catch (Exception exception)
+        {
+            if (_session == session && _state != SessionState.Disposed) await FailSessionAsync(exception);
+        }
+        finally { _metadataReadInFlight = false; }
+    }
+
+    private async void RefreshTerminalFrame(TerminalSession session, bool refreshCards = false)
+    {
+        if (_session != session || _state == SessionState.Disposed) return;
+        _captureCards |= refreshCards;
+        if (_captureInFlight) { _captureRequested = true; return; }
+        _captureInFlight = true;
+        _captureRequested = false;
+        var cards = _captureCards;
+        _captureCards = false;
+        _frameRefreshPending = false;
+        Interlocked.Exchange(ref _outputRefreshQueued, 0);
+        var started = PerformanceCapture.Enabled ? Stopwatch.GetTimestamp() : 0;
+        try
+        {
+            var snapshot = await session.CaptureFrameAsync();
+            if (started != 0) PerformanceCapture.Record(PerformanceMetric.CaptureLatency, Stopwatch.GetElapsedTime(started).TotalMilliseconds, Terminal.CapturePaneId);
+            if (_session != session || _state == SessionState.Disposed || !_viewActive || !IsLoaded || _surfaceOpen) return;
+            _pointerMode = snapshot.PointerMode;
+            var presenting = PerformanceCapture.Enabled ? Stopwatch.GetTimestamp() : 0;
+            try { PresentTerminalFrame(snapshot.Frame, cards); }
+            finally
             {
-                CompositionTarget.Rendering += Refresh_Rendering;
-                _renderingSubscribed = true;
+                if (presenting != 0) PerformanceCapture.Record(PerformanceMetric.FrameRefresh, Stopwatch.GetElapsedTime(presenting).TotalMilliseconds, Terminal.CapturePaneId);
             }
-            if (session.PendingFrameRefreshDelay is { } delay)
+            _synchronizedRefreshTimer.Stop();
+            if (CanRefreshFrames)
             {
-                _synchronizedRefreshTimer.Interval = delay > TimeSpan.Zero ? delay : TimeSpan.FromMilliseconds(1);
-                _synchronizedRefreshTimer.Start();
+                if (!_renderingSubscribed)
+                {
+                    CompositionTarget.Rendering += Refresh_Rendering;
+                    _renderingSubscribed = true;
+                }
+                if (snapshot.PendingRefreshDelay is { } delay)
+                {
+                    _synchronizedRefreshTimer.Interval = delay > TimeSpan.Zero ? delay : TimeSpan.FromMilliseconds(1);
+                    _synchronizedRefreshTimer.Start();
+                }
+            }
+            DrainAgentHandoff();
+            if (snapshot.PromptState == ShellPromptState.Ready) ReadAgentHandoff(session);
+        }
+        catch (TerminalOperationQueueFullException)
+        {
+            _captureCards |= cards;
+            await Task.Delay(16);
+            _captureRequested = true;
+        }
+        catch (Exception exception)
+        {
+            if (_session == session && _state != SessionState.Disposed) await FailSessionAsync(exception);
+        }
+        finally
+        {
+            _captureInFlight = false;
+            if (_captureRequested && _session is { } current && _state != SessionState.Disposed && _viewActive && IsLoaded && !_surfaceOpen)
+            {
+                if (CanRefreshFrames) RequestFrameRefresh();
+                else RefreshTerminalFrame(current, _captureCards);
             }
         }
+    }
+
+    private void DrainAgentHandoff()
+    {
+        if (_pendingAgentHandoff is not { } pending) return;
+        if (_session != pending.Session || _state == SessionState.Disposed)
+        {
+            _pendingAgentHandoff = null;
+            return;
+        }
+        if (_startingTask || _state != SessionState.Running) return;
+        _pendingAgentHandoff = null;
+        _ = StartTaskAsync(pending.Request, explicitHandoff: false);
+    }
+
+    private async void ReadAgentHandoff(TerminalSession session)
+    {
+        if (_agentHandoffReadRunning || _startingTask || _pendingAgentHandoff is not null) return;
+        _agentHandoffReadRunning = true;
+        try
+        {
+            var request = await session.DispatchAsync(s => s.PromptState == ShellPromptState.Ready ? s.TakeAgentRequest() : null);
+            if (_session != session || request is null) return;
+            _pendingAgentHandoff = (session, request);
+            DrainAgentHandoff();
+        }
+        catch (Exception error)
+        {
+            if (_session == session && _state != SessionState.Disposed) await FailSessionAsync(error);
+        }
+        finally { _agentHandoffReadRunning = false; }
+    }
+
+    private void PresentTerminalFrame(TerminalFrame frame, bool refreshCards)
+    {
         var previous = _presentedFrame;
         if (frame.OverscanBelow.Length == 0) Terminal.SetScrollFraction(0);
         if (!ReferenceEquals(previous, frame))
@@ -486,8 +617,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _hostCellHeight = HostCellHeight;
             if (_state is SessionState.Running or SessionState.Idle && _session is not null)
             {
-                _session.Resize(columns, rows, _hostCellWidth, _hostCellHeight);
-                RefreshOutput(_session);
+                var cellWidth = _hostCellWidth;
+                var cellHeight = _hostCellHeight;
+                QueueSessionUpdate(_session, s => s.Resize(columns, rows, cellWidth, cellHeight), refresh: true);
             }
         }
         GridSizeText.Text = $"{_columns} x {_rows}";
@@ -549,8 +681,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_state == SessionState.Disposed || _session is not { } session) return;
         try
         {
-            session.SetTheme(CurrentTheme);
-            if (_viewActive) RefreshOutput(session);
+            var theme = CurrentTheme;
+            QueueSessionUpdate(session, s => s.SetTheme(theme), refresh: _viewActive);
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }
     }
@@ -603,8 +735,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             if (_updatingScrollBar || _session is not { } session) return;
             StopSmoothScroll(false);
-            session.ScrollTo((long)Math.Round(e.NewValue));
-            RefreshOutput(session);
+            var offset = (long)Math.Round(e.NewValue);
+            QueueSessionUpdate(session, s => s.ScrollTo(offset), refresh: true);
 
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }
@@ -627,7 +759,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 e.Handled = true;
                 return;
             }
-            if (_state == SessionState.Running && !TerminalScrollAnimation.UseHistoryScrolling(session.IsMouseTrackingEnabled, Down(VirtualKey.Shift)))
+            if (_state == SessionState.Running && !TerminalScrollAnimation.UseHistoryScrolling(_pointerMode.MouseTracking, Down(VirtualKey.Shift)))
             {
                 StopSmoothScroll();
                 bool horizontal = point.Properties.IsHorizontalMouseWheel;
@@ -656,18 +788,21 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         (uint)Terminal.CellWidth, (uint)Terminal.CellHeight,
         (float)(Terminal.XamlRoot?.RasterizationScale ?? 1));
 
-    private bool SendApplicationMouse(Point point, TerminalMouseAction action, TerminalMouseButton? button)
+    private bool SendApplicationMouse(Point point, TerminalMouseAction action, TerminalMouseButton? button, TerminalModifiers? capturedModifiers = null)
     {
         if (_state != SessionState.Running || _session is not { } session) return false;
         var geometry = Terminal.Geometry;
         var position = action == TerminalMouseAction.Press && button is not (TerminalMouseButton.WheelUp or TerminalMouseButton.WheelDown
             or TerminalMouseButton.WheelLeft or TerminalMouseButton.WheelRight)
             ? geometry.ToFrame(point) : geometry.ToFrameClamped(point);
-        var modifiers = Modifiers();
+        var modifiers = capturedModifiers ?? Modifiers();
         if (action == TerminalMouseAction.Release && button is { } released && _applicationMouseButtons.Contains(released))
             modifiers &= ~TerminalModifiers.Shift;
-        if (!session.SendMouse(new(action, button, modifiers, (float)position.X, (float)position.Y), MouseGeometry(), _presentedFrame))
-            return false;
+        if ((modifiers & TerminalModifiers.Shift) != 0 || !_pointerMode.MouseTracking) return false;
+        var mouse = new TerminalMouseEvent(action, button, modifiers, (float)position.X, (float)position.Y);
+        var mouseGeometry = MouseGeometry();
+        var displayed = _presentedFrame;
+        QueueSessionUpdate(session, s => s.SendMouse(mouse, mouseGeometry, displayed));
         _applicationMousePosition = position;
         if (action == TerminalMouseAction.Press) RefreshLocalInput(session);
         return true;
@@ -686,40 +821,56 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void ReleaseApplicationMouse()
     {
         if (_state == SessionState.Running && _session is { } session)
+        {
+            var modifiers = Modifiers() & ~TerminalModifiers.Shift;
+            var position = _applicationMousePosition;
+            var geometry = MouseGeometry();
+            var displayed = _presentedFrame;
             foreach (var button in _applicationMouseButtons)
-                session.SendMouse(new(TerminalMouseAction.Release, button, Modifiers() & ~TerminalModifiers.Shift,
-                    (float)_applicationMousePosition.X, (float)_applicationMousePosition.Y), MouseGeometry(), _presentedFrame);
+                QueueSessionUpdate(session, s => s.SendMouse(new(TerminalMouseAction.Release, button, modifiers,
+                    (float)position.X, (float)position.Y), geometry, displayed));
+        }
         _applicationMouseButtons.Clear();
     }
 
+    private readonly SemaphoreSlim _pointerGestureGate = new(1, 1);
+    private (PointerPoint Point, TerminalModifiers Modifiers, TerminalSession? Session)? _pendingPointerMotion;
+    private long _pointerCaptureGeneration;
+
     private async void Terminal_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        StopSmoothScroll();
+        if (_session is not { } pressSession) return;
+        var point = e.GetCurrentPoint(Terminal);
+        var modifiers = Modifiers();
+        e.Handled = true;
+        await _pointerGestureGate.WaitAsync();
         try
         {
-            if (_session is not { } session) return;
-            var point = e.GetCurrentPoint(Terminal);
+            StopSmoothScroll();
+            if (_session != pressSession) return;
+            var session = pressSession;
             if (point.Properties.IsLeftButtonPressed &&
-                TerminalKeyboardInput.ShortcutModifiers(Modifiers()) == (TerminalModifiers.Control | TerminalModifiers.Shift))
+                TerminalKeyboardInput.ShortcutModifiers(modifiers) == (TerminalModifiers.Control | TerminalModifiers.Shift))
             {
                 ReleaseApplicationMouse();
                 FocusTerminal(FocusState.Pointer);
-                if (_presentedFrame is { } frame && Terminal.Geometry.TryCellAt(point.Position, out var outputColumn, out var outputRow) &&
-                    session.TrySelectFrameCommandOutput(frame, outputColumn, outputRow)) RefreshOutput(session);
                 e.Handled = true;
+                if (_presentedFrame is { } frame && Terminal.Geometry.TryCellAt(point.Position, out var outputColumn, out var outputRow))
+                    QueueSessionUpdate(session, s => s.TrySelectFrameCommandOutput(frame, outputColumn, outputRow), refresh: true);
                 return;
             }
-            if (HandleLinkPress(e, point)) return;
+            if (await HandleLinkPressAsync(e, point, modifiers)) return;
+            if (_session != session) return;
             var button = ChangedMouseButton(point);
-            if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
-            if (!_selecting && button is not null && SendApplicationMouse(point.Position, TerminalMouseAction.Press, button))
+            if (modifiers.HasFlag(TerminalModifiers.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
+            if (!_selecting && button is not null && SendApplicationMouse(point.Position, TerminalMouseAction.Press, button, modifiers))
             {
                 FocusTerminal(FocusState.Pointer);
                 var grid = Terminal.Geometry;
                 if (point.Position.Y >= grid.Top && point.Position.Y < grid.Bottom)
                 {
                     _applicationMouseButtons.Add(button.Value);
-                    Terminal.CapturePointer(e.Pointer);
+                    if (Terminal.CapturePointer(e.Pointer)) _pointerCaptureGeneration++;
                 }
                 e.Handled = true;
                 return;
@@ -728,16 +879,17 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 FocusTerminal(FocusState.Pointer);
                 e.Handled = true;
-                if (TryShowLinkMenu(point.Position)) return;
+                if (await TryShowLinkMenuAsync(point.Position)) return;
+                if (_session != session) return;
                 if (_presentedFrame?.HasSelection == true) CopySelection(session);
-                else await PasteAsync(session);
+                else _ = PasteAsync(session);
                 return;
             }
             if (!point.Properties.IsLeftButtonPressed || (button is not null && button != TerminalMouseButton.Left)) return;
             FocusTerminal(FocusState.Pointer);
             if (!Terminal.Geometry.TryCellAt(point.Position, out var column, out var row))
             {
-                if (!Down(VirtualKey.Shift) && _presentedFrame?.HasSelection == true) { session.ClearSelection(); RefreshOutput(session); }
+                if (!modifiers.HasFlag(TerminalModifiers.Shift) && _presentedFrame?.HasSelection == true) { QueueSessionUpdate(session, s => s.ClearSelection()); RefreshOutput(session); }
                 e.Handled = true;
                 return;
             }
@@ -751,29 +903,70 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _selectionClicks = _clickCount;
             _selectionMoved = false;
             _selecting = true;
-            if (Down(VirtualKey.Shift) && _presentedFrame?.HasSelection == true)
+            if (modifiers.HasFlag(TerminalModifiers.Shift) && _presentedFrame?.HasSelection == true)
             {
-                session.ExtendSelection(column, row);
+                QueueSessionUpdate(session, s => s.ExtendSelection(column, row));
                 _selectionMoved = true;
             }
             else
-                session.BeginSelection(column, row, _clickCount, Down(VirtualKey.Menu));
-            Terminal.CapturePointer(e.Pointer);
+            {
+                var clicks = _clickCount;
+                var rectangular = modifiers.HasFlag(TerminalModifiers.Alt);
+                QueueSessionUpdate(session, s => s.BeginSelection(column, row, clicks, rectangular));
+            }
+            if (Terminal.CapturePointer(e.Pointer)) _pointerCaptureGeneration++;
             _selectionTimer.Start();
             RefreshOutput(session);
             e.Handled = true;
 
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }
+        finally
+        {
+            try { FlushPendingPointerMotion(); }
+            finally { _pointerGestureGate.Release(); }
+        }
     }
 
-    private void Terminal_PointerMoved(object sender, PointerRoutedEventArgs e)
+    private async void Terminal_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(Terminal);
+        if (_pointerGestureGate.CurrentCount == 0)
+        {
+            _pendingPointerMotion = (point, Modifiers(), _session);
+            e.Handled = true;
+            return;
+        }
+        await _pointerGestureGate.WaitAsync();
+        try
+        {
+            if (ProcessPointerMotion(point, Modifiers()))
+            {
+                e.Handled = true;
+                if (_session is { } session) await session.DispatchAsync(_ => { });
+            }
+        }
+        catch (Exception error) { ShowInteractionFailure(error); }
+        finally
+        {
+            try { FlushPendingPointerMotion(); }
+            finally { _pointerGestureGate.Release(); }
+        }
+    }
+
+    private void FlushPendingPointerMotion()
+    {
+        if (_pendingPointerMotion is not { } motion) return;
+        _pendingPointerMotion = null;
+        if (_session == motion.Session) ProcessPointerMotion(motion.Point, motion.Modifiers);
+    }
+
+    private bool ProcessPointerMotion(PointerPoint point, TerminalModifiers modifiers)
     {
         try
         {
-            if (_session is not { } session) return;
-            if (_linkPress is not null) { e.Handled = true; return; }
-            var point = e.GetCurrentPoint(Terminal);
+            if (_session is not { } session) return false;
+            if (_linkPress is not null) return true;
             if (!_selecting)
             {
                 TerminalMouseButton? button = point.Properties.IsLeftButtonPressed ? TerminalMouseButton.Left
@@ -781,30 +974,35 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                     : point.Properties.IsMiddleButtonPressed ? TerminalMouseButton.Middle
                     : point.Properties.IsXButton1Pressed ? TerminalMouseButton.Back
                     : point.Properties.IsXButton2Pressed ? TerminalMouseButton.Forward : null;
-                if (SendApplicationMouse(point.Position, TerminalMouseAction.Motion, button)) e.Handled = true;
-                return;
+                return SendApplicationMouse(point.Position, TerminalMouseAction.Motion, button, modifiers);
             }
             _selectionPointer = point.Position;
             var (column, row) = Terminal.Geometry.ClampedCellAt(_selectionPointer);
             if (column != _lastClickColumn || row != _lastClickRow) _selectionMoved = true;
             if (_selectionMoved)
             {
-                session.ExtendSelection(column, row);
+                QueueSessionUpdate(session, s => s.ExtendSelection(column, row));
                 RefreshOutput(session);
             }
-            e.Handled = true;
+            return true;
 
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }
+        return false;
     }
 
-    private void Terminal_PointerReleased(object sender, PointerRoutedEventArgs e)
+    private async void Terminal_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        var releaseSession = _session;
+        var releasedPoint = e.GetCurrentPoint(Terminal);
+        var modifiers = Modifiers();
+        e.Handled = true;
+        await _pointerGestureGate.WaitAsync();
         try
         {
-            if (_session is not { } session) return;
-            var releasedPoint = e.GetCurrentPoint(Terminal);
-            if (HandleLinkRelease(e, releasedPoint)) return;
+            FlushPendingPointerMotion();
+            if (_session is not { } session || session != releaseSession) return;
+            if (await HandleLinkReleaseAsync(e, releasedPoint)) return;
             if (_selecting && ChangedMouseButton(releasedPoint) is { } releasedButton && releasedButton != TerminalMouseButton.Left)
             {
                 e.Handled = true;
@@ -812,55 +1010,63 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             }
             if (!_selecting)
             {
-                var point = e.GetCurrentPoint(Terminal);
+                var point = releasedPoint;
                 var button = ChangedMouseButton(point);
                 if (button is not null && _applicationMouseButtons.Contains(button.Value))
                 {
-                    if (SendApplicationMouse(point.Position, TerminalMouseAction.Release, button)) e.Handled = true;
+                    if (SendApplicationMouse(point.Position, TerminalMouseAction.Release, button, modifiers)) e.Handled = true;
                     _applicationMouseButtons.Remove(button.Value);
                 }
                 if (_applicationMouseButtons.Count == 0) Terminal.ReleasePointerCapture(e.Pointer);
                 return;
             }
+            ProcessPointerMotion(releasedPoint, modifiers);
             _selecting = false;
             _selectionTimer.Stop();
-            session.EndSelection();
-            if (!_selectionMoved && _selectionClicks == 1) session.ClearSelection();
+            QueueSessionUpdate(session, s => s.EndSelection());
+            if (!_selectionMoved && _selectionClicks == 1) QueueSessionUpdate(session, s => s.ClearSelection());
             Terminal.ReleasePointerCapture(e.Pointer);
             RefreshOutput(session);
             e.Handled = true;
 
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }
+        finally { _pointerGestureGate.Release(); }
     }
 
-    private void Terminal_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    private async void Terminal_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
+        var generation = _pointerCaptureGeneration;
+        var captureSession = _session;
+        await _pointerGestureGate.WaitAsync();
         try
         {
+            if (generation != _pointerCaptureGeneration || captureSession != _session) return;
+            _pendingPointerMotion = null;
             CancelLinkPress();
             ReleaseApplicationMouse();
             if (!_selecting) return;
             _selecting = false;
             _selectionTimer.Stop();
-            _session?.EndSelection();
+            if (_session is { } selectingSession) QueueSessionUpdate(selectingSession, s => s.EndSelection());
             if (_session is { } session) RefreshOutput(session);
 
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }
+        finally { _pointerGestureGate.Release(); }
     }
 
     private void SelectionTimer_Tick(DispatcherQueueTimer sender, object args)
     {
         try
         {
-            if (!_selecting || _session is not { } session) return;
+            if (_pointerGestureGate.CurrentCount == 0 || !_selecting || _session is not { } session) return;
             var direction = _selectionPointer.Y < Terminal.Geometry.Top ? -1 : _selectionPointer.Y >= Terminal.ActualHeight ? 1 : 0;
             if (direction == 0) return;
-            session.ScrollLines(direction);
+            QueueSessionUpdate(session, s => s.ScrollLines(direction));
             RefreshOutput(session);
             var (column, row) = Terminal.Geometry.ClampedCellAt(_selectionPointer);
-            session.ExtendSelection(column, row);
+            QueueSessionUpdate(session, s => s.ExtendSelection(column, row));
             _selectionMoved = true;
             RefreshOutput(session);
 
@@ -915,7 +1121,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 if (status.WasKeyDown && !historyShortcut && !zoomShortcut) return;
                 if (promptShortcut)
                 {
-                    session.NavigatePrompt(key == VirtualKey.Up ? -1 : 1);
+                    var direction = key == VirtualKey.Up ? -1 : 1;
+                    QueueSessionUpdate(session, s => s.NavigatePrompt(direction));
                     RefreshOutput(session);
                     return;
                 }
@@ -944,21 +1151,22 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 if (historyShortcut)
                 {
                     var page = (int)_rows;
+                    var wheelLines = WheelLines();
                     switch (key)
                     {
-                        case VirtualKey.Up: session.ScrollLines(-WheelLines()); break;
-                        case VirtualKey.Down: session.ScrollLines(WheelLines()); break;
-                        case VirtualKey.PageUp: session.ScrollLines(-page); break;
-                        case VirtualKey.PageDown: session.ScrollLines(page); break;
-                        case VirtualKey.Home: session.ScrollTo(0); break;
-                        case VirtualKey.End: session.ScrollToBottom(); break;
+                        case VirtualKey.Up: QueueSessionUpdate(session, s => s.ScrollLines(-wheelLines)); break;
+                        case VirtualKey.Down: QueueSessionUpdate(session, s => s.ScrollLines(wheelLines)); break;
+                        case VirtualKey.PageUp: QueueSessionUpdate(session, s => s.ScrollLines(-page)); break;
+                        case VirtualKey.PageDown: QueueSessionUpdate(session, s => s.ScrollLines(page)); break;
+                        case VirtualKey.Home: QueueSessionUpdate(session, s => s.ScrollTo(0)); break;
+                        case VirtualKey.End: QueueSessionUpdate(session, s => s.ScrollToBottom()); break;
                     }
                     RefreshOutput(session);
                     return;
                 }
                 if (key == VirtualKey.Escape)
                 {
-                    session.ClearSelection();
+                    QueueSessionUpdate(session, s => s.ClearSelection());
                     SetKeyboardMarkMode(false);
                     RefreshOutput(session);
                     return;
@@ -986,8 +1194,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (direct)
             {
                 e.Handled = true;
-                session.SendPhysicalKey(virtualKey, rawMods, action, null, physical.ScanCode, physical.Extended,
-                    TerminalModifiers.None, layoutCodepoint);
+                ForwardKey(session, new(virtualKey, rawMods, action, null, physical, TerminalModifiers.None, layoutCodepoint));
                 RefreshLocalInput(session);
             }
         }
@@ -998,23 +1205,23 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         or VirtualKey.LeftControl or VirtualKey.RightControl or VirtualKey.LeftMenu or VirtualKey.RightMenu
         or VirtualKey.LeftWindows or VirtualKey.RightWindows;
 
-    private void CopySelection(TerminalSession session)
+    private async void CopySelection(TerminalSession session)
     {
         try
         {
-            var text = session.ReadSelectionText();
+            var text = await session.DispatchAsync(s => s.ReadSelectionText());
             if (text is null) return;
             SetKeyboardMarkMode(false);
             if (text.Length == 0)
             {
-                session.ClearSelection();
+                QueueSessionUpdate(session, s => s.ClearSelection());
                 RefreshOutput(session);
                 return;
             }
             var data = new DataPackage();
             data.SetText(text);
             Clipboard.SetContent(data);
-            session.ClearSelection();
+            QueueSessionUpdate(session, s => s.ClearSelection());
             RefreshOutput(session);
         }
         catch (Exception exception) { ShowClipboardFailure(exception); }
@@ -1030,7 +1237,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var text = await content.GetTextAsync();
             if (_session == session && _state == SessionState.Running)
             {
-                session.Paste(text);
+                await session.DispatchAsync(s => s.Paste(text));
                 RefreshLocalInput(session);
             }
         }
@@ -1074,7 +1281,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (text.Length == 0 || _state != SessionState.Running || _session is not { } session) return;
         try
         {
-            session.SendKey(0, TerminalModifiers.None, TerminalKeyAction.Press, text);
+            ForwardKey(session, new(0, TerminalModifiers.None, TerminalKeyAction.Press, text));
             RefreshLocalInput(session);
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
@@ -1109,7 +1316,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void Terminal_GotFocus(object sender, RoutedEventArgs e)
     {
-        if (_state == SessionState.Running) _session?.SetFocus(true);
+        if (_state == SessionState.Running && _session is { } session) QueueSessionUpdate(session, s => s.SetFocus(true));
         Terminal.RefreshCursor();
         UpdateCursorBlink();
     }
@@ -1130,7 +1337,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             ReleaseApplicationMouse();
             foreach (var key in releases)
                 ForwardKey(session, key);
-            session.SetFocus(false);
+            QueueSessionUpdate(session, s => s.SetFocus(false));
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
     }
@@ -1166,6 +1373,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async Task FailSessionAsync(Exception exception)
     {
+        if (exception is TerminalOperationQueueFullException) { ShowInteractionFailure(exception); return; }
         SetState(SessionState.Stopping);
         await ReleaseSessionAsync();
         if (_state != SessionState.Disposed)
@@ -1207,7 +1415,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (_selecting)
         {
             _selecting = false;
-            _session?.EndSelection();
+            if (_session is { } selectingSession) QueueSessionUpdate(selectingSession, s => s.EndSelection());
             Terminal.ReleasePointerCaptures();
         }
         _zoomWheelDelta = 0;
@@ -1220,6 +1428,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private Task ReleaseSessionAsync()
     {
+        _pointerMode = default;
+        _pendingAgentHandoff = null;
         CancelFind();
         StopRefresh();
         CancelSelectionGesture();

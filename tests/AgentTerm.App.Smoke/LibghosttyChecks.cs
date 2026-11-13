@@ -24,7 +24,11 @@ internal static partial class StartupChecks
         void Emit(string text) => typeof(TerminalSession).GetMethod("ProcessOutput", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(session, [new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(text))]);
         TerminalFrame Presented() => Field<TerminalFrame>(page, "_presentedFrame");
-        void Refresh() => Invoke("RefreshOutput", session);
+        async Task Refresh()
+        {
+            Invoke("RefreshOutput", session);
+            await WaitAsync(() => !Field<bool>(page, "_captureInFlight") && !Field<bool>(page, "_captureRequested"), "worker frame presentation");
+        }
         session.SetBottomAnchored(false);
         session.ConfigureEffects(new TerminalEffectOptions { Notifications = NotificationStyle.InApp, ClipboardWrite = ClipboardWritePolicy.Ask });
         Emit("\u001bc" + string.Concat(Enumerable.Range(0, Presented().Rows + 80).Select(i => $"history-{i:D3}\r\n")) +
@@ -32,7 +36,7 @@ internal static partial class StartupChecks
             "\x1b[31m\x1b]8;;https://example.com/fixture\x1b\\link\x1b]8;;\x1b\\\x1b[0m\r\n");
         var pixels = Convert.ToBase64String(Enumerable.Range(0, 16).SelectMany(_ => new byte[] { 240, 100, 20, 255 }).ToArray());
         Emit($"\x1b_Ga=T,f=32,s=4,v=4,c=4,r=2,i=991,q=2;{pixels}\x1b\\");
-        Refresh();
+        await Refresh();
         await WaitAsync(() => Field<TerminalFrame?>(surface, "_paintedFrame")?.Images.IsEmpty == false, "Kitty image in the live WinUI raster");
         var frame = Presented();
         if (!frame.Cells.Any(cell => cell.Overline && cell.UnderlineStyle == TerminalUnderlineStyle.Curly))
@@ -48,7 +52,7 @@ internal static partial class StartupChecks
         var lines = Field<List<Rectangle>>(page, "_linkUnderlines");
         var before = ((SolidColorBrush)lines[0].Fill).Color;
         Emit("\x1b[2;1H\x1b[32m\x1b]8;;https://example.com/fixture\x1b\\link\x1b]8;;\x1b\\\x1b[0m");
-        Refresh();
+        await Refresh();
         frame = Presented();
         link = session.ReadLinkAt(0, 1, frame) ?? throw new Exception("Updated link is missing.");
         Invoke("ApplyLinkHover", link, true, frame, 0, 1, false);
@@ -78,7 +82,8 @@ internal static partial class StartupChecks
         if (!Field<TerminalScrollAnimation>(page, "_scrollAnimation").IsActive)
             throw new Exception("A running, visible page with animations enabled must animate history scrolling.");
         await WaitAsync(() => !Field<TerminalScrollAnimation>(page, "_scrollAnimation").IsActive, "fractional scrolling completion");
-        await WaitAsync(() => !Field<bool>(page, "_renderingSubscribed") && !Field<bool>(page, "_frameRefreshQueued"), "scrolling frame pump becoming idle");
+        await WaitAsync(() => !Field<bool>(page, "_renderingSubscribed") && !Field<bool>(page, "_frameRefreshQueued") &&
+            !Field<bool>(page, "_captureInFlight"), "scrolling frame pump becoming idle");
         if (Presented().Viewport.Offset != offset - 5 || Field<double>(surface, "_scrollFraction") != 0 ||
             Presented().OverscanAbove.Length != 0 || Presented().OverscanBelow.Length != 0)
             throw new Exception($"Smooth scrolling did not settle. Offset {offset} -> {Presented().Viewport.Offset}, fraction {Field<double>(surface, "_scrollFraction")}, overscan {Presented().OverscanAbove.Length}/{Presented().OverscanBelow.Length}.");
@@ -91,7 +96,7 @@ internal static partial class StartupChecks
         if (!session.HasSelection) throw new Exception("Find did not select its history match.");
         session.ClearSelection();
         session.ScrollToBottom();
-        Refresh();
+        await Refresh();
         report.Add("PASS progressive Find selects a history match in the actual page.");
 
         Emit("\x1b]9;4;1;37\a\x1b]9;Integration fixture\a");
@@ -104,7 +109,7 @@ internal static partial class StartupChecks
         report.Add("PASS native progress and notification callbacks reach WinUI and RIS withdraws them.");
 
         Emit("\x1b]133;A\a$ test\r\n\x1b]133;C\a10%\rdone\r\n\x1b]133;D;0\a");
-        Refresh();
+        await Refresh();
         var commandFrame = Presented();
         if (!session.TrySelectFrameCommandOutput(commandFrame, 0, 1) || session.ReadSelectionText()?.Trim() != "done")
             throw new Exception("Command output selection must use native semantic rows and CR rewrites.");
@@ -191,7 +196,7 @@ internal static partial class StartupChecks
                     var before = Presented().Viewport.Offset;
                     var expected = Math.Clamp(before + (long)rows, 0, Presented().Viewport.MaximumOffset);
                     typeof(MainPage).GetMethod("ScrollHistoryWheel", NonPublic)!.Invoke(page, [session, rows]);
-                    // Immediately, and again after the 140 ms animation would have finished, to catch a deferred driver.
+                    await WaitAsync(() => Presented().Viewport.Offset == expected, "retained history worker presentation");
                     for (var check = 0; check < 2; check++)
                     {
                         var animation = Field<TerminalScrollAnimation>(page, "_scrollAnimation");
@@ -210,6 +215,10 @@ internal static partial class StartupChecks
                     }
                 }
                 report.Add($"PASS wheel scrolls retained history immediately after {ending} with animations on and off, without a frame subscription, overscan or restart.");
+                var burstStart = Presented().Viewport.Offset;
+                typeof(MainPage).GetMethod("ScrollHistoryWheel", NonPublic)!.Invoke(page, [session, -1d]);
+                typeof(MainPage).GetMethod("ScrollHistoryWheel", NonPublic)!.Invoke(page, [session, -1d]);
+                await WaitAsync(() => Presented().Viewport.Offset == Math.Max(0, burstStart - 2), "queued wheel deltas accumulate before presentation");
             }
         }
         finally { animations.SetValue(page, original); }

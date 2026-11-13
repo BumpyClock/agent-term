@@ -109,6 +109,9 @@ internal static partial class StartupChecks
                 active.Split(sideBySide: true);
                 await WaitAsync(() => active.PaneCount == 2, "split pane creation");
                 await AssertOutputAsync(active, report, "split pane");
+                await AssertIndependentPaneSchedulingAsync(active, report);
+                await AssertInputDoesNotWaitForCaptureAsync(active, report);
+                await AssertQueueSaturationKeepsSessionAsync(active, report);
                 await active.CloseActivePaneAsync();
                 await AssertOutputAsync(active, report, "surviving pane");
                 report.Add("PASS rapid tab creation, switching, split and pane close.");
@@ -327,6 +330,112 @@ internal static partial class StartupChecks
         report.Add($"PASS {context}: shell PID {session.ProcessId}, executed marker, canvas draw, nonblank raster and terminal focus.");
     }
 
+    private static async Task AssertQueueSaturationKeepsSessionAsync(TerminalTab tab, List<string> report)
+    {
+        var page = tab.ActivePage;
+        var session = Field<TerminalSession>(page, "_session");
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var blocked = session.DispatchAsync(_ =>
+        {
+            entered.Set();
+            if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Queue saturation fixture was not released.");
+        });
+        try
+        {
+            if (!entered.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Queue saturation fixture did not start.");
+            var accepted = Enumerable.Range(0, 1024).Select(_ => session.DispatchAsync(_ => { })).ToArray();
+            typeof(MainPage).GetMethod("ForwardKey", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page,
+                [session, new TerminalKeyboardInput.KeyEvent(0, TerminalModifiers.None, TerminalKeyAction.Press, "x")]);
+            if (!ReferenceEquals(session, Field<TerminalSession>(page, "_session")) ||
+                typeof(MainPage).GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page)!.ToString() != "Running")
+                throw new Exception("Queue saturation terminated the shell session.");
+            release.Set();
+            await blocked;
+            await Task.WhenAll(accepted).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { release.Set(); }
+        await AssertOutputAsync(tab, report, "queue saturation recovery");
+        report.Add("PASS rejected input reports queue saturation without terminating the shell.");
+    }
+
+    private static async Task AssertInputDoesNotWaitForCaptureAsync(TerminalTab tab, List<string> report)
+    {
+        var page = tab.ActivePage;
+        var surface = (TerminalSurface)page.FindName("Terminal");
+        var session = Field<TerminalSession>(page, "_session");
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = session.DispatchAsync(owner =>
+        {
+            lock (Field<object>(owner, "_renderGate"))
+            {
+                entered.SetResult();
+                return release.Wait(TimeSpan.FromSeconds(5));
+            }
+        });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // A leading space is accepted input without leaving a partial command to cancel in cmd.exe.
+        try { surface.Input.Text = " "; }
+        finally { release.Set(); }
+        if (!await held)
+            throw new Exception("Typing waited for the render lock instead of enqueueing input on the pane worker.");
+        await session.DispatchAsync(_ => { });
+        await AssertOutputAsync(tab, report, "input after held capture");
+        report.Add("PASS text input returns while the pane render lock is held; accepted input and subsequent shell commands retain ordering.");
+    }
+
+    private static async Task AssertIndependentPaneSchedulingAsync(TerminalTab tab, List<string> report)
+    {
+        var inputPage = tab.ActivePage;
+        var outputPage = Descendants(tab).OfType<MainPage>().Single(page => page != inputPage);
+        var outputSession = Field<TerminalSession>(outputPage, "_session");
+        static bool Idle(MainPage page) => !Field<bool>(page, "_renderingSubscribed") &&
+            !Field<bool>(page, "_frameRefreshQueued") && !Field<bool>(page, "_frameRefreshPending") &&
+            !Field<bool>(page, "_captureInFlight") && !Field<bool>(page, "_captureRequested") &&
+            Field<int>(page, "_outputRefreshQueued") == 0 &&
+            !Field<DispatcherQueueTimer>(page, "_synchronizedRefreshTimer").IsRunning;
+        TerminalFrame? stableOutput = null, stableInput = null;
+        var stableSince = System.Diagnostics.Stopwatch.GetTimestamp();
+        await WaitAsync(() =>
+        {
+            var output = Field<TerminalFrame>(outputPage, "_presentedFrame");
+            var input = Field<TerminalFrame>(inputPage, "_presentedFrame");
+            if (!Idle(outputPage) || !Idle(inputPage) ||
+                !ReferenceEquals(output, stableOutput) || !ReferenceEquals(input, stableInput))
+            {
+                stableOutput = output;
+                stableInput = input;
+                stableSince = System.Diagnostics.Stopwatch.GetTimestamp();
+                return false;
+            }
+            return System.Diagnostics.Stopwatch.GetElapsedTime(stableSince).TotalMilliseconds >= 250;
+        }, "split panes keeping stable frames and empty frame queues for 250 ms before output burst");
+        var outputBefore = Field<TerminalFrame>(outputPage, "_presentedFrame");
+        var inputBefore = Field<TerminalFrame>(inputPage, "_presentedFrame");
+        var emit = typeof(TerminalSession).GetMethod("ProcessOutput", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var marker = "PANE_BURST_" + Guid.NewGuid().ToString("N")[..8];
+        for (var index = 0; index < 128; index++)
+            emit.Invoke(outputSession, [new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes($"\x1b[H{marker}_{index:D3}"))]);
+        var inputTurn = new TaskCompletionSource<bool>();
+        inputPage.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
+            inputTurn.SetResult(ReferenceEquals(outputBefore, Field<TerminalFrame>(outputPage, "_presentedFrame"))));
+        if (!await inputTurn.Task.WaitAsync(TimeSpan.FromSeconds(5)))
+            throw new Exception("A busy pane refreshed ahead of normal-priority input work queued after its output burst.");
+        await WaitAsync(() => string.Concat(Field<TerminalFrame>(outputPage, "_presentedFrame").Cells.Select(cell => cell.Text))
+            .Contains(marker + "_127"), "final output burst snapshot");
+        var inputAfter = Field<TerminalFrame>(inputPage, "_presentedFrame");
+        if (!ReferenceEquals(inputBefore, inputAfter))
+        {
+            static string Describe(TerminalFrame frame) => $"ContentVersion={frame.ContentVersion}; dimensions={frame.Columns}x{frame.Rows}; viewport={frame.Viewport}; cursor={frame.Cursor}; selection={frame.HasSelection}";
+            throw new Exception($"Output in one pane replaced the independent idle pane's frame. Before [{Describe(inputBefore)}]. After [{Describe(inputAfter)}]. " +
+                $"Input pane flags: capture={Field<bool>(inputPage, "_captureInFlight")}; requested={Field<bool>(inputPage, "_captureRequested")}; " +
+                $"queued={Field<bool>(inputPage, "_frameRefreshQueued")}; pending={Field<bool>(inputPage, "_frameRefreshPending")}; output={Field<int>(inputPage, "_outputRefreshQueued")}.");
+        }
+        await AssertOutputAsync(tab, report, "input beside busy pane");
+        report.Add("PASS split-pane output burst yields to queued input work, retains the final update, and leaves the other pane's frame unchanged.");
+    }
+
     private static async Task AssertIdleAndWakeAsync(TerminalTab tab, List<string> report)
     {
         var page = tab.ActivePage;
@@ -388,14 +497,14 @@ internal static partial class StartupChecks
         session.ExtendSelection(3, row);
         session.EndSelection();
         typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [session]);
-        if (Field<TerminalFrame>(surface, "_frame").HasSelection != true)
-            throw new Exception("Input regression fixture did not create a visible selection.");
+        await WaitAsync(() => Field<TerminalFrame>(surface, "_frame").HasSelection, "visible selection before keyboard input");
         surface.Input.Text = "x";
-        if (Field<TerminalFrame>(surface, "_frame").HasSelection)
-            throw new Exception("Text input did not immediately refresh selection before process-output callbacks could run.");
+        if ((await session.CaptureFrameAsync()).Frame.HasSelection)
+            throw new Exception("Ordered keyboard input did not clear the selection.");
+        await WaitAsync(() => !Field<TerminalFrame>(surface, "_frame").HasSelection, "keyboard input clears the presented selection");
         session.Send("\u0003");
         await AssertOutputAsync(tab, report, "input selection clear");
-        report.Add("PASS local input updates the selected frame synchronously, without waiting for process echo.");
+        report.Add("PASS local input requests a new selection frame through the pane worker.");
     }
 
     private static void WriteTerminal(TerminalSession session, string text)
@@ -421,18 +530,19 @@ internal static partial class StartupChecks
                 session.ExtendSelection(3, row);
                 session.EndSelection();
                 refresh.Invoke(page, [session]);
-                if (!Field<TerminalFrame>(surface, "_frame").HasSelection)
-                    throw new Exception("Mouse regression fixture did not create a visible selection.");
+                await WaitAsync(() => Field<TerminalFrame>(surface, "_frame").HasSelection, "visible selection before application mouse input");
                 var point = new Windows.Foundation.Point(surface.CellWidth, surface.Geometry.RowTop(row) + surface.CellHeight / 2);
-                if (!(bool)mouse.Invoke(page, [point, TerminalMouseAction.Press, button])! ||
-                    Field<TerminalFrame>(surface, "_frame").HasSelection)
-                    throw new Exception("Application mouse press did not refresh the cleared selection before process echo.");
+                if (!(bool)mouse.Invoke(page, [point, TerminalMouseAction.Press, button, null])!)
+                    throw new Exception("Application mouse press was not routed to the tracking program.");
+                if ((await session.CaptureFrameAsync()).Frame.HasSelection)
+                    throw new Exception("Ordered application mouse input did not clear the selection.");
+                await WaitAsync(() => !Field<TerminalFrame>(surface, "_frame").HasSelection, "application mouse clears the presented selection");
             }
         }
         finally { WriteTerminal(session, "\x1b[?1000l\x1b[?1006l"); }
         session.Send("\u0003");
         await AssertOutputAsync(tab, report, "mouse selection clear");
-        report.Add("PASS application click and wheel clear selection synchronously, without process echo.");
+        report.Add("PASS application click and wheel request updated selection frames through the pane worker.");
     }
 
     private static async Task AssertHiddenCursorIdleAsync(TerminalTab tab, List<string> report)

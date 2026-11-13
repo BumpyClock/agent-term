@@ -1,4 +1,5 @@
 using AgentTerm.Terminal;
+using System.Diagnostics;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Input;
@@ -34,9 +35,27 @@ public sealed partial class MainPage
         };
     }
 
-    private static void ForwardKey(TerminalSession session, TerminalKeyboardInput.KeyEvent key) =>
-        session.SendPhysicalKey(key.Key, key.Modifiers, key.Action, key.Text, key.Physical.ScanCode,
-            key.Physical.Extended, key.ConsumedModifiers, key.LayoutCodepoint);
+    private async void ForwardKey(TerminalSession session, TerminalKeyboardInput.KeyEvent key)
+    {
+        var started = PerformanceCapture.Enabled ? Stopwatch.GetTimestamp() : 0;
+        try
+        {
+            await session.DispatchAsync(s =>
+            {
+                if (ShouldForwardLinkMenuKey(s, key))
+                    s.SendPhysicalKey(key.Key, key.Modifiers, key.Action, key.Text, key.Physical.ScanCode,
+                        key.Physical.Extended, key.ConsumedModifiers, key.LayoutCodepoint);
+            });
+        }
+        catch (Exception exception)
+        {
+            if (_session == session && _state != SessionState.Disposed) await FailSessionAsync(exception);
+        }
+        finally
+        {
+            if (started != 0) PerformanceCapture.Record(PerformanceMetric.InputDispatch, Stopwatch.GetElapsedTime(started).TotalMilliseconds, Terminal.CapturePaneId);
+        }
+    }
 
     private bool HandleKeyboardSelection(TerminalSession session, KeyRoutedEventArgs e,
         TerminalKeyboardInput.PhysicalKey physical, VirtualKey key, TerminalModifiers modifiers)
@@ -67,11 +86,11 @@ public sealed partial class MainPage
             if (toggle)
             {
                 if (e.KeyStatus.WasKeyDown) return true;
-                if (!_keyboardMarkMode) session.BeginKeyboardSelection();
-                else session.ClearSelection();
+                if (!_keyboardMarkMode) QueueSessionUpdate(session, s => s.BeginKeyboardSelection());
+                else QueueSessionUpdate(session, s => s.ClearSelection());
                 SetKeyboardMarkMode(!_keyboardMarkMode);
             }
-            else session.AdjustSelection(adjustment!.Value);
+            else QueueSessionUpdate(session, s => s.AdjustSelection(adjustment!.Value));
             RefreshOutput(session);
         }
         catch (Exception exception) { ShowInteractionFailure(exception); }

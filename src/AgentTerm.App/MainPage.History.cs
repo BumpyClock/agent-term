@@ -85,9 +85,9 @@ public sealed partial class MainPage
     }
     private void PreviousPrompt_Click(object sender, RoutedEventArgs e) => MovePrompt(-1);
     private void NextPrompt_Click(object sender, RoutedEventArgs e) => MovePrompt(1);
-    private void MovePrompt(int delta)
+    private async void MovePrompt(int delta)
     {
-        try { if (_session is { } session) { session.NavigatePrompt(delta); RefreshOutput(session); } }
+        try { if (_session is { } session) { await session.DispatchAsync(owner => owner.NavigatePrompt(delta)); if (_session == session) RefreshOutput(session); } }
         catch (Exception error) { ShowInteractionFailure(error); }
     }
     private async void CopyRich_Click(object sender, RoutedEventArgs e)
@@ -108,8 +108,6 @@ public sealed partial class MainPage
     private void ExportVt_Click(object sender, RoutedEventArgs e) => ExportHistoryFile(TerminalExportFormat.StyledVt, false);
     private void ExportSelectionHtml_Click(object sender, RoutedEventArgs e) => ExportHistoryFile(TerminalExportFormat.Html, true);
     private void ExportSelectionVt_Click(object sender, RoutedEventArgs e) => ExportHistoryFile(TerminalExportFormat.StyledVt, true);
-    // Formatting starts before the picker opens, off the UI thread, so the snapshot predates later output.
-    // Cancelling the picker discards it; the bytes go to the file without a string round trip.
     private async void ExportHistoryFile(TerminalExportFormat format, bool selectionOnly)
     {
         using var cancellation = new CancellationTokenSource();
@@ -117,8 +115,9 @@ public sealed partial class MainPage
         try
         {
             if (_session is not { } session) return;
-            if (selectionOnly && !session.HasSelection) return;
+            if (selectionOnly && _presentedFrame?.HasSelection != true) return;
             prepared = session.ExportHistoryAsync(format, selectionOnly, cancellation.Token);
+            if (selectionOnly && await prepared is null) return;
             var picker = new FileSavePicker { SuggestedFileName = selectionOnly ? "terminal-selection" : "terminal-history" };
             picker.FileTypeChoices.Add(format == TerminalExportFormat.Html ? "HTML" : "Styled VT", new[] { format == TerminalExportFormat.Html ? ".html" : ".ansi" });
             WinRT.Interop.InitializeWithWindow.Initialize(picker, GetActiveWindow());

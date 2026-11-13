@@ -55,7 +55,7 @@ public sealed partial class MainPage
         var bottom = TerminalPreferences.Current.TerminalStartPosition == TerminalStartPosition.Bottom;
         Terminal.SetBottomAligned(bottom);
         if (_session is not { } session || _state is not (SessionState.Starting or SessionState.Running or SessionState.Idle)) return;
-        session.SetBottomAnchored(bottom);
+        QueueSessionUpdate(session, owner => owner.SetBottomAnchored(bottom));
         if (_state != SessionState.Starting) RefreshOutput(session);
     }
 
@@ -238,7 +238,7 @@ public sealed partial class MainPage
         Terminal.Visibility = HistoryScrollBar.Visibility = TaskCardLayer.Visibility = Visibility.Visible;
         if (_session is { } session)
         {
-            session.ScrollToBottom();
+            QueueSessionUpdate(session, owner => owner.ScrollToBottom());
             RefreshOutput(session);
         }
         UpdateInputOwner(true);
@@ -303,7 +303,7 @@ public sealed partial class MainPage
         try
         {
             var task = _agent.BeginTask();
-            if (_session is { } session && session.ReserveRows() is { } anchor)
+            if (_session is { } session && await session.DispatchAsync(owner => owner.ReserveRows()) is { } anchor)
             {
                 var card = new AgentTaskCard(task);
                 card.Click += (_, _) => OpenSurface(task);
@@ -321,44 +321,68 @@ public sealed partial class MainPage
                 await SendToAgentAsync(request);
             }
         }
-        finally { _startingTask = false; RefreshAgentChrome(); }
+        finally { _startingTask = false; RefreshAgentChrome(); DrainAgentHandoff(); }
     }
 
-    private void RefreshTaskCards(TerminalFrame frame)
+    private bool _cardRefreshRunning;
+    private TerminalFrame? _pendingCardFrame;
+
+    private async void RefreshTaskCards(TerminalFrame frame)
     {
-        if (_cards.Count == 0) return;
-        var geometry = Terminal.GeometryFor(frame);
-        var cell = geometry.CellHeight;
-        var shown = !_surfaceOpen && !frame.Viewport.IsAlternateScreen;
-        var cursorRow = frame.Viewport.Offset + frame.Cursor.Row;
-        var width = Math.Max(0, Math.Min(TaskCardLayer.ActualWidth, geometry.Columns * geometry.CellWidth));
-        var height = Math.Max(0, 2 * cell - 4);
-        var bottom = TaskCardLayer.ActualHeight;
-        foreach (var (task, entry) in _cards)
+        if (_cards.Count == 0 || _session is not { } session) return;
+        if (_cardRefreshRunning) { _pendingCardFrame = frame; return; }
+        _cardRefreshRunning = true;
+        try
         {
-            if (entry.Session != _session) { _expiredCards.Add(task); continue; }
-            if (!shown) { entry.Card.Place(false, 0, 0, 0); continue; }
-            if (entry.Session.ReadAnchor(entry.Anchor) is not { } row) { _expiredCards.Add(task); continue; }
-            var frameRow = row - frame.Viewport.Offset;
-            var top = geometry.RowTop(frameRow);
-            var overlapsPrompt = row <= cursorRow && cursorRow < row + 2;
-            entry.Card.Place(!overlapsPrompt && top > -2 * cell && top < bottom && geometry.RowsBlank(frame, frameRow, 2), top + 2, width, height);
+            var entries = _cards.ToArray();
+            var rows = await session.DispatchAsync(owner => entries.Select(pair =>
+                pair.Value.Session == owner ? owner.ReadAnchor(pair.Value.Anchor) : null).ToArray());
+            if (_session != session) return;
+            if (!ReferenceEquals(frame, _presentedFrame)) { _pendingCardFrame = _presentedFrame; return; }
+            var geometry = Terminal.GeometryFor(frame);
+            var cell = geometry.CellHeight;
+            var shown = !_surfaceOpen && !frame.Viewport.IsAlternateScreen;
+            var cursorRow = frame.Viewport.Offset + frame.Cursor.Row;
+            var width = Math.Max(0, Math.Min(TaskCardLayer.ActualWidth, geometry.Columns * geometry.CellWidth));
+            var height = Math.Max(0, 2 * cell - 4);
+            var bottom = TaskCardLayer.ActualHeight;
+            for (var index = 0; index < entries.Length; index++)
+            {
+                var (task, entry) = entries[index];
+                if (!_cards.TryGetValue(task, out var current) || current != entry) continue;
+                if (entry.Session != _session) { _expiredCards.Add(task); continue; }
+                if (!shown) { entry.Card.Place(false, 0, 0, 0); continue; }
+                if (rows[index] is not { } row) { _expiredCards.Add(task); continue; }
+                var frameRow = row - frame.Viewport.Offset;
+                var top = geometry.RowTop(frameRow);
+                var overlapsPrompt = row <= cursorRow && cursorRow < row + 2;
+                entry.Card.Place(!overlapsPrompt && top > -2 * cell && top < bottom && geometry.RowsBlank(frame, frameRow, 2), top + 2, width, height);
+            }
+            foreach (var task in _expiredCards) RemoveCard(task);
+            _expiredCards.Clear();
         }
-        foreach (var task in _expiredCards) RemoveCard(task);
-        _expiredCards.Clear();
+        catch (ObjectDisposedException) { }
+        catch (Exception error) { ShowInteractionFailure(error); }
+        finally
+        {
+            _cardRefreshRunning = false;
+            var pending = _pendingCardFrame;
+            _pendingCardFrame = null;
+            if (pending is not null && _session == session) RefreshTaskCards(pending);
+        }
     }
 
     private void RemoveCard(AgentTask task)
     {
         if (!_cards.Remove(task, out var entry)) return;
         TaskCardLayer.Children.Remove(entry.Card);
-        if (entry.Session == _session) entry.Session.ReleaseAnchor(entry.Anchor);
+        if (entry.Session == _session) QueueSessionUpdate(entry.Session, owner => owner.ReleaseAnchor(entry.Anchor));
     }
 
     private void TaskCardLayer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         TaskCardLayer.Clip = new RectangleGeometry { Rect = new(0, 0, e.NewSize.Width, e.NewSize.Height) };
-        if (_session is { } session && _state is SessionState.Running or SessionState.Idle) RefreshTaskCards(session.ReadFrame());
+        if (_presentedFrame is { } frame && _state is SessionState.Running or SessionState.Idle) RefreshTaskCards(frame);
     }
     private void TaskCardLayer_PointerWheelChanged(object sender, PointerRoutedEventArgs e) => Terminal_PointerWheelChanged(Terminal, e);
 

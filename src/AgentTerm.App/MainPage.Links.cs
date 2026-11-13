@@ -86,10 +86,12 @@ public sealed partial class MainPage
             RefreshLinkFeedback();
     }
 
-    /// <summary>Re-reads what is under the pointer. Cheap when nothing moved and the frame is unchanged.</summary>
-    private void RefreshLinkFeedback()
+    private bool _linkRefreshRunning, _linkRefreshPending;
+    private async void RefreshLinkFeedback()
     {
         if (!_pointerOverTerminal) return;
+        if (_linkRefreshRunning) { _linkRefreshPending = true; return; }
+        _linkRefreshRunning = true;
         try
         {
             if (_session is not { } session || _state is not (SessionState.Running or SessionState.Idle) || _presentedFrame is not { } frame)
@@ -98,7 +100,8 @@ public sealed partial class MainPage
                 Terminal.ResetPointerKind();
                 return;
             }
-            var mode = session.ReadPointerMode();
+            var pointer = _linkPointer;
+            var mode = _pointerMode;
             var tracking = _state == SessionState.Running && mode.MouseTracking;
             var modifiers = Modifiers();
             var onGrid = Terminal.Geometry.TryCellAt(_linkPointer, out var column, out var row);
@@ -112,9 +115,11 @@ public sealed partial class MainPage
             }
             else if (!lookedUp || column != _hoverColumn || row != _hoverRow || !ReferenceEquals(frame, _hoverFrame))
             {
-                link = session.ReadLinkAt(column, row, frame);
+                link = await session.DispatchAsync(owner => owner.ReadLinkAt(column, row, frame));
                 lookedUp = true;
             }
+            if (_session != session || !_pointerOverTerminal) return;
+            if (pointer != _linkPointer || modifiers != Modifiers()) { _linkRefreshPending = true; return; }
             ApplyLinkHover(link, lookedUp, frame, onGrid ? column : -1, onGrid ? row : -1, TerminalLinkGesture.IsOpenModifier(modifiers));
             Terminal.SetPointerKind(TerminalLinkGesture.PointerFor(mode.Shape, link, modifiers, _selecting));
         }
@@ -125,6 +130,13 @@ public sealed partial class MainPage
             _pointerOverTerminal = false;
             ClearLinkHover();
             ShowInteractionFailure(exception);
+        }
+        finally
+        {
+            _linkRefreshRunning = false;
+            var pending = _linkRefreshPending;
+            _linkRefreshPending = false;
+            if (pending) RefreshLinkFeedback();
         }
     }
 
@@ -252,24 +264,24 @@ public sealed partial class MainPage
         _linkOverlay.Visibility = Visibility.Visible;
     }
 
-    // Ctrl+Click opens a link. The press is claimed so neither a selection nor the program sees it. The open happens on
-    // release, and only when the release still sits on a link with the same destination.
-    private bool HandleLinkPress(PointerRoutedEventArgs e, PointerPoint point)
+    private async Task<bool> HandleLinkPressAsync(PointerRoutedEventArgs e, PointerPoint point, TerminalModifiers modifiers)
     {
-        if (point.Properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed || !PointerShowsHover(e) || !LinkModifierDown() ||
+        if (point.Properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed || !PointerShowsHover(e) ||
+            TerminalKeyboardInput.ShortcutModifiers(modifiers) != TerminalModifiers.Control ||
             _selecting || _session is not { } session || _state is not (SessionState.Running or SessionState.Idle) ||
             _presentedFrame is not { } frame || !Terminal.Geometry.TryCellAt(point.Position, out var column, out var row))
             return false;
-        var link = session.ReadLinkAt(column, row, frame);
-        if (!TerminalLinkGesture.ClaimsPress(Modifiers(), TerminalMouseButton.Left, link is not null)) return false;
+        var link = await session.DispatchAsync(owner => owner.ReadLinkAt(column, row, frame));
+        if (_session != session || !ReferenceEquals(frame, _presentedFrame)) return false;
+        if (!TerminalLinkGesture.ClaimsPress(modifiers, TerminalMouseButton.Left, link is not null)) return false;
         FocusTerminal(FocusState.Pointer);
         _linkPress = new LinkPress(link!, column, row);
-        Terminal.CapturePointer(e.Pointer);
+        if (Terminal.CapturePointer(e.Pointer)) _pointerCaptureGeneration++;
         e.Handled = true;
         return true;
     }
 
-    private bool HandleLinkRelease(PointerRoutedEventArgs e, PointerPoint point)
+    private async Task<bool> HandleLinkReleaseAsync(PointerRoutedEventArgs e, PointerPoint point)
     {
         if (_linkPress is not { } press) return false;
         if (point.Properties.PointerUpdateKind != PointerUpdateKind.LeftButtonReleased) return true;
@@ -277,48 +289,82 @@ public sealed partial class MainPage
         Terminal.ReleasePointerCapture(e.Pointer);
         e.Handled = true;
         if (_session is { } session && _presentedFrame is { } frame && Terminal.Geometry.TryCellAt(point.Position, out var column, out var row) &&
-            session.ReadLinkAt(column, row, frame) is { } link && TerminalLinkGesture.OpensOnRelease(press.Link, link))
+            await session.DispatchAsync(owner => owner.ReadLinkAt(column, row, frame)) is { } link &&
+            _session == session && ReferenceEquals(frame, _presentedFrame) && TerminalLinkGesture.OpensOnRelease(press.Link, link))
             _ = OpenLinkAsync(link);
         return true;
     }
 
     private void CancelLinkPress() => _linkPress = null;
 
-    /// <summary>Right-click on a link. Returns false when there is no link, so the caller keeps its own right-click action.</summary>
-    private bool TryShowLinkMenu(Point position)
+    private async Task<bool> TryShowLinkMenuAsync(Point position)
     {
         if (_session is not { } session || _presentedFrame is not { } frame || !Terminal.Geometry.TryCellAt(position, out var column, out var row) ||
-            session.ReadLinkAt(column, row, frame) is not { } link)
+            await session.DispatchAsync(owner => owner.ReadLinkAt(column, row, frame)) is not { } link ||
+            _session != session || !ReferenceEquals(frame, _presentedFrame))
             return false;
         ShowLinkMenu(position, link, session);
         return true;
     }
 
-    // The Menu key opens the same menu without a pointer, for the link under the hovering pointer or else at the text cursor.
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<TerminalSession,
+        Dictionary<TerminalKeyboardInput.PhysicalKey, bool>> _linkMenuKeys = new();
+
+    private bool ShouldForwardLinkMenuKey(TerminalSession session, TerminalKeyboardInput.KeyEvent key)
+    {
+        if (!_linkMenuKeys.TryGetValue(session, out var decisions) || !decisions.TryGetValue(key.Physical, out var consumed)) return true;
+        if (key.Action == TerminalKeyAction.Release) decisions.Remove(key.Physical);
+        return !consumed;
+    }
+
     private bool TryShowLinkMenuFromKeyboard(KeyRoutedEventArgs e)
     {
         if (e.Key != VirtualKey.Application && !(e.Key == VirtualKey.F10 && Down(VirtualKey.Shift) && !Down(VirtualKey.Control) && !Down(VirtualKey.Menu)))
             return false;
         if (_session is not { } session || _presentedFrame is not { } frame) return false;
-        TerminalLink? link;
         int column, row;
-        if (_pointerOverTerminal && _hoverLink is { } hovered && _hoverColumn >= 0)
-        {
+        if (_pointerOverTerminal && _hoverLink is not null && _hoverColumn >= 0)
             (column, row) = (_hoverColumn, _hoverRow);
-            link = session.ReadLinkAt(column, row, frame);
-        }
         else
         {
             var cursor = frame.Cursor;
             if (!frame.Viewport.IsAtBottom || cursor.Column < 0 || cursor.Row < 0 || cursor.Column >= frame.Columns) return false;
             (column, row) = (cursor.Column, cursor.Row);
-            link = session.ReadLinkAt(column, row, frame);
         }
-        if (link is null) return false;
-        var geometry = Terminal.Geometry;
-        ShowLinkMenu(new Point(column * Terminal.CellWidth, geometry.RowTop(row) + Terminal.CellHeight), link, session);
+        var status = e.KeyStatus;
+        var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
+        var modifiers = KeyboardModifiers();
+        var action = _keyboard.KeyDown(physical, (uint)e.Key, modifiers, status.WasKeyDown, TerminalKeyboardInput.Route.Direct);
+        var key = new TerminalKeyboardInput.KeyEvent((uint)e.Key, modifiers, action, Physical: physical);
         e.Handled = true;
+        ShowLinkMenuFromKeyboard(session, frame, column, row, key);
         return true;
+    }
+
+    private async void ShowLinkMenuFromKeyboard(TerminalSession session, TerminalFrame frame, int column, int row,
+        TerminalKeyboardInput.KeyEvent key)
+    {
+        var forwardToApplication = _state == SessionState.Running;
+        try
+        {
+            var link = await session.DispatchAsync(owner =>
+            {
+                var decisions = _linkMenuKeys.GetOrCreateValue(owner);
+                var repeat = decisions.TryGetValue(key.Physical, out var consumed);
+                var candidate = repeat ? null : owner.ReadLinkAt(column, row, frame);
+                if (!repeat) decisions[key.Physical] = consumed = candidate is not null || !forwardToApplication;
+                if (!consumed && forwardToApplication)
+                    owner.SendPhysicalKey(key.Key, key.Modifiers, key.Action, key.Text, key.Physical.ScanCode,
+                        key.Physical.Extended, key.ConsumedModifiers, key.LayoutCodepoint);
+                return candidate;
+            });
+            if (_session != session) return;
+            if (link is null) { if (forwardToApplication) RefreshLocalInput(session); return; }
+            var geometry = Terminal.Geometry;
+            ShowLinkMenu(new Point(column * Terminal.CellWidth, geometry.RowTop(row) + Terminal.CellHeight), link, session);
+        }
+        catch (ObjectDisposedException) { }
+        catch (Exception error) { ShowInteractionFailure(error); }
     }
 
     private void ShowLinkMenu(Point position, TerminalLink link, TerminalSession session)
