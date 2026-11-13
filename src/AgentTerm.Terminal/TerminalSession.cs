@@ -88,7 +88,11 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     private async Task<int> CompleteAsync()
     {
         try { return await _connection.Completion.ConfigureAwait(false); }
-        finally { lock (_gate) _programStatus.EndCommand(); }
+        finally
+        {
+            lock (_gate) _programStatus.EndCommand();
+            EndEffects();
+        }
     }
 
     public void Start()
@@ -336,7 +340,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
-            var bytes = _terminal.EncodePaste(text);
+            var bytes = _terminal.EncodeClipboardPaste(text);
             if (bytes.Length != 0) PrepareInput();
             _connection.Send(bytes);
         }
@@ -498,6 +502,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             events = TakeProtocolDispatch();
         }
         DispatchProtocolEvents(events);
+        FlushEffects();
         OutputAvailable?.Invoke();
     }
 
