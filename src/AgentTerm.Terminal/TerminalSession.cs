@@ -49,6 +49,10 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         _osc.Sequence += _programStatus.Accept;
         _osc.Reset += _programStatus.Reset;
         _prompt.PromptStarted += _programStatus.EndCommand;
+        // Scanner order matches stream order, so a title set after the prompt marker in the same chunk survives.
+        _osc.Sequence += (sequence, _) => { if (IsTitleSequence(sequence)) _titlePending = true; };
+        _osc.Reset += ClearTitle;
+        _prompt.PromptStarted += ClearTitle;
         _osc.Output += bytes => _owned?.Capture.Feed(bytes);
         _prompt.Marker += message => _owned?.Capture.Marker(message);
         _columns = columns;
@@ -78,6 +82,21 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     public IReadOnlyList<ProgramStatus> ReadProgramStatuses()
     {
         lock (_gate) return _programStatus.ReadStatuses();
+    }
+
+    private string _title = "";
+    private bool _titlePending;
+
+    /// <summary>The title a program set with OSC 0 or OSC 2 since the last integrated prompt, or empty.</summary>
+    public string Title { get { lock (_gate) return _title; } }
+
+    private static bool IsTitleSequence(string sequence) =>
+        sequence is "0" or "2" || sequence.StartsWith("0;", StringComparison.Ordinal) || sequence.StartsWith("2;", StringComparison.Ordinal);
+
+    private void ClearTitle()
+    {
+        _titlePending = false;
+        _title = "";
     }
 
     private async Task<int> CompleteAsync()
@@ -473,6 +492,11 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         {
             _terminal.Write(bytes.Span);
             _osc.Feed(bytes.Span);
+            if (_titlePending)
+            {
+                _titlePending = false;
+                _title = _terminal.ReadTitle();
+            }
             if (_mailboxPending is { } pending && !_restoringDraft && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == pending)
             {
                 _restoringDraft = true;

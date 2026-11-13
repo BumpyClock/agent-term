@@ -76,5 +76,6 @@
         </Grid>
         <Border x:Name="ActiveBorder" CornerRadius="10" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
                 Opacity="{ThemeResource PaneActiveStrokeOpacity}" IsHitTestVisible="False" Visibility="Collapsed" />
+        <Grid x:Name="ActivityHost" Height="1" Margin="9,0,9,0" VerticalAlignment="Top" IsHitTestVisible="False" />
     </Grid>
 </UserControl>

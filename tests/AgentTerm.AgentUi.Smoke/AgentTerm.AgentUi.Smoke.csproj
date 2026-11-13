@@ -20,6 +20,8 @@
     <Compile Include="../../src/AgentTerm.App/ProgramStatusPresentation.cs" Link="ProgramStatusPresentation.cs" />
     <Compile Include="../../src/AgentTerm.App/TabProgramStatus.cs" Link="TabProgramStatus.cs" />
     <Compile Include="../../src/AgentTerm.App/ProgramStatusIcon.cs" Link="ProgramStatusIcon.cs" />
+    <Compile Include="../../src/AgentTerm.App/ProgramIconPresentation.cs" Link="ProgramIconPresentation.cs" />
+    <Compile Include="../../src/AgentTerm.App/ProgramActivity.cs" Link="ProgramActivity.cs" />
     <Compile Include="../../src/AgentTerm.App/AgentMarks.cs" Link="AgentMarks.cs" />
     <Compile Include="../../src/AgentTerm.App/ExecutableIcon.cs" Link="ExecutableIcon.cs" />
     <Compile Include="../../src/AgentTerm.App/ProgramStatusCard.cs" Link="ProgramStatusCard.cs" />

@@ -1,6 +1,8 @@
 using System.Text;
 using AgentTerm.Terminal;
 
+ProgramTitleChecks.Run();
+if (args.Contains("--program-title-only")) return;
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 NativeProtocolChecks.Run();
@@ -35,6 +37,18 @@ using (var terminal = new GhosttyTerminal(20, 4))
 
     terminal.Write(Encoding.UTF8.GetBytes("plain\x1b[31m red\x1b[0m"));
     AssertText(terminal, "plain red", "SGR sequences should not appear in plain text output.");
+}
+
+using (var terminal = new GhosttyTerminal(20, 4))
+{
+    if (terminal.ReadTitle() != "") throw new InvalidOperationException("A new terminal should have no title.");
+    var title = Encoding.UTF8.GetBytes("\x1b]0;⠂ Fix tab é\a");
+    terminal.Write(title.AsSpan(0, 7));
+    terminal.Write(title.AsSpan(7));
+    if (terminal.ReadTitle() != "⠂ Fix tab é") throw new InvalidOperationException($"OSC 0 should set a UTF-8 title, got <{terminal.ReadTitle()}>.");
+    terminal.Write("\x1b]2;Claude Code\x1b\\"u8);
+    if (terminal.ReadTitle() != "Claude Code") throw new InvalidOperationException("OSC 2 with ST should replace the title.");
+    AssertText(terminal, "", "Title sequences should not print.");
 }
 
 using (var terminal = new GhosttyTerminal(20, 4))

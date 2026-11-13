@@ -63,7 +63,7 @@ internal static class PaneHeaderChecks
                     await CheckAsync(header, bar, state, width, compact: width == NarrowWidth);
 
             await CheckAsync(header, bar, Idle, MidWidth, compact: false);
-            await CheckAsync(header, bar, Handoff, MidWidth, compact: true);
+            await CheckAsync(header, bar, Handoff, MidWidth, compact: false);
             await CheckAsync(header, bar, Idle, MidWidth, compact: false);
             await CheckAsync(header, bar, Handoff, NarrowWidth, compact: true);
             await CheckAsync(header, bar, Handoff, NormalWidth, compact: false);
@@ -79,7 +79,7 @@ internal static class PaneHeaderChecks
     {
         header.Width = width;
         bar.ShowShellStatus(state.Prompt, state.EntryUnavailable);
-        bar.ShowTask(state.Agent, !state.SurfaceOpen, true);
+        bar.ShowTask(state.Agent, !state.SurfaceOpen);
         bar.ShowInteract(state.Interact);
         await Task.Delay(150);
         var where = $"{state.Name} at {width} DIP";
@@ -114,7 +114,8 @@ internal static class PaneHeaderChecks
         }
         if (!compact)
         {
-            Check(!state.TaskShown || IsShown(label), $"{where}: the full layout must keep the task label.");
+            var needsLabel = state.Agent is AgentState.WaitingForApproval or AgentState.WaitingForInput;
+            Check(IsShown(label) == (state.TaskShown && needsLabel), $"{where}: only approval and answer states need a visible task label.");
             Check(!state.Interact || IsShown(interactLabel), $"{where}: the full layout must keep the input handoff label.");
             Check(!statusShown || status.Text.Length > 1, $"{where}: the full layout must keep the shell status text.");
         }

@@ -312,8 +312,8 @@ internal static class ProgramStatusUiChecks
         await CaptureAsync(canvas, "icon-working");
         status.Update([working with { Status = working.Status with { Progress = 62 } }]);
         await Task.Delay(300);
-        var ring = Descendants(icon).OfType<ProgressRing>().Single();
-        Check(!ring.IsIndeterminate && ring.Value == 62 && ring.Visibility == Visibility.Visible, "Reported progress must stay visible even when animation is disabled.");
+        Check(!Descendants(icon).OfType<ProgressRing>().Any(), "Working tabs must use the dot sweep instead of a progress ring.");
+        Check(AutomationProperties.GetHelpText(tab).Contains("Working · 62%"), "Reported progress must remain in accessible status details.");
         await CaptureAsync(canvas, "icon-progress");
         var executableIcon = tab.IconSource;
         status.Update([working with { Status = working.Status with { State = ProgramState.Done } }]);
@@ -329,7 +329,7 @@ internal static class ProgramStatusUiChecks
         Check(Descendants(icon).OfType<FontIcon>().Single().Glyph == "π", "Pi identity must render as pi, not a status circle or missing font glyph.");
         await CaptureAsync(canvas, "icon-pi-idle");
         status.Update([pi with { Status = pi.Status with { State = ProgramState.Working } }]);
-        Check(Descendants(icon).OfType<ContentPresenter>().Single(presenter => presenter.Content is FontIcon { Glyph: "π" }).Visibility == Visibility.Visible, "Pi identity must stay visible inside its activity ring.");
+        Check(Descendants(icon).OfType<ContentPresenter>().Single(presenter => presenter.Content is FontIcon { Glyph: "π" }).Visibility == (moving ? Visibility.Collapsed : Visibility.Visible), "Pi must use the loader while animating, or keep its normal icon with motion disabled.");
         await CaptureAsync(canvas, "icon-pi-working");
         status.Update([pi with { Status = pi.Status with { IsActive = false } }]);
         Check(ReferenceEquals(tab.IconSource, shell), "Exiting idle Pi must restore shell identity.");
@@ -345,12 +345,17 @@ internal static class ProgramStatusUiChecks
         await CaptureAsync(canvas, "icon-claude-idle");
         status.Update([claude with { Status = claude.Status with { State = ProgramState.Working } }]);
         await Task.Delay(100);
-        Check(Descendants(icon).OfType<PathIcon>().Single().Data is not null, "Claude identity must stay visible inside its activity ring.");
+        Check(Descendants(icon).OfType<ProgramActivity>().Single().IsAnimating == moving, "Claude must use the loader only while motion is enabled.");
         await CaptureAsync(canvas, "icon-claude-working");
         var sidebarIcon = new ProgramStatusIcon { Tab = tab };
         canvas.Children.Add(sidebarIcon);
         await Task.Delay(100);
-        Check(Descendants(sidebarIcon).OfType<PathIcon>().Single().Data is not null, "A second view of the same tab must render the mark without sharing its geometry.");
+        Check(Descendants(sidebarIcon).OfType<ProgramActivity>().Single().IsAnimating == moving, "Both views of a working tab must follow the same motion preference.");
+        status.Update([claude]);
+        await Task.Delay(100);
+        var firstMark = Descendants(icon).OfType<PathIcon>().Single();
+        var secondMark = Descendants(sidebarIcon).OfType<PathIcon>().Single();
+        Check(firstMark.Data is not null && secondMark.Data is not null && !ReferenceEquals(firstMark.Data, secondMark.Data), "Idle representations of the same tab must restore their own app geometry.");
         canvas.Children.Remove(sidebarIcon);
         status.Update([Report("", ProgramState.Idle, "codex", "Ready")]);
         await Task.Delay(100);
@@ -365,7 +370,99 @@ internal static class ProgramStatusUiChecks
         }
         status.Update([claude with { Status = claude.Status with { IsActive = false } }]);
         Check(ReferenceEquals(tab.IconSource, shell), "Exiting an agent must restore shell identity.");
-        Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% progress and static completion passed. Motion enabled={moving}.");
+        Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% accessible progress and static completion passed. Motion enabled={moving}.");
+    }
+
+    internal static async Task CheckIconPreferencesAsync(Window window)
+    {
+        var preferences = new IconPreferences();
+        preferences.SetContrast(true);
+        var tab = new TabViewItem { Header = "PowerShell" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var report = Report("", ProgramState.Working, "claude", "Selected report text");
+        status.Update([report]);
+        var icon = new ProgramStatusIcon(null, preferences) { Tab = tab };
+        var card = new ProgramStatusCard(preferences);
+        card.Update("PowerShell", [report], true);
+        var host = new StackPanel { Children = { icon, card } };
+        window.Content = host;
+        window.Activate();
+        await Task.Delay(150);
+        var text = Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Selected report text");
+        text.Select(text.ContentStart, text.ContentEnd);
+        var row = VisualTreeHelper.GetParent(text);
+        var tabMark = Descendants(icon).OfType<PathIcon>().Single();
+        var rowMark = Descendants(card).OfType<PathIcon>().Single();
+        var brand = Windows.UI.Color.FromArgb(255, 0xD9, 0x77, 0x57);
+        Check(preferences.Subscribers == 2, "Each loaded presentation must observe preferences once.");
+        foreach (var contrast in new[] { false, true, false })
+        {
+            preferences.SetContrast(contrast);
+            await Task.Delay(150);
+            foreach (var mark in new[] { tabMark, rowMark })
+                Check(contrast ? mark.ReadLocalValue(IconElement.ForegroundProperty) == DependencyProperty.UnsetValue
+                    : mark.Foreground is SolidColorBrush brush && brush.Color == brand,
+                    "Unchanged tab and row marks must enter and leave high contrast.");
+            Check(ReferenceEquals(rowMark, Descendants(card).OfType<PathIcon>().Single()) &&
+                ReferenceEquals(row, VisualTreeHelper.GetParent(text)) && text.SelectedText == "Selected report text",
+                "Preference refresh must preserve the rendered row, text identity and selection.");
+            foreach (var root in new DependencyObject[] { icon, card })
+            {
+                var activity = Descendants(root).OfType<ProgramActivity>().Single();
+                Check(activity.IsAnimating == !contrast, "Contrast must stop and restore permitted working motion.");
+                var presenter = Descendants(root).OfType<ContentPresenter>().Single(p => p.Content is Viewbox);
+                Check(presenter.Visibility == (contrast ? Visibility.Visible : Visibility.Collapsed), "A static mark must replace the sweep in high contrast.");
+            }
+        }
+        report = report with { Status = report.Status with { IsActive = false } };
+        card.Update("PowerShell", [report], true);
+        rowMark = Descendants(card).OfType<PathIcon>().Single();
+        foreach (var contrast in new[] { true, false })
+        {
+            preferences.SetContrast(contrast);
+            await Task.Delay(100);
+            Check(contrast ? rowMark.ReadLocalValue(IconElement.ForegroundProperty) == DependencyProperty.UnsetValue
+                : rowMark.Foreground is SolidColorBrush brush && brush.Color == brand,
+                "An exited report must refresh contrast in both directions without another report update.");
+            Check(ReferenceEquals(text, Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Selected report text")) &&
+                ReferenceEquals(row, VisualTreeHelper.GetParent(text)) && text.SelectedText == "Selected report text" &&
+                !Descendants(card).OfType<ProgramActivity>().Single().IsAnimating,
+                "Exited reports must retain row identity, selected text and a static icon.");
+        }
+        host.Children.Clear();
+        await Task.Delay(100);
+        Check(preferences.Subscribers == 0, "Unloaded presentations must release preference subscriptions.");
+        Check(Descendants(card).OfType<ProgramActivity>().All(a => !a.IsAnimating), "Unloading must stop row motion.");
+        preferences.SetContrast(true);
+        host.Children.Add(icon);
+        host.Children.Add(card);
+        await Task.Delay(150);
+        Check(preferences.Subscribers == 2 && rowMark.ReadLocalValue(IconElement.ForegroundProperty) == DependencyProperty.UnsetValue,
+            "Reattachment must read preferences changed while unloaded without duplicating subscriptions.");
+        host.Children.Clear();
+        await Task.Delay(100);
+        Check(preferences.Subscribers == 0, "Repeated unload must release all subscriptions.");
+        var orphanCard = new ProgramStatusCard();
+        var firstOrphan = new PaneProgramStatus(1, "PowerShell", new("build/test", ProgramState.Done, null, null, null, null, null, null, DateTimeOffset.Now));
+        var secondOrphan = firstOrphan with { Status = firstOrphan.Status with { Id = "deploy/test" } };
+        orphanCard.Update("PowerShell", [firstOrphan, secondOrphan], false);
+        host.Children.Add(orphanCard);
+        await Program.WaitAsync(() => orphanCard.IsLoaded);
+        orphanCard.UpdateLayout();
+        var identities = Descendants(orphanCard).OfType<TextBlock>().Select(block => block.Text).ToArray();
+        Check(identities.Any(value => value.StartsWith("build/test · ")) && identities.Any(value => value.StartsWith("deploy/test · ")), $"Orphan nested reports with equal leaf names must retain distinct full identities. Visible text: {string.Join(" | ", identities)}");
+        host.Children.Clear();
+    }
+
+    private sealed class IconPreferences : IProgramIconPreferences
+    {
+        public bool HighContrast { get; private set; }
+        public bool AnimationsEnabled => true;
+        private Action? _changed;
+        internal int Subscribers => _changed?.GetInvocationList().Length ?? 0;
+        public event Action? Changed { add => _changed += value; remove => _changed -= value; }
+        internal void SetContrast(bool value) { HighContrast = value; _changed?.Invoke(); }
     }
 
     internal static async Task CheckLayoutAsync(Window window)
@@ -387,6 +484,59 @@ internal static class ProgramStatusUiChecks
         try { await CheckReadingUpdatesAsync(status, card!); }
         finally { status.Hide(); await Task.Delay(150); }
         Console.WriteLine("Native status layout checks passed without global input injection.");
+    }
+
+    internal static async Task CheckCardAsync(Window window)
+    {
+        var tab = new TabViewItem { Header = "PowerShell" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var tabs = new TabView();
+        tabs.TabItems.Add(tab);
+        var root = new Grid { RequestedTheme = ElementTheme.Dark, Children = { tabs } };
+        window.Content = root;
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1100, 850));
+        window.Activate();
+        await Task.Delay(300);
+        var now = DateTimeOffset.Now;
+        PaneProgramStatus Session(string id, ProgramState state, string? app, string? title, string? message, int pane = 1, string? kind = null) =>
+            new(pane, "PowerShell", new(id, state, kind, null, app, app ?? "claude-code", title, message, now));
+        PaneProgramStatus[] session =
+        [
+            Session("", ProgramState.Working, "claude-code", null, "Refining the tab status card"),
+            Session("explore", ProgramState.Working, null, "Explore tooltip code", "Reading ProgramStatusCard.cs"),
+            Session("review", ProgramState.Done, null, "Review diff", "No blocking issues"),
+            Session("tests", ProgramState.Blocked, null, "Run smoke tests", "Allow dotnet run?", kind: "permission"),
+        ];
+        status.Update(session);
+        status.ShowDetails(tab);
+        await Task.Delay(400);
+        var card = OpenCard(tab)!;
+        await CaptureAsync(card, "card-session-dark");
+        var names = Descendants(card).OfType<TextBlock>().Where(block => block.Name == "Name").Select(block => block.Text).ToArray();
+        Check(names.Contains("Claude Code") && !names.Contains("claude-code"), "Known agents must show their product name instead of the reported app id.");
+        var moving = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled && !new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        var animating = Descendants(card).OfType<ProgramActivity>().Count(activity => activity.IsAnimating);
+        Check(animating == (moving ? 2 : 0), $"Each working session and subagent row must show the tab activity indicator only while motion is allowed (animating={animating}).");
+        status.Hide();
+        await Task.Delay(150);
+        root.RequestedTheme = ElementTheme.Light;
+        status.Update([.. session, Session("", ProgramState.Idle, "codex", null, "Waiting for input", pane: 2) with { Title = "Codex review" }]);
+        status.ShowDetails(tab);
+        await Task.Delay(400);
+        await CaptureAsync(OpenCard(tab)!, "card-session-light");
+        var paneText = Text(OpenCard(tab)!);
+        Check(paneText.Contains("Pane 2 · Codex review · PowerShell") && paneText.Contains("Pane 1 · PowerShell"),
+            "Pane headings must use the pane's program title and keep the shell only when the title replaced it.");
+        status.Update([.. session, Session("", ProgramState.Idle, "codex", null, "Waiting for input", pane: 2) with { Title = "Codex tests" }]);
+        await Task.Delay(100);
+        Check(Text(OpenCard(tab)!).Contains("Pane 2 · Codex tests · PowerShell"), "A program title change must rename its pane heading in the open card.");
+        status.Update([.. session.Select(record => record with { Status = record.Status with { State = ProgramState.Done } })]);
+        await Task.Delay(200);
+        Check(Descendants(OpenCard(tab)!).OfType<ProgramActivity>().All(activity => !activity.IsAnimating), "Finished rows must stop the activity indicator.");
+        status.Hide();
+        await Task.Delay(150);
+        Console.WriteLine($"Status card session rows, product names and per-row activity passed. Motion enabled={moving}.");
     }
 
     private static async Task CheckReadingUpdatesAsync(TabProgramStatus status, ProgramStatusCard card)
@@ -439,7 +589,7 @@ internal static class ProgramStatusUiChecks
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
             foreach (var child in Descendants(VisualTreeHelper.GetChild(root, index))) yield return child;
     }
-    private static async Task CaptureAsync(FrameworkElement element, string name)
+    internal static async Task CaptureAsync(FrameworkElement element, string name)
     {
         var presenter = element;
         while (VisualTreeHelper.GetParent(presenter) is FrameworkElement parent) presenter = parent;

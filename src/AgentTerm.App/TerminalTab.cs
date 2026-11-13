@@ -32,7 +32,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private bool _shown;
     private Task _paneClose = Task.CompletedTask;
     private Task? _disposal;
-    private readonly List<(Pane Pane, IReadOnlyList<ProgramStatus> Statuses)> _statusSources = [];
+    private readonly List<(Pane Pane, IReadOnlyList<ProgramStatus> Statuses, string? Title)> _statusSources = [];
     private IReadOnlyList<PaneProgramStatus> _programStatuses = [];
     private int _titleVersion;
     private int _readTitleVersion = -1;
@@ -63,11 +63,13 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         foreach (var pane in _panes)
         {
             if (ReferenceEquals(pane, _retiring)) continue;
-            var current = pane.Page.ReadProgramStatuses();
-            if (count == _statusSources.Count) { _statusSources.Add((pane, current)); changed = true; }
-            else if (!ReferenceEquals(_statusSources[count].Pane, pane) || !ReferenceEquals(_statusSources[count].Statuses, current))
+            var current = pane.View.ReadProgramStatuses();
+            // The status card names each pane by its program title, which can change while reports do not.
+            var title = current.Count == 0 ? null : ProgramTitle.Clean(pane.Page.ProgramTitle);
+            if (count == _statusSources.Count) { _statusSources.Add((pane, current, title)); changed = true; }
+            else if (!ReferenceEquals(_statusSources[count].Pane, pane) || !ReferenceEquals(_statusSources[count].Statuses, current) || _statusSources[count].Title != title)
             {
-                _statusSources[count] = (pane, current);
+                _statusSources[count] = (pane, current, title);
                 changed = true;
             }
             count++;
@@ -78,12 +80,27 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
             changed = true;
         }
         if (changed) _programStatuses = _statusSources.SelectMany((source, index) => source.Statuses
-            .Select(status => new PaneProgramStatus(index + 1, source.Pane.Page.Profile.Name, status))).ToArray();
+            .Select(status => new PaneProgramStatus(index + 1, source.Pane.Page.Profile.Name, status, source.Title))).ToArray();
         statuses = _programStatuses;
         return changed;
     }
 
-    internal string Title => string.Join(" · ", _panes.Select(pane => pane.Page.Profile.Name).Distinct().Take(2));
+    private string _title = "";
+    internal string Title => _title.Length != 0 ? _title : _title = ComposeTitle();
+
+    private string ComposeTitle() => string.Join(" · ", _panes.Select(pane => PaneLabel(pane.Page)).Distinct().Take(2));
+
+    /// <summary>Picks up OSC 0 and OSC 2 titles. Called on the window's status tick.</summary>
+    internal void RefreshTitle()
+    {
+        if (IsClosing) return;
+        var title = ComposeTitle();
+        if (title == _title) return;
+        _title = title;
+        RaiseTitleChanged();
+    }
+
+    private static string PaneLabel(MainPage page) => ProgramTitle.Clean(page.ProgramTitle) ?? page.Profile.Name;
     internal ShellProfile PrimaryProfile => _panes[0].Page.Profile;
     internal int PaneCount => _panes.Count;
     internal MainPage ActivePage => _active.Page;
@@ -94,6 +111,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
 
     private void RaiseTitleChanged()
     {
+        _title = ComposeTitle();
         _titleVersion++;
         TitleChanged?.Invoke();
     }
@@ -103,7 +121,11 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         _visible = visible;
         if (!visible) _motion.FinishAll();
         foreach (var pane in _panes)
-            pane.Page.SetActive(visible && !ReferenceEquals(pane, _retiring));
+        {
+            var active = visible && !ReferenceEquals(pane, _retiring);
+            pane.View.SetActive(active);
+            pane.Page.SetActive(active);
+        }
         UpdateFocus();
     }
 
@@ -185,6 +207,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         _motion.FinishAll();
         _retiring = old;
         old.Page.SetActive(false);
+        old.View.SetActive(false);
         old.View.IsHitTestVisible = false;
         old.View.IsEnabled = false;
         if (_panes.Count == 1)
@@ -340,6 +363,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         var page = new MainPage(profile);
         page.SetActive(_visible);
         var view = new TerminalPane(page);
+        view.SetActive(_visible);
         var pane = new Pane(page, view);
         page.Loaded += (_, _) =>
         {

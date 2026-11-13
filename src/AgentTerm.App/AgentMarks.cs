@@ -66,6 +66,8 @@ internal static class AgentMarks
         return source;
     }
 
+    internal static bool Has(string app) => string.Equals(app, "pi", StringComparison.OrdinalIgnoreCase) || MarksByApp.ContainsKey(app);
+
     private static Color Rgb(byte r, byte g, byte b) => Color.FromArgb(255, r, g, b);
 
     internal static Geometry? CreateGeometry(PathIconSource source) => Markup.TryGetValue(source, out var data) ? Parse(data) : null;
