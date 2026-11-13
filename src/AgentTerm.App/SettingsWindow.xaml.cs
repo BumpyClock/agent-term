@@ -33,11 +33,17 @@ internal sealed partial class SettingsWindow : Window
     private string? _shownProfileId;
     private SettingsValues _saved;
     private bool _updatingControls = true;
+    private EffectsSettingsPanel _programs = null!;
+    private TerminalEffectOptions _savedEffects = TerminalEffectOptions.Default;
 
     internal SettingsWindow(Window owner, IReadOnlyList<ShellProfile> profiles)
     {
         _profiles = profiles;
         InitializeComponent();
+        _programs = new EffectsSettingsPanel((Style)SettingsNavigation.Resources["SettingCard"], (Style)SettingsNavigation.Resources["SettingLabel"],
+            (Style)SettingsNavigation.Resources["SettingDescription"]);
+        _programs.Changed += () => { if (!_updatingControls) UpdateActions(); };
+        ProgramsHost.Children.Add(_programs);
         SettingsNavigation.Loaded += (_, _) => ApplyCaptionTheme();
         SettingsNavigation.ActualThemeChanged += (_, _) => ApplyCaptionTheme();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
@@ -110,6 +116,7 @@ internal sealed partial class SettingsWindow : Window
         _shownProfileId = (e.SelectedItem as NavigationViewItem)?.Tag as string;
         StartupPage.Visibility = ReferenceEquals(e.SelectedItem, StartupItem) ? Visibility.Visible : Visibility.Collapsed;
         TabsPage.Visibility = ReferenceEquals(e.SelectedItem, TabsItem) ? Visibility.Visible : Visibility.Collapsed;
+        ProgramsPage.Visibility = ReferenceEquals(e.SelectedItem, ProgramsItem) ? Visibility.Visible : Visibility.Collapsed;
         DefaultsPage.Visibility = ReferenceEquals(e.SelectedItem, DefaultsItem) ? Visibility.Visible : Visibility.Collapsed;
         ProfilePage.Visibility = _shownProfileId is null ? Visibility.Collapsed : Visibility.Visible;
         if (_shownProfileId is { } id) LoadProfileDraft(id);
@@ -122,6 +129,8 @@ internal sealed partial class SettingsWindow : Window
             _preferences.FontSize, _preferences.UseAcrylic, _preferences.BackgroundOpacity, _preferences.TabPosition,
             _preferences.ColorScheme, _preferences.LightThemeId, _preferences.DarkThemeId, _preferences.TerminalStartPosition);
         _updatingControls = true;
+        _savedEffects = _preferences.Effects;
+        _programs.Load(_savedEffects);
         _savedOverrides = _preferences.ProfileOverrides.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         _profileDrafts.Clear();
         _savedProfileDrafts.Clear();
@@ -313,7 +322,7 @@ internal sealed partial class SettingsWindow : Window
             FontSizeBox.Text != _saved.FontSize.ToString(CultureInfo.InvariantCulture) ||
             BackgroundBox.SelectedIndex != (_saved.UseAcrylic ? 1 : 0) ||
             OpacitySlider.Value != _saved.BackgroundOpacity * 100 || SelectedTabPosition != _saved.TabPosition ||
-            SelectedTerminalStartPosition != _saved.TerminalStartPosition || profilesDirty;
+            SelectedTerminalStartPosition != _saved.TerminalStartPosition || _programs.Options != _savedEffects || profilesDirty;
         SaveButton.IsEnabled = DiscardButton.IsEnabled = dirty;
         FooterStatus.Text = dirty ? "Unsaved changes. Closing this window discards them." : "";
     }
@@ -360,6 +369,7 @@ internal sealed partial class SettingsWindow : Window
         {
             _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides, OpacitySlider.Value / 100,
                 SelectedTabPosition, colorScheme, lightThemeId, darkThemeId, SelectedTerminalStartPosition);
+            _preferences.UpdateEffects(_programs.Options);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

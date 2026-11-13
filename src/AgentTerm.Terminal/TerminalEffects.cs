@@ -52,6 +52,12 @@ public sealed class TerminalEffects
     /// <summary>Count of callback exceptions that were swallowed. A failing callback answers as a refusal.</summary>
     public int Faults => Volatile.Read(ref _faults);
 
+    /// <summary>
+    /// True when a program's clipboard write can succeed or be offered to the user. A device attributes reply can use this to
+    /// advertise OSC 52 clipboard access (DA1 feature 52) only when the host would honor it.
+    /// </summary>
+    public bool AdvertisesClipboardAccess => _clipboard is not null && _options.ClipboardWrite != ClipboardWritePolicy.Deny;
+
     public int PendingWriteCount { get { lock (_gate) return _writes.Count; } }
 
     public void RecordFault() => Interlocked.Increment(ref _faults);
@@ -279,7 +285,10 @@ public sealed class TerminalEffects
             var taken = _pending.ToArray();
             _pending.Clear();
             foreach (var effect in taken)
-                if (effect is ProgressEffect progress) _uiProgressActive = progress.State != TerminalProgressState.Remove;
+            {
+                if (effect is ResetEffect) _uiProgressActive = false;
+                else if (effect is ProgressEffect progress) _uiProgressActive = progress.State != TerminalProgressState.Remove;
+            }
             return taken;
         }
     }
@@ -290,14 +299,15 @@ public sealed class TerminalEffects
     /// Drops everything that has not been delivered, forgets approvals and paste grants, and removes shown progress.
     /// A full terminal reset and shell exit use this.
     /// </summary>
-    public void Reset()
+    public void Reset(bool clearHost = false)
     {
         lock (_gate)
         {
             _pending.Clear();
             _writes.Clear();
             _pasteText = null;
-            if (_uiProgressActive) _pending.Add(new ProgressEffect(TerminalProgressState.Remove, 0));
+            if (clearHost) _pending.Add(new ResetEffect());
+            else if (_uiProgressActive) _pending.Add(new ProgressEffect(TerminalProgressState.Remove, 0));
         }
     }
 

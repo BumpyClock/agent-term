@@ -66,6 +66,7 @@ internal sealed class PaneEffects : IDisposable
         {
             switch (effect)
             {
+                case ResetEffect: Reset(); break;
                 case BellEffect: Bell(options); break;
                 case NotificationEffect notification: Notify(options, notification); break;
                 case ProgressEffect progress: ApplyProgress(options, progress); break;

@@ -71,7 +71,7 @@ public sealed partial class GhosttyTerminal
 
     private void ConfigureResetEvents()
     {
-        _reset = (_, _) => Queue(() => { Effects.Reset(); return new TerminalReset(); });
+        _reset = (_, _) => Queue(() => { Effects.Reset(clearHost: true); return new TerminalReset(); });
         Register(EventsNative.Reset, _reset, "reset");
     }
 

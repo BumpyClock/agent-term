@@ -109,6 +109,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _agent = new(App.AgentHarness, () => _session);
         InitializeComponent();
         _dispatcher = DispatcherQueue;
+        InitializeEffects();
         RequestPanel.Attach(_agent, AgentReply);
         _agentBar.TaskRequested += () => OpenLatestTask();
         _agentBar.InteractRequested += AllowAgentInput;
@@ -173,6 +174,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
         if (_surfaceOpen) StopSmoothScroll(false);
         if (!_surfaceOpen) Terminal.ResumeRendering();
+        EffectsViewed();
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
             session.SetTheme(CurrentTheme);
@@ -220,6 +222,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var session = new TerminalSession(_columns, _rows, Profile);
             _session = session;
             session.OutputAvailable += Session_OutputAvailable;
+            AttachEffects(session);
             session.SetBottomAnchored(TerminalPreferences.Current.TerminalStartPosition == TerminalStartPosition.Bottom);
             session.SetTheme(CurrentTheme);
             _startup = Task.Run(session.Start);
@@ -258,6 +261,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 return;
 
             SetState(SessionState.Stopping);
+            EffectsSessionEnded();
             CancelSelectionGesture();
             RefreshOutput(session);
             await session.StopAsync();
@@ -521,6 +525,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         else if (previous.FontFamily != _appearance.FontFamily)
             SetFontSize(_fontSize);
         Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
+        ApplyEffectOptions();
         ApplyDisplayMode();
         Page_ActualThemeChanged(this, EventArgs.Empty);
     }
@@ -1190,6 +1195,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             return _release;
 
         session.OutputAvailable -= Session_OutputAvailable;
+        DetachEffects(session);
         _session = null;
         return _release = ReleaseCoreAsync(session, _startup);
     }
@@ -1228,6 +1234,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         PaneStatus.Dispose();
         _selectionTimer.Stop();
         await ReleaseSessionAsync();
+        DisposeEffects();
         TerminalPreferences.Current.Changed -= PreferencesChanged;
         ActualThemeChanged -= Page_ActualThemeChanged;
         _uiSettings.AnimationsEnabledChanged -= UISettings_AnimationsEnabledChanged;

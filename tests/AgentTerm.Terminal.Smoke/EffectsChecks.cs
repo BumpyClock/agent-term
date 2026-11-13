@@ -175,7 +175,7 @@ internal static class EffectsChecks
             terminal.Effects.TakePending();
             Feed(terminal, $"{Esc}c");
             var afterReset = terminal.Effects.TakePending();
-            Require(afterReset is [ProgressEffect { State: TerminalProgressState.Remove }],
+            Require(afterReset is [ResetEffect],
                 $"A full reset (RIS) should remove progress that is visible, got {Describe(afterReset)}.");
             Feed(terminal, $"{Esc}]9;4;1;30{Bel}");
             terminal.Effects.Reset();
@@ -255,8 +255,10 @@ internal static class EffectsChecks
                 $"Held writes should be bounded, keeping the newest, got {terminal.Effects.PendingWriteCount} held and {Describe(flood)}.");
 
             Feed(terminal, Osc52Write("reset me"));
-            terminal.Effects.Reset();
-            Require(terminal.Effects.PendingWriteCount == 0, "Reset should discard held writes.");
+            var staleRequest = (ClipboardEffect)terminal.Effects.TakePending().Last();
+            Feed(terminal, $"{Esc}c");
+            Require(terminal.Effects.PendingWriteCount == 0 && terminal.Effects.ResolveWrite(staleRequest.RequestId, true) == ClipboardOutcome.Unsupported,
+                "RIS must discard held writes before an old approval can copy them.");
 
             clipboard.WriteOutcome = ClipboardOutcome.Busy;
             terminal.Effects.Options = new TerminalEffectOptions { ClipboardWrite = ClipboardWritePolicy.Allow };
@@ -451,6 +453,11 @@ internal static class EffectsChecks
         Require(!TerminalEffectOptions.Default.AllowWindowResize, "The default must not let programs resize the window.");
         using var terminal = new GhosttyTerminal(10, 2);
         Require(terminal.SupportsClipboardProtocols, "The native clipboard callbacks should register.");
+        Require(!terminal.Effects.AdvertisesClipboardAccess, "Without a clipboard adapter the terminal should not advertise clipboard access.");
+        terminal.Effects.Clipboard = new FakeClipboard();
+        Require(terminal.Effects.AdvertisesClipboardAccess, "Allowed writes should be advertised.");
+        terminal.Effects.Options = new TerminalEffectOptions { ClipboardWrite = ClipboardWritePolicy.Deny };
+        Require(!terminal.Effects.AdvertisesClipboardAccess, "Blocked writes should not be advertised.");
     }
 
     private static string Describe(IReadOnlyList<TerminalEffect> effects) => string.Join(", ", effects.Select(effect => effect.ToString()));

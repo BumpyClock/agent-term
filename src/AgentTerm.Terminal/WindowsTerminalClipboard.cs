@@ -18,6 +18,8 @@ public sealed class WindowsTerminalClipboard : ITerminalClipboard
 
     public static WindowsTerminalClipboard Shared { get; } = new();
 
+    private WindowsTerminalClipboard() { }
+
     private readonly object _startGate = new();
     private readonly ConcurrentQueue<Job> _jobs = new();
     private Thread? _owner;

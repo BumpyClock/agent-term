@@ -59,6 +59,13 @@ internal static class EffectsHostChecks
 
     public static void Run()
     {
+        var inbox = new EffectInbox();
+        for (var request = 1; request <= 1000; request++)
+            inbox.Add([new ClipboardEffect(ClipboardNoticeKind.WriteRequested, 1, "test", request)]);
+        Require(inbox.Take().Count <= EffectInbox.Capacity, "Undelivered clipboard approvals must stay bounded across batches.");
+        inbox.Add([new NotificationEffect("before", "reset"), new ResetEffect(), new NotificationEffect("after", "reset")]);
+        Require(inbox.Take() is [ResetEffect, NotificationEffect { Title: "after" }], "A reset must remove earlier queued notices and preserve later ones.");
+
         CheckBell();
         CheckNotifications();
         CheckNotificationActivation();

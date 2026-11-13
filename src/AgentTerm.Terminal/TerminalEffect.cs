@@ -6,6 +6,9 @@ public enum TerminalProgressState { Remove, Set, Error, Indeterminate, Pause }
 /// <summary>An effect a program requested through the terminal. Instances are immutable copies that own their data.</summary>
 public abstract record TerminalEffect;
 
+/// <summary>Withdraws earlier notices, approvals, and progress after a full terminal reset.</summary>
+public sealed record ResetEffect : TerminalEffect;
+
 /// <summary>One or more bells. Consecutive bells in one batch coalesce into <paramref name="Count"/>.</summary>
 public sealed record BellEffect(int Count) : TerminalEffect;
 

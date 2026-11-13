@@ -216,6 +216,13 @@ public sealed partial class MainWindow : Window
             _ = SetShellIconAsync(item, tab);
         };
         tab.CloseRequested += async () => await CloseTabAsync(item);
+        tab.RevealRequested += () =>
+        {
+            if (_closing || tab.IsClosing) return;
+            Tabs.SelectedItem = item;
+            if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter) presenter.Restore();
+            Activate();
+        };
         Tabs.TabItems.Add(item);
         Tabs.SelectedItem = item;
     }
