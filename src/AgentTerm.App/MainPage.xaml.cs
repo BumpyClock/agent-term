@@ -78,6 +78,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _session?.ReadProgramStatuses() ?? [];
 
     public ShellProfile Profile { get; }
+    internal string ProgramTitle => _session?.Title ?? "";
     internal PaneStatus.PaneStatusMonitor PaneStatus { get; } = new();
     internal TerminalColor TerminalBackground => _terminalBackground ?? CurrentTheme.Background;
     private TerminalTheme CurrentTheme => TerminalThemes.Resolve(_appearance.ColorScheme, _appearance.LightThemeId, _appearance.DarkThemeId,

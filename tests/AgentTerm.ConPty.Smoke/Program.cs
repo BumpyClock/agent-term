@@ -75,6 +75,12 @@ if (args.Contains("--resize-anchor-only"))
     return;
 }
 
+if (args.Contains("--title-only"))
+{
+    await TitleChecks.RunAsync();
+    return;
+}
+
 if (args.Contains("--prompt-mode-only"))
 {
     await NativeStartupChecks.RunAsync();
@@ -95,6 +101,7 @@ await ScrollbackSessionChecks.RunAsync();
 await ConcurrentFrameChecks.RunAsync();
 await ProfileChecks.RunAsync();
 await DirectoryChecks.RunAsync();
+await TitleChecks.RunAsync();
 await SmartPromptChecks.RunAsync();
 await NativeStartupChecks.RunAsync();
 await PromptModeChecks.ProbeAsync();

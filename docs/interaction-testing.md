@@ -253,6 +253,12 @@ Removed the Program status menu action from both tab layouts. The existing hover
 
 The isolated Release build, native `--status-layout` checks, and changed-file lint passed. The updated app launched and remained responsive. The interactive suite stopped at its foreground-ownership guard before injecting input, so the new pointer regressions remain unverified. The previous app window and its sessions were left open.
 
+### Program titles
+
+Programs set the tab label with OSC 0 or OSC 2. The selected tab's label also becomes the window title (`<label> - AgentTerm`) for the taskbar and Alt+Tab. A leading spinner glyph (Dingbats or Braille block) is dropped because the tab already shows activity. An empty title, or ConPTY's startup executable path, falls back to the shell profile name. Integrated PowerShell clears the program title at each new prompt, so a stale agent title does not outlive the agent. Shells without integration keep the last title. Split tabs join up to two distinct pane labels.
+
+`dotnet run --project tests/AgentTerm.ConPty.Smoke -c Release -p:Platform=x64 -- --title-only` checks titles through real ConPTY PowerShell, including UTF-8 and prompt clearing. The startup-smoke build accepts `--tab-title` after its report path and Top/Left argument. It feeds titles through the real TerminalSession output path and checks the tab header, window title, spinner trimming and fallbacks in both layouts.
+
 ## Terminal color themes
 
 1. In Settings > Profiles > Defaults, select Auto, Ocean Light, and Forest Dark. Save. In a test window, change Windows appearance. Only the active palette must change; both saved slots must remain selected. Output, shell PIDs, scroll position, and selection must remain intact.

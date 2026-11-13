@@ -83,7 +83,22 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         return changed;
     }
 
-    internal string Title => string.Join(" · ", _panes.Select(pane => pane.Page.Profile.Name).Distinct().Take(2));
+    private string _title = "";
+    internal string Title => _title.Length != 0 ? _title : _title = ComposeTitle();
+
+    private string ComposeTitle() => string.Join(" · ", _panes.Select(pane => PaneLabel(pane.Page)).Distinct().Take(2));
+
+    /// <summary>Picks up OSC 0 and OSC 2 titles. Called on the window's status tick.</summary>
+    internal void RefreshTitle()
+    {
+        if (IsClosing) return;
+        var title = ComposeTitle();
+        if (title == _title) return;
+        _title = title;
+        RaiseTitleChanged();
+    }
+
+    private static string PaneLabel(MainPage page) => ProgramTitle.Clean(page.ProgramTitle) ?? page.Profile.Name;
     internal ShellProfile PrimaryProfile => _panes[0].Page.Profile;
     internal int PaneCount => _panes.Count;
     internal MainPage ActivePage => _active.Page;
@@ -94,6 +109,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
 
     private void RaiseTitleChanged()
     {
+        _title = ComposeTitle();
         _titleVersion++;
         TitleChanged?.Invoke();
     }

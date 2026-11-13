@@ -51,9 +51,12 @@ public sealed partial class MainWindow : Window
         {
             if (_closing) return;
             foreach (var item in Tabs.TabItems.OfType<TabViewItem>())
-                if (item.Content is TerminalTab { IsClosing: false } tab && item.Tag is TabProgramStatus status &&
-                    tab.TryReadProgramStatusChange(out var statuses))
+            {
+                if (item.Content is not TerminalTab { IsClosing: false } tab) continue;
+                tab.RefreshTitle();
+                if (item.Tag is TabProgramStatus status && tab.TryReadProgramStatusChange(out var statuses))
                     status.Update(statuses);
+            }
         }
         statusTimer.Tick += (_, _) => UpdateProgramStatuses();
         statusTimer.Start();
@@ -208,6 +211,7 @@ public sealed partial class MainWindow : Window
         tab.TitleChanged += () =>
         {
             item.Header = tab.Title;
+            if (ReferenceEquals(Tabs.SelectedItem, item)) UpdateWindowTitle();
             _ = SetShellIconAsync(item, tab);
         };
         tab.CloseRequested += async () => await CloseTabAsync(item);
@@ -262,6 +266,7 @@ public sealed partial class MainWindow : Window
     {
         SyncSidebarSelection();
         var next = (Tabs.SelectedItem as TabViewItem)?.Content as TerminalTab;
+        UpdateWindowTitle();
         if (ReferenceEquals(next, _visibleTab)) return;
         _visibleTab?.SetVisible(false);
         _visibleTab = next;
@@ -269,6 +274,10 @@ public sealed partial class MainWindow : Window
         next.SetVisible(true);
         next.FocusActivePane();
     }
+
+    // Taskbar and Alt+Tab read the window title, so it follows the selected tab.
+    private void UpdateWindowTitle() =>
+        Title = (Tabs.SelectedItem as TabViewItem)?.Content is TerminalTab tab ? $"{tab.Title} - AgentTerm" : "AgentTerm";
 
     private async void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args) =>
         await CloseTabAsync(args.Tab);

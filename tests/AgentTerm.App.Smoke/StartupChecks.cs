@@ -52,6 +52,13 @@ internal static class StartupChecks
                 var profile = new ShellProfile("startup-smoke", "Command Prompt",
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"), "/D /Q", Environment.CurrentDirectory);
                 var addTab = typeof(MainWindow).GetMethod("AddTab", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                if (Environment.GetCommandLineArgs().Contains("--tab-title"))
+                {
+                    addTab.Invoke(window, [profile]);
+                    await AssertOutputAsync((TerminalTab)((TabViewItem)tabs.SelectedItem).Content, report, "title fixture");
+                    await AssertTabTitleAsync(window, tabs, report);
+                    return;
+                }
                 await AssertSynchronizedTimeoutAsync(window, tabs, addTab, report);
                 for (var index = 0; index < 3; index++) addTab.Invoke(window, [profile]);
                 await Task.Delay(500);
@@ -125,6 +132,28 @@ internal static class StartupChecks
                 Exit();
             }
         }
+    }
+
+    private static async Task AssertTabTitleAsync(MainWindow window, TabView tabs, List<string> report)
+    {
+        var item = (TabViewItem)tabs.SelectedItem;
+        var tab = (TerminalTab)item.Content;
+        var page = tab.ActivePage;
+        void Emit(string value) => typeof(TerminalSession).GetMethod("ProcessOutput", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(Field<TerminalSession>(page, "_session"), [new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(value))]);
+        string Header() => item.Header as string ?? "";
+        Emit("\u001b]0;" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe") + "\a");
+        await Task.Delay(600);
+        if (Header() != "Command Prompt") throw new Exception($"An executable-path console title replaced the shell name: <{Header()}>.");
+        Emit("\u001b]2;⠂ Fix the tab title\u001b\\");
+        await WaitAsync(() => Header() == "Fix the tab title", "program title in tab header");
+        if (window.Title != "Fix the tab title - AgentTerm") throw new Exception($"Window title did not follow the tab: <{window.Title}>.");
+        Emit("\u001b]0;✳ Claude Code\a");
+        await WaitAsync(() => Header() == "Claude Code", "spinner prefix removed from title");
+        Emit("\u001b]0;\a");
+        await WaitAsync(() => Header() == "Command Prompt" && window.Title == "Command Prompt - AgentTerm", "empty title restores shell name");
+        await AssertOutputAsync(tab, report, "title survivor");
+        report.Add("PASS OSC 0/2 titles drive tab header and window title, spinner prefixes trimmed, executable-path and empty titles fall back to the shell name.");
     }
 
     private static T Field<T>(object instance, string name) =>
