@@ -59,4 +59,3 @@ internal static class HostContractChecks
         Console.WriteLine("Host geometry, identity, capabilities, theme and diagnostic checks passed.");
     }
 }
-
