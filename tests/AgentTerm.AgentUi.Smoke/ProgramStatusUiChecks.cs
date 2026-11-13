@@ -394,6 +394,59 @@ internal static class ProgramStatusUiChecks
         Console.WriteLine("Native status layout checks passed without global input injection.");
     }
 
+    internal static async Task CheckCardAsync(Window window)
+    {
+        var tab = new TabViewItem { Header = "PowerShell" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var tabs = new TabView();
+        tabs.TabItems.Add(tab);
+        var root = new Grid { RequestedTheme = ElementTheme.Dark, Children = { tabs } };
+        window.Content = root;
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1100, 850));
+        window.Activate();
+        await Task.Delay(300);
+        var now = DateTimeOffset.Now;
+        PaneProgramStatus Session(string id, ProgramState state, string? app, string? title, string? message, int pane = 1, string? kind = null) =>
+            new(pane, "PowerShell", new(id, state, kind, null, app, app ?? "claude-code", title, message, now));
+        PaneProgramStatus[] session =
+        [
+            Session("", ProgramState.Working, "claude-code", null, "Refining the tab status card"),
+            Session("explore", ProgramState.Working, null, "Explore tooltip code", "Reading ProgramStatusCard.cs"),
+            Session("review", ProgramState.Done, null, "Review diff", "No blocking issues"),
+            Session("tests", ProgramState.Blocked, null, "Run smoke tests", "Allow dotnet run?", kind: "permission"),
+        ];
+        status.Update(session);
+        status.ShowDetails(tab);
+        await Task.Delay(400);
+        var card = OpenCard(tab)!;
+        await CaptureAsync(card, "card-session-dark");
+        var names = Descendants(card).OfType<TextBlock>().Where(block => block.Name == "Name").Select(block => block.Text).ToArray();
+        Check(names.Contains("Claude Code") && !names.Contains("claude-code"), "Known agents must show their product name instead of the reported app id.");
+        var moving = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled && !new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        var animating = Descendants(card).OfType<ProgramActivity>().Count(activity => activity.IsAnimating);
+        Check(animating == (moving ? 2 : 0), $"Each working session and subagent row must show the tab activity indicator only while motion is allowed (animating={animating}).");
+        status.Hide();
+        await Task.Delay(150);
+        root.RequestedTheme = ElementTheme.Light;
+        status.Update([.. session, Session("", ProgramState.Idle, "codex", null, "Waiting for input", pane: 2) with { Title = "Codex review" }]);
+        status.ShowDetails(tab);
+        await Task.Delay(400);
+        await CaptureAsync(OpenCard(tab)!, "card-session-light");
+        var paneText = Text(OpenCard(tab)!);
+        Check(paneText.Contains("Pane 2 · Codex review · PowerShell") && paneText.Contains("Pane 1 · PowerShell"),
+            "Pane headings must use the pane's program title and keep the shell only when the title replaced it.");
+        status.Update([.. session, Session("", ProgramState.Idle, "codex", null, "Waiting for input", pane: 2) with { Title = "Codex tests" }]);
+        await Task.Delay(100);
+        Check(Text(OpenCard(tab)!).Contains("Pane 2 · Codex tests · PowerShell"), "A program title change must rename its pane heading in the open card.");
+        status.Update([.. session.Select(record => record with { Status = record.Status with { State = ProgramState.Done } })]);
+        await Task.Delay(200);
+        Check(Descendants(OpenCard(tab)!).OfType<ProgramActivity>().All(activity => !activity.IsAnimating), "Finished rows must stop the activity indicator.");
+        status.Hide();
+        await Task.Delay(150);
+        Console.WriteLine($"Status card session rows, product names and per-row activity passed. Motion enabled={moving}.");
+    }
+
     private static async Task CheckReadingUpdatesAsync(TabProgramStatus status, ProgramStatusCard card)
     {
         var reports = Enumerable.Range(0, 20).Select(index => Report($"task{index:D2}", ProgramState.Working, $"Task {index}", "Reading detail " + index)).ToArray();

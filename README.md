@@ -244,7 +244,12 @@ automatically, including when a report arrives while the pointer is already over
 the tab. There is no **Program status** context-menu action.
 
 The card groups split panes and nested tasks, labels states and progress, and
-shows messages and update times. Urgent panes appear first. Every report remains
+shows messages and update times. Each row leads with the agent's mark or a state
+symbol. A working session or subagent row shows the tab's dot sweep in place of
+that symbol. Known agents appear by product name, such as Claude Code for
+`claude-code`. Nested tasks do not repeat their parent's app. Split-pane headings
+use the pane's program title and add the shell name when the title replaced it.
+Urgent panes appear first. Every report remains
 reachable by scrolling. Live updates preserve the reading position. Reopening
 starts at the top. Clearing all reports restores the shell icon. Returning to a
 shell prompt or exiting the shell also restores its icon, while retained reports

@@ -32,7 +32,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private bool _shown;
     private Task _paneClose = Task.CompletedTask;
     private Task? _disposal;
-    private readonly List<(Pane Pane, IReadOnlyList<ProgramStatus> Statuses)> _statusSources = [];
+    private readonly List<(Pane Pane, IReadOnlyList<ProgramStatus> Statuses, string? Title)> _statusSources = [];
     private IReadOnlyList<PaneProgramStatus> _programStatuses = [];
     private int _titleVersion;
     private int _readTitleVersion = -1;
@@ -64,10 +64,12 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         {
             if (ReferenceEquals(pane, _retiring)) continue;
             var current = pane.View.ReadProgramStatuses();
-            if (count == _statusSources.Count) { _statusSources.Add((pane, current)); changed = true; }
-            else if (!ReferenceEquals(_statusSources[count].Pane, pane) || !ReferenceEquals(_statusSources[count].Statuses, current))
+            // The status card names each pane by its program title, which can change while reports do not.
+            var title = current.Count == 0 ? null : ProgramTitle.Clean(pane.Page.ProgramTitle);
+            if (count == _statusSources.Count) { _statusSources.Add((pane, current, title)); changed = true; }
+            else if (!ReferenceEquals(_statusSources[count].Pane, pane) || !ReferenceEquals(_statusSources[count].Statuses, current) || _statusSources[count].Title != title)
             {
-                _statusSources[count] = (pane, current);
+                _statusSources[count] = (pane, current, title);
                 changed = true;
             }
             count++;
@@ -78,7 +80,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
             changed = true;
         }
         if (changed) _programStatuses = _statusSources.SelectMany((source, index) => source.Statuses
-            .Select(status => new PaneProgramStatus(index + 1, source.Pane.Page.Profile.Name, status))).ToArray();
+            .Select(status => new PaneProgramStatus(index + 1, source.Pane.Page.Profile.Name, status, source.Title))).ToArray();
         statuses = _programStatuses;
         return changed;
     }
