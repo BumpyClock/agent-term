@@ -211,8 +211,7 @@ internal sealed class TabProgramStatus
         if (_app != app)
         {
             _app = app;
-            _programIcon = string.Equals(app, "pi", StringComparison.OrdinalIgnoreCase)
-                ? new FontIconSource { Glyph = "π", FontFamily = new FontFamily("Segoe UI") } : null;
+            _programIcon = AgentMarks.For(app);
             if (_programIcon is null) _ = LoadProgramIconAsync(app);
         }
         RefreshIcon();

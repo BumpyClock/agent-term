@@ -252,9 +252,17 @@ remain available in the card.
 
 Working tabs show an animated activity ring, or determinate progress when the
 program reports a percentage. Programs with a matching local PATH executable
-keep that executable's icon inside the activity ring and when idle or done. Pi
-uses a built-in π mark because script-based CLI installs need not contain an
-executable icon. Other unresolved commands keep the shell icon. No executable is
+keep that executable's icon inside the activity ring and when idle or done.
+Coding agents use built-in marks because script-based CLI installs need not
+contain an executable icon. The reported `app` value selects the mark, ignoring
+case. Pi (`pi`) uses π. Claude Code (`claude`, `claude-code`), Codex (`codex`),
+Gemini CLI (`gemini`), GitHub Copilot CLI (`copilot`), Cursor Agent (`cursor`,
+`cursor-agent`), OpenCode (`opencode`), Qwen Code (`qwen`, `qwen-code`), and
+Cline (`cline`) use marks from Simple Icons (CC0). Claude, Gemini, and Qwen
+use their brand colors. Black-and-white brands follow the tab theme. High
+contrast uses the system foreground for every mark. Built-in marks take
+priority over PATH executable icons. Other unresolved commands keep the shell
+icon. No executable is
 launched to obtain its icon. Blocked and error reports use distinct attention
 symbols while their command is active. With Windows animations
 off or high contrast on, indeterminate work uses a static dotted ring; known
