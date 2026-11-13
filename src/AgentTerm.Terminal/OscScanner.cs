@@ -2,20 +2,39 @@ using System.Text;
 
 namespace AgentTerm.Terminal;
 
+public delegate void OutputSpanHandler(ReadOnlySpan<byte> bytes);
+
 public sealed class OscScanner
 {
     private enum State { Ground, Escape, Osc, OscEscape, String }
     private State _state;
     private readonly StringBuilder _sequence = new();
+    private readonly byte[] _pair = new byte[2];
     private int _length;
-    public event Action<byte>? OutputByte;
+    public event OutputSpanHandler? Output;
     public event Action<string, int>? Sequence;
     public event Action? Reset;
 
     public void Feed(ReadOnlySpan<byte> bytes)
     {
-        foreach (var value in bytes)
+        var index = 0;
+        while (index < bytes.Length)
         {
+            if (_state == State.Ground)
+            {
+                var rest = bytes[index..];
+                var escape = rest.IndexOf((byte)27);
+                if (escape < 0) { Output?.Invoke(rest); return; }
+                if (escape > 0) Output?.Invoke(rest[..escape]);
+                index += escape;
+            }
+            else if (_state == State.String)
+            {
+                var skip = bytes[index..].IndexOfAny((byte)24, (byte)26, (byte)27);
+                if (skip < 0) return;
+                index += skip;
+            }
+            var value = bytes[index++];
             if (value == 27)
             {
                 _state = _state == State.Osc ? State.OscEscape : State.Escape;
@@ -37,24 +56,19 @@ public sealed class OscScanner
                     _ => State.Ground
                 };
                 if (value == 'c') Reset?.Invoke();
-                if (_state == State.Ground) { OutputByte?.Invoke(27); OutputByte?.Invoke(value); }
+                if (_state == State.Ground) { _pair[0] = 27; _pair[1] = value; Output?.Invoke(_pair); }
                 continue;
             }
-            if (_state is State.Osc or State.String)
+            if (value is 24 or 26) { _state = State.Ground; _sequence.Clear(); }
+            else if (_state == State.Osc)
             {
-                if (value is 24 or 26) { _state = State.Ground; _sequence.Clear(); }
-                else if (_state == State.Osc)
+                if (value == 7) Finish(1);
+                else
                 {
-                    if (value == 7) Finish(1);
-                    else
-                    {
-                        _length = Math.Min(1_000_001, _length + 1);
-                        if (_length <= 1_000_000) _sequence.Append((char)value);
-                    }
+                    _length = Math.Min(1_000_001, _length + 1);
+                    if (_length <= 1_000_000) _sequence.Append((char)value);
                 }
-                continue;
             }
-            OutputByte?.Invoke(value);
         }
     }
 

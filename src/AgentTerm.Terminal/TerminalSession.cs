@@ -46,7 +46,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         _osc.Sequence += _programStatus.Accept;
         _osc.Reset += _programStatus.Reset;
         _prompt.PromptStarted += _programStatus.EndCommand;
-        _osc.OutputByte += b => _owned?.Capture.Feed(b);
+        _osc.Output += bytes => _owned?.Capture.Feed(bytes);
         _prompt.Marker += message => _owned?.Capture.Marker(message);
         _columns = columns;
         _connection = new ConPtyConnection(columns, rows);

@@ -30,7 +30,7 @@ UiContext.Run(async () =>
     var captureProtocolScanner = new OscScanner();
     captureProtocolScanner.Sequence += captureProtocol.Accept;
     var capture = new CommandOutputCapture();
-    captureProtocolScanner.OutputByte += capture.Feed; captureProtocol.Marker += capture.Marker;
+    captureProtocolScanner.Output += capture.Feed; captureProtocol.Marker += capture.Marker;
     var captureWire = "prior echo\u001b]777;capture;start\ahello 🦉終\u001b]7;file://localhost/C:/\a\u001b]777;capture;end;1;0\aprompt\u001b]777;capture;ready\a";
     foreach (var b in System.Text.Encoding.UTF8.GetBytes(captureWire)) captureProtocolScanner.Feed([b]);
     Check(capture.Text == "hello 🦉終", "Capture excludes echo/metadata/prompt with byte-fragmented UTF-8.");
@@ -38,7 +38,7 @@ UiContext.Run(async () =>
     var orderedProtocolScanner = new OscScanner();
     orderedProtocolScanner.Sequence += orderedProtocol.Accept;
     var orderedCapture = new CommandOutputCapture("a:fixture");
-    orderedProtocolScanner.OutputByte += orderedCapture.Feed; orderedProtocol.Marker += orderedCapture.Marker;
+    orderedProtocolScanner.Output += orderedCapture.Feed; orderedProtocol.Marker += orderedCapture.Marker;
     var orderedWire = "echo __AgentTermStart; command\r\nCommand started [a:fixture]\r\nfirst 🦉\r\nA\r\nnext\r\n\u001b]777;ordered;end;1;0;a:fixture\a\u001b]777;ordered;ready;a:fixture\afinal line\r\nCommand ended [a:fixture]\r\nprompt";
     foreach (var b in System.Text.Encoding.UTF8.GetBytes(orderedWire)) orderedProtocolScanner.Feed([b]);
     Check(orderedCapture.Ended && orderedCapture.Text == "first 🦉\r\nA\r\nnext\r\nfinal line\r\n", "Reordered OSC must not cut off output or capture fences/echo/prompt.");

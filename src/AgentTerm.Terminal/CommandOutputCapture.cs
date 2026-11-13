@@ -8,6 +8,7 @@ public sealed class CommandOutputCapture(string? commandId = null)
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
     private readonly StringBuilder _text = new();
     private readonly StringBuilder _fence = new();
+    private const int ChunkBytes = 512;
     private bool _capturing;
     private int _matched;
     private int _replayed;
@@ -21,37 +22,55 @@ public sealed class CommandOutputCapture(string? commandId = null)
         if (message == "start") _capturing = true;
         if (message.StartsWith("end;", StringComparison.Ordinal)) { _capturing = false; Ended = true; }
     }
-    public void Feed(byte value)
+    public void Feed(byte value) => Feed(new ReadOnlySpan<byte>(in value));
+    public void Feed(ReadOnlySpan<byte> bytes)
     {
-        if (_ansi == 1) { _ansi = value == '[' ? 2 : 0; return; }
-        if (_ansi == 2) { if (value is >= 0x40 and <= 0x7e) _ansi = 0; return; }
-        if (value == 27) { _ansi = 1; return; }
-        Span<char> chars = stackalloc char[2];
-        var count = _decoder.GetChars([value], chars, false);
-        foreach (var ch in chars[..count])
+        Span<char> chars = stackalloc char[ChunkBytes + 1];
+        var index = 0;
+        while (index < bytes.Length)
         {
-            if (Ended) return;
-            if (commandId is null) { if (_capturing) Append(ch); continue; }
-            var expected = _capturing ? _end : _start;
-            if (_matched > 0 && _fence.Length < expected.Length * 3 && ch is '\r' or '\n') { _fence.Append(ch); continue; }
-            if (ch == expected[_matched])
+            if (_ansi == 1) { _ansi = bytes[index++] == '[' ? 2 : 0; continue; }
+            if (_ansi == 2) { if (bytes[index++] is >= 0x40 and <= 0x7e) _ansi = 0; continue; }
+            var run = bytes[index..];
+            var escape = run.IndexOf((byte)27);
+            if (escape >= 0) run = run[..escape];
+            index += run.Length;
+            if (escape >= 0) { index++; _ansi = 1; }
+            while (run.Length > 0)
             {
-                _fence.Append(ch);
-                _matched++;
-                if (_matched == expected.Length)
+                var take = Math.Min(run.Length, ChunkBytes);
+                var count = _decoder.GetChars(run[..take], chars, false);
+                run = run[take..];
+                for (var i = 0; i < count; i++)
                 {
-                    _fence.Clear(); _matched = 0;
-                    if (_capturing) { Ended = true; _capturing = false; }
-                    else _capturing = true;
+                    if (Ended) return;
+                    Accept(chars[i]);
                 }
             }
-            else
+        }
+    }
+    private void Accept(char ch)
+    {
+        if (commandId is null) { if (_capturing) Append(ch); return; }
+        var expected = _capturing ? _end : _start;
+        if (_matched > 0 && _fence.Length < expected.Length * 3 && ch is '\r' or '\n') { _fence.Append(ch); return; }
+        if (ch == expected[_matched])
+        {
+            _fence.Append(ch);
+            _matched++;
+            if (_matched == expected.Length)
             {
-                if (_capturing) foreach (var pending in _fence.ToString()) Append(pending);
                 _fence.Clear(); _matched = 0;
-                if (ch == expected[0]) { _fence.Append(ch); _matched = 1; }
-                else if (_capturing) Append(ch);
+                if (_capturing) { Ended = true; _capturing = false; }
+                else _capturing = true;
             }
+        }
+        else
+        {
+            if (_capturing) foreach (var pending in _fence.ToString()) Append(pending);
+            _fence.Clear(); _matched = 0;
+            if (ch == expected[0]) { _fence.Append(ch); _matched = 1; }
+            else if (_capturing) Append(ch);
         }
     }
     private void Append(char ch)
