@@ -115,6 +115,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _agentBar.InteractRequested += AllowAgentInput;
         _agent.Changed += AgentChanged;
         Terminal.Input.TextCompositionStarted += Input_CompositionStarted;
+        InitializeTerminalAutomation();
         Terminal.Input.TextCompositionEnded += Input_CompositionEnded;
         Terminal.Input.TextChanging += Input_TextChanging;
         Terminal.AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(Terminal_KeyUp), true);
@@ -515,6 +516,20 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         return mods;
     }
 
+    private static TerminalModifiers KeyboardModifiers()
+    {
+        var mods = Modifiers();
+        if (Down(VirtualKey.RightShift)) mods |= TerminalModifiers.ShiftRight;
+        if (Down(VirtualKey.RightControl)) mods |= TerminalModifiers.ControlRight;
+        if (Down(VirtualKey.RightMenu)) mods |= TerminalModifiers.AltRight;
+        if (Down(VirtualKey.RightWindows)) mods |= TerminalModifiers.SuperRight;
+        if ((InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.CapitalLock) & CoreVirtualKeyStates.Locked) != 0)
+            mods |= TerminalModifiers.CapsLock;
+        if ((InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.NumberKeyLock) & CoreVirtualKeyStates.Locked) != 0)
+            mods |= TerminalModifiers.NumLock;
+        return mods;
+    }
+
     private void PreferencesChanged()
     {
         var previous = _appearance;
@@ -684,6 +699,16 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             if (_session is not { } session) return;
             var point = e.GetCurrentPoint(Terminal);
+            if (point.Properties.IsLeftButtonPressed &&
+                TerminalKeyboardInput.ShortcutModifiers(Modifiers()) == (TerminalModifiers.Control | TerminalModifiers.Shift))
+            {
+                ReleaseApplicationMouse();
+                FocusTerminal(FocusState.Pointer);
+                if (_presentedFrame is { } frame && Terminal.Geometry.TryCellAt(point.Position, out var outputColumn, out var outputRow) &&
+                    session.TrySelectFrameCommandOutput(frame, outputColumn, outputRow)) RefreshOutput(session);
+                e.Handled = true;
+                return;
+            }
             if (HandleLinkPress(e, point)) return;
             var button = ChangedMouseButton(point);
             if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
@@ -861,10 +886,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         var status = e.KeyStatus;
         var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
         var key = IsSidedModifier(e.OriginalKey) ? e.OriginalKey : e.Key;
-        var mods = Modifiers();
+        var rawMods = KeyboardModifiers();
+        var mods = TerminalKeyboardInput.ShortcutModifiers(rawMods);
         const TerminalModifiers ctrlAlt = TerminalModifiers.Control | TerminalModifiers.Alt;
         var altGr = (mods & ctrlAlt) == ctrlAlt && Down(VirtualKey.RightMenu);
         var ctrlShift = mods == (TerminalModifiers.Control | TerminalModifiers.Shift);
+        if (HandleKeyboardSelection(session, e, physical, key, mods)) return;
         var hasSelection = _presentedFrame?.HasSelection == true;
         var selectionCopy = (key == VirtualKey.C && mods == TerminalModifiers.Control && hasSelection) ||
             (key == VirtualKey.Insert && mods == TerminalModifiers.Control && hasSelection) ||
@@ -881,7 +908,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             (key == VirtualKey.Escape && mods == TerminalModifiers.None && hasSelection);
         try
         {
-            if (shortcut || (status.WasKeyDown && _keyboard.IsShortcut(physical)))
+            if ((shortcut && !_keyboard.IsForwarded(physical)) || (status.WasKeyDown && _keyboard.IsShortcut(physical)))
             {
                 _keyboard.KeyDown(physical, (uint)key, mods, status.WasKeyDown, TerminalKeyboardInput.Route.Shortcut);
                 e.Handled = true;
@@ -932,6 +959,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 if (key == VirtualKey.Escape)
                 {
                     session.ClearSelection();
+                    SetKeyboardMarkMode(false);
                     RefreshOutput(session);
                     return;
                 }
@@ -946,17 +974,20 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             if (_state != SessionState.Running) return;
 
             var virtualKey = (uint)key;
+            if (!IsSidedModifier(key) && virtualKey is not (0x10 or 0x11 or 0x12)) SetKeyboardMarkMode(false);
             var special = virtualKey is < 0x20 or (>= 0x21 and <= 0x2F) or (>= 0x60 and <= 0x87 and not 0x6C)
                 or 0x5D or 0x90 or 0x91 || IsSidedModifier(key);
             var direct = special || (mods & TerminalModifiers.Super) != 0 || (!altGr && (mods & ctrlAlt) != 0);
-            var action = _keyboard.KeyDown(physical, virtualKey, mods, status.WasKeyDown,
+            var layoutCodepoint = TerminalKeyboardLayout.UnshiftedCodepoint(virtualKey, physical.ScanCode);
+            var action = _keyboard.KeyDown(physical, virtualKey, rawMods, status.WasKeyDown,
                 direct ? TerminalKeyboardInput.Route.Direct : TerminalKeyboardInput.Route.Text,
-                !direct && altGr ? ctrlAlt : TerminalModifiers.None);
+                !direct && altGr ? ctrlAlt : TerminalModifiers.None, layoutCodepoint);
             _textKey = direct ? null : physical;
             if (direct)
             {
                 e.Handled = true;
-                session.SendKey(virtualKey, mods, action);
+                session.SendPhysicalKey(virtualKey, rawMods, action, null, physical.ScanCode, physical.Extended,
+                    TerminalModifiers.None, layoutCodepoint);
                 RefreshLocalInput(session);
             }
         }
@@ -973,6 +1004,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             var text = session.ReadSelectionText();
             if (text is null) return;
+            SetKeyboardMarkMode(false);
             if (text.Length == 0)
             {
                 session.ClearSelection();
@@ -1020,8 +1052,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var status = e.KeyStatus;
             var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
             if (_textKey == physical) _textKey = null;
-            if (_keyboard.KeyUp(physical, Modifiers()) is { } key && _state == SessionState.Running)
-                session.SendKey(key.Key, key.Modifiers, key.Action);
+            if (_keyboard.KeyUp(physical, KeyboardModifiers()) is { } key && _state == SessionState.Running)
+                ForwardKey(session, key);
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
     }
@@ -1061,7 +1093,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             if (_keyboard.Text(physical, text) is { } input)
             {
-                session.SendKey(input.Key, input.Modifiers, input.Action, input.Text);
+                ForwardKey(session, input);
                 RefreshLocalInput(session);
             }
         }
@@ -1086,6 +1118,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         _cursorTimer.Stop();
         _composition.Cancel();
+        SetKeyboardMarkMode(false);
         _textKey = null;
         Terminal.SetCompositionVisible(false);
         ClearInput();
@@ -1096,7 +1129,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             ReleaseApplicationMouse();
             foreach (var key in releases)
-                session.SendKey(key.Key, key.Modifiers, key.Action);
+                ForwardKey(session, key);
             session.SetFocus(false);
         }
         catch (Exception exception) { await FailSessionAsync(exception); }

@@ -14,9 +14,10 @@ namespace AgentTerm_App;
 public sealed partial class TerminalSurface
 {
     private readonly ImageBitmaps _imageBitmaps = new();
+    internal long ImageBitmapCacheBytes => _imageBitmaps.Bytes;
 
     private static void DrawImages(CanvasDrawingSession drawing, TerminalFrame frame, TerminalImageLayer layer,
-        float cellWidth, float cellHeight, float gridTop, ImageBitmaps? bitmaps, Rect? viewportClip = null)
+        float cellWidth, float cellHeight, float gridTop, ImageBitmaps? bitmaps, Rect? viewportClip = null, Rect? damageClip = null)
     {
         var images = frame.Images;
         if (bitmaps is null || images.IsEmpty || images.CellPixelWidth <= 0 || images.CellPixelHeight <= 0) return;
@@ -31,7 +32,8 @@ public sealed partial class TerminalSurface
             {
                 if (placement.Layer != layer) continue;
                 var target = PlacementBounds(placement, cellWidth, cellHeight, gridTop, scaleX, scaleY);
-                if (target.Width <= 0 || target.Height <= 0 || !Intersects(target, grid)) continue;
+                if (target.Width <= 0 || target.Height <= 0 || !Intersects(target, grid) ||
+                    damageClip is { } damage && !Intersects(target, damage)) continue;
                 if (bitmaps.Get(drawing.Device, placement, drawing) is not { } bitmap) continue;
                 clip ??= drawing.CreateLayer(1, grid);
                 var size = bitmap.Bitmap.SizeInPixels;
@@ -58,6 +60,39 @@ public sealed partial class TerminalSurface
 
     private static bool Intersects(Rect a, Rect b) =>
         a.X < b.X + b.Width && b.X < a.X + a.Width && a.Y < b.Y + b.Height && b.Y < a.Y + a.Height;
+
+    // Compare draw-order slots rather than sets. Reordering or removing duplicate translucent placements changes
+    // their composition even when the set of placement values stays the same. Old bounds clear moved/deleted pixels.
+    internal static void AddImageDamage(TerminalImages previous, TerminalImages current, int columns, int rows,
+        float cellWidth, float cellHeight, float gridTop,
+        List<(int FirstRow, int EndRow, int FirstColumn, int EndColumn)> spans)
+    {
+        var sameScale = previous.CellPixelWidth == current.CellPixelWidth && previous.CellPixelHeight == current.CellPixelHeight;
+        for (var i = 0; i < Math.Max(previous.Placements.Count, current.Placements.Count); i++)
+        {
+            var before = i < previous.Placements.Count ? previous.Placements[i] : null;
+            var after = i < current.Placements.Count ? current.Placements[i] : null;
+            if (sameScale && before == after) continue;
+            Add(before, previous);
+            Add(after, current);
+        }
+
+        void Add(TerminalImagePlacement? placement, TerminalImages images)
+        {
+            if (placement is null || images.CellPixelWidth <= 0 || images.CellPixelHeight <= 0) return;
+            var bounds = PlacementBounds(placement, cellWidth, cellHeight, gridTop,
+                cellWidth / images.CellPixelWidth, cellHeight / images.CellPixelHeight);
+            var firstRow = (int)Math.Clamp(Math.Floor((bounds.Top - gridTop) / cellHeight), 0, rows);
+            var endRow = (int)Math.Clamp(Math.Ceiling((bounds.Bottom - gridTop) / cellHeight), 0, rows);
+            var firstColumn = (int)Math.Clamp(Math.Floor(bounds.Left / cellWidth), 0, columns);
+            var endColumn = (int)Math.Clamp(Math.Ceiling(bounds.Right / cellWidth), 0, columns);
+            if (firstRow < endRow && firstColumn < endColumn)
+            {
+                var span = (firstRow, endRow, firstColumn, endColumn);
+                if (spans.Count == 0 || spans[^1] != span) spans.Add(span);
+            }
+        }
+    }
 
     /// <summary>
     /// Device bitmaps keyed by image generation, which uniquely names a version of an image's pixels, and the source
@@ -88,9 +123,11 @@ public sealed partial class TerminalSurface
 
         internal int Count => _entries.Count;
         internal long Bytes => _bytes;
+        internal long Requests { get; private set; }
 
         internal Entry? Get(CanvasDevice device, TerminalImagePlacement placement, CanvasDrawingSession? drawing = null)
         {
+            Requests++;
             if (!ReferenceEquals(device, _device))
             {
                 Clear();

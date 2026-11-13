@@ -93,10 +93,11 @@ internal static class GridGeometryChecks
     {
         var frame = Frame(rows: 6, columns: 4, new TerminalViewport(50, 44, 6, false), _ => Background,
             new TerminalCursor(0, 5, true, false, TerminalCursorShape.Block, CursorColor));
-        var cells = frame.Cells;
+        var cells = frame.Cells.ToArray();
         cells[2 * 4 + 1] = cells[2 * 4 + 1] with { Text = ">" };
         cells[4 * 4 + 3] = cells[4 * 4 + 3] with { Background = Red };
         cells[5 * 4 + 0] = cells[5 * 4 + 0] with { Underline = true };
+        frame = frame.WithCells(cells);
         var geometry = TerminalGridGeometry.For(frame, 120, CellWidth, CellHeight, bottomAligned: true);
         Expect(geometry.RowsBlank(frame, 0, 2), "Two empty rows are blank.");
         Expect(!geometry.RowsBlank(frame, 1, 2), "Prompt text on the second reserved row must hide the card.");

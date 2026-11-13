@@ -19,6 +19,8 @@
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.cs" Link="TerminalSurface.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.Scrolling.cs" Link="TerminalSurface.Scrolling.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.Images.cs" Link="TerminalSurface.Images.cs" />
+    <Compile Include="../../src/AgentTerm.App/TerminalSurface.Automation.cs" Link="TerminalSurface.Automation.cs" />
+    <Compile Include="../../src/AgentTerm.App/TerminalSurface.AutomationText.cs" Link="TerminalSurface.AutomationText.cs" />
     <Compile Include="../../src/AgentTerm.App/AcrylicRecipe.cs" Link="AcrylicRecipe.cs" />
   </ItemGroup>
 </Project>

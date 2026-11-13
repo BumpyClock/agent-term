@@ -86,6 +86,7 @@ public sealed partial class TerminalSurface : UserControl
     private bool _cursorPhase = true;
     private bool _paintedTextPhase = true;
     internal bool HasBlinkingText { get; private set; }
+    private bool[] _rowBlink = [];
     private bool _resourcesReady;
     private bool _suspended;
     private float _terminalFontSize = 14;
@@ -171,14 +172,32 @@ public sealed partial class TerminalSurface : UserControl
         var previous = _frame;
         _frame = frame;
         if (previous is null || !ReferenceEquals(previous.Cells, frame.Cells))
-            HasBlinkingText = frame.Cells.Any(cell => cell.Blink && !cell.Hidden);
+        {
+            if (previous is null || previous.Rows != frame.Rows || previous.Columns != frame.Columns)
+                _rowBlink = new bool[frame.Rows];
+            for (var row = 0; row < frame.Rows; row++)
+            {
+                if (previous is not null && previous.Rows == frame.Rows && previous.Columns == frame.Columns && previous.Cells.SharesRowWith(frame.Cells, row)) continue;
+                _rowBlink[row] = false;
+                for (var col = 0; col < frame.Columns; col++)
+                {
+                    var cell = frame.Cells[row * frame.Columns + col];
+                    if (cell.Blink && !cell.Hidden) { _rowBlink[row] = true; break; }
+                }
+            }
+            HasBlinkingText = _rowBlink.Any(value => value);
+        }
         PositionInput();
         if (previous is null || !ReferenceEquals(previous.Cells, frame.Cells) || previous.Columns != frame.Columns ||
             previous.Rows != frame.Rows || previous.Viewport.TopInset != frame.Viewport.TopInset || previous.Background != frame.Background ||
             previous.SelectionBackground != frame.SelectionBackground || previous.SelectionForeground != frame.SelectionForeground ||
-            !ReferenceEquals(previous.Images, frame.Images))
+            !ReferenceEquals(previous.Images, frame.Images) || !ReferenceEquals(previous.SearchHighlights, frame.SearchHighlights))
             _canvas?.Invalidate();
         else if (ReferenceEquals(_paintedFrame, previous)) _paintedFrame = frame;
+        NotifyAutomationFrameChanged(previous is null || !ReferenceEquals(previous.Cells, frame.Cells) ||
+            previous.Viewport != frame.Viewport || previous.Columns != frame.Columns || previous.Rows != frame.Rows,
+            previous is null || previous.HasSelection != frame.HasSelection ||
+            frame.HasSelection && !ReferenceEquals(previous.Cells, frame.Cells));
         UpdateCursorOverlay();
     }
 
@@ -391,7 +410,7 @@ public sealed partial class TerminalSurface : UserControl
         var full = originChanged || frame.OverscanAbove.Length != 0 || frame.OverscanBelow.Length != 0 || previous is null || previous.Columns != frame.Columns || previous.Rows != frame.Rows ||
             previous.Viewport.TopInset != frame.Viewport.TopInset || previous.Background != frame.Background ||
             previous.SelectionBackground != frame.SelectionBackground || previous.SelectionForeground != frame.SelectionForeground ||
-            !ReferenceEquals(previous.Images, frame.Images);
+            !ReferenceEquals(previous.SearchHighlights, frame.SearchHighlights);
         _glyphLayouts.Configure(TerminalFontFamily, _terminalFontSize, CellWidth, CellHeight);
         _glyphLayouts.FitGrid(frame.Cells.Length);
         if (full)
@@ -401,7 +420,8 @@ public sealed partial class TerminalSurface : UserControl
                     _terminalFontSize, _acrylicBackground, TerminalFontFamily, true, top, _cursorPhase, _imageBitmaps, (float)ActualHeight);
             _imageBitmaps.Trim(frame.Images);
         }
-        else if (!ReferenceEquals(previous!.Cells, frame.Cells) || _paintedTextPhase != _cursorPhase && HasBlinkingText)
+        else if (!ReferenceEquals(previous!.Cells, frame.Cells) || !ReferenceEquals(previous.Images, frame.Images) ||
+            _paintedTextPhase != _cursorPhase && HasBlinkingText)
         {
             using var drawing = _renderTarget.CreateDrawingSession();
             var scale = _canvas.Dpi / 96;
@@ -410,27 +430,32 @@ public sealed partial class TerminalSurface : UserControl
             var latest = _damageColumns;
             spans.Clear();
             latest.Clear();
+            if (!ReferenceEquals(previous.Images, frame.Images))
+                AddImageDamage(previous.Images, frame.Images, frame.Columns, rows, CellWidth, CellHeight, top, spans);
             for (var row = 0; row < rows; row++)
-            for (var col = 0; col < frame.Columns;)
             {
-                if (!CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) { col++; continue; }
-                var first = Math.Max(0, col - 2);
-                var lastChanged = col++;
-                while (col < frame.Columns && col <= lastChanged + 4)
+                if (previous.Cells.SharesRowWith(frame.Cells, row) && !(_paintedTextPhase != _cursorPhase && _rowBlink[row])) continue;
+                for (var col = 0; col < frame.Columns;)
                 {
-                    if (CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) lastChanged = col;
-                    col++;
-                }
-                var end = Math.Min(frame.Columns, lastChanged + 3);
-                if (latest.TryGetValue((first, end), out var previousSpan) && spans[previousSpan].EndRow == row)
-                {
-                    var span = spans[previousSpan];
-                    spans[previousSpan] = (span.FirstRow, row + 1, first, end);
-                }
-                else
-                {
-                    latest[(first, end)] = spans.Count;
-                    spans.Add((row, row + 1, first, end));
+                    if (!CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) { col++; continue; }
+                    var first = Math.Max(0, col - 2);
+                    var lastChanged = col++;
+                    while (col < frame.Columns && col <= lastChanged + 4)
+                    {
+                        if (CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) lastChanged = col;
+                        col++;
+                    }
+                    var end = Math.Min(frame.Columns, lastChanged + 3);
+                    if (latest.TryGetValue((first, end), out var previousSpan) && spans[previousSpan].EndRow == row)
+                    {
+                        var span = spans[previousSpan];
+                        spans[previousSpan] = (span.FirstRow, row + 1, first, end);
+                    }
+                    else
+                    {
+                        latest[(first, end)] = spans.Count;
+                        spans.Add((row, row + 1, first, end));
+                    }
                 }
             }
             foreach (var span in spans)
@@ -448,7 +473,7 @@ public sealed partial class TerminalSurface : UserControl
                     Math.Max(0, (int)MathF.Floor((upper - top) / CellHeight)),
                     Math.Min(rows, (int)MathF.Ceiling((lower - top) / CellHeight)),
                     Math.Max(0, (int)MathF.Floor(left / CellWidth) - 1),
-                    Math.Min(frame.Columns, (int)MathF.Ceiling(right / CellWidth) + 1), _cursorPhase, _imageBitmaps);
+                    Math.Min(frame.Columns, (int)MathF.Ceiling(right / CellWidth) + 1), _cursorPhase, _imageBitmaps, damageClip: damage);
             }
         }
         _paintedFrame = frame;
@@ -488,12 +513,13 @@ public sealed partial class TerminalSurface : UserControl
 
     private static void DrawCells(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, GlyphLayouts layouts, float gridTop,
-        int firstRow, int endRow, int firstColumn, int endColumn, bool textPhase, ImageBitmaps? images = null, Rect? viewportClip = null)
+        int firstRow, int endRow, int firstColumn, int endColumn, bool textPhase, ImageBitmaps? images = null,
+        Rect? viewportClip = null, Rect? damageClip = null)
     {
         TerminalCell CellAt(int row, int col) => row < 0 ? frame.OverscanAbove[0].Cells[col]
             : row >= frame.Rows ? frame.OverscanBelow[0].Cells[col] : frame.Cells[row * frame.Columns + col];
         var device = drawing.Device;
-        DrawImages(drawing, frame, TerminalImageLayer.BelowBackground, cellWidth, cellHeight, gridTop, images, viewportClip);
+        DrawImages(drawing, frame, TerminalImageLayer.BelowBackground, cellWidth, cellHeight, gridTop, images, viewportClip, damageClip);
         var antialiasing = drawing.Antialiasing;
         drawing.Antialiasing = CanvasAntialiasing.Aliased;
         for (var row = firstRow; row < endRow; row++)
@@ -508,7 +534,7 @@ public sealed partial class TerminalSurface : UserControl
                 if (col < endColumn)
                 {
                     var cell = CellAt(row, col);
-                    fill = cell.Selected || cell.Background != frame.Background;
+                    fill = cell.Selected || cell.HasBackground || cell.Background != frame.Background;
                     color = cell.Selected ? frame.SelectionBackground : cell.Background;
                 }
                 if (runStart >= 0 && (!fill || color != runColor))
@@ -520,7 +546,20 @@ public sealed partial class TerminalSurface : UserControl
             }
         }
         drawing.Antialiasing = antialiasing;
-        DrawImages(drawing, frame, TerminalImageLayer.BelowText, cellWidth, cellHeight, gridTop, images, viewportClip);
+        DrawImages(drawing, frame, TerminalImageLayer.BelowText, cellWidth, cellHeight, gridTop, images, viewportClip, damageClip);
+        if (frame.SearchHighlights is { } highlights)
+            foreach (var span in highlights.Spans)
+            {
+                if (span.Row < firstRow || span.Row >= endRow || span.Row < 0 || span.Row >= frame.Rows) continue;
+                var first = Math.Max(firstColumn, Math.Clamp(span.StartColumn, 0, frame.Columns - 1));
+                var last = Math.Clamp(span.EndColumn, 0, frame.Columns - 1);
+                // Native matches end at a wide glyph's head. Cover its continuation cell too.
+                last = Math.Min(endColumn - 1, last + Math.Max(1, (int)CellAt(span.Row, last).Width) - 1);
+                if (last < first) continue;
+                var color = span.Selected ? Color.FromArgb(100, 255, 170, 30) : Color.FromArgb(65, 255, 210, 70);
+                drawing.FillRectangle(first * cellWidth, gridTop + span.Row * cellHeight,
+                    (last - first + 1) * cellWidth, cellHeight, color);
+            }
         for (var row = firstRow; row < endRow; row++)
         for (var col = firstColumn; col < endColumn; col++)
         {
@@ -537,7 +576,7 @@ public sealed partial class TerminalSurface : UserControl
             }
             DrawDecorations(drawing, cell, x, y, width, cellHeight, foreground);
         }
-        DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images, viewportClip);
+        DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images, viewportClip, damageClip);
     }
 
     private static void DrawDecorations(CanvasDrawingSession drawing, TerminalCell cell, float x, float y,
@@ -706,8 +745,8 @@ internal readonly record struct TerminalGridGeometry(double Top, int Columns, in
         for (var row = Math.Max(0, firstRow); row < Math.Min(firstRow + count, Rows); row++)
             for (var column = 0; column < frame.Columns; column++)
             {
-                var cell = frame.Cells[row * frame.Columns + column];
-                if (!string.IsNullOrWhiteSpace(cell.Text) || cell.Background != frame.Background || cell.Underline || cell.Strikethrough || cell.Overline)
+                var cell = frame.Cells[checked((int)row * frame.Columns + column)];
+                if (!string.IsNullOrWhiteSpace(cell.Text) || cell.HasBackground || cell.Background != frame.Background || cell.Underline || cell.Strikethrough || cell.Overline)
                     return false;
             }
         return true;

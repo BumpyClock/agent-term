@@ -30,7 +30,13 @@ internal static partial class Program
         terminal.SetTheme(TerminalThemes.Resolve("agent-dark", false));
         Write("\x1b[?1049h\x1b[2J\x1b[?25lSparse edits and cached glyphs\r\n\x1b[1;31mBold red\x1b[0m \x1b[3mItalic\x1b[0m é 界 🙂\r\nLast fixture row");
         await Check("initial");
+        terminal.Find("row", true); await Check("search-highlight");
+        terminal.Find("glyphs", true); await Check("search-highlight-moved");
+        terminal.Find("", true); terminal.ClearSelection(); await Check("search-highlight-cleared");
         Write("\x1b[1;8HX"); await Check("sparse-edit");
+        Write("\x1b[1;1Hdrop");
+        terminal.ReadFrame();
+        Write("\x1b[2;1Hnext"); await Check("dropped-intermediate-frame");
         Write("\x1b[2;1H\x1b[K"); await Check("erase-row");
         Write("\x1b[3;2H界"); await Check("wide-glyph");
         Write("\x1b[3;2Hx "); await Check("wide-to-narrow");
@@ -52,6 +58,46 @@ internal static partial class Program
         Write("\x1b[4;1H\x1b[48;2;20;80;140mColor band\x1b[0m"); await Check("colored-background");
         surface.SetAcrylicBackground(false); transparent = false; await Check("solid-background");
         surface.SetAcrylicBackground(true); transparent = true; await Check("transparent-background");
+
+        terminal.SetImageStorageLimit(TerminalImages.DefaultStorageLimit);
+        terminal.SetCellPixelSize(10, 20);
+        Write("\x1b[?25l\x1b[H\x1b[2JImage damage fixture\x1b[3;1H\x1b[48;2;12;12;12mexplicit background\x1b[0m");
+        Image(1, 2, 20, -2147483648, 255, 0, 0, 128);
+        Image(2, 5, 30, -1, 0, 255, 0, 128);
+        Image(3, 8, 40, 0, 0, 0, 255, 128);
+        if (terminal.ReadFrame().Images.Placements.Count != 3) throw new Exception("Image damage fixture requires three visible placements.");
+        await Check("images-three-layers");
+        var bitmapCache = typeof(TerminalSurface).GetField("_imageBitmaps", Private)!.GetValue(surface)!;
+        var requestProperty = bitmapCache.GetType().GetProperty("Requests", Private)!;
+        long ImageRequests() => (long)requestProperty.GetValue(bitmapCache)!;
+        var requests = ImageRequests();
+        Write("\x1b[1;1HX\x1b[5;1HY\x1b[9;1HZ"); await Check("images-unrelated-sparse-text");
+        var unrelatedRequests = ImageRequests() - requests;
+        if (unrelatedRequests != 0) throw new Exception($"Unrelated text damage accessed the image cache {unrelatedRequests} times.");
+        requests = ImageRequests();
+        Image(2, 5, 30, -1, 255, 255, 0, 128); await Check("images-small-animation");
+        var animationRequests = ImageRequests() - requests;
+        if (animationRequests != 1) throw new Exception($"One changed image should access only its bitmap, got {animationRequests} accesses.");
+        Image(3, 8, 41, 0, 255, 0, 255, 128); await Check("images-moved");
+        Image(3, 5, 30, 0, 255, 0, 255, 128); await Check("images-overlapping-alpha");
+        Image(2, 5, 30, -1, 0, 128, 255, 128); await Check("images-overlapping-animation");
+        var imageFrame = terminal.ReadFrame();
+        var duplicate = imageFrame.Images.Placements[^1];
+        await Check("images-duplicate-alpha", imageFrame with { Images = imageFrame.Images with
+            { Placements = [.. imageFrame.Images.Placements, duplicate] } });
+        await Check("images-duplicate-removed");
+        await Check("images-scale-changed", imageFrame with { Images = imageFrame.Images with
+            { CellPixelWidth = 20, CellPixelHeight = 40 } });
+        await Check("images-scale-restored");
+        surface.SetAcrylicBackground(false); transparent = false; await Check("images-solid");
+        Image(3, 6, 31, 0, 128, 0, 255, 128); await Check("images-solid-moved");
+        surface.SetAcrylicBackground(true); transparent = true; await Check("images-acrylic-restored");
+        Write("\x1b_Ga=d,d=I,i=1,q=2\x1b\\"); await Check("images-deleted-below-background");
+        terminal.BeginSelection(29, 4); terminal.ExtendSelection(32, 5); terminal.EndSelection(); await Check("images-selection");
+        Image(2, 5, 30, -1, 0, 255, 255, 192); await Check("images-animation-with-selection");
+        terminal.ClearSelection();
+        Write("\x1b_Ga=d,d=A,q=2\x1b\\"); await Check("images-all-deleted");
+        Console.WriteLine($"Image damage cache accesses: unrelated text {unrelatedRequests}, one animation {animationRequests}.");
 
         suspend.Invoke(surface, null);
         if (retainedField.GetValue(surface) is not null || glyphCache.Count != 0)
@@ -107,15 +153,18 @@ internal static partial class Program
         Write("\x1b[?5l"); await Check("reverse-restored");
         File.WriteAllText(output, JsonSerializer.Serialize(new
         {
-            passed = cases.Count, cases, glyphCache = new { capacity, cjkScreens, cjkCreated, finalLayouts = glyphCache.Count }
+            passed = cases.Count, cases, imageDamage = new { unrelatedRequests, animationRequests },
+            glyphCache = new { capacity, cjkScreens, cjkCreated, finalLayouts = glyphCache.Count }
         }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Retained raster parity passed {cases.Count} transitions.");
 
         void Write(string value) => terminal.Write(Encoding.UTF8.GetBytes(value));
-        async Task Check(string name)
+        void Image(int id, int row, int column, int z, byte r, byte g, byte b, byte alpha) =>
+            Write($"\x1b[{row};{column}H\x1b_Ga=T,f=32,s=1,v=1,c=2,r=2,C=1,i={id},z={z},q=2;{Convert.ToBase64String([r, g, b, alpha])}\x1b\\");
+        async Task Check(string name, TerminalFrame? snapshot = null)
         {
             var canvas = (CanvasControl)canvasField.GetValue(surface)!;
-            var frame = terminal.ReadFrame();
+            var frame = snapshot ?? terminal.ReadFrame();
             var drawn = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             void Completed(CanvasControl _, CanvasDrawEventArgs __) => drawn.TrySetResult();
             canvas.Draw += Completed;

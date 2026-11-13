@@ -23,6 +23,7 @@
   <ItemGroup Condition="'$(StartupSmoke)' == 'true'">
     <Compile Include="../../tests/AgentTerm.App.Smoke/StartupChecks.cs" Link="StartupChecks.cs" />
     <Compile Include="../../tests/AgentTerm.App.Smoke/LibghosttyChecks.cs" Link="LibghosttyChecks.cs" />
+    <Compile Include="../../tests/AgentTerm.App.Smoke/KeyboardAutomationChecks.cs" Link="KeyboardAutomationChecks.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />

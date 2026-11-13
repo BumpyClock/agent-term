@@ -19,7 +19,7 @@ internal static class FidelityRasterChecks
             decorations[style] = image.GetPixelColors();
             if (!image.GetPixelColors(0, 16, 60, 4).Any(c => c.R > 80 && c.G < 50)) throw new Exception($"Missing {style} underline color.");
             if (!image.GetPixelColors(0, 0, 60, 3).Any(c => c.R > 80 && c.G > 80)) throw new Exception("Missing overline.");
-            var hidden = frame with { Cells = [cell with { Hidden = true, Selected = true }] };
+            var hidden = frame.WithCells([cell with { Hidden = true, Selected = true }]);
             using (var drawing = image.CreateDrawingSession()) TerminalSurface.DrawFrame(drawing, hidden, 60, 20, true, true);
             if (image.GetPixelColors().Any(c => c.R > 80 && c.G < 50)) throw new Exception("Hidden selected text drew an underline.");
         }
@@ -50,7 +50,7 @@ internal static class FidelityRasterChecks
                 throw new Exception($"Blink must hide all glyphs and decorations, preserving background for {text}, selected={selected}.");
             if (selected && on.Any(c => c.R > 80 && c.G < 50))
                 throw new Exception("Selection must override the explicit underline color.");
-            var hidden = frame with { Cells = [cell with { Hidden = true }] };
+            var hidden = frame.WithCells([cell with { Hidden = true }]);
             using (var drawing = image.CreateDrawingSession()) TerminalSurface.DrawFrame(drawing, hidden, 60, 20, true, true);
             if (!image.GetPixelColors().SequenceEqual(off))
                 throw new Exception("Hidden and blink-off text must preserve the same background.");

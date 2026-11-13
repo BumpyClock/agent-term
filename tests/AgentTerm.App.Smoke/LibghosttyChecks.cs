@@ -15,6 +15,8 @@ internal static partial class StartupChecks
 {
     private static async Task AssertLibghosttyAsync(TerminalTab tab, List<string> report)
     {
+        KeyboardAutomationChecks.Run();
+        report.Add("PASS UI Automation reads Unicode text and routes native selection.");
         var page = tab.ActivePage;
         var surface = (TerminalSurface)page.FindName("Terminal");
         var session = Field<TerminalSession>(page, "_session");
@@ -61,8 +63,9 @@ internal static partial class StartupChecks
             .SelectMany(popup => Descendants(popup.Child)).OfType<ContentDialog>().FirstOrDefault()) is not null, "full link confirmation");
         try
         {
-            if (!Descendants(dialog!).OfType<TextBlock>().Any(block => block.Text == target.Uri!.AbsoluteUri && block.Text.Contains("destination.example")))
-                throw new Exception("Link confirmation must show the complete validated destination, including a host beyond the hover truncation.");
+            await WaitAsync(() => Descendants(dialog!).OfType<TextBlock>().Any(block =>
+                block.Text == target.Uri!.AbsoluteUri && block.Text.Contains("destination.example")),
+                "the complete link destination in the laid-out confirmation dialog");
         }
         finally { dialog!.Hide(); }
         if (await confirmation) throw new Exception("Cancelling confirmation must not approve launching a link.");
@@ -99,6 +102,17 @@ internal static partial class StartupChecks
         await WaitAsync(() => Field<ProgressBar>(page, "_progressBar").Visibility == Visibility.Collapsed &&
             Field<PaneEffects>(page, "_effects").Notices.Items.Count == 0, "RIS withdraws cards and progress");
         report.Add("PASS native progress and notification callbacks reach WinUI and RIS withdraws them.");
+
+        Emit("\x1b]133;A\a$ test\r\n\x1b]133;C\a10%\rdone\r\n\x1b]133;D;0\a");
+        Refresh();
+        var commandFrame = Presented();
+        if (!session.TrySelectFrameCommandOutput(commandFrame, 0, 1) || session.ReadSelectionText()?.Trim() != "done")
+            throw new Exception("Command output selection must use native semantic rows and CR rewrites.");
+        Emit("\x1b[2;1Hnew");
+        if (session.TrySelectFrameCommandOutput(commandFrame, 0, 1))
+            throw new Exception("Command output selection must reject a stale displayed frame.");
+        Emit("\u001bc");
+        report.Add("PASS native command output selection and stale-frame rejection.");
 
         Emit("offline-search-marker\r\n");
         var snapshot = await page.CaptureArchiveSnapshotAsync();

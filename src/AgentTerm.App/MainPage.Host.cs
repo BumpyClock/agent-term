@@ -41,9 +41,22 @@ public sealed partial class MainPage
     public async Task ShowHostDiagnosticsAsync()
     {
         if (_session is not { } session) return;
-        var text = new TextBox { Text = session.ReadDiagnosticReport(), IsReadOnly = true, AcceptsReturn = true,
+        string Report() => session.ReadDiagnosticReport() + $"Device image cache bytes {Terminal.ImageBitmapCacheBytes} (excludes transient draws)\n";
+        var text = new TextBox { Text = Report(), IsReadOnly = true, AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap, MinWidth = 420, MaxHeight = 500 };
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Terminal diagnostics", Content = text, CloseButtonText = "Close" };
+        var capture = new CheckBox { Content = "Count unsupported protocols (no payloads)", IsChecked = session.UnknownSequenceDiagnosticsEnabled };
+        capture.Click += (_, _) =>
+        {
+            session.SetUnknownSequenceDiagnostics(capture.IsChecked == true);
+            text.Text = Report();
+        };
+        var refresh = new Button { Content = "Refresh" };
+        refresh.Click += (_, _) => text.Text = Report();
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(capture);
+        content.Children.Add(refresh);
+        content.Children.Add(text);
+        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Terminal diagnostics", Content = content, CloseButtonText = "Close" };
         await dialog.ShowAsync();
     }
 }

@@ -14,12 +14,30 @@ internal static class KittyImageRenderChecks
     internal static void Run(CanvasDevice device)
     {
         CheckLayers(device);
+        CheckDefaultColoredBackground(device);
         CheckCropScaleOffsetAndClip(device);
         CheckTerminalFrame(device);
         CheckBitmapCache(device);
         CheckManyCurrentCrops(device);
         CheckOverscanLayers(device);
         Console.WriteLine("Kitty image render checks passed layers, alpha, crop, scale, offsets, clipping and bitmap cache.");
+    }
+
+    private static void CheckDefaultColoredBackground(CanvasDevice device)
+    {
+        using var terminal = new GhosttyTerminal(4, 1);
+        var bg = terminal.ReadFrame().Background;
+        terminal.Write(Encoding.ASCII.GetBytes($"\x1b[?25l\x1b[0m \x1b[48;2;{bg.R};{bg.G};{bg.B}m "));
+        var native = terminal.ReadFrame();
+        var frame = native with { Images = new TerminalImages([Place(Solid(1, 1, 255, 0, 0), TerminalImageLayer.BelowBackground, 0, 0, 20, 20)], 10, 20) };
+        using var target = Draw(device, frame, 40, 20);
+        Expect(target, 5, 10, 255, 0, 0, "A default background exposes a below-background image.");
+        Expect(target, 15, 10, bg.R, bg.G, bg.B, "An explicit default-colored background covers a below-background image.");
+        using var transparent = new CanvasRenderTarget(device, 40, 20, 96);
+        using (var drawing = transparent.CreateDrawingSession())
+            TerminalSurface.DrawFrame(drawing, native, 10, 20, true, true, transparentBackground: true);
+        if (transparent.GetPixelColors(5, 10, 1, 1)[0].A != 0 || transparent.GetPixelColors(15, 10, 1, 1)[0].A != 255)
+            throw new Exception("Acrylic must retain explicit default-colored backgrounds as opaque.");
     }
 
     private static TerminalImageData Solid(int width, int height, byte r, byte g, byte b, byte a = 255) =>
