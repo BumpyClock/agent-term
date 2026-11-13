@@ -23,13 +23,15 @@ public sealed class CommandOutputCapture(string? commandId = null)
         if (message.StartsWith("end;", StringComparison.Ordinal)) { _capturing = false; Ended = true; }
     }
     public void Feed(byte value) => Feed(new ReadOnlySpan<byte>(in value));
+    /// <summary>A control string cut short any escape sequence still open in the output stream.</summary>
+    public void EndEscape() => _ansi = 0;
     public void Feed(ReadOnlySpan<byte> bytes)
     {
         Span<char> chars = stackalloc char[ChunkBytes + 1];
         var index = 0;
         while (index < bytes.Length)
         {
-            if (_ansi == 1) { _ansi = bytes[index++] == '[' ? 2 : 0; continue; }
+            if (_ansi == 1) { _ansi = bytes[index++] switch { (byte)'[' => 2, 27 => 1, _ => 0 }; continue; }
             if (_ansi == 2) { if (bytes[index++] is >= 0x40 and <= 0x7e) _ansi = 0; continue; }
             var run = bytes[index..];
             var escape = run.IndexOf((byte)27);

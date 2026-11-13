@@ -111,7 +111,7 @@ public sealed partial class GhosttyTerminal
         else
         {
             Native.Selection existing = default;
-            var result = RenderNative.ghostty_terminal_get(_raw, 31, &existing);
+            var result = RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.Selection, &existing);
             if (result == -4) return;
             ThrowIfFailed(result, "Could not read selection anchor.");
             anchor = existing.Start;
@@ -148,7 +148,7 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         Native.Selection selection = default;
-        var result = RenderNative.ghostty_terminal_get(_raw, 31, &selection);
+        var result = RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.Selection, &selection);
         if (result == -4) return null;
         ThrowIfFailed(result, "Could not read selection.");
         ThrowIfFailed(Native.ghostty_formatter_terminal_new(IntPtr.Zero, out var formatter, _handle), "Could not create selection formatter.");
@@ -170,7 +170,7 @@ public sealed partial class GhosttyTerminal
     private unsafe int ActiveScreen()
     {
         int screen = 0;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 6, &screen), "Could not read active screen.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.ActiveScreen, &screen), "Could not read active screen.");
         return screen;
     }
     private void CheckSelectionScreen()
@@ -193,7 +193,7 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         Scrollbar bar = default;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 9, &bar), "Could not read terminal scrollbar.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.Scrollbar, &bar), "Could not read terminal scrollbar.");
         return new TerminalViewport(checked((long)bar.Total), checked((long)bar.Offset), checked((int)bar.Length), ActiveScreen() != 0);
     }
     private void CaptureSelectedViewport()
@@ -226,7 +226,7 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         Native.Selection selection = default;
-        var result = RenderNative.ghostty_terminal_get(_raw, 31, &selection);
+        var result = RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.Selection, &selection);
         if (result == -4) return false;
         ThrowIfFailed(result, "Could not read selection.");
         return true;

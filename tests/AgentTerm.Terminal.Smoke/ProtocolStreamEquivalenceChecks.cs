@@ -1,7 +1,12 @@
 using System.Text;
 using AgentTerm.Terminal;
 
-internal static class OscScannerEquivalenceChecks
+/// <summary>
+/// Compares the native-boundary protocol stream against a frozen copy of the per-byte managed scanner it replaced.
+/// The 7-bit corpus covers cases where both parsers agree. Random noise is checked for chunking invariance and for
+/// terminal state identical to a plain write, because the native parser is authoritative where they differ.
+/// </summary>
+internal static class ProtocolStreamEquivalenceChecks
 {
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
 
@@ -14,6 +19,7 @@ internal static class OscScannerEquivalenceChecks
         public event Action<byte>? OutputByte;
         public event Action<string, int>? Sequence;
         public event Action? Reset;
+        public event Action? StringStarted;
 
         public void Feed(ReadOnlySpan<byte> bytes)
         {
@@ -40,6 +46,7 @@ internal static class OscScannerEquivalenceChecks
                         _ => State.Ground
                     };
                     if (value == 'c') Reset?.Invoke();
+                    if (_state is State.Osc or State.String) StringStarted?.Invoke();
                     if (_state == State.Ground) { OutputByte?.Invoke(27); OutputByte?.Invoke(value); }
                     continue;
                 }
@@ -83,6 +90,7 @@ internal static class OscScannerEquivalenceChecks
         public bool Ended { get; private set; }
         public bool Truncated { get; private set; }
         public string Text => (_text.Length > 0 && char.IsHighSurrogate(_text[^1]) ? _text.ToString(0, _text.Length - 1) : _text.ToString()).TrimStart('\r', '\n');
+        public void EndEscape() => _ansi = 0;
         public void Marker(string message)
         {
             if (commandId is not null) return;
@@ -133,7 +141,10 @@ internal static class OscScannerEquivalenceChecks
         }
     }
 
-    private sealed record Result(List<string> Events, string Plain, string Fenced, bool PlainEnded, bool FencedEnded, bool PlainTruncated, bool FencedTruncated);
+    private sealed record Result(List<string> Events, string Plain, string Fenced, bool PlainEnded, bool FencedEnded, bool PlainTruncated, bool FencedTruncated)
+    {
+        public string Text = "";
+    }
 
     private static Result RunLegacy(byte[] data, int[] cuts)
     {
@@ -141,24 +152,62 @@ internal static class OscScannerEquivalenceChecks
         var plain = new LegacyCapture();
         var fenced = new LegacyCapture("x");
         var events = new List<string>();
-        scanner.OutputByte += b => { plain.Feed(b); fenced.Feed(b); events.Add("b" + b); };
+        scanner.OutputByte += b => { plain.Feed(b); fenced.Feed(b); };
         scanner.Sequence += (text, length) => { events.Add("s" + text + ":" + length); if (text == "start" || text.StartsWith("end;", StringComparison.Ordinal)) plain.Marker(text); };
         scanner.Reset += () => events.Add("r");
+        // The one intentional fix: a control string ends a CSI left open in output, so the next text is not eaten.
+        scanner.StringStarted += () => { plain.EndEscape(); fenced.EndEscape(); };
         Slice(data, cuts, chunk => scanner.Feed(chunk));
         return new(events, plain.Text, fenced.Text, plain.Ended, fenced.Ended, plain.Truncated, fenced.Truncated);
     }
 
     private static Result RunCurrent(byte[] data, int[] cuts)
     {
-        var scanner = new OscScanner();
+        using var terminal = new GhosttyTerminal(80, 8);
+        var stream = new TerminalProtocolStream(terminal);
         var plain = new CommandOutputCapture();
         var fenced = new CommandOutputCapture("x");
         var events = new List<string>();
-        scanner.Output += bytes => { plain.Feed(bytes); fenced.Feed(bytes); foreach (var b in bytes) events.Add("b" + b); };
-        scanner.Sequence += (text, length) => { events.Add("s" + text + ":" + length); if (text == "start" || text.StartsWith("end;", StringComparison.Ordinal)) plain.Marker(text); };
-        scanner.Reset += () => events.Add("r");
-        Slice(data, cuts, chunk => scanner.Feed(chunk));
-        return new(events, plain.Text, fenced.Text, plain.Ended, fenced.Ended, plain.Truncated, fenced.Truncated);
+        stream.Output += bytes => { plain.Feed(bytes); fenced.Feed(bytes); };
+        stream.ControlStringStarted += () => { plain.EndEscape(); fenced.EndEscape(); };
+        stream.Sequence += (text, length) => { events.Add("s" + text + ":" + length); if (text == "start" || text.StartsWith("end;", StringComparison.Ordinal)) plain.Marker(text); };
+        stream.ProtocolEvent += item => { if (item is TerminalReset) events.Add("r"); };
+        Slice(data, cuts, chunk => stream.Write(chunk));
+        return new(events, plain.Text, fenced.Text, plain.Ended, fenced.Ended, plain.Truncated, fenced.Truncated) { Text = terminal.ReadText() };
+    }
+
+    private static Result RunNative(byte[] data, int[] cuts)
+    {
+        using var terminal = new GhosttyTerminal(80, 8);
+        var stream = new TerminalProtocolStream(terminal);
+        var plain = new CommandOutputCapture();
+        var output = new List<string>();
+        var events = new List<string>();
+        stream.Output += bytes => { plain.Feed(bytes); output.Add(Convert.ToHexString(bytes)); };
+        stream.ControlStringStarted += () => { plain.EndEscape(); events.Add("c"); };
+        stream.Sequence += (text, length) => { events.Add("s" + text + ":" + length); if (text == "start" || text.StartsWith("end;", StringComparison.Ordinal)) plain.Marker(text); };
+        stream.ProtocolEvent += item => events.Add(item.ToString());
+        Slice(data, cuts, chunk => stream.Write(chunk));
+        return new(events, plain.Text, string.Concat(output), plain.Ended, false, plain.Truncated, false) { Text = terminal.ReadText() + "|" + terminal.ReadTitle() };
+    }
+
+    private static string PlainWrite(byte[] data)
+    {
+        using var terminal = new GhosttyTerminal(80, 8);
+        terminal.Write(data);
+        return terminal.ReadText() + "|" + terminal.ReadTitle();
+    }
+
+    private static void CompareNoise(byte[] data, int[] cuts, string label)
+    {
+        var whole = RunNative(data, []);
+        var split = RunNative(data, cuts);
+        var where = label + " cuts=" + string.Join(",", cuts.Take(8));
+        var first = Enumerable.Range(0, Math.Min(whole.Events.Count, split.Events.Count)).FirstOrDefault(i => whole.Events[i] != split.Events[i], -1);
+        Check(whole.Events.SequenceEqual(split.Events), "Native events and sequences must not depend on chunking: " + where + $" first difference {first}: whole <" +
+            Visible(string.Join(" | ", whole.Events.Skip(Math.Max(first, 0)).Take(3))) + "> split <" + Visible(string.Join(" | ", split.Events.Skip(Math.Max(first, 0)).Take(3))) + ">");
+        Check(whole.Fenced == split.Fenced && whole.Plain == split.Plain && whole.PlainEnded == split.PlainEnded, "Output must not depend on chunking: " + where);
+        Check(whole.Text == split.Text && whole.Text == PlainWrite(data), "Boundary writes must leave the same terminal state as one plain write: " + where);
     }
 
     private static void Slice(byte[] data, int[] cuts, Action<byte[]> feed)
@@ -172,13 +221,16 @@ internal static class OscScannerEquivalenceChecks
         }
     }
 
+    private static string Visible(string text) => string.Concat(text.Select(c => c < ' ' || c is > '~' and < ' ' ? $"\\x{(int)c:x2}" : c.ToString()));
+
     private static void Compare(byte[] data, int[] cuts, string label)
     {
         var a = RunLegacy(data, cuts);
         var b = RunCurrent(data, cuts);
         var where = label + " cuts=" + string.Join(",", cuts.Take(8));
-        Check(a.Events.SequenceEqual(b.Events), "Scanner output, sequences and resets must match the per-byte scanner: " + where);
-        Check(a.Plain == b.Plain && a.Fenced == b.Fenced, "Captured text must match the per-byte capture: " + where);
+        Check(a.Events.SequenceEqual(b.Events), "Sequences and resets must match the per-byte scanner: " + where + " legacy [" + string.Join(" | ", a.Events) + "] native [" + string.Join(" | ", b.Events) + "]");
+        Check(a.Plain == b.Plain && a.Fenced == b.Fenced, "Captured text must match the per-byte capture: " + where +
+            " data <" + Visible(Encoding.Latin1.GetString(data)) + "> legacy <" + Visible(a.Plain) + "|" + Visible(a.Fenced) + "> native <" + Visible(b.Plain) + "|" + Visible(b.Fenced) + ">");
         Check(a.PlainEnded == b.PlainEnded && a.FencedEnded == b.FencedEnded && a.PlainTruncated == b.PlainTruncated && a.FencedTruncated == b.FencedTruncated, "Capture flags must match: " + where);
     }
 
@@ -208,7 +260,7 @@ internal static class OscScannerEquivalenceChecks
         {
             random.NextBytes(noise);
             for (var i = 0; i < noise.Length; i += 7) noise[i] = i % 3 == 0 ? (byte)27 : specials[random.Next(specials.Length)];
-            Compare(noise, Enumerable.Range(0, 5).Select(_ => random.Next(noise.Length + 1)).Order().ToArray(), "noise " + round);
+            CompareNoise(noise, Enumerable.Range(0, 5).Select(_ => random.Next(noise.Length + 1)).Order().ToArray(), "noise " + round);
         }
         var longOsc = new List<byte> { 27, (byte)']' };
         longOsc.AddRange(Enumerable.Repeat((byte)'a', 1_000_010));

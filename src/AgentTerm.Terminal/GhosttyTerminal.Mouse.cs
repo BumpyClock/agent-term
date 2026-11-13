@@ -30,7 +30,7 @@ public sealed partial class GhosttyTerminal
         get
         {
             ThrowIfDisposed();
-            ThrowIfFailed(MouseNative.ghostty_terminal_get(_raw, 11, out var enabled),
+            ThrowIfFailed(MouseNative.ghostty_terminal_get(_handle, 11, out var enabled),
                 "Could not read libghostty-vt mouse tracking mode.");
             return enabled != 0;
         }
@@ -136,8 +136,8 @@ public sealed partial class GhosttyTerminal
             internal uint PaddingTop, PaddingBottom, PaddingRight, PaddingLeft;
         }
 
-        [LibraryImport(Library), SuppressGCTransition]
-        internal static partial int ghostty_terminal_get(IntPtr terminal, int data, out byte enabled);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_terminal_get(TerminalHandle terminal, int data, out byte enabled);
         [LibraryImport(Library)]
         internal static partial int ghostty_mouse_encoder_new(IntPtr allocator, out IntPtr encoder);
         [LibraryImport(Library)]

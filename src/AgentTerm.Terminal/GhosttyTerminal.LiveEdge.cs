@@ -21,15 +21,18 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         ushort row = 0;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 4, &row), "Could not read active cursor row.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.CursorY, &row), "Could not read active cursor row.");
         return row;
     }
 
     public long ActiveTop { get { ThrowIfDisposed(); return ReadNativeViewport().TotalRows - _rows; } }
 
-    private void EnsurePresentation()
+    private void EnsurePresentation(bool boundary = false)
     {
         if (_preparingPresentation || !_presentationDirty) return;
+        // During a render hold the presented view stays at the boundary. Preparing it would update the render state
+        // over a pending boundary snapshot, or move the view and force a half-drawn capture.
+        if (_holdActive && !boundary) return;
         if (!_bottomAnchored && _presentedTotal is null)
         {
             _presentationDirty = false;
@@ -39,6 +42,7 @@ public sealed partial class GhosttyTerminal
         try
         {
             var original = ReadNativeViewport();
+            var before = (_presentedTotal, original.Offset);
             _presentedTotal = null;
             if (_bottomAnchored && !original.IsAlternateScreen)
             {
@@ -48,7 +52,9 @@ public sealed partial class GhosttyTerminal
             var maximum = Math.Max(0, (_presentedTotal ?? original.TotalRows) - original.Rows);
             var target = _following && !HasSelection() ? maximum : Math.Min(original.Offset, maximum);
             NativeScroll(target);
-            _viewRevision++;
+            // Only a changed presentation is a view change. A render-hold boundary settles presentation too, and an
+            // unchanged view must not invalidate the held frame.
+            if (before != (_presentedTotal, target)) _viewRevision++;
             _presentationDirty = false;
         }
         finally { _preparingPresentation = false; }

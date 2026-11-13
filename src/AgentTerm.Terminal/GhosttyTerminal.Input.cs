@@ -169,7 +169,7 @@ public sealed partial class GhosttyTerminal
     private bool IsInputModeEnabled(InputNative.DecMode mode)
     {
         var config = new InputNative.ModeConfig { Mode = mode };
-        ThrowIfFailed(InputNative.ghostty_terminal_get(_raw, InputNative.TerminalDataMode, ref config),
+        ThrowIfFailed(InputNative.ghostty_terminal_get(_handle, InputNative.TerminalDataMode, ref config),
             $"Could not read libghostty-vt mode {(ushort)mode}.");
         return config.Value != 0;
     }
@@ -370,8 +370,8 @@ public sealed partial class GhosttyTerminal
         [LibraryImport(Library)]
         internal static partial int ghostty_key_event_set_utf8(KeyEventHandle keyEvent, KeyText text);
 
-        [LibraryImport(Library), SuppressGCTransition]
-        internal static partial int ghostty_terminal_get(IntPtr terminal, int data, ref ModeConfig config);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_terminal_get(TerminalHandle terminal, int data, ref ModeConfig config);
 
         [LibraryImport(Library)]
         internal static unsafe partial int ghostty_paste_encode(byte* data, nuint dataLength,

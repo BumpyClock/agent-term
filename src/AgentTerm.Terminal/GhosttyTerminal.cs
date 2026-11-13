@@ -9,11 +9,11 @@ namespace AgentTerm.Terminal;
 /// The terminal is a state machine. It does not create a shell, PTY, or window.
 /// Callers must serialize all access to an instance, including disposal. The one exception is the second phase of a
 /// split frame capture (BeginFrame, then CompleteFrame), which may overlap any call that leaves the render state alone.
+/// Native calls retain their handle for the whole call, so an unreachable wrapper is never finalized mid-operation.
 /// </summary>
 public sealed partial class GhosttyTerminal : IDisposable
 {
     private readonly TerminalHandle _handle;
-    private readonly IntPtr _raw;
     private ushort _columns;
     private ushort _rows;
     private bool _disposed;
@@ -35,7 +35,6 @@ public sealed partial class GhosttyTerminal : IDisposable
         var result = restored == IntPtr.Zero ? Native.ghostty_terminal_new(IntPtr.Zero, out handle, columns, rows) : 0;
         ThrowIfFailed(result, "Could not create the libghostty-vt terminal.");
         _handle = new TerminalHandle(handle);
-        _raw = handle;
         _columns = columns;
         _rows = rows;
         _writePty = (_, _, data, length) =>
@@ -53,6 +52,7 @@ public sealed partial class GhosttyTerminal : IDisposable
             if (restored == IntPtr.Zero) ConfigureScrollback();
             ConfigureHost(restored != IntPtr.Zero);
             ConfigureSnapshot();
+            ConfigureRenderHold();
             ThrowIfFailed(Native.ghostty_terminal_set(_handle, 2, Marshal.GetFunctionPointerForDelegate(_writePty)),
                 "Could not register terminal replies.");
         }
@@ -70,13 +70,30 @@ public sealed partial class GhosttyTerminal : IDisposable
 
         fixed (byte* bytes = data)
         {
-            Native.ghostty_terminal_vt_write(_raw, bytes, (nuint)data.Length);
+            try { Native.ghostty_terminal_vt_write(_handle, bytes, (nuint)data.Length); }
+            finally { ContentVersion++; }
         }
+        FinishWrite();
+    }
+
+    /// <summary>Viewport and selection upkeep after parsed output, including a hold boundary inside a write.</summary>
+    private void SettleAfterWrite()
+    {
         _presentationDirty = true;
         CheckSelectionScreen();
         RestoreSelectedViewport();
-        GC.KeepAlive(_writePty);
-        _callbackError?.Throw();
+    }
+
+    /// <summary>Applies post-write bookkeeping and rethrows a captured callback failure once.</summary>
+    internal void FinishWrite()
+    {
+        SettleAfterWrite();
+        GC.KeepAlive(this);
+        if (_callbackError is { } error)
+        {
+            _callbackError = null;
+            error.Throw();
+        }
     }
 
     /// <summary>Reads the last OSC 7 report. The returned string owns its memory.</summary>
@@ -84,7 +101,7 @@ public sealed partial class GhosttyTerminal : IDisposable
     {
         ThrowIfDisposed();
         Native.Utf8String value = default;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 13, &value), "Could not read terminal directory.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.WorkingDirectory, &value), "Could not read terminal directory.");
         return value.Length == 0 ? string.Empty : Marshal.PtrToStringUTF8(value.Data, checked((int)value.Length))!;
     }
 
@@ -160,7 +177,6 @@ public sealed partial class GhosttyTerminal : IDisposable
         var result = Native.ghostty_terminal_resize(_handle, columns, rows, cellWidthPx, cellHeightPx);
         if (result != 0) (_columns, _rows, _cellWidthPx, _cellHeightPx) = previousGeometry;
         ThrowIfFailed(result, "Could not resize the libghostty-vt terminal.");
-        _holdStarted = null;
         _viewRevision++;
         _presentationDirty = true;
     }
@@ -269,7 +285,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         internal static partial void ghostty_terminal_free(IntPtr terminal);
 
         [LibraryImport(Library)]
-        internal static unsafe partial void ghostty_terminal_vt_write(IntPtr terminal, byte* data, nuint length);
+        internal static unsafe partial void ghostty_terminal_vt_write(TerminalHandle terminal, byte* data, nuint length);
 
         [LibraryImport(Library)]
         internal static partial int ghostty_terminal_resize(TerminalHandle terminal, ushort columns, ushort rows, uint cellWidthPx, uint cellHeightPx);

@@ -144,8 +144,10 @@ using (var terminal = new GhosttyTerminal(20, 4))
 }
 
 
-OscScannerEquivalenceChecks.Run();
+ProtocolStreamChecks.Run();
+ProtocolStreamEquivalenceChecks.Run();
 RenderChecks.Run();
+RenderOwnershipChecks.Run();
 ProgramStatusChecks.Run();
 ProgramStatusPresentationChecks.Run();
 ThemeChecks.Run();

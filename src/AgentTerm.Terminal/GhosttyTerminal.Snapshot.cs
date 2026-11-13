@@ -50,8 +50,8 @@ public sealed partial class GhosttyTerminal
                 DecodeCheck(SnapshotNative.ghostty_snapshot_decoder_get(decoder, 2, &consumed));
                 if (consumed != (nuint)snapshot.Length) throw new InvalidDataException("Terminal snapshot has trailing data.");
                 ushort columns = 0, rows = 0;
-                DecodeCheck(RenderNative.ghostty_terminal_get(terminal, 1, &columns));
-                DecodeCheck(RenderNative.ghostty_terminal_get(terminal, 2, &rows));
+                DecodeCheck(SnapshotNative.ghostty_terminal_get(terminal, 1, &columns));
+                DecodeCheck(SnapshotNative.ghostty_terminal_get(terminal, 2, &rows));
                 var owned = terminal;
                 terminal = IntPtr.Zero; // Constructor takes ownership even when callback setup fails.
                 return new GhosttyTerminal(columns, rows, owned);
@@ -72,6 +72,7 @@ public sealed partial class GhosttyTerminal
     private static unsafe partial class SnapshotNative
     {
         private const string Lib = "ghostty-vt";
+        [LibraryImport(Lib)] internal static partial int ghostty_terminal_get(IntPtr terminal, int key, void* value);
         [LibraryImport(Lib)] internal static partial int ghostty_snapshot_encode_buf(TerminalHandle terminal, byte* data, nuint capacity, nuint* written);
         [LibraryImport(Lib)] internal static partial int ghostty_snapshot_decoder_new_buf(IntPtr allocator, out IntPtr decoder, byte* data, nuint length);
         [LibraryImport(Lib)] internal static partial int ghostty_snapshot_decoder_set(IntPtr decoder, int option, void* value);

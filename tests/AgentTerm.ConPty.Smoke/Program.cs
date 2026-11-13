@@ -83,6 +83,12 @@ if (args.Contains("--hyperlink-only"))
     return;
 }
 
+if (args.Contains("--protocol-events-only"))
+{
+    await ProtocolEventSessionChecks.RunAsync();
+    return;
+}
+
 if (args.Contains("--title-only"))
 {
     await TitleChecks.RunAsync();
@@ -111,6 +117,7 @@ await ProfileChecks.RunAsync();
 await DirectoryChecks.RunAsync();
 await TitleChecks.RunAsync();
 await HyperlinkSessionChecks.RunAsync();
+await ProtocolEventSessionChecks.RunAsync();
 await SmartPromptChecks.RunAsync();
 await NativeStartupChecks.RunAsync();
 await PromptModeChecks.ProbeAsync();

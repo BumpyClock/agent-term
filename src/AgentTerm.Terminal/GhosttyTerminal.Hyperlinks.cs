@@ -61,7 +61,7 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         int shape = 0;
-        var result = RenderNative.ghostty_terminal_get(_raw, 41, &shape);
+        var result = RenderNative.ghostty_terminal_get(_handle, 41, &shape);
         return result == 0 ? TerminalMouseShapes.FromNative(shape) : TerminalMouseShapes.Initial;
     }
 
@@ -76,7 +76,7 @@ public sealed partial class GhosttyTerminal
         if (LinkNative.ghostty_grid_ref_cell(&reference, &raw) != 0) return false;
         int wide = 0;
         byte hasLink = 0;
-        if (RenderNative.ghostty_cell_get(raw, 3, &wide) != 0 || RenderNative.ghostty_cell_get(raw, 7, &hasLink) != 0) return false;
+        if (RenderNative.ghostty_cell_get(raw, CellData.Wide, &wide) != 0 || RenderNative.ghostty_cell_get(raw, CellData.Hyperlink, &hasLink) != 0) return false;
         cell = new LinkCell(reference, wide, hasLink != 0);
         return true;
     }
