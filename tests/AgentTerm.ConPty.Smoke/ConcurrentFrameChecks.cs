@@ -5,6 +5,7 @@ internal static class ConcurrentFrameChecks
 {
     public static async Task RunAsync()
     {
+        await SessionWorkerChecks.RunAsync();
         await using var session = new TerminalSession(120, 30, TestShell.Profile);
         session.SetBottomAnchored(true);
         await TestShell.StartLegacyAsync(session);

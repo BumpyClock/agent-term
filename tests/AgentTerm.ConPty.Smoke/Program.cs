@@ -37,6 +37,7 @@ if (!OperatingSystem.IsWindows())
 }
 
 if (args.Contains("--history-search-only")) { await HistorySearchChecks.RunAsync(); return; }
+if (args.Contains("--session-worker-only")) { await SessionWorkerChecks.RunAsync(); return; }
 if (args.Contains("--transport-only")) { await TransportChecks.RunAsync(); return; }
 if (args.Contains("--smart-prompt-only")) { await SmartPromptChecks.RunAsync(); return; }
 

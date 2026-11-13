@@ -76,6 +76,7 @@ public sealed partial class GhosttyTerminal
         report.AppendLine($"Grid {_columns} x {_rows}, cell pixels {_cellWidthPx} x {_cellHeightPx}");
         report.AppendLine($"Host clipboard {_hostCapabilities.Clipboard || Effects.AdvertisesClipboardAccess}, host Kitty images {_hostCapabilities.KittyImages}");
         report.AppendLine($"Page resident bytes {memory.Values[2] + memory.Values[8]}, reserved bytes {memory.Values[1] + memory.Values[7]}");
+        report.AppendLine($"Compressed pages {memory.Values[3] + memory.Values[9]}, compressed bytes {memory.Values[4] + memory.Values[10]}");
         report.AppendLine($"Image bytes {memory.Values[5] + memory.Values[11]}, compression supported {memory.CompressionSupported != 0}");
         report.AppendLine($"Managed image raw cache bytes {_rawImages.Values.Sum(image => image.RawBytes)}, converted cache bytes {ImageCacheBytes}");
         report.AppendLine("Image cache figures exclude older retained frames and device resources.");

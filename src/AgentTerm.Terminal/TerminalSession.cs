@@ -6,10 +6,6 @@ namespace AgentTerm.Terminal;
 /// <summary>Owns one shell and serializes access to its Ghostty terminal state.</summary>
 public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 {
-    // Lock order: _renderGate, then _gate. _renderGate owns the terminal's render state, so a frame can finish
-    // iterating cells after _gate is released while output keeps parsing. Native callbacks run inside a terminal
-    // write under _gate and must never take _renderGate; the render-hold callback captures through its own
-    // in-flight handoff instead (see GhosttyTerminal.RenderHold.cs and docs/libghostty/render-ownership.md).
     private readonly object _renderGate = new();
     private readonly object _gate = new();
     private readonly GhosttyTerminal _terminal;
@@ -47,7 +43,6 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         _prompt.Marker += ReanchorMarker;
         _prompt.Marker += MailboxMarker;
         _prompt.PromptStarted += _programStatus.EndCommand;
-        // Protocol events apply in stream order, so a title set after the prompt marker in the same chunk survives.
         _prompt.PromptStarted += ClearTitle;
         _prompt.Marker += message => _owned?.Capture.Marker(message);
         _columns = columns;
@@ -227,7 +222,6 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         await Task.WhenAny(owned.Completion.Task, exited, CancellationSignal(signalLifetime.Token)).ConfigureAwait(false);
         signalLifetime.Cancel();
         if (Settle() is { } settled) return settled;
-        // Cancellation won. Ctrl+C recovery ends at readiness or at shell exit; only a proven exit releases a running command.
         try { await Task.WhenAny(owned.Completion.Task, exited).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
         catch (TimeoutException) { }
         if (Settle() is { } recovered) return recovered;
@@ -235,7 +229,6 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             return new(TerminalExecutionStatus.InterruptionFailed, owned.Capture.Text,
                 Message: "PowerShell did not report readiness after Ctrl+C. Terminal remains agent-owned; use interactive input or close the pane.");
 
-        // The reader drains before the shell completes, so once exit is sampled the command's own result is final and wins a tie.
         TerminalExecutionResult? Settle()
         {
             var shellExited = exited.IsCompleted;
@@ -480,12 +473,27 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         }
     }
 
+    private const int OutputParseSliceBytes = 2048;
+
     private void ProcessOutput(ReadOnlyMemory<byte> bytes)
     {
+        while (!bytes.IsEmpty)
+        {
+            var length = Math.Min(bytes.Length, OutputParseSliceBytes);
+            lock (_gate)
+            {
+                _stream.Write(bytes.Span[..length]);
+                foreach (var reply in _terminal.TakeResponses())
+                {
+                    if (_disposeTask is null) _connection.SendReply(reply);
+                }
+            }
+            bytes = bytes[length..];
+            YieldOutputToWorker();
+        }
         TerminalProtocolEvent[]? events;
         lock (_gate)
         {
-            _stream.Write(bytes.Span);
             HistoryActivity();
             if (_mailboxPending is { } pending && !_restoringDraft && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == pending)
             {
@@ -505,10 +513,6 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
                 owned.Completion.TrySetResult(new(owned.Interrupted ? TerminalExecutionStatus.Interrupted : TerminalExecutionStatus.Completed,
                     owned.Capture.Text, _prompt.LastCommandSucceeded, _prompt.LastExitCode,
                     ShellDirectory.FromReport(_terminal.ReadWorkingDirectory(), _profile)?.Path, owned.Capture.Truncated));
-            }
-            foreach (var reply in _terminal.TakeResponses())
-            {
-                if (_disposeTask is null) _connection.SendReply(reply);
             }
             events = TakeProtocolDispatch();
         }
@@ -531,7 +535,11 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     private async Task CloseAsync()
     {
-        try { await StopAsync().ConfigureAwait(false); }
+        try
+        {
+            await StopWorkerAsync().ConfigureAwait(false);
+            await StopAsync().ConfigureAwait(false);
+        }
         finally
         {
             await _searchOwner.WaitAsync().ConfigureAwait(false);

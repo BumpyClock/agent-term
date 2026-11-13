@@ -20,23 +20,23 @@ public sealed record TerminalSelectionCopy(string Html, string Text);
 
 public sealed partial class TerminalSession
 {
-    // Yield between batches after this target duration. One native call can exceed it; this is not a hard bound.
     private static readonly TimeSpan SearchSlice = TimeSpan.FromMilliseconds(2);
     private const int ProvisionalDelayMs = 100, ProgressIntervalMs = 50, StaleRetryDelayMs = 16;
     private readonly SemaphoreSlim _searchOwner = new(1, 1);
     private Timer? _historyIdle;
     private ulong? _compressionToken;
+    private long _compressionActivityAt;
 
     public long HistoryVersion { get { lock (_gate) return _terminal.ContentVersion; } }
 
     public void NavigatePrompt(int delta) => MutateView(() => _terminal.NavigatePrompt(delta));
 
     /// <summary>
-    /// Formats history or the selection on the thread pool. _gate is held only for the native format call; decoding and
-    /// file writes happen after it is released. Null means selection export without a selection.
+    /// Formats history or the selection in session order. Native formatting and the owned byte copy hold terminal
+    /// exclusion; decoding and file writes happen after it is released. Null means selection export without a selection.
     /// </summary>
     public Task<TerminalHistoryExport?> ExportHistoryAsync(TerminalExportFormat format, bool selectionOnly = false, CancellationToken cancellationToken = default) =>
-        Task.Run(() =>
+        DispatchAsync<TerminalHistoryExport?>(_ =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             lock (_gate)
@@ -48,11 +48,11 @@ public sealed partial class TerminalSession
                 ScheduleHistoryCompression();
                 return bytes is null ? null : new TerminalHistoryExport(format, bytes);
             }
-        }, cancellationToken);
+        });
 
     /// <summary>Formats the selection as HTML and plain text from one terminal snapshot. Null without a selection.</summary>
     public Task<TerminalSelectionCopy?> CopySelectionRichAsync(CancellationToken cancellationToken = default) =>
-        Task.Run(() =>
+        DispatchAsync<TerminalSelectionCopy?>(_ =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             byte[]? html;
@@ -62,9 +62,10 @@ public sealed partial class TerminalSession
                 ThrowIfClosed();
                 html = _terminal.ExportHistoryUtf8(TerminalExportFormat.Html, true);
                 text = html is null ? null : _terminal.ReadSelectionText();
+                ScheduleHistoryCompression();
             }
             return html is null || text is null ? null : new TerminalSelectionCopy(System.Text.Encoding.UTF8.GetString(html), text);
-        }, cancellationToken);
+        });
 
     /// <summary>Search yields between native step batches. One owner excludes query changes and disposal; the terminal lock protects each batch.</summary>
     /// <param name="retainSelection">
@@ -78,15 +79,23 @@ public sealed partial class TerminalSession
         await _searchOwner.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            lock (_gate)
+            await DispatchAsync(_ =>
             {
-                ThrowIfClosed();
-                _terminal.PrepareSearch(query, caseSensitive);
-            }
+                lock (_gate)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ThrowIfClosed();
+                    _terminal.PrepareSearch(query, caseSensitive);
+                }
+            }).ConfigureAwait(false);
             if (query.Length == 0) return new(0, true);
             return await Task.Run(() => SearchAsync(forward, progress, retainSelection, cancellationToken), cancellationToken).ConfigureAwait(false);
         }
-        finally { _searchOwner.Release(); }
+        finally
+        {
+            try { lock (_gate) ScheduleHistoryCompression(); }
+            finally { _searchOwner.Release(); }
+        }
     }
 
     private async Task<TerminalSearchProgress> SearchAsync(bool forward, IProgress<TerminalSearchProgress>? progress, bool retain, CancellationToken token)
@@ -106,7 +115,6 @@ public sealed partial class TerminalSession
             reportedAt = started.ElapsedMilliseconds;
             progress?.Report(new(matches, false));
         }
-        // A long search shows its first match early. The status stays provisional until completion.
         void Provisional(long version)
         {
             if (owned || keepUserSelection || started.ElapsedMilliseconds < ProvisionalDelayMs) return;
@@ -132,7 +140,6 @@ public sealed partial class TerminalSession
             {
                 bool changed;
                 lock (_gate) { ThrowIfClosed(); changed = _terminal.ContentVersion != previous; }
-                // Output changed the content mid-search. Let a burst settle before re-feeding instead of chasing every chunk.
                 if (changed) await Task.Delay(StaleRetryDelayMs, token).ConfigureAwait(false);
             }
             long version;
@@ -238,7 +245,6 @@ public sealed partial class TerminalSession
 
     private void ThrowIfClosed() => ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
 
-    // Called with _gate held after output or reflow. The timer is one-shot and has no idle polling path.
     private void HistoryActivity()
     {
         ScheduleHistoryCompression();
@@ -249,22 +255,43 @@ public sealed partial class TerminalSession
         var token = _terminal.CompressionActivity;
         if (_compressionToken == token) return;
         _compressionToken = token;
+        _compressionActivityAt = Stopwatch.GetTimestamp();
         _historyIdle ??= new Timer(CompressIdle);
         _historyIdle.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
     }
     private void CompressIdle(object? state)
     {
-        lock (_renderGate) lock (_gate)
+        if (!Monitor.TryEnter(_renderGate)) { RetryCompressionWhenIdle(); return; }
+        try
         {
-            if (_disposeTask is not null) return;
-            var token = _terminal.CompressionActivity;
-            if (_compressionToken != token)
+            if (!Monitor.TryEnter(_gate)) { RetryCompressionWhenIdle(); return; }
+            try
             {
-                _compressionToken = token;
-                _historyIdle!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
-                return;
+                if (_disposeTask is not null) return;
+                var token = _terminal.CompressionActivity;
+                if (_compressionToken != token)
+                {
+                    _compressionToken = token;
+                    _compressionActivityAt = Stopwatch.GetTimestamp();
+                    _historyIdle!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+                    return;
+                }
+                var remaining = TimeSpan.FromSeconds(2) - Stopwatch.GetElapsedTime(_compressionActivityAt);
+                if (remaining > TimeSpan.Zero)
+                {
+                    _historyIdle!.Change(remaining, Timeout.InfiniteTimeSpan);
+                    return;
+                }
+                if (_terminal.CompressHistoryStep()) _historyIdle!.Change(25, Timeout.Infinite);
             }
-            if (_terminal.CompressHistoryStep()) _historyIdle!.Change(25, Timeout.Infinite);
+            finally { Monitor.Exit(_gate); }
         }
+        finally { Monitor.Exit(_renderGate); }
+    }
+
+    private void RetryCompressionWhenIdle()
+    {
+        try { _historyIdle?.Change(250, Timeout.Infinite); }
+        catch (ObjectDisposedException) { }
     }
 }
