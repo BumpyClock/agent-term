@@ -37,10 +37,17 @@ internal static class HistorySearchChecks
         if (!updated.Found) throw new Exception("A new query must see concurrent terminal output.");
         session.Resize(55, 20);
         if (!(await session.FindAsync("needle row", true)).Found) throw new Exception("Reflow must refresh search results.");
-        using var shutdown = new CancellationTokenSource();
-        var pending = session.FindAsync("needle", false, cancellationToken: shutdown.Token);
-        shutdown.Cancel();
-        try { await pending; } catch (OperationCanceledException) { }
+        var resizedDuringSearch = 0;
+        var reflowed = await session.FindAsync("needle", false, progress: new SearchProgress(() =>
+        {
+            if (Interlocked.Exchange(ref resizedDuringSearch, 1) == 0) session.Resize(63, 20);
+        })).WaitAsync(TimeSpan.FromSeconds(30));
+        if (!reflowed.Found || resizedDuringSearch == 0 || reflowed.HistoryVersion != session.HistoryVersion)
+            throw new Exception("Reflow between incremental ticks must re-feed and publish the current revision.");
+        var pending = session.FindAsync("needle row", false);
+        var disposal = session.DisposeAsync().AsTask();
+        try { await pending.WaitAsync(TimeSpan.FromSeconds(10)); } catch (ObjectDisposedException) { }
+        await disposal.WaitAsync(TimeSpan.FromSeconds(10));
         Console.WriteLine("History search session checks passed.");
     }
     private sealed class SearchProgress(Action update) : IProgress<TerminalSearchProgress>

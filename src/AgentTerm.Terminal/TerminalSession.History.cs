@@ -26,7 +26,7 @@ public sealed partial class TerminalSession
         }
     }
 
-    /// <summary>Only feed and selection touch the terminal. Ticks run outside both session locks. One owner excludes query changes and disposal.</summary>
+    /// <summary>Search yields between native steps. One owner excludes query changes and disposal; the terminal lock protects each step.</summary>
     public async Task<TerminalSearchProgress> FindAsync(string query, bool forward, bool caseSensitive = false,
         IProgress<TerminalSearchProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -56,8 +56,16 @@ public sealed partial class TerminalSession
                     do
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        status = _terminal.TickSearch();
-                        progress?.Report(new(caseSensitive ? 0 : _terminal.SearchCount(), false));
+                        long matches;
+                        lock (_gate)
+                        {
+                            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+                            if (_historyVersion != version) { status = 1; break; }
+                            // Native 1.0.1 tickHistory still reads a live tracked pin despite the independent-tick header contract.
+                            status = _terminal.TickSearch();
+                            matches = caseSensitive ? 0 : _terminal.SearchCount();
+                        }
+                        progress?.Report(new(matches, false));
                         await Task.Delay(1, cancellationToken).ConfigureAwait(false);
                     } while (status == 0);
                     if (status != 2) continue;

@@ -551,15 +551,18 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         finally
         {
             await _searchOwner.WaitAsync().ConfigureAwait(false);
-            lock (_renderGate) lock (_gate)
+            try
             {
-                _historyIdle?.Dispose();
-                _connection.OutputReceived -= ProcessOutput;
-                _terminal.Dispose();
-                _commandMailbox?.Dispose();
-                _commandMailbox = null;
+                lock (_renderGate) lock (_gate)
+                {
+                    _historyIdle?.Dispose();
+                    _connection.OutputReceived -= ProcessOutput;
+                    _terminal.Dispose();
+                    _commandMailbox?.Dispose();
+                    _commandMailbox = null;
+                }
             }
-            _searchOwner.Release();
+            finally { _searchOwner.Release(); }
         }
     }
 
