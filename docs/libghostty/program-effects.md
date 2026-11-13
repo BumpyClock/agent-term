@@ -75,16 +75,14 @@ read carries a `name`, which is why `name=` appears in the checks. Without mode 
 
 ### Reset and exit
 
-A full reset (RIS) makes the library report progress removed before its reset callback, so a visible progress indicator clears with no extra
-wiring (checked). Pending cards and held writes are not cleared by RIS: a notification that was already shown stays valid.
-`TerminalEffects.Reset()` drops everything undelivered, forgets held writes and the paste grant, and removes visible progress.
-`TerminalSession` calls it when the shell exits. `MainPage` calls it on exit and when a session is released.
+A full reset (RIS) clears pending cards, held clipboard approvals, paste grants and visible progress at the native reset callback boundary.
+A queued reset effect withdraws notices already displayed by the host. `TerminalEffects.Reset()` also runs when the shell exits
+or the page releases its session.
 
-## Seams for other owners
+## Host integration
 
-- **D (reports).** Read `TerminalEffects.AdvertisesClipboardAccess` when answering DA1 to advertise clipboard access (feature 52) only if writes would be honored. Do not register `CLIPBOARD_WRITE`, `CLIPBOARD_READ`, `BELL`, `DESKTOP_NOTIFICATION`, `PROGRESS_REPORT` or `RESIZE_WINDOW` again. Size reports (`OPT_SIZE`) are D's.
-- **B (reset events).** Not required for correct progress reset. If B's native reset callback lands, call `Effects.Reset()` from it if undelivered cards should also clear on RIS.
-- **Windows notifications.** `WindowsEffectHost` registers with `AppNotificationManager` on the first notification, tags each toast, withdraws them on pane close and at process exit, and sets them to expire after ten minutes and on reboot. Clicking one selects the tab and pane and brings the window forward (`TerminalTab.RevealRequested`, `MainWindow.AddTab`). If registration fails or the system does not support it, the in-app card is the notification. This was compiled but not exercised in a running app here, so the parent should check a real toast, click activation, and taskbar progress.
+- **Capability reports.** Host configuration reads `TerminalEffects.AdvertisesClipboardAccess` when answering DA1. Preference changes preserve image storage. Effects callbacks are registered once by the terminal constructor; size reports belong to the host geometry adapter.
+- **Windows notifications.** `WindowsEffectHost` registers with `AppNotificationManager` on the first notification, tags each toast, withdraws them on pane close and at process exit, and sets them to expire after ten minutes and on reboot. Clicking one selects the tab and pane and brings the window forward (`TerminalTab.RevealRequested`, `MainWindow.AddTab`). If registration fails or the system does not support it, the in-app card is the notification. OS toast activation remains outside the automated UI fixture.
 - **Window resize.** Honored by `MainPage.ResizeWindowFor` only when the option is on, the window is in its restored state, and the pane is visible. A split pane resizes the window by the cell delta of that pane, which is approximate.
 
 ## Tests
@@ -93,4 +91,4 @@ wiring (checked). Pending cards and held writes are not cleared by RIS: a notifi
 - `EffectsHostChecks` (Terminal.Smoke): bell throttling, notification lifecycle and activation, progress aggregation across panes and windows, card actions, expiry and bounds, settings round trip and tolerance of a bad `Effects` section.
 - `EffectsSessionChecks` (ConPty.Smoke, `--effects-only`): through a real ConPTY shell, delivery outside the terminal lock, ordering, a throwing subscriber, and progress removal on exit.
 
-Full terminal resets cancel held clipboard approvals and paste grants at the native callback boundary. A reset effect also withdraws displayed notices and progress. Clipboard access is advertised only when the configured adapter and write policy allow it; changing effects preferences preserves image support. The UI inbox bounds repeated approval notices as well as ordinary effects.
+The UI inbox bounds repeated approval notices as well as ordinary effects. See [integration verification](README.md) for platform and UI coverage.

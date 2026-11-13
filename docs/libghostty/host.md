@@ -18,11 +18,11 @@ Ctrl+Shift+F12 opens a selectable, read-only diagnostic report. `MainPage.ShowHo
 
 Bindings follow the bundled `terminal.h`, `device.h`, `size_report.h`, `color_scheme.h`, and `build_info.h`. All five were byte-compared with the official 1.0.1 archive and matched. The official VT documentation at https://lib.ghostty.org/vt/ returned HTTP 200 during implementation.
 
-Focused checks passed using the parent's copied current DLL in this checkout's ignored native artifacts directory.
+Focused checks and aggregate Windows suites passed with the pinned 1.0.1 DLL.
 
 - `dotnet run --project tests/AgentTerm.Terminal.Smoke -- --host-only` checks exact native replies, mode gating, unchanged-grid pixel changes, identity, capability opt-in, disabled image queries, theme queries/reports, diagnostics after malformed VT, standalone resize semantics and ConPTY history preservation.
 - `dotnet run --project tests/AgentTerm.ConPty.Smoke -- --resize-input-only` checks immediate/delayed resize adjacency, blank output, long transport, Unicode/multiline capture and Legacy history.
 - `dotnet build src/AgentTerm.App -p:Platform=x64 --nologo -v:q` passed with zero warnings and errors.
 - `git diff --check` passed.
 
-No GUI automation or visual run was performed. Parent owns sequential GUI validation, aggregate checks and Boat CI. Integration must reconcile the constructor/dispose hooks with other feature partials, retain session reply draining, and combine capability preferences from F/I. The terminal assembly version currently resolves to 1.0.0; central versioning should update that assembly version when the app release version changes.
+The shared constructor registers host, snapshot, render-hold, effects and reset callbacks. Session mutation paths drain replies before returning. The terminal assembly version currently resolves to 1.0.0; central versioning should update it when the app release version changes. See the [integration verification](README.md) for platform and UI coverage.

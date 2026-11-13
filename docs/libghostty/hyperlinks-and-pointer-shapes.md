@@ -1,6 +1,6 @@
 # Hyperlinks and application pointer shapes
 
-Scope: OSC 8 hyperlinks and OSC 22 pointer shapes. Native source is libghostty-vt 1.0.0 public API.
+OSC 8 hyperlinks and OSC 22 pointer shapes use the libghostty-vt 1.0.1 public API.
 
 ## What users get
 
@@ -56,7 +56,7 @@ The OS pointer is separate from the text cursor, which `TerminalSurface` draws o
 
 - `TerminalSession` and `TerminalSurface` became `partial`.
 - `MainPage.xaml.cs`: `InitializeLinks()` in the constructor, `HandleLinkPress` and the `TryShowLinkMenu` right-click call in the pointer press handler, a `_linkPress` early return in the move handler, `HandleLinkRelease` in the release handler, `CancelLinkPress` on capture lost, `ResetLinkInteraction` in `CancelSelectionGesture`, `RefreshLinkFeedback` after each presented frame, and `TryShowLinkMenuFromKeyboard` in `Terminal_KeyDown`.
-- Geometry: all hit testing uses `Terminal.Geometry.TryCellAt` and `RowTop`. If scroll geometry (overscan, smooth scroll) adds a pixel offset, `TryCellAt` and `RowTop` must include it. The link overlay uses `RowTop` for underlines.
+- All hit testing uses `Terminal.Geometry.TryCellAt` and `RowTop`, including the fractional scroll offset. The link overlay uses `RowTop` for underlines.
 
 ## Pointer mapping
 

@@ -263,7 +263,7 @@ internal static class ProgramStatusUiChecks
         {
             sidebar.IsCompact = compact;
             sidebar.Width = compact ? 48 : 220;
-            Move(window, input, 100, 50);
+            Move(window, input, input.ActualWidth - 20, input.ActualHeight - 20);
             await Task.Delay(100);
             Move(window, sidebar, 20, 20);
             await Task.Delay(600);
@@ -273,9 +273,9 @@ internal static class ProgramStatusUiChecks
             var card = OpenCard(sidebar);
             Check(card is not null && Text(card).Contains("Sidebar hover report"), "New reports must automatically open for an already-hovered sidebar tab in both widths.");
             Check(ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(sidebar.XamlRoot), input), "Sidebar hover must preserve terminal focus.");
-            Move(window, input, 100, 50);
+            Move(window, input, input.ActualWidth - 20, input.ActualHeight - 20);
             await Task.Delay(600);
-            Check(OpenCard(sidebar) is null, "Leaving a sidebar tab must dismiss its status card.");
+            Check(OpenCard(sidebar) is null, "Leaving the sidebar tab and card must dismiss its status card.");
             status.Update([]);
         }
         sidebar.IsCompact = false;
