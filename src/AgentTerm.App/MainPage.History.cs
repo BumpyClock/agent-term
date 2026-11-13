@@ -50,6 +50,7 @@ public sealed partial class MainPage
             {
                 if (token.IsCancellationRequested || _session != session) return;
                 FindStatus.Text = value.Complete ? $"{value.Matches} matches" : $"Searching… {value.Matches} matches";
+                if (value.Found && !value.Complete) RefreshTerminalFrame(session);
             });
             var result = await session.FindAsync(FindBox.Text, forward, FindMatchCase.IsChecked == true, progress, token);
             if (token.IsCancellationRequested || _session != session) return;

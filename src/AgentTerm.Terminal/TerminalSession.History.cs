@@ -42,6 +42,8 @@ public sealed partial class TerminalSession
             if (query.Length == 0) return new(0, true);
             return await Task.Run(async () =>
             {
+                var started = System.Diagnostics.Stopwatch.StartNew();
+                var interimSelected = false;
                 while (true)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -51,6 +53,18 @@ public sealed partial class TerminalSession
                         ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
                         version = _historyVersion;
                         _terminal.FeedSearch();
+                    }
+                    if (!interimSelected && started.ElapsedMilliseconds >= 100)
+                    {
+                        long matches;
+                        lock (_renderGate) lock (_gate)
+                        {
+                            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+                            if (_historyVersion != version) continue;
+                            interimSelected = _terminal.SelectSearchMatch(forward, caseSensitive, query, 32);
+                            matches = caseSensitive ? (interimSelected ? 1 : 0) : _terminal.SearchCount();
+                        }
+                        if (interimSelected) progress?.Report(new(matches, false, true) { HistoryVersion = version });
                     }
                     int status;
                     do
@@ -90,8 +104,9 @@ public sealed partial class TerminalSession
                         }
                     }
                     lock (_gate) { if (_historyVersion != version) continue; }
-                    bool found = false;
-                    for (long i = 0; i < count && (!caseSensitive || exact != 0); i++)
+                    bool found;
+                    lock (_gate) found = interimSelected && _terminal.HasSelection();
+                    for (long i = 0; !found && i < count && (!caseSensitive || exact != 0); i++)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         lock (_renderGate) lock (_gate)

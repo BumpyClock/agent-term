@@ -26,6 +26,20 @@ internal static class HistorySearchChecks
         if (!exact.Found || exact.Matches != current.Matches) throw new Exception("Exact-case count must include all matching history candidates.");
         var sensitive = await session.FindAsync("NEEDLE ROW", true, true);
         if (sensitive.Found || sensitive.Matches != 0) throw new Exception("Case filtering must reject ASCII case variants.");
+        session.Send("1..300 | ForEach-Object { ('FLOW_' + $_); Start-Sleep -Milliseconds 10 }\r");
+        deadline.Restart();
+        while (!session.ReadText().Contains("FLOW_1"))
+        {
+            if (deadline.Elapsed > TimeSpan.FromSeconds(10)) throw new Exception("Streaming fixture did not start.");
+            await Task.Delay(10);
+        }
+        using var streamingCancellation = new CancellationTokenSource();
+        var visibleMatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var streamingSearch = session.FindAsync("needle row", true, true, new MatchProgress(visibleMatch), streamingCancellation.Token);
+        var first = await Task.WhenAny(visibleMatch.Task, streamingSearch).WaitAsync(TimeSpan.FromSeconds(2));
+        if (first == streamingSearch && !(await streamingSearch).Found) throw new Exception("Streaming search returned no visible match.");
+        streamingCancellation.Cancel();
+        try { await streamingSearch; } catch (OperationCanceledException) { }
         session.Send("('newneedle_' + 'marker')\r");
         deadline.Restart();
         while (!session.ReadText().Contains("newneedle_marker") || session.PromptState != ShellPromptState.Ready)
@@ -53,5 +67,9 @@ internal static class HistorySearchChecks
     private sealed class SearchProgress(Action update) : IProgress<TerminalSearchProgress>
     {
         public void Report(TerminalSearchProgress value) => update();
+    }
+    private sealed class MatchProgress(TaskCompletionSource match) : IProgress<TerminalSearchProgress>
+    {
+        public void Report(TerminalSearchProgress value) { if (value.Found) match.TrySetResult(); }
     }
 }
