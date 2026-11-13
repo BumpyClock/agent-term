@@ -31,7 +31,6 @@ internal sealed class ProgramActivity : Grid
     private bool _working;
     private bool _active = true;
     private bool _inViewport = true;
-    private bool _loaded;
     internal event Action? Changed;
     internal bool IsAnimating => _animation is not null;
 
@@ -62,7 +61,7 @@ internal sealed class ProgramActivity : Grid
         }
         Loaded += (_, _) =>
         {
-            _loaded = true;
+            Disconnect();
             _inViewport = true;
             _settings.AnimationsEnabledChanged += SettingsChanged;
             _settings.ColorValuesChanged += SettingsChanged;
@@ -75,13 +74,9 @@ internal sealed class ProgramActivity : Grid
         };
         Unloaded += (_, _) =>
         {
-            _loaded = false;
-            _settings.AnimationsEnabledChanged -= SettingsChanged;
-            _settings.ColorValuesChanged -= SettingsChanged;
-            foreach (var entry in _visibility) entry.Element.UnregisterPropertyChangedCallback(VisibilityProperty, entry.Token);
-            _visibility.Clear();
-            if (_root is not null) _root.Changed -= RootChanged;
-            _root = null;
+            // Reparenting can deliver an old Unloaded after the element has loaded into its new pane.
+            if (IsLoaded) return;
+            Disconnect();
             Refresh();
         };
         ActualThemeChanged += (_, _) => RefreshPreferences();
@@ -136,9 +131,19 @@ internal sealed class ProgramActivity : Grid
         Refresh();
     }
 
+    private void Disconnect()
+    {
+        _settings.AnimationsEnabledChanged -= SettingsChanged;
+        _settings.ColorValuesChanged -= SettingsChanged;
+        foreach (var entry in _visibility) entry.Element.UnregisterPropertyChangedCallback(VisibilityProperty, entry.Token);
+        _visibility.Clear();
+        if (_root is not null) _root.Changed -= RootChanged;
+        _root = null;
+    }
+
     private void Refresh(bool restart = false)
     {
-        var visible = _working && _active && _loaded && _inViewport && _root?.IsHostVisible != false &&
+        var visible = _working && _active && IsLoaded && _inViewport && _root?.IsHostVisible != false &&
             _visibility.All(entry => entry.Element.Visibility == Visibility.Visible);
         var animate = visible && _motionAllowed();
         _dots.Visibility = animate && _kind == ProgramActivityKind.TabIcon ? Visibility.Visible : Visibility.Collapsed;

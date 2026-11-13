@@ -14,12 +14,6 @@ internal static class ProgramStatusUiChecks
 {
     internal static void Run()
     {
-        var orphanCard = new ProgramStatusCard();
-        var firstOrphan = new PaneProgramStatus(1, "PowerShell", new("build/test", ProgramState.Done, null, null, null, null, null, null, DateTimeOffset.Now));
-        var secondOrphan = firstOrphan with { Status = firstOrphan.Status with { Id = "deploy/test" } };
-        orphanCard.Update("PowerShell", [firstOrphan, secondOrphan], false);
-        var identities = Descendants(orphanCard).OfType<TextBlock>().Where(text => text.Name == "Identity").Select(text => text.Text).ToArray();
-        Check(identities.Any(text => text.StartsWith("build/test · ")) && identities.Any(text => text.StartsWith("deploy/test · ")), "Orphan nested reports with equal leaf names must retain distinct full identities.");
         var tab = new TabViewItem { Header = "PowerShell" };
         var status = new TabProgramStatus(tab);
         tab.Tag = status;
@@ -382,6 +376,7 @@ internal static class ProgramStatusUiChecks
     internal static async Task CheckIconPreferencesAsync(Window window)
     {
         var preferences = new IconPreferences();
+        preferences.SetContrast(true);
         var tab = new TabViewItem { Header = "PowerShell" };
         var status = new TabProgramStatus(tab);
         tab.Tag = status;
@@ -448,6 +443,16 @@ internal static class ProgramStatusUiChecks
         host.Children.Clear();
         await Task.Delay(100);
         Check(preferences.Subscribers == 0, "Repeated unload must release all subscriptions.");
+        var orphanCard = new ProgramStatusCard();
+        var firstOrphan = new PaneProgramStatus(1, "PowerShell", new("build/test", ProgramState.Done, null, null, null, null, null, null, DateTimeOffset.Now));
+        var secondOrphan = firstOrphan with { Status = firstOrphan.Status with { Id = "deploy/test" } };
+        orphanCard.Update("PowerShell", [firstOrphan, secondOrphan], false);
+        host.Children.Add(orphanCard);
+        await Program.WaitAsync(() => orphanCard.IsLoaded);
+        orphanCard.UpdateLayout();
+        var identities = Descendants(orphanCard).OfType<TextBlock>().Select(block => block.Text).ToArray();
+        Check(identities.Any(value => value.StartsWith("build/test · ")) && identities.Any(value => value.StartsWith("deploy/test · ")), $"Orphan nested reports with equal leaf names must retain distinct full identities. Visible text: {string.Join(" | ", identities)}");
+        host.Children.Clear();
     }
 
     private sealed class IconPreferences : IProgramIconPreferences

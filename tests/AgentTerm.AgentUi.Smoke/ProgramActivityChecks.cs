@@ -69,6 +69,11 @@ internal static class ProgramActivityChecks
         Check(!edge.IsAnimating, "A hidden pane must immediately stop its comet.");
         edge.Active = true;
         Check(edge.IsAnimating, "A visible pane must resume its own work.");
+        canvas.Children.Remove(firstPane);
+        var split = new Grid { Children = { firstPane } };
+        canvas.Children.Add(split);
+        await Task.Delay(150);
+        Check(edge.IsLoaded && edge.IsAnimating, "Reparenting an active pane into a split must preserve its activity.");
         canvas.RequestedTheme = ElementTheme.Light;
         await Task.Delay(200);
         Check(Activity(icon).IsAnimating && edge.IsAnimating, "Theme changes must preserve ongoing work.");
