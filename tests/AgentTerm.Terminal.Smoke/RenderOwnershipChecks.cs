@@ -23,10 +23,13 @@ internal static class RenderOwnershipChecks
         CheckViewChangeOverridesHold();
         CheckPresentationReadsDuringHold();
         CheckHandoffDuringInFlightCapture();
+        CheckAnchoredHandoff();
+        CheckFailedBoundary();
         CheckSplitCaptureMetadata();
         CheckUnicodeClusters();
         CheckRetainedFrames();
         CheckFailureRecovery();
+        MeasureAnchoredBoundaries();
         CheckHandleLifetime();
         CheckConcurrentHolds();
     }
@@ -183,6 +186,50 @@ internal static class RenderOwnershipChecks
         Check(Screen(terminal.ReadFrame()) == "BASE\npq\nafter", "rows untouched since adoption must stay correct.");
     }
 
+    private static void CheckAnchoredHandoff()
+    {
+        using var terminal = new GhosttyTerminal(20, 6);
+        using var reference = new GhosttyTerminal(20, 6);
+        foreach (var t in new[] { terminal, reference })
+        {
+            t.SetBottomAnchored(true);
+            for (var i = 0; i < 12; i++) Write(t, $"history{i}\r\n");
+            Write(t, "prompt>");
+            t.ReadFrame();
+        }
+        var capture = terminal.BeginFrame();
+        Write(reference, "\r\nfinished");
+        var expected = reference.ReadFrame();
+        Write(terminal, "\r\nfinished\x1b[?2026h\r\nhalf");
+        terminal.CompleteFrame(capture);
+        var held = terminal.ReadFrame();
+        Check(Screen(held) == Screen(expected) && held.Viewport == expected.Viewport,
+            $"An in-flight anchored boundary must settle to the exact viewport. Expected <{Screen(expected)}> {expected.Viewport}, got <{Screen(held)}> {held.Viewport}.");
+        Write(terminal, "\x1b[?2026l");
+        Check(Row(terminal.ReadFrame(), 5) == "half", "Release resumes bottom anchoring.");
+    }
+
+    private static void CheckFailedBoundary()
+    {
+        foreach (var inFlight in new[] { false, true })
+        {
+            using var terminal = new GhosttyTerminal(30, 4) { RenderAllocator = FailingAllocator.Instance };
+            Write(terminal, "published");
+            var stable = terminal.ReadFrame();
+            var capture = inFlight ? terminal.BeginFrame() : default;
+            FailingAllocator.Fail = true;
+            try { Write(terminal, "\r\n" + new string('x', 25) + "é̂\x1b[?2026h\x1b[Hhalf"); }
+            finally { FailingAllocator.Fail = false; }
+            Check(terminal.HoldCounters.CaptureFailures == 1, "Fixture must fail the boundary allocation.");
+            if (inFlight) stable = terminal.CompleteFrame(capture);
+            Check(ReferenceEquals(stable, terminal.ReadFrame()), "Failed boundary must retain the published frame after allocator recovery.");
+            Check(ReferenceEquals(stable, terminal.ReadFrame()), "Failure must keep holding until release.");
+            if (inFlight) Thread.Sleep((int)GhosttyTerminal.RenderHoldTimeout.TotalMilliseconds + 20);
+            else Write(terminal, "\x1b[?2026l");
+            Check(!ReferenceEquals(stable, terminal.ReadFrame()), "Release or timeout publishes recovered output.");
+        }
+    }
+
     private static void CheckSplitCaptureMetadata()
     {
         using var terminal = new GhosttyTerminal(20, 3);
@@ -265,6 +312,41 @@ internal static class RenderOwnershipChecks
         }
         finally { FailingAllocator.Fail = false; }
         Check(fresh.ReadFrame().Columns == 10, "a terminal recovers after its first capture failed.");
+    }
+
+    private static void MeasureAnchoredBoundaries()
+    {
+        // Compare callback cost for the same dirty, bottom-anchored viewport. The in-flight path must
+        // scan through local native ownership. Report spread; this is not a whole-render throughput claim.
+        foreach (var inFlight in new[] { false, true })
+        {
+            var trials = new List<double>();
+            for (var trial = 0; trial < 6; trial++)
+            {
+                using var terminal = new GhosttyTerminal(120, 40);
+                terminal.SetBottomAnchored(true);
+                for (var row = 0; row < 60; row++) Write(terminal, new string('x', 100) + "\r\n");
+                terminal.ReadFrame();
+                long ticks = 0;
+                for (var i = 0; i < 100; i++)
+                {
+                    var capture = inFlight ? terminal.BeginFrame() : default;
+                    Write(terminal, "line\r\n");
+                    var start = System.Diagnostics.Stopwatch.GetTimestamp();
+                    Write(terminal, "\x1b[?2026h");
+                    ticks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
+                    if (inFlight) terminal.CompleteFrame(capture);
+                    terminal.ReadFrame();
+                    Write(terminal, "\x1b[?2026l");
+                    terminal.ReadFrame();
+                }
+                Check((inFlight ? terminal.HoldCounters.HandoffCaptures : terminal.HoldCounters.DirectCaptures) == 100,
+                    "Every timed boundary must execute its requested capture path.");
+                if (trial != 0) trials.Add(ticks * 1_000_000.0 / System.Diagnostics.Stopwatch.Frequency / 100);
+            }
+            trials.Sort();
+            Console.WriteLine($"Anchored hold callback {(inFlight ? "handoff" : "direct")}, 120x40, five trials x 100 after warmup, microseconds mean-per-trial min/median/max {trials[0]:F1}/{trials[2]:F1}/{trials[^1]:F1}.");
+        }
     }
 
     private static void CheckHandleLifetime()
@@ -357,9 +439,10 @@ internal static class RenderOwnershipChecks
     }
 
     /// <summary>A libghostty allocator backed by NativeMemory that fails every allocation while <see cref="Fail"/> is set.</summary>
-    private static unsafe class FailingAllocator
+    internal static unsafe class FailingAllocator
     {
         public static volatile bool Fail;
+        public static long Allocations;
         public static readonly IntPtr Instance = Create();
 
         private static IntPtr Create()
@@ -375,8 +458,11 @@ internal static class RenderOwnershipChecks
         }
 
         [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-        private static void* Alloc(void* context, nuint length, byte alignment, nuint returnAddress) =>
-            Fail ? null : NativeMemory.AlignedAlloc(Math.Max(length, 1), (nuint)1 << alignment);
+        private static void* Alloc(void* context, nuint length, byte alignment, nuint returnAddress)
+        {
+            Interlocked.Increment(ref Allocations);
+            return Fail ? null : NativeMemory.AlignedAlloc(Math.Max(length, 1), (nuint)1 << alignment);
+        }
 
         [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
         private static byte Resize(void* context, void* memory, nuint length, byte alignment, nuint newLength, nuint returnAddress) =>

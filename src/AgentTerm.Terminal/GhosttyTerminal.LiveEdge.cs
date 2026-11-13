@@ -27,12 +27,12 @@ public sealed partial class GhosttyTerminal
 
     public long ActiveTop { get { ThrowIfDisposed(); return ReadNativeViewport().TotalRows - _rows; } }
 
-    private void EnsurePresentation()
+    private void EnsurePresentation(bool boundary = false)
     {
         if (_preparingPresentation || !_presentationDirty) return;
         // During a render hold the presented view stays at the boundary. Preparing it would update the render state
         // over a pending boundary snapshot, or move the view and force a half-drawn capture.
-        if (_holdActive && !_presentingBoundary) return;
+        if (_holdActive && !boundary) return;
         if (!_bottomAnchored && _presentedTotal is null)
         {
             _presentationDirty = false;

@@ -48,12 +48,17 @@ public sealed partial class GhosttyTerminal
         Volatile.Write(ref _frameRefreshAt, 0);
         try
         {
-            EnsureRender();
+            AdoptHandoff();
             if (HeldCapture() is { } held)
             {
-                if (held.Held is null) Volatile.Write(ref _captureInFlight, true);
+                if (held.Held is null)
+                {
+                    EnsureRender();
+                    Volatile.Write(ref _captureInFlight, true);
+                }
                 return held;
             }
+            EnsureRender();
             EnsurePresentation();
             var capture = CaptureMetadata();
             using (var lease = new HandleLease(_render))
@@ -299,52 +304,78 @@ public sealed partial class GhosttyTerminal
     /// </summary>
     private unsafe int LastContentRow()
     {
-        EnsureRender();
+        var inFlight = Volatile.Read(ref _captureInFlight);
+        if (!inFlight) EnsureRender();
+        // A parser callback must never borrow the iterators being materialized by CompleteFrame.
+        using var localState = inFlight ? NewRenderState() : null;
+        RenderRowsHandle? localRows = null;
+        RenderCellsHandle? localCells = null;
+        if (inFlight)
+        {
+            ThrowIfFailed(RenderNative.ghostty_render_state_row_iterator_new(IntPtr.Zero, out var rows), "Could not create presentation rows.");
+            localRows = new RenderRowsHandle(rows);
+            var cellResult = RenderNative.ghostty_render_state_row_cells_new(IntPtr.Zero, out var cells);
+            if (cellResult != NativeResult.Success) localRows.Dispose();
+            ThrowIfFailed(cellResult, "Could not create presentation cells.");
+            localCells = new RenderCellsHandle(cells);
+            _renderStale = true; // The local update consumes terminal dirtiness; adoption must replace the old state.
+            _handoff?.Dispose();
+            _handoff = null;
+        }
+        using var ownedRows = localRows;
+        using var ownedCells = localCells;
+        var rowIterator = (localRows ?? _renderRows)!.DangerousGetHandle();
+        var cellIterator = (localCells ?? _renderCells)!.DangerousGetHandle();
         var last = ReadActiveCursorRow();
         var reverse = ReadMode(ReverseColorsMode);
-        using var state = new HandleLease(_render);
-        using var rowsLease = new HandleLease(_renderRows);
-        using var cellsLease = new HandleLease(_renderCells);
+        using var state = new HandleLease(localState ?? _render);
+        using var rowsLease = new HandleLease(localRows ?? _renderRows);
+        using var cellsLease = new HandleLease(localCells ?? _renderCells);
+        var presentationState = state.Raw;
         ConfigureOverscan(state.Raw, false);
         ThrowIfFailed(RenderNative.ghostty_render_state_update(state.Raw, _handle), "Could not update render state.");
         Rgb foreground = default, background = default;
-        StateGet(RenderStateData.ColorForeground, &foreground); StateGet(RenderStateData.ColorBackground, &background);
+        LocalStateGet(RenderStateData.ColorForeground, &foreground); LocalStateGet(RenderStateData.ColorBackground, &background);
         TerminalColor defaultFg = foreground.ToColor(), defaultBg = background.ToColor(), frameBg = reverse ? defaultFg : defaultBg;
-        var rowPtr = _rowIterator;
-        StateGet(RenderStateData.RowIterator, &rowPtr);
+        var rowPtr = rowIterator;
+        LocalStateGet(RenderStateData.RowIterator, &rowPtr);
         byte* scratch = stackalloc byte[ScratchTextBytes];
-        for (var row = 0; RenderNative.ghostty_render_state_row_iterator_next(_rowIterator) != 0; row++)
+        for (var row = 0; RenderNative.ghostty_render_state_row_iterator_next(rowIterator) != 0; row++)
         {
             if (row <= last) continue;
-            var cellPtr = _cellIterator;
-            RowGet(RenderRowData.Cells, &cellPtr);
-            while (RenderNative.ghostty_render_state_row_cells_next(_cellIterator) != 0)
+            var cellPtr = cellIterator;
+            LocalRowGet(RenderRowData.Cells, &cellPtr);
+            while (RenderNative.ghostty_render_state_row_cells_next(cellIterator) != 0)
             {
                 ulong raw = 0; int tag = 0; ushort styleId = 0; uint codepoint = 0;
-                CellGet(RenderCellData.Raw, &raw);
+                LocalCellGet(RenderCellData.Raw, &raw);
                 ThrowIfFailed(RenderNative.ghostty_cell_get(raw, CellData.ContentTag, &tag), "Could not read cell content.");
                 ThrowIfFailed(RenderNative.ghostty_cell_get(raw, CellData.StyleId, &styleId), "Could not read cell style.");
                 ThrowIfFailed(RenderNative.ghostty_cell_get(raw, CellData.Codepoint, &codepoint), "Could not read cell codepoint.");
                 if (tag == 0 && styleId == 0 && (codepoint == 0 || codepoint <= char.MaxValue && char.IsWhiteSpace((char)codepoint))) continue;
                 Style style = default;
-                CellGet(RenderCellData.Style, &style);
-                if (style.Has(StyleFlags.UnderlineMask | StyleFlags.Strikethrough | StyleFlags.Overline) || CellColors(defaultFg, defaultBg, style.Has(StyleFlags.Inverse) ^ reverse).Bg != frameBg) { last = row; break; }
+                LocalCellGet(RenderCellData.Style, &style);
+                if (style.Has(StyleFlags.UnderlineMask | StyleFlags.Strikethrough | StyleFlags.Overline) || CellColors(defaultFg, defaultBg, style.Has(StyleFlags.Inverse) ^ reverse, cellIterator).Bg != frameBg) { last = row; break; }
                 var buffer = new ByteBuffer { Pointer = scratch, Capacity = ScratchTextBytes };
-                var result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, RenderCellData.GraphemesUtf8, &buffer);
+                var result = RenderNative.ghostty_render_state_row_cells_get(cellIterator, RenderCellData.GraphemesUtf8, &buffer);
                 if (result == NativeResult.OutOfSpace) { last = row; break; }
                 ThrowIfFailed(result, "Could not read cell text.");
                 if (!string.IsNullOrWhiteSpace(CellText(new ReadOnlySpan<byte>(scratch, checked((int)buffer.Length)), null))) { last = row; break; }
             }
         }
+        void LocalStateGet(RenderStateData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_get(presentationState, key, value), "Could not read presentation state.");
+        void LocalRowGet(RenderRowData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_get(rowIterator, key, value), "Could not read presentation row.");
+        void LocalCellGet(RenderCellData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_cells_get(cellIterator, key, value), "Could not read presentation cell.");
         return last;
     }
 
-    private unsafe (TerminalColor Fg, TerminalColor Bg) CellColors(TerminalColor fg, TerminalColor bg, bool inverse)
+    private unsafe (TerminalColor Fg, TerminalColor Bg) CellColors(TerminalColor fg, TerminalColor bg, bool inverse, IntPtr iterator = default)
     {
+        if (iterator == IntPtr.Zero) iterator = _cellIterator;
         Rgb color = default;
-        var result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, RenderCellData.ForegroundColor, &color);
+        var result = RenderNative.ghostty_render_state_row_cells_get(iterator, RenderCellData.ForegroundColor, &color);
         if (result == NativeResult.Success) fg = color.ToColor(); else if (result != NativeResult.NoValue) ThrowIfFailed(result, "Could not read cell foreground.");
-        result = RenderNative.ghostty_render_state_row_cells_get(_cellIterator, RenderCellData.BackgroundColor, &color);
+        result = RenderNative.ghostty_render_state_row_cells_get(iterator, RenderCellData.BackgroundColor, &color);
         if (result == NativeResult.Success) bg = color.ToColor(); else if (result != NativeResult.NoValue) ThrowIfFailed(result, "Could not read cell background.");
         return inverse ? (bg, fg) : (fg, bg);
     }

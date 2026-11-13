@@ -24,7 +24,7 @@ public sealed partial class GhosttyTerminal
     private FrameCapture? _boundary;
     private RenderHandle? _handoff;
     private bool _renderStale;
-    private bool _presentingBoundary;
+    private long? _failedBoundaryViewRevision;
     // Render exclusion guards this; CompleteFrame writes it.
     private long _frameHoldGeneration = -1;
     private RenderHoldCounters _holdCounters;
@@ -52,10 +52,11 @@ public sealed partial class GhosttyTerminal
 
     private void OnRenderHold(bool held)
     {
-        // Exceptions must not unwind through the native parser. A failed boundary leaves the next frame to a live capture.
+        // Exceptions must not unwind through the parser. A failed boundary retains the last published frame.
         try
         {
             _boundary = null;
+            _failedBoundaryViewRevision = null;
             _holdGeneration++;
             _holdActive = held;
             if (!held) return;
@@ -63,12 +64,13 @@ public sealed partial class GhosttyTerminal
             _holdCounters.Starts++;
             CaptureBoundary();
         }
-        catch (Exception) { _boundary = null; _holdCounters.CaptureFailures++; }
+        catch (Exception) { _boundary = null; _failedBoundaryViewRevision = _viewRevision; _holdCounters.CaptureFailures++; }
     }
 
     private unsafe void CaptureBoundary()
     {
         SettleAfterWrite();
+        EnsurePresentation(boundary: true);
         if (Volatile.Read(ref _captureInFlight))
         {
             // A pending handoff belongs to this capture window: every render-exclusive caller adopts it before starting
@@ -93,9 +95,6 @@ public sealed partial class GhosttyTerminal
             return;
         }
         EnsureRender();
-        _presentingBoundary = true;
-        try { EnsurePresentation(); }
-        finally { _presentingBoundary = false; }
         var capture = CaptureMetadata() with { Boundary = true };
         using (var lease = new HandleLease(_render))
         {
@@ -128,7 +127,10 @@ public sealed partial class GhosttyTerminal
             Volatile.Write(ref _frameRefreshAt, deadline);
             return boundary;
         }
-        if (_frame is null || _frameHoldGeneration != _holdGeneration || _viewRevision != _capturedViewRevision) return null;
+        if (_frame is null) return null;
+        var publishedForHold = _frameHoldGeneration == _holdGeneration && _viewRevision == _capturedViewRevision;
+        var failedBoundaryFallback = _failedBoundaryViewRevision == _viewRevision;
+        if (!publishedForHold && !failedBoundaryFallback) return null;
         Volatile.Write(ref _frameRefreshAt, deadline);
         return new FrameCapture(_frame, default, false, false, 0, null);
     }
