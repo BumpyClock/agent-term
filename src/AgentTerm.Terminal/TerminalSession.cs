@@ -223,18 +223,25 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         });
         using var signalLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var exited = Completion;
-        var finished = await Task.WhenAny(owned.Completion.Task, exited, CancellationSignal(signalLifetime.Token)).ConfigureAwait(false);
+        await Task.WhenAny(owned.Completion.Task, exited, CancellationSignal(signalLifetime.Token)).ConfigureAwait(false);
         signalLifetime.Cancel();
-        if (finished == owned.Completion.Task) return await owned.Completion.Task.ConfigureAwait(false);
-        if (finished == exited)
+        if (Settle() is { } settled) return settled;
+        // Cancellation won. Ctrl+C recovery ends at readiness or at shell exit; only a proven exit releases a running command.
+        try { await Task.WhenAny(owned.Completion.Task, exited).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
+        catch (TimeoutException) { }
+        if (Settle() is { } recovered) return recovered;
+        lock (_gate)
+            return new(TerminalExecutionStatus.InterruptionFailed, owned.Capture.Text,
+                Message: "PowerShell did not report readiness after Ctrl+C. Terminal remains agent-owned; use interactive input or close the pane.");
+
+        // The reader drains before the shell completes, so once exit is sampled the command's own result is final and wins a tie.
+        TerminalExecutionResult? Settle()
         {
+            var shellExited = exited.IsCompleted;
+            if (owned.Completion.Task.IsCompleted) return owned.Completion.Task.Result;
+            if (!shellExited) return null;
             lock (_gate) { if (_owned == owned) _owned = null; }
             return new(TerminalExecutionStatus.Exited, owned.Capture.Text);
-        }
-        try { return await owned.Completion.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
-        catch (TimeoutException)
-        {
-            return new(TerminalExecutionStatus.InterruptionFailed, Message: "PowerShell did not report readiness after Ctrl+C. Terminal remains agent-owned; use interactive input or close the pane.");
         }
     }
     private static async Task CancellationSignal(CancellationToken token)

@@ -41,9 +41,12 @@ internal static class SmartPromptChecks
             session.Send("Write-Output 'accidental-input'\r");
             try { session.SubmitCommand("Write-Output 'competing'"); throw new Exception("User input admitted."); } catch (InvalidOperationException) { }
             await Task.Delay(500); cancel.Cancel();
-            if ((await sleeping).Status != TerminalExecutionStatus.Interrupted || session.AgentOwnsTerminal || session.PromptState != ShellPromptState.Ready) throw new Exception("Cancellation recovery failed.");
+            var interrupted = await sleeping;
+            if (interrupted.Status != TerminalExecutionStatus.Interrupted || session.AgentOwnsTerminal || session.PromptState != ShellPromptState.Ready)
+                throw new Exception($"Cancellation recovery failed (owns={session.AgentOwnsTerminal}, prompt={session.PromptState}): " + System.Text.Json.JsonSerializer.Serialize(interrupted) + "\nScreen:\n" + session.ReadText());
             if (session.ReadText().Contains("Agent completed [")) throw new Exception("Cancellation must not print a shell-generated successful agent-turn outcome.");
             Console.WriteLine("Host cancellation passed.");
+            await Task.WhenAll(CancelThenExitAsync(), CancelTimeoutAsync());
             var recovered = await session.ExecuteAsync(new("smartAlias")).WaitAsync(TimeSpan.FromSeconds(15));
             if (!recovered.Output.Contains("42") || session.ProcessId != pid) throw new Exception("Shell identity lost: " + System.Text.Json.JsonSerializer.Serialize(recovered));
             await using (var second = new TerminalSession())
@@ -63,6 +66,43 @@ internal static class SmartPromptChecks
         }
         finally { await session.DisposeAsync(); try { Directory.Delete(fixture); } catch (IOException) { Console.WriteLine("Fixture still held by closing shell: " + fixture); } }
         Console.WriteLine("Host capture > viewport, UTF-8, truncation, cwd/state/alias, exit 7, busy/input exclusion, cancellation recovery, pane isolation and raw fallback passed.");
+    }
+    // Ctrl+C reaches PowerShell as input, so the command outlives cancellation; ResistCtrlCAsync proves that before each case.
+    private const string ResistantCommand = "[Console]::TreatControlCAsInput = $true; Write-Output ('cancel-' + 'partial'); Start-Sleep 60";
+    private static async Task<Task<TerminalExecutionResult>> ResistCtrlCAsync(TerminalSession session, CancellationTokenSource cancel)
+    {
+        session.Start();
+        using (var ready = new CancellationTokenSource(TimeSpan.FromSeconds(25))) while (session.PromptState != ShellPromptState.Ready) await Task.Delay(25, ready.Token);
+        var running = session.ExecuteAsync(new(ResistantCommand), cancel.Token);
+        using (var seen = new CancellationTokenSource(TimeSpan.FromSeconds(25))) while (!session.ReadText().Contains("cancel-partial")) await Task.Delay(25, seen.Token);
+        cancel.Cancel();
+        await Task.Delay(2000);
+        if (running.IsCompleted || !session.AgentOwnsTerminal || session.Completion.IsCompleted)
+            throw new Exception("Fixture must survive Ctrl+C with the agent still owning a live shell: " + (running.IsCompleted ? System.Text.Json.JsonSerializer.Serialize(await running) : "shell ended"));
+        return running;
+    }
+    private static async Task CancelThenExitAsync()
+    {
+        await using var session = new TerminalSession(100, 35);
+        using var cancel = new CancellationTokenSource();
+        var running = await ResistCtrlCAsync(session, cancel);
+        await session.StopAsync();
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+        if (result.Status != TerminalExecutionStatus.Exited || result.Output.Split("cancel-partial").Length != 2 || session.AgentOwnsTerminal || session.PromptState != ShellPromptState.Exited)
+            throw new Exception($"Shell exit during Ctrl+C recovery must promptly return Exited with partial output and release ownership (owns={session.AgentOwnsTerminal}): " + System.Text.Json.JsonSerializer.Serialize(result));
+        Console.WriteLine("Host cancel then shell exit passed.");
+    }
+    private static async Task CancelTimeoutAsync()
+    {
+        await using var session = new TerminalSession(100, 35);
+        using var cancel = new CancellationTokenSource();
+        var running = await ResistCtrlCAsync(session, cancel);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(25));
+        if (result.Status != TerminalExecutionStatus.InterruptionFailed || waited.Elapsed < TimeSpan.FromSeconds(15) || !result.Output.Contains("cancel-partial") ||
+            !session.AgentOwnsTerminal || session.Completion.IsCompleted || (await session.ExecuteAsync(new("Write-Output 'competing'"))).Status != TerminalExecutionStatus.Busy)
+            throw new Exception($"Genuine Ctrl+C timeout must keep the running command agent-owned with partial output (after {waited.Elapsed.TotalSeconds:F1}s): " + System.Text.Json.JsonSerializer.Serialize(result));
+        Console.WriteLine("Host cancellation timeout kept ownership.");
     }
     private static async Task ResizeDuringCaptureAsync(TerminalSession session)
     {
