@@ -26,6 +26,11 @@ internal static class Program
             GlyphClippingChecks.Run(device);
             return;
         }
+        if (args.Contains("--text-runs-only"))
+        {
+            TextRunRasterChecks.Run(device);
+            return;
+        }
         SmoothScrollRasterChecks.Run(device);
         if (args.Contains("--smooth-scroll-only")) return;
         FidelityRasterChecks.Run(device);
@@ -110,6 +115,7 @@ internal static class Program
         AssertOscCursorText(device);
         AssertBackgroundContinuity(device);
         GlyphClippingChecks.Run(device);
+        TextRunRasterChecks.Run(device);
         GridGeometryChecks.Run(device);
         KittyImageRenderChecks.Run(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");

@@ -42,6 +42,16 @@ internal static partial class Program
         Write("\x1b[3;2Hx "); await Check("wide-to-narrow");
         Write("\x1b[5;1Hcombining é ö å"); await Check("combining-written");
         Write("\x1b[5;11Hũ"); await Check("combining-partial-edit");
+        Write("\x1b[8;1Hx => y != z <!-- --> === ---------->"); await Check("ligatures-written");
+        Write("\x1b[8;36H-"); await Check("ligature-arrow-head-edit");
+        Write("\x1b[8;36H>"); await Check("ligature-context-restored");
+        Write("\x1b[8;3H\x1b[31m=\x1b[0m"); await Check("ligature-style-split");
+        Write("\x1b[8;4H "); await Check("ligature-partial-erase");
+        terminal.BeginSelection(22, 7); terminal.ExtendSelection(23, 7); terminal.EndSelection(); await Check("ligature-selection-edge");
+        terminal.ClearSelection(); await Check("ligature-selection-cleared");
+        Write("\x1b[8;1H\x1b[K===abcdefghijk"); await Check("ligature-before-run-rejection");
+        Write("\x1b[8;14H\u0633"); await Check("ligature-run-rejected-by-distant-rtl");
+        Write("\x1b[8;14Hk"); await Check("ligature-run-accepted-after-distant-edit");
         terminal.BeginSelection(0, 0); terminal.ExtendSelection(9, 0); terminal.EndSelection(); await Check("selection-first");
         terminal.ClearSelection(); terminal.BeginSelection(2, 2); terminal.ExtendSelection(8, 2); terminal.EndSelection(); await Check("selection-moved");
         terminal.BeginSelection(0, 1); terminal.ExtendSelection(4, 1);
@@ -129,7 +139,7 @@ internal static partial class Program
             for (var index = 0; index < glyphsPerScreen; index++) text.Append((char)(0x4E00 + (first + index) % 20000));
             Write(text.Append("\x1b[0m").ToString());
             await Check($"cjk-cache-{cjkScreens}");
-            if (glyphCache.Count > glyphCache.Capacity) throw new Exception($"Glyph cache grew to {glyphCache.Count} above {glyphCache.Capacity}.");
+            if (glyphCache.Cells > glyphCache.Capacity) throw new Exception($"Glyph cache grew to {glyphCache.Cells} cells above {glyphCache.Capacity}.");
         }
         var cjkCreated = glyphCache.Created - createdBefore;
         if (cjkCreated <= capacity) throw new Exception($"CJK screens created {cjkCreated} layouts and never overflowed capacity {capacity}.");
@@ -137,8 +147,8 @@ internal static partial class Program
         if (glyphCache.Count <= 1024) throw new Exception("CJK shrink fixture did not fill more than the minimum cache capacity.");
         terminal.Resize(16, 8);
         await Check("cjk-cache-shrink");
-        if (glyphCache.Capacity != 1024 || glyphCache.Count > glyphCache.Capacity)
-            throw new Exception($"Shrinking the grid retained {glyphCache.Count} layouts above the new capacity {glyphCache.Capacity}.");
+        if (glyphCache.Capacity != 1024 || glyphCache.Cells > glyphCache.Capacity)
+            throw new Exception($"Shrinking the grid retained {glyphCache.Cells} cells above the new capacity {glyphCache.Capacity}.");
 
         fontSize = 17; surface.SetTerminalFont(fontSize, "FiraCode Nerd Font"); await Check("font-zoom");
         fontSize = 14; surface.SetTerminalFont(fontSize, "FiraCode Nerd Font"); await Check("font-restore");
@@ -154,7 +164,7 @@ internal static partial class Program
         File.WriteAllText(output, JsonSerializer.Serialize(new
         {
             passed = cases.Count, cases, imageDamage = new { unrelatedRequests, animationRequests },
-            glyphCache = new { capacity, cjkScreens, cjkCreated, finalLayouts = glyphCache.Count }
+            glyphCache = new { capacity, cjkScreens, cjkCreated, finalLayouts = glyphCache.Count, finalCells = glyphCache.Cells }
         }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Retained raster parity passed {cases.Count} transitions.");
 

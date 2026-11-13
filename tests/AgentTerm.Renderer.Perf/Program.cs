@@ -28,6 +28,12 @@ internal static partial class Program
             return 2;
         }
         WinRT.ComWrappersSupport.InitializeComWrappers();
+        if (args.Contains("--cache-churn-only"))
+        {
+            using var device = CanvasDevice.GetSharedDevice();
+            GlyphCacheProbe.CheckUniqueTokens(device, Path.GetFullPath(args[2]));
+            return 0;
+        }
         Application.Start(_ =>
         {
             var app = new RendererPerf.App();
@@ -107,6 +113,7 @@ internal static partial class Program
             var changedFrames = 0;
             long readFrames = 0, totalDraws = 0, renderingSubscriptions = 0, outputNotifications = 0, holdTimerFires = 0;
             var maxGlyphLayouts = 0;
+            var maxGlyphCells = 0;
             var pendingRefreshMs = 0d;
             TerminalFrame? lastFrame = null, expectedFinalFrame = null;
             var finalDraw = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -125,7 +132,11 @@ internal static partial class Program
             canvas.Draw += (_, _) =>
             {
                 totalDraws++;
-                if (glyphCache is not null) maxGlyphLayouts = Math.Max(maxGlyphLayouts, glyphCache.Count);
+                if (glyphCache is not null)
+                {
+                    maxGlyphLayouts = Math.Max(maxGlyphLayouts, glyphCache.Count);
+                    maxGlyphCells = Math.Max(maxGlyphCells, glyphCache.Cells);
+                }
                 if (expectedFinalFrame is not null && ReferenceEquals(expectedFinalFrame, lastFrame)) finalDraw.TrySetResult();
                 if (pattern == "held" && goTimestamp != 0 && lastFrame is { } shown && FrameText(shown).Contains(HeldMarker))
                     heldShown.TrySetResult(Stopwatch.GetElapsedTime(goTimestamp).TotalMilliseconds);
@@ -349,8 +360,8 @@ internal static partial class Program
             var minimumUpdates = Math.Min(10, expectedTicks);
             if (draws < minimumUpdates || changedFrames < minimumUpdates || !text.Contains(marker) || TerminalGridGeometry.VisibleRows(finalFrame) == 0)
                 throw new Exception($"Work did not render. draws={draws}, changedFrames={changedFrames}, workloadText={text.Contains(marker)}.");
-            if (glyphCache is not null && maxGlyphLayouts > glyphCache.Capacity)
-                throw new Exception($"Glyph cache held {maxGlyphLayouts} layouts above its {glyphCache.Capacity} capacity.");
+            if (glyphCache is not null && maxGlyphCells > glyphCache.Capacity)
+                throw new Exception($"Glyph cache held {maxGlyphCells} cells above its {glyphCache.Capacity} capacity.");
             lastFrame = expectedFinalFrame = finalFrame;
             surface.SetFrame(finalFrame);
             canvas.Invalidate();
@@ -400,7 +411,7 @@ internal static partial class Program
                 drawWorkAvailability = completedEvent is null ? "not-available" : "callback-elapsed-only",
                 drawWorkDurations = completedEvent is null ? null : Stats(drawWorkDurations),
                 frameWorkDurations = completedEvent is null ? null : Stats(frameWorkDurations), retainedRaster = retainedStatus,
-                glyphCache = glyphCache is null ? null : new { capacity = glyphCache.Capacity, maxLayouts = maxGlyphLayouts, created = glyphLayoutsCreated },
+                glyphCache = glyphCache is null ? null : new { capacity = glyphCache.Capacity, maxLayouts = maxGlyphLayouts, maxCells = maxGlyphCells, createdEntries = glyphLayoutsCreated },
                 privateBytesStart, privateBytesEnd,
                 measurementStartQpcMs = measurementStartQpc * 1000d / Stopwatch.Frequency,
                 measurementEndQpcMs = measurementEndQpc * 1000d / Stopwatch.Frequency,
@@ -466,13 +477,60 @@ internal sealed class GlyphCacheProbe
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
     private readonly object _cache;
     private readonly FieldInfo _layouts, _capacity, _created;
+    private readonly FieldInfo? _cells;
 
-    private GlyphCacheProbe(object cache, FieldInfo layouts, FieldInfo capacity, FieldInfo created) =>
+    private GlyphCacheProbe(object cache, FieldInfo layouts, FieldInfo capacity, FieldInfo created)
+    {
         (_cache, _layouts, _capacity, _created) = (cache, layouts, capacity, created);
+        _cells = cache.GetType().GetField("_cachedCells", Private);
+    }
 
     internal int Count => ((System.Collections.ICollection)_layouts.GetValue(_cache)!).Count;
+    internal int Cells => _cells is null ? Count : (int)_cells.GetValue(_cache)!;
     internal int Capacity => (int)_capacity.GetValue(_cache)!;
     internal long Created => (long)_created.GetValue(_cache)!;
+
+    internal static void CheckUniqueTokens(CanvasDevice device, string output)
+    {
+        var type = typeof(TerminalSurface).GetNestedType("GlyphLayouts", BindingFlags.NonPublic)!;
+        using var cache = (IDisposable)Activator.CreateInstance(type, true)!;
+        var probe = new GlyphCacheProbe(cache, type.GetField("_layouts", Private)!, type.GetField("_capacity", Private)!, type.GetField("_created", Private)!);
+        type.GetMethod("Configure", Private)!.Invoke(cache, ["Consolas", 14f, 10f, 20f]);
+        type.GetMethod("FitGrid", Private)!.Invoke(cache, [120 * 40]);
+        var run = type.GetMethod("GetRun", Private);
+        var reset = type.GetMethod("ResetKey", Private);
+        var append = type.GetMethod("AppendCell", Private);
+        var get = type.GetMethod("Get", Private)!;
+        int accepted = 0, rejected = 0, maximumCells = 0;
+        void Shape(string token)
+        {
+            if (run is not null)
+            {
+                reset!.Invoke(cache, null);
+                foreach (var character in token) append!.Invoke(cache, [character.ToString()]);
+                if (run.Invoke(cache, [device, token.Length, false, false]) is not null) accepted++;
+                else rejected++;
+            }
+            else
+                foreach (var character in token) get.Invoke(cache, [device, character.ToString(), 10f, false, false]);
+            maximumCells = Math.Max(maximumCells, probe.Cells);
+            if (probe.Cells > probe.Capacity) throw new Exception("Unique tokens exceeded the glyph cache cell budget.");
+        }
+        Shape("hello_world");
+        if (run is not null && accepted != 1) throw new Exception("Consolas ASCII did not use the shaped run path.");
+        var before = probe.Created;
+        for (var index = 0; index < 1200; index++)
+        {
+            Shape($"2026-11-13T09:{index / 60:00}:{index % 60:00}.{index:D6}");
+            Shape($"{index:x16}{index * 2654435761L:x16}");
+            Shape($"src/worker-{index:D6}/run-{index:x8}.cs");
+        }
+        var result = new { shapedRuns = run is not null, tokens = 3600, createdEntries = probe.Created - before,
+            acceptedRuns = accepted, rejectedRuns = rejected, capacityCells = probe.Capacity, maximumCells, finalEntries = probe.Count };
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        File.WriteAllText(output, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine(JsonSerializer.Serialize(result));
+    }
 
     internal static GlyphCacheProbe? For(TerminalSurface surface)
     {

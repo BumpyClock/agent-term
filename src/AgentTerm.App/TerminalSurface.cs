@@ -442,14 +442,21 @@ public sealed partial class TerminalSurface : UserControl
                 for (var col = 0; col < frame.Columns;)
                 {
                     if (!CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) { col++; continue; }
-                    var first = Math.Max(0, col - 2);
+                    var first = col;
+                    while (first > 0 && (HasText(previous, row, first) || HasText(frame, row, first)) &&
+                        (HasText(previous, row, first - 1) || HasText(frame, row, first - 1))) first--;
+                    first = Math.Min(first, Math.Max(0, col - 2));
                     var lastChanged = col++;
                     while (col < frame.Columns && col <= lastChanged + 4)
                     {
                         if (CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) lastChanged = col;
                         col++;
                     }
-                    var end = Math.Min(frame.Columns, lastChanged + 3);
+                    var end = lastChanged + 1;
+                    while (end < frame.Columns && (HasText(previous, row, end - 1) || HasText(frame, row, end - 1)) &&
+                        (HasText(previous, row, end) || HasText(frame, row, end))) end++;
+                    end = Math.Max(end, Math.Min(frame.Columns, lastChanged + 3));
+                    col = Math.Max(col, end);
                     if (latest.TryGetValue((first, end), out var previousSpan) && spans[previousSpan].EndRow == row)
                     {
                         var span = spans[previousSpan];
@@ -483,6 +490,9 @@ public sealed partial class TerminalSurface : UserControl
         _paintedFrame = frame;
         _paintedTextPhase = _cursorPhase;
     }
+
+    private static bool HasText(TerminalFrame frame, int row, int column) =>
+        !string.IsNullOrWhiteSpace(frame.Cells[row * frame.Columns + column].Text);
 
     internal static bool CellNeedsRepaint(TerminalCell previous, TerminalCell current, bool textPhaseChanged) =>
         !ReferenceEquals(previous, current) || textPhaseChanged && current.Blink && !current.Hidden;
@@ -565,22 +575,55 @@ public sealed partial class TerminalSurface : UserControl
                     (last - first + 1) * cellWidth, cellHeight, color);
             }
         for (var row = firstRow; row < endRow; row++)
-        for (var col = firstColumn; col < endColumn; col++)
         {
-            var cell = CellAt(row, col);
-            if (cell.Width == 0 || cell.Hidden || (cell.Blink && !textPhase)) continue;
-            var foreground = cell.Selected ? ToColor(frame.SelectionForeground) : ToColor(cell.Foreground);
-            if (cell.Dim && !cell.Selected) foreground = Color.FromArgb(255, (byte)(foreground.R / 2), (byte)(foreground.G / 2), (byte)(foreground.B / 2));
-            var x = col * cellWidth;
             var y = gridTop + row * cellHeight;
-            var width = cellWidth * cell.Width;
-            if (!string.IsNullOrWhiteSpace(cell.Text))
+            var start = firstColumn;
+            while (start > 0 && JoinsTextRun(frame, CellAt(row, start - 1), CellAt(row, start), textPhase)) start--;
+            while (start < endColumn)
             {
-                drawing.DrawTextLayout(layouts.Get(device, cell.Text, width, cell.Bold, cell.Italic), x, y, foreground);
+                var first = CellAt(row, start);
+                var end = start + 1;
+                if (!DrawsText(first, textPhase)) { start = end; continue; }
+                while (end < frame.Columns && JoinsTextRun(frame, CellAt(row, end - 1), CellAt(row, end), textPhase)) end++;
+                var foreground = TextColor(frame, first);
+                CanvasTextLayout? run = null;
+                if (end - start > 1)
+                {
+                    layouts.ResetKey();
+                    for (var col = start; col < end; col++) layouts.AppendCell(CellAt(row, col).Text);
+                    run = layouts.GetRun(device, end - start, first.Bold, first.Italic);
+                }
+                if (run is not null) drawing.DrawTextLayout(run, start * cellWidth, y, foreground);
+                else
+                    for (var col = start; col < end; col++)
+                    {
+                        var cell = CellAt(row, col);
+                        drawing.DrawTextLayout(layouts.Get(device, cell.Text, cell.Width, cell.Bold, cell.Italic), col * cellWidth, y, foreground);
+                    }
+                start = end;
             }
-            DrawDecorations(drawing, cell, x, y, width, cellHeight, foreground);
+            for (var col = firstColumn; col < endColumn; col++)
+            {
+                var cell = CellAt(row, col);
+                if (cell.Width == 0 || cell.Hidden || (cell.Blink && !textPhase)) continue;
+                DrawDecorations(drawing, cell, col * cellWidth, y, cellWidth * cell.Width, cellHeight, TextColor(frame, cell));
+            }
         }
         DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images, viewportClip, damageClip);
+    }
+
+    private static bool DrawsText(TerminalCell cell, bool textPhase) =>
+        cell.Width != 0 && !cell.Hidden && (!cell.Blink || textPhase) && !string.IsNullOrWhiteSpace(cell.Text);
+
+    internal static bool JoinsTextRun(TerminalFrame frame, TerminalCell left, TerminalCell right, bool textPhase) =>
+        left.Width == 1 && right.Width == 1 && DrawsText(left, textPhase) && DrawsText(right, textPhase) &&
+        left.Bold == right.Bold && left.Italic == right.Italic && left.Blink == right.Blink &&
+        TextColor(frame, left) == TextColor(frame, right);
+
+    private static Color TextColor(TerminalFrame frame, TerminalCell cell)
+    {
+        var color = ToColor(cell.Selected ? frame.SelectionForeground : cell.Foreground);
+        return cell.Dim && !cell.Selected ? Color.FromArgb(255, (byte)(color.R / 2), (byte)(color.G / 2), (byte)(color.B / 2)) : color;
     }
 
     private static void DrawDecorations(CanvasDrawingSession drawing, TerminalCell cell, float x, float y,
@@ -635,7 +678,7 @@ public sealed partial class TerminalSurface : UserControl
             drawing.FillRectangle(cx, cy, cursorWidth, cellHeight, color);
             if (!cell.Hidden && cell.Width != 0 && (!cell.Blink || textPhase))
             {
-                drawing.DrawTextLayout(layouts.Get(device, cell.Text, cursorWidth, cell.Bold, cell.Italic),
+                drawing.DrawTextLayout(layouts.Get(device, cell.Text, Math.Max(1, (int)cell.Width), cell.Bold, cell.Italic),
                     cx, cy, ToColor(frame.CursorText ?? cell.Background));
                 DrawDecorations(drawing, cell, cx, cy, cursorWidth, cellHeight,
                     ToColor(frame.CursorText ?? cell.Background), cursorText: true);
@@ -646,11 +689,18 @@ public sealed partial class TerminalSurface : UserControl
     private sealed class GlyphLayouts : IDisposable
     {
         private int _capacity = 1024;
+        private int _cachedCells;
         private long _created;
-        private readonly record struct Key(string Text, float Width, bool Bold, bool Italic);
-        private readonly Dictionary<Key, CanvasTextLayout> _layouts = new();
-        private readonly Queue<Key> _order = new();
+        private readonly Dictionary<string, CanvasTextLayout?> _layouts = new();
+        private readonly Dictionary<string, CanvasTextLayout?>.AlternateLookup<ReadOnlySpan<char>> _lookup;
+        private readonly Queue<(string Key, int Cells)> _order = new();
+        private readonly (FaceMetrics Face, float Baseline)?[] _references = new (FaceMetrics, float)?[4];
+        private readonly GlyphRunFaces _runFaces = new();
+        private char[] _key = new char[64];
+        private int _keyLength;
         private (string Family, float Size, float CellWidth, float CellHeight) _metrics;
+
+        internal GlyphLayouts() => _lookup = _layouts.GetAlternateLookup<ReadOnlySpan<char>>();
 
         internal void Configure(string family, float size, float cellWidth, float cellHeight)
         {
@@ -663,40 +713,172 @@ public sealed partial class TerminalSurface : UserControl
         internal void FitGrid(int cells)
         {
             _capacity = Math.Clamp(cells * 2, 1024, 65536);
-            while (_layouts.Count > _capacity) EvictOldest();
+            while (_cachedCells > _capacity) EvictOldest();
         }
 
-        internal CanvasTextLayout Get(CanvasDevice device, string text, float width, bool bold, bool italic)
+        internal void ResetKey() => _keyLength = 0;
+
+        internal void AppendCell(string text)
         {
-            var key = new Key(text, width, bold, italic);
-            if (_layouts.TryGetValue(key, out var layout)) return layout;
+            if (_keyLength + text.Length + 2 > _key.Length) Array.Resize(ref _key, Math.Max(_key.Length * 2, _keyLength + text.Length + 2));
+            text.CopyTo(_key.AsSpan(_keyLength));
+            _keyLength += text.Length;
+            _key[_keyLength++] = '\0';
+        }
+
+        internal CanvasTextLayout Get(CanvasDevice device, string text, int cells, bool bold, bool italic)
+        {
+            ResetKey();
+            AppendCell(text);
+            var key = FinishKey(bold, italic, cells);
+            if (_lookup.TryGetValue(key, out var layout)) return layout!;
             using var format = CreateFormat(bold, italic, _metrics.Size, _metrics.Family);
-            layout = new CanvasTextLayout(device, text, format, width, _metrics.CellHeight)
+            layout = new CanvasTextLayout(device, text, format, cells * _metrics.CellWidth, _metrics.CellHeight)
             {
                 Options = CanvasDrawTextOptions.Clip
             };
-            _created++;
-            if (_layouts.Count == _capacity) EvictOldest();
-            _layouts.Add(key, layout);
-            _order.Enqueue(key);
+            Add(key, cells, layout);
             return layout;
+        }
+
+        internal CanvasTextLayout? GetRun(CanvasDevice device, int cells, bool bold, bool italic)
+        {
+            var key = FinishKey(bold, italic, 0);
+            if (_lookup.TryGetValue(key, out var layout)) return layout;
+            layout = CreateRun(device, key[..^1], cells, bold, italic);
+            Add(key, cells, layout);
+            return layout;
+        }
+
+        private ReadOnlySpan<char> FinishKey(bool bold, bool italic, int singleCellWidth)
+        {
+            _key[_keyLength] = (char)('0' + Style(bold, italic) + 4 * singleCellWidth);
+            return _key.AsSpan(0, _keyLength + 1);
+        }
+
+        private static int Style(bool bold, bool italic) => (bold ? 1 : 0) | (italic ? 2 : 0);
+
+        private CanvasTextLayout? CreateRun(CanvasDevice device, ReadOnlySpan<char> cellTexts, int cells, bool bold, bool italic)
+        {
+            var starts = new int[cells + 1];
+            var text = new char[cellTexts.Length - cells];
+            int length = 0, cell = 0;
+            foreach (var character in cellTexts)
+            {
+                if (character != '\0') text[length++] = character;
+                else if (cell < cells) starts[++cell] = length;
+                else return null;
+            }
+            if (cell != cells) return null;
+            using var format = CreateFormat(bold, italic, _metrics.Size, _metrics.Family);
+            if (_references[Style(bold, italic)] is not { } reference)
+            {
+                using var primary = new CanvasTextLayout(device, "M", format, _metrics.CellWidth, _metrics.CellHeight);
+                if (_runFaces.Read(primary) is not { } face) return null;
+                _references[Style(bold, italic)] = reference = (face, primary.LineMetrics[0].Baseline);
+            }
+            var layout = new CanvasTextLayout(device, new string(text, 0, length), format, cells * _metrics.CellWidth, _metrics.CellHeight)
+            {
+                Options = CanvasDrawTextOptions.Clip
+            };
+            if (_runFaces.Read(layout) == reference.Face && AnchorClusters(layout, starts, _metrics.CellWidth, reference.Baseline)) return layout;
+            layout.Dispose();
+            return null;
+        }
+
+        private static bool AnchorClusters(CanvasTextLayout layout, int[] cellStarts, float cellWidth, float baseline)
+        {
+            if (layout.LineMetrics is not [var line] || MathF.Abs(line.Baseline - baseline) > 0.001f) return false;
+            var clusters = layout.ClusterMetrics;
+            var targets = new float[clusters.Length];
+            int offset = 0, cell = 0, cells = cellStarts.Length - 1;
+            for (var index = 0; index < clusters.Length; index++)
+            {
+                var cluster = clusters[index];
+                if ((cluster.Properties & CanvasClusterProperties.RightToLeft) != 0 || cell == cells || cellStarts[cell] != offset) return false;
+                var end = offset + cluster.CharacterCount;
+                var next = cell + 1;
+                while (next < cells && cellStarts[next] < end) next++;
+                if (cellStarts[next] != end) return false;
+                targets[index] = (next - cell) * cellWidth;
+                layout.SetCharacterSpacing(offset, cluster.CharacterCount, 0, targets[index] - cluster.Width, 0);
+                (offset, cell) = (end, next);
+            }
+            if (cell != cells) return false;
+            var anchored = layout.ClusterMetrics;
+            if (anchored.Length != targets.Length) return false;
+            for (var index = 0; index < targets.Length; index++)
+                if (MathF.Abs(anchored[index].Width - targets[index]) > 0.001f) return false;
+            return true;
+        }
+
+        private void Add(ReadOnlySpan<char> key, int cells, CanvasTextLayout? layout)
+        {
+            _created++;
+            while (_order.Count != 0 && _cachedCells + cells > _capacity) EvictOldest();
+            var stored = new string(key);
+            _layouts.Add(stored, layout);
+            _order.Enqueue((stored, cells));
+            _cachedCells += cells;
         }
 
         private void EvictOldest()
         {
-            var oldest = _order.Dequeue();
-            _layouts[oldest].Dispose();
+            var (oldest, cells) = _order.Dequeue();
+            _layouts[oldest]?.Dispose();
             _layouts.Remove(oldest);
+            _cachedCells -= cells;
         }
 
         internal void Clear()
         {
-            foreach (var layout in _layouts.Values) layout.Dispose();
+            foreach (var layout in _layouts.Values) layout?.Dispose();
             _layouts.Clear();
             _order.Clear();
+            _cachedCells = 0;
+            Array.Clear(_references);
         }
 
         public void Dispose() => Clear();
+    }
+
+    private readonly record struct FaceMetrics(float Ascent, float Descent, float LineGap);
+
+    private sealed class GlyphRunFaces : ICanvasTextRenderer
+    {
+        private FaceMetrics? _face;
+        private bool _uniform;
+
+        internal FaceMetrics? Read(CanvasTextLayout layout)
+        {
+            (_face, _uniform) = (null, true);
+            layout.DrawToTextRenderer(this, 0, 0);
+            return _uniform ? _face : null;
+        }
+
+        public void DrawGlyphRun(Vector2 point, CanvasFontFace fontFace, float fontSize, CanvasGlyph[] glyphs, bool isSideways,
+            uint bidiLevel, object brush, CanvasTextMeasuringMode measuringMode, string localeName, string textString,
+            int[] clusterMapIndices, uint characterIndex, CanvasGlyphOrientation glyphOrientation)
+        {
+            var face = new FaceMetrics(fontFace.Ascent, fontFace.Descent, fontFace.LineGap);
+            if (isSideways || bidiLevel % 2 != 0 || _face is { } previous && previous != face) _uniform = false;
+            _face = face;
+        }
+
+        public void DrawStrikethrough(Vector2 point, float strikethroughWidth, float strikethroughThickness, float strikethroughOffset,
+            CanvasTextDirection textDirection, object brush, CanvasTextMeasuringMode textMeasuringMode, string localeName,
+            CanvasGlyphOrientation glyphOrientation) { }
+
+        public void DrawUnderline(Vector2 point, float underlineWidth, float underlineThickness, float underlineOffset, float runHeight,
+            CanvasTextDirection textDirection, object brush, CanvasTextMeasuringMode textMeasuringMode, string localeName,
+            CanvasGlyphOrientation glyphOrientation) { }
+
+        public void DrawInlineObject(Vector2 point, ICanvasTextInlineObject inlineObject, bool isSideways, bool isRightToLeft,
+            object brush, CanvasGlyphOrientation glyphOrientation) { }
+
+        public float Dpi => 96;
+        public bool PixelSnappingDisabled => true;
+        public Matrix3x2 Transform => Matrix3x2.Identity;
     }
 
     private static CanvasTextFormat CreateFormat(bool bold, bool italic, float fontSize, string fontFamily) => new()
