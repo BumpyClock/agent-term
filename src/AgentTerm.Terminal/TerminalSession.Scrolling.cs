@@ -76,6 +76,7 @@ public sealed partial class TerminalSession
         });
         if (Task.WaitAny([operation], Remaining()) < 0 && Interlocked.CompareExchange(ref claim, Abandoned, Queued) == Queued)
             return TerminalSelectionOutcome.Busy;
-        return operation.GetAwaiter().GetResult();
+        try { return operation.GetAwaiter().GetResult(); }
+        catch (TerminalOperationQueueFullException) { return TerminalSelectionOutcome.Busy; }
     }
 }

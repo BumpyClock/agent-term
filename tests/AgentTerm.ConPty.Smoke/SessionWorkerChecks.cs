@@ -148,7 +148,7 @@ internal static class SessionWorkerChecks
             var completed = 0;
             var accepted = Enumerable.Range(0, 1024).Select(_ => session.DispatchAsync(_ => completed++)).ToArray();
             try { await session.DispatchAsync(_ => completed++); throw new Exception("Full worker queue accepted an extra operation."); }
-            catch (InvalidOperationException error) when (error.Message == "The terminal operation queue is full.") { }
+            catch (TerminalOperationQueueFullException) { }
             release.Set();
             await blocked;
             await Task.WhenAll(accepted).WaitAsync(TimeSpan.FromSeconds(10));

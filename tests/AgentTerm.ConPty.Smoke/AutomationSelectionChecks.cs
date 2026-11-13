@@ -19,6 +19,7 @@ internal static class AutomationSelectionChecks
 
         await CheckOrderAfterQueuedClearAsync(session, frame);
         await CheckBlockedWorkerAsync(session, frame);
+        await CheckFullQueueAsync(session, frame);
         foreach (var field in new[] { "_renderGate", "_gate" })
             await CheckHeldGateAsync(session, frame, typeof(TerminalSession).GetField(field, flags)!.GetValue(session)!, field);
 
@@ -98,6 +99,22 @@ internal static class AutomationSelectionChecks
         await holder;
         await session.DispatchAsync(_ => { });
         Selected(session, "automation", "A busy result leaves the selection unchanged after " + name + " is released");
+    }
+
+    private static async Task CheckFullQueueAsync(TerminalSession session, TerminalFrame frame)
+    {
+        using var release = new ManualResetEventSlim();
+        var blocked = Block(session, release);
+        var queued = Enumerable.Range(0, 1024).Select(_ => session.DispatchAsync(_ => { })).ToArray();
+        try
+        {
+            Expect(TerminalSelectionOutcome.Busy, session.SelectFrameRange(frame, 0, 0, 4, 0, Short), "Selection at queue capacity");
+            Expect(TerminalSelectionOutcome.Busy, session.ClearSelection(Short), "Clear at queue capacity");
+        }
+        finally { release.Set(); }
+        await blocked;
+        await Task.WhenAll(queued).WaitAsync(Ample);
+        Selected(session, "automation", "Queue rejection never changes selection");
     }
 
     private static Task Block(TerminalSession session, ManualResetEventSlim release)

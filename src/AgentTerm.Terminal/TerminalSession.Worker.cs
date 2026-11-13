@@ -2,6 +2,8 @@ using System.Threading.Channels;
 
 namespace AgentTerm.Terminal;
 
+public sealed class TerminalOperationQueueFullException() : InvalidOperationException("The terminal operation queue is full.");
+
 /// <summary>An owned frame and its next presentation deadline, captured on the session worker.</summary>
 public sealed record TerminalFrameSnapshot(TerminalFrame Frame, TimeSpan? PendingRefreshDelay)
 {
@@ -96,7 +98,7 @@ public sealed partial class TerminalSession
                     Monitor.PulseAll(_workerGate);
                 }
             }
-        })) return Task.FromException<T>(new InvalidOperationException("The terminal operation queue is full."));
+        })) return Task.FromException<T>(new TerminalOperationQueueFullException());
         _outstandingOperations++;
         _worker ??= Task.Run(async () =>
         {
