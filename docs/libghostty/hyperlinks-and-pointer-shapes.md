@@ -18,6 +18,8 @@ The routing is pure code in `TerminalLinkGesture` (`src/AgentTerm.Terminal/Termi
 
 ## URI policy
 
+Confirmation shows the complete validated URI in a selectable, scrollable field. Only the hover chip truncates long targets. A long user-information component cannot conceal the destination host behind the hover ellipsis during approval.
+
 `TerminalLinkPolicy.Evaluate` decides from the raw bytes. It never starts a program.
 
 | Result | Meaning | Examples |

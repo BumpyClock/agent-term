@@ -26,7 +26,10 @@ internal static class ShellIntegration
                     $global:__AgentTermDraftCursor = 0
                     $global:__AgentTermPromptRows = 1
                     $global:__AgentTermCommandPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('COMMAND_PATH'))
-                    function global:__AgentTermReport($value) { [Console]::Write(([char]27 + "]777;TOKEN;" + $value + [char]7)) }
+                    function global:__AgentTermReport($value) {
+                        if ($value -eq 'start' -or $value.StartsWith('start;')) { [Console]::Write(([char]27 + ']133;C' + [char]7)) }
+                        [Console]::Write(([char]27 + "]777;TOKEN;" + $value + [char]7))
+                    }
                     $editorCommand = Get-Command Set-PSReadLineKeyHandler -ErrorAction Ignore
                     if (-not $global:__AgentTermReadLine) { $global:__AgentTermReadLine = $function:PSConsoleHostReadLine }
                     if ($editorCommand -and $global:__AgentTermReadLine) {
@@ -158,13 +161,15 @@ internal static class ShellIntegration
                         [Console]::Write(([char]27 + ']7;' + $location + [char]7))
                         if ($id -and $id.StartsWith('a:')) { [Console]::WriteLine(('Command ended [' + $id + ']')) }
                         if ($id -and $id.StartsWith('c:')) { [Console]::WriteLine() }
+                        [Console]::Write(([char]27 + ']133;D;' + $(if ($ok) { 0 } else { 1 }) + [char]7))
+                        [Console]::Write(([char]27 + ']133;A' + [char]7))
                         __AgentTermReport ('end;' + [int]$ok + ';' + $code + ';' + $id)
                         if ($global:__AgentTermEditor) { __AgentTermReport ('ready;' + $id) }
                         if (-not $ok) { Write-Error 'restore previous command status' -ErrorAction Ignore }
                         $result = if ($null -ne $global:__AgentTermPrompt) { & $global:__AgentTermPrompt } else { "PS $pwd> " }
                         $global:__AgentTermPromptRows = 1 + ([regex]::Matches(($result -join ''), "`n")).Count
                         $global:LASTEXITCODE = $code
-                        $result
+                        ($result -join '') + [char]27 + ']133;B' + [char]7
                     }
                 } else { [Console]::Write(([char]27 + "]777;TOKEN;unavailable" + [char]7)) }
                 """;
@@ -173,7 +178,7 @@ internal static class ShellIntegration
         }
         if (executable.Equals("cmd", StringComparison.OrdinalIgnoreCase) &&
             flags.All(flag => flag.Equals("/D", StringComparison.OrdinalIgnoreCase) || flag.Equals("/Q", StringComparison.OrdinalIgnoreCase)))
-            return profile.Arguments + " /K \"prompt $E]7;$P$E\\$P$G\"";
+            return profile.Arguments + " /K \"prompt $E]7;$P$E\\$E]133;A$E\\$P$G$E]133;B$E\\\"";
         return profile.Arguments;
     }
 }

@@ -360,7 +360,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         CompositionTarget.Rendering -= Refresh_Rendering;
         _renderingSubscribed = false;
-        if (!_frameRefreshPending || _frameRefreshQueued || !CanRefreshFrames) return;
+        if ((!_frameRefreshPending && !_scrollAnimation.IsActive) || _frameRefreshQueued || !CanRefreshFrames) return;
         _frameRefreshPending = false;
         _frameRefreshQueued = DispatcherQueue.TryEnqueue(RefreshQueuedFrame);
     }
@@ -376,7 +376,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (!CanRefreshFrames || _session is not { } session) return;
         try
         {
-            RefreshTerminalFrame(session);
+            var scrolling = _scrollTick != 0;
+            AdvanceSmoothScroll(session);
+            RefreshTerminalFrame(session, refreshCards: scrolling);
             UpdateCursorBlink();
         }
         catch (Exception exception) { await FailSessionAsync(exception); }
@@ -421,6 +423,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             }
         }
         var previous = _presentedFrame;
+        if (frame.OverscanBelow.Length == 0) Terminal.SetScrollFraction(0);
         if (!ReferenceEquals(previous, frame))
         {
             _presentedFrame = frame;

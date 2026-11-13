@@ -389,12 +389,12 @@ public sealed partial class MainPage
             body.Children.Add(new TextBlock { Text = target.Reason, TextWrapping = TextWrapping.Wrap });
             body.Children.Add(new TextBlock
             {
-                Text = target.Display, TextWrapping = TextWrapping.WrapWholeWords, IsTextSelectionEnabled = true,
+                Text = target.Uri!.AbsoluteUri, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
                 FontFamily = new FontFamily("Cascadia Mono, Consolas")
             });
             var dialog = new ContentDialog
             {
-                Title = "Open this link?", Content = body, PrimaryButtonText = "Open", CloseButtonText = "Cancel",
+                Title = "Open this link?", Content = new ScrollViewer { Content = body, MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, PrimaryButtonText = "Open", CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close, XamlRoot = Terminal.XamlRoot
             };
             return await dialog.ShowAsync() == ContentDialogResult.Primary;

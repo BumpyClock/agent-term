@@ -9,7 +9,7 @@ internal static class HyperlinkSessionChecks
         await WaitAsync(() => session.PromptState == ShellPromptState.Ready, "PowerShell should reach its prompt.", session);
 
         // The link is printed by a running program, so the prompt cannot be what created it.
-        session.Send("$e=[char]27; [Console]::Write(\"$e]8;;https://link.test/path?q=1$([char]7)linktext$e]8;;$([char]7) plain\"); " +
+        session.Send("$e=[char]27; $label='link'+'text'; [Console]::Write(\"$e]8;;https://link.test/path?q=1$([char]7)$label$e]8;;$([char]7) plain\"); " +
             "[Console]::Write(\"$e]22;pointer$e\\\"); Start-Sleep -Seconds 3\r");
         TerminalFrame frame = null!;
         (int Column, int Row) cell = (-1, -1);

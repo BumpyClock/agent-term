@@ -7,6 +7,20 @@ internal static class HistorySearchChecks
     {
         await using var session = new TerminalSession(100, 20, TestShell.Profile);
         await TestShell.StartLegacyAsync(session);
+        foreach (var marker in new[] { "ONE", "TWO" })
+        {
+            session.Send("1..30 | ForEach-Object { 'prompt navigation output ' + $_ }; ('PROMPT_' + '" + marker + "')\r");
+            var promptWait = Stopwatch.StartNew();
+            while (!session.ReadText().Contains("PROMPT_" + marker) || session.PromptState != ShellPromptState.Ready)
+            {
+                if (promptWait.Elapsed > TimeSpan.FromSeconds(15)) throw new Exception("Integrated prompt fixture timed out.");
+                await Task.Delay(20);
+            }
+        }
+        var promptBottom = session.ReadFrame().Viewport.MaximumOffset;
+        session.NavigatePrompt(-1);
+        if (session.ReadFrame().Viewport.Offset >= promptBottom) throw new Exception("Default PowerShell integration must provide native prompt navigation markers.");
+        session.ScrollTo(promptBottom);
         session.Send("1..14000 | ForEach-Object { 'needle row ' + $_ }; ('HISTORY_' + 'READY')\r");
         var deadline = Stopwatch.StartNew();
         while (!session.ReadText().Contains("HISTORY_READY") || session.PromptState != ShellPromptState.Ready ||

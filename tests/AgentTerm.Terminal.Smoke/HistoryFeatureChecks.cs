@@ -33,6 +33,10 @@ internal static class HistoryFeatureChecks
         wrap.Write("abcdef  "u8);
         Check(wrap.ExportHistory(TerminalExportFormat.Plain, unwrap: true, trim: true)!.Contains("abcdef"), "Unwrapped export must join soft wraps.");
         Check(wrap.ExportHistory(TerminalExportFormat.Plain, unwrap: false, trim: false)!.Contains("abcd\nef"), "Physical export must retain soft row breaks.");
+        wrap.BeginSelection(0, 0, rectangular: true); wrap.ExtendSelection(1, 1); wrap.EndSelection();
+        Check(wrap.ExportHistory(TerminalExportFormat.Plain, true) == wrap.ReadSelectionText() && wrap.ReadSelectionText() == "ab\nef", "Rectangular exports must preserve physical rows across a soft wrap.");
+        var rectangularHtml = wrap.ExportHistory(TerminalExportFormat.Html, true)!;
+        Check(rectangularHtml.Contains("ab") && rectangularHtml.Contains("ef") && !rectangularHtml.Contains("abef"), "Rich rectangles must not join the selected rows.");
         using var prompts = new GhosttyTerminal(20, 3);
         prompts.Write("\u001b]133;A\aprompt1\r\none\r\n\u001b]133;A\aprompt2\r\ntwo\r\n\u001b]133;A\aprompt3"u8);
         prompts.NavigatePrompt(-1);
@@ -41,6 +45,7 @@ internal static class HistoryFeatureChecks
         prompts.Resize(10, 3);
         prompts.NavigatePrompt(1);
         Check(prompts.ReadFrame().Viewport.Offset >= previous, "Prompt navigation must remain usable after reflow.");
+        SearchOwnershipChecks.RunAsync().GetAwaiter().GetResult();
         Console.WriteLine("History feature checks passed.");
     }
 }

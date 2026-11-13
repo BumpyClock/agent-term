@@ -128,6 +128,32 @@ public sealed partial class GhosttyTerminal
         return false;
     }
 
+    // Read both snapshots together. Native search owns the tracked match; no borrowed
+    // grid reference survives this call or a terminal mutation.
+    internal unsafe bool IsSearchMatchSelected()
+    {
+        ThrowIfDisposed();
+        if (_search is null) return false;
+        Native.Selection match = default, selected = default;
+        var result = SearchNative.ghostty_search_get(_search, 5, &match);
+        if (result == -4) return false;
+        ThrowIfFailed(result, "Could not read selected search match.");
+        result = RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.Selection, &selected);
+        if (result == -4) return false;
+        ThrowIfFailed(result, "Could not read terminal selection.");
+        if (match.Rectangle != selected.Rectangle ||
+            !match.Start.Equals(selected.Start) || !match.End.Equals(selected.End)) return false;
+        var text = FormatSearchMatch(selected);
+        if (_searchCaseSensitive) return string.Equals(text, _searchQuery, StringComparison.Ordinal);
+        if (text.Length != _searchQuery!.Length) return false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            static char Fold(char c) => c is >= 'A' and <= 'Z' ? (char)(c + ('a' - 'A')) : c;
+            if (Fold(text[i]) != Fold(_searchQuery[i])) return false;
+        }
+        return true;
+    }
+
     private unsafe string FormatSearchMatch(Native.Selection selection)
     {
         ThrowIfFailed(Native.ghostty_formatter_terminal_new(IntPtr.Zero, out var ptr, _handle), "Could not create search formatter.");

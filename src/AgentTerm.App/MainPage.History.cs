@@ -34,9 +34,9 @@ public sealed partial class MainPage
     private void RefreshFindHistory(TerminalSession session)
     {
         if (FindBar.Visibility == Visibility.Visible && IsLoaded && _viewActive &&
-            FindBox.Text.Length != 0 && !_findInFlight && session.HistoryVersion != _findHistoryVersion) FindMatch(true);
+            FindBox.Text.Length != 0 && !_findInFlight && session.HistoryVersion != _findHistoryVersion) FindMatch(true, retainSelection: true);
     }
-    private async void FindMatch(bool forward)
+    private async void FindMatch(bool forward, bool retainSelection = false)
     {
         if (_session is not { } session || FindBox is null || FindStatus is null || FindMatchCase is null) return;
         CancelFind();
@@ -52,7 +52,7 @@ public sealed partial class MainPage
                 FindStatus.Text = value.Complete ? $"{value.Matches} matches" : $"Searching… {value.Matches} matches";
                 if (value.Found && !value.Complete) RefreshTerminalFrame(session);
             });
-            var result = await session.FindAsync(FindBox.Text, forward, FindMatchCase.IsChecked == true, progress, token);
+            var result = await session.FindAsync(FindBox.Text, forward, FindMatchCase.IsChecked == true, progress, token, retainSelection);
             if (token.IsCancellationRequested || _session != session) return;
             _findHistoryVersion = result.HistoryVersion;
             _findInFlight = false;

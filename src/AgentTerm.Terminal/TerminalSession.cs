@@ -471,20 +471,6 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         }
     }
 
-    public bool Find(string query, bool forward, bool caseSensitive = false)
-    {
-        _searchOwner.Wait();
-        try
-        {
-            lock (_renderGate) lock (_gate)
-            {
-                ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                return _terminal.Find(query, forward, caseSensitive);
-            }
-        }
-        finally { _searchOwner.Release(); }
-    }
-
     private void MutateView(Action change)
     {
         lock (_renderGate) lock (_gate)
