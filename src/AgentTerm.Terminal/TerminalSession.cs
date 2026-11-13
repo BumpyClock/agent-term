@@ -55,6 +55,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         _terminal = new GhosttyTerminal(columns, rows);
         _terminal.ConfigureConPtyHost();
         _stream = ConfigureProtocol();
+        ConfigureImages();
         _connection.OutputReceived += ProcessOutput;
         _completion = CompleteAsync();
     }

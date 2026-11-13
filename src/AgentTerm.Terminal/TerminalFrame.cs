@@ -36,6 +36,7 @@ public sealed record TerminalFrame(int Columns, int Rows, TerminalCell[] Cells,
     public TerminalColor SelectionBackground { get; init; } = new(45, 92, 150);
     public TerminalColor SelectionForeground { get; init; } = new(255, 255, 255);
     public TerminalColor? CursorText { get; init; }
+    public TerminalImages Images { get; init; } = TerminalImages.Empty;
 }
 
 public readonly record struct TerminalViewport(long TotalRows, long Offset, int Rows, bool IsAlternateScreen)

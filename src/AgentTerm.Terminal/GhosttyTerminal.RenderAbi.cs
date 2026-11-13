@@ -24,7 +24,7 @@ public sealed partial class GhosttyTerminal
     private enum RenderStateData
     {
         Columns = 1, Rows = 2, Dirty = 3, RowIterator = 4, ColorBackground = 5, ColorForeground = 6,
-        ColorCursor = 7, ColorCursorHasValue = 8, Palette = 9, Cursor = 18,
+        ColorCursor = 7, ColorCursorHasValue = 8, Palette = 9, Cursor = 18, ImageIterator = 22, ImageGeneration = 23,
     }
     private enum RenderDirty { Clean = 0, Partial = 1, Full = 2 }
     private enum RenderRowData { Dirty = 1, Cells = 3, Selection = 4, ViewportY = 6 }

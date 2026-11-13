@@ -192,6 +192,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         DisposeAnchors();
         DisposeSelection();
         DisposeInput();
+        DisposeImages();
         DisposeRender();
         _handle.Dispose();
         GC.SuppressFinalize(this);

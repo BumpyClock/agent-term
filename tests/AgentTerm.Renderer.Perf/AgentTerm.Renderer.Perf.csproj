@@ -22,5 +22,6 @@
     <ProjectReference Include="$(TerminalProject)" />
     <Compile Include="$(TerminalSurfaceSource)" Link="TerminalSurface.cs" />
     <Compile Include="$(TerminalSurfaceScrollingSource)" Link="TerminalSurface.Scrolling.cs" Condition="Exists('$(TerminalSurfaceScrollingSource)')" />
+    <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Images.cs" Link="TerminalSurface.Images.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Images.cs')" />
   </ItemGroup>
 </Project>

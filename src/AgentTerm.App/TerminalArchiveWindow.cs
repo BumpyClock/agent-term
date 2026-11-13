@@ -101,6 +101,10 @@ internal sealed class TerminalArchiveWindow : Window
 
     private void Refresh()
     {
+        if (_closed) return;
+        var scale = _surface.XamlRoot?.RasterizationScale ?? 1;
+        _terminal.SetCellPixelSize((uint)Math.Max(1, Math.Round(_surface.CellWidth * scale)),
+            (uint)Math.Max(1, Math.Round(_surface.CellHeight * scale)));
         var frame = _terminal.ReadFrame();
         _surface.Width = frame.Columns * _surface.CellWidth;
         _surface.Height = frame.Rows * _surface.CellHeight;

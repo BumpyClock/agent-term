@@ -31,8 +31,16 @@ public sealed partial class GhosttyTerminal
     internal int CaptureFailures => Volatile.Read(ref _captureFailures);
 
     /// <summary>Remaining delay before a held or failed frame must be recaptured, or null when no refresh is pending.</summary>
-    public TimeSpan? PendingFrameRefreshDelay => Volatile.Read(ref _frameRefreshAt) is var deadline and not 0
-        ? TimeSpan.FromMilliseconds(Math.Max(0, deadline - Environment.TickCount64)) : null;
+    public TimeSpan? PendingFrameRefreshDelay
+    {
+        get
+        {
+            var frameAt = Volatile.Read(ref _frameRefreshAt);
+            var imageAt = _holdActive ? null : ImageRefreshAt;
+            var deadline = frameAt == 0 ? imageAt : imageAt is { } image ? Math.Min(frameAt, image) : frameAt;
+            return deadline is { } due ? TimeSpan.FromMilliseconds(Math.Max(0, due - Environment.TickCount64)) : null;
+        }
+    }
 
     /// <summary>Captures an owned snapshot of the visible terminal grid.</summary>
     public TerminalFrame ReadFrame() => CompleteFrame(BeginFrame());
@@ -59,6 +67,7 @@ public sealed partial class GhosttyTerminal
                 return held;
             }
             EnsureRender();
+            TickImageAnimations();
             EnsurePresentation();
             var capture = CaptureMetadata();
             using (var lease = new HandleLease(_render))
@@ -66,6 +75,7 @@ public sealed partial class GhosttyTerminal
                 ConfigureOverscan(lease.Raw, capture.OverscanEnabled);
                 ThrowIfFailed(RenderNative.ghostty_render_state_begin_update(lease.Raw, _handle), "Could not update render state.");
             }
+            capture = capture with { ImageCapture = CaptureImagePixels() };
             Volatile.Write(ref _captureInFlight, true);
             return capture;
         }
@@ -136,7 +146,8 @@ public sealed partial class GhosttyTerminal
             nativeCursor.VisualStyle switch { CursorVisualStyle.Bar => TerminalCursorShape.Bar, CursorVisualStyle.Underline => TerminalCursorShape.Underline, CursorVisualStyle.BlockHollow => TerminalCursorShape.Hollow, _ => TerminalCursorShape.Block },
             cursorHasColor != 0 ? cursorColor.ToColor() : reverse ? defaultBg : defaultFg)
             { WideTail = hasPosition && nativeCursor.WideTail != 0, PasswordInput = nativeCursor.PasswordInput != 0 };
-        if (dirty == RenderDirty.Clean && _frame is not null && current && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
+        var images = CompleteImages(capture.ImageCapture);
+        if (dirty == RenderDirty.Clean && _frame is not null && current && ReferenceEquals(images, _frame.Images) && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
             (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background)
             return capture.Boundary || _frame.ContentVersion == capture.ContentVersion ? _frame : _frame = _frame with { ContentVersion = capture.ContentVersion };
         var previous = _frame;
@@ -251,7 +262,7 @@ public sealed partial class GhosttyTerminal
         if (reverse) (defaultFg, defaultBg) = (defaultBg, defaultFg);
         _frameReverse = reverse;
         _frame = new TerminalFrame(columns, rowsCount, cellsArray, cursor, defaultFg, defaultBg) {
-            Viewport = viewport, HasSelection = hasSelection, ContentVersion = capture.ContentVersion,
+            Images = images, Viewport = viewport, HasSelection = hasSelection, ContentVersion = capture.ContentVersion,
             OverscanAbove = above.ToArray(), OverscanBelow = below.ToArray(),
             SelectionBackground = (capture.Theme ?? TerminalThemes.All[0]).SelectionBackground,
             SelectionForeground = (capture.Theme ?? TerminalThemes.All[0]).SelectionForeground,
@@ -366,7 +377,7 @@ public sealed partial class GhosttyTerminal
         void LocalStateGet(RenderStateData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_get(presentationState, key, value), "Could not read presentation state.");
         void LocalRowGet(RenderRowData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_get(rowIterator, key, value), "Could not read presentation row.");
         void LocalCellGet(RenderCellData key, void* value) => ThrowIfFailed(RenderNative.ghostty_render_state_row_cells_get(cellIterator, key, value), "Could not read presentation cell.");
-        return last;
+        return Math.Max(last, LastImageRow());
     }
 
     private unsafe (TerminalColor Fg, TerminalColor Bg) CellColors(TerminalColor fg, TerminalColor bg, bool inverse, IntPtr iterator = default)
@@ -416,5 +427,6 @@ public sealed partial class GhosttyTerminal
         public long HoldGeneration { get; init; } = -1;
         public long ContentVersion { get; init; }
         public bool OverscanEnabled { get; init; }
+        public ImageCapture? ImageCapture { get; init; }
     }
 }
