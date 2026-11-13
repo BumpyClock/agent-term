@@ -27,6 +27,7 @@ public sealed partial class GhosttyTerminal
                 "Could not register terminal color scheme queries.");
         }
 
+        var schemeChanged = (_theme?.IsLight ?? false) != theme.IsLight;
         Rgb foreground = ToRgb(theme.Foreground), background = ToRgb(theme.Background), cursor = ToRgb(theme.Cursor);
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 12, (IntPtr)(&foreground)), "Could not set terminal foreground.");
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 13, (IntPtr)(&background)), "Could not set terminal background.");
@@ -37,6 +38,8 @@ public sealed partial class GhosttyTerminal
         for (var index = 0; index < 16; index++) palette[index] = ToRgb(theme.Ansi[index]);
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 15, (IntPtr)palette), "Could not set terminal palette.");
         _theme = theme;
+        if (schemeChanged && ReadMode(2031))
+            _responses.Add(theme.IsLight ? "\u001b[?997;2n"u8.ToArray() : "\u001b[?997;1n"u8.ToArray());
         _presentationDirty = true;
         _viewRevision++;
     }

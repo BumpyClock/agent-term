@@ -3,6 +3,8 @@ using AgentTerm.Terminal;
 
 ProgramTitleChecks.Run();
 if (args.Contains("--program-title-only")) return;
+HostContractChecks.Run();
+if (args.Contains("--host-only")) return;
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 NativeProtocolChecks.Run();

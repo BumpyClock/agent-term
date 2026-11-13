@@ -4,7 +4,7 @@ using AgentTerm.Agents;
 namespace AgentTerm.Terminal;
 
 /// <summary>Owns one shell and serializes access to its Ghostty terminal state.</summary>
-public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
+public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 {
     // Lock order: _renderGate, then _gate. _renderGate owns the terminal's render state, so a frame can finish
     // iterating cells after _gate is released while output keeps parsing.
@@ -62,6 +62,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             if (_disposeTask is null) _connection.SendReply(ProgramStatusProtocol.SupportReply);
         };
         _terminal = new GhosttyTerminal(columns, rows);
+        _terminal.ConfigureConPtyHost();
         _connection.OutputReceived += ProcessOutput;
         _completion = CompleteAsync();
     }
@@ -367,15 +368,16 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void SetLightTheme(bool light) => SetTheme(TerminalThemes.Resolve("", light));
 
-    public void SetTheme(TerminalTheme theme) => MutateView(() => _terminal.SetTheme(theme));
+    public void SetTheme(TerminalTheme theme) => MutateView(() => { _terminal.SetTheme(theme); DrainHostResponses(); });
 
-    public void Resize(ushort columns, ushort rows)
+    public void Resize(ushort columns, ushort rows, uint cellWidthPx = 0, uint cellHeightPx = 0)
     {
         bool stopped, widthChanged;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            _terminal.Resize(columns, rows);
+            _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
+            DrainHostResponses();
             stopped = _stopTask is not null;
             widthChanged = columns != _columns;
             _columns = columns;

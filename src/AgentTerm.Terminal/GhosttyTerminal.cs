@@ -47,10 +47,11 @@ public sealed partial class GhosttyTerminal : IDisposable
         try
         {
             ConfigureScrollback();
+            ConfigureHost();
             ThrowIfFailed(Native.ghostty_terminal_set(_handle, 2, Marshal.GetFunctionPointerForDelegate(_writePty)),
                 "Could not register terminal replies.");
         }
-        catch { _handle.Dispose(); throw; }
+        catch { DisposeHost(); _handle.Dispose(); throw; }
     }
 
     /// <summary>Feeds raw VT bytes into the terminal state machine.</summary>
@@ -80,7 +81,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         return value.Length == 0 ? string.Empty : Marshal.PtrToStringUTF8(value.Data, checked((int)value.Length))!;
     }
 
-    /// <summary>Drains terminal query replies for delivery to the PTY input. Call after each Write.</summary>
+    /// <summary>Drains terminal query replies for delivery to the PTY input. Call after Write and host mutations such as Resize and SetTheme.</summary>
     public byte[][] TakeResponses()
     {
         ThrowIfDisposed();
@@ -134,8 +135,8 @@ public sealed partial class GhosttyTerminal : IDisposable
         }
     }
 
-    /// <summary>Resizes the terminal grid. Cell pixel dimensions are optional for VT parsing.</summary>
-    public void Resize(ushort columns, ushort rows)
+    /// <summary>Resizes the terminal grid. Cell dimensions are device pixels. Zero means unknown.</summary>
+    public void Resize(ushort columns, ushort rows, uint cellWidthPx = 0, uint cellHeightPx = 0)
     {
         ThrowIfDisposed();
         if (columns == 0)
@@ -143,10 +144,14 @@ public sealed partial class GhosttyTerminal : IDisposable
         if (rows == 0)
             throw new ArgumentOutOfRangeException(nameof(rows), "Terminal height must be greater than zero.");
 
-        var result = Native.ghostty_terminal_resize(_handle, columns, rows, 0, 0);
-        ThrowIfFailed(result, "Could not resize the libghostty-vt terminal.");
+        var previousGeometry = (_columns, _rows, _cellWidthPx, _cellHeightPx);
         _columns = columns;
         _rows = rows;
+        _cellWidthPx = cellWidthPx;
+        _cellHeightPx = cellHeightPx;
+        var result = Native.ghostty_terminal_resize(_handle, columns, rows, cellWidthPx, cellHeightPx);
+        if (result != 0) (_columns, _rows, _cellWidthPx, _cellHeightPx) = previousGeometry;
+        ThrowIfFailed(result, "Could not resize the libghostty-vt terminal.");
         _holdStarted = null;
         _viewRevision++;
         _presentationDirty = true;
@@ -158,6 +163,7 @@ public sealed partial class GhosttyTerminal : IDisposable
             return;
 
         _disposed = true;
+        DisposeHost();
         DisposeSearch();
         DisposeAnchors();
         DisposeSelection();

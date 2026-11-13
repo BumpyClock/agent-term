@@ -134,6 +134,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _synchronizedRefreshTimer.IsRepeating = false;
         _synchronizedRefreshTimer.Tick += (_, _) => RequestFrameRefresh();
         Terminal.MetricsChanged += UpdateGridSize;
+        ConfigureHostUi();
         SetFontSize(_appearance.FontSize);
         Terminal.SetAcrylicBackground(_appearance.UseAcrylic);
         TerminalPreferences.Current.Changed += PreferencesChanged;
@@ -228,7 +229,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             SetState(SessionState.Running);
             StatusText.Text = "Running · Local session";
             UpdateGridSize();
-            session.Resize(_columns, _rows);
+            session.Resize(_columns, _rows, HostCellWidth, HostCellHeight);
             RefreshOutput(session);
             if (_viewActive) StartRefresh();
             SessionReady?.Invoke();
@@ -462,13 +463,15 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         if (Terminal.ActualWidth <= 0 || Terminal.ActualHeight <= 0) return;
         var columns = (ushort)Math.Clamp(Math.Floor(Terminal.ActualWidth / Terminal.CellWidth), 2, 1000);
         var rows = (ushort)Math.Clamp(Math.Floor(Terminal.ActualHeight / Terminal.CellHeight), 1, 1000);
-        if (columns != _columns || rows != _rows)
+        if (columns != _columns || rows != _rows || HostCellWidth != _hostCellWidth || HostCellHeight != _hostCellHeight)
         {
             _columns = columns;
             _rows = rows;
+            _hostCellWidth = HostCellWidth;
+            _hostCellHeight = HostCellHeight;
             if (_state is SessionState.Running or SessionState.Idle && _session is not null)
             {
-                _session.Resize(columns, rows);
+                _session.Resize(columns, rows, _hostCellWidth, _hostCellHeight);
                 RefreshOutput(_session);
             }
         }
