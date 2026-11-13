@@ -12,7 +12,7 @@ Child shells receive `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PRO
 
 The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles, cursor shapes, and alternate screens. History, search, selection, and keyboard encoding use Ghostty's native APIs. Selection pins the viewport while output continues. Typing or pasting returns to live output.
 
-Terminal drawing reuses dirty cells, clipped glyph layouts, and a bitmap of painted content. Idle panes stop requesting frames, and hidden panes release cached GPU content. The [native performance fixture](tests/AgentTerm.Renderer.Perf/README.md) checks simulated ConPTY output, final pixels, scheduling and GC pauses. See the [measurement limits](docs/terminal-frame-budget.md) and [startup regression checks](docs/terminal-startup.md).
+Terminal drawing reuses dirty cells, clipped glyph layouts, and a bitmap of painted content. Idle panes stop requesting frames, and hidden panes release cached GPU content. The [native performance fixture](tests/AgentTerm.Renderer.Perf/README.md) checks simulated ConPTY output, final pixels, scheduling and GC pauses.
 
 Terminal colors default to Auto, following the Windows light or dark appearance. Settings offers independent light and dark theme choices and Auto, Light, or Dark appearance, shared or per profile. Saving recolors open terminals without restarting shells. Switching themes preserves output, history, selection, and application-defined RGB or OSC colors.
 
@@ -73,7 +73,7 @@ New panes fade in over 200 ms. Closing panes fade out over 140 ms before removal
 
 Zoom applies to the current pane; Ctrl+0 restores that profile's font size. A saved font-size change updates panes whose resolved profile size changed. Saving another profile's settings preserves unrelated pane zoom. History is configured for 10 MiB and 10,000 physical lines; Ghostty retains whole pages, so these limits are approximate. WSL discovery is bounded and skips unavailable distributions. WSL itself is not installed by the app.
 
-This is a base terminal experience, not complete Windows Terminal compatibility. Live IME compatibility validation, a terminal UI Automation text provider, advanced profile editing, and custom themes/key bindings remain open. See [the parity tracker](docs/windows-terminal-parity.md).
+This is a base terminal experience, not complete Windows Terminal compatibility. Live IME compatibility validation, a terminal UI Automation text provider, advanced profile editing, and custom themes/key bindings remain open.
 
 ### Left tabs
 
@@ -116,7 +116,7 @@ The avatar button sits at the right end of the title bar, beside the caption but
 - Copilot usage comes from the undocumented `copilot_internal/user` endpoint and may stop working. When it fails, the other sections still load.
 - The button hides when the window is too narrow to fit it beside the caption buttons. There is no setting to hide it otherwise.
 - With Windows animations off, the flyout entrance, heatmap reveal, tab slide, and loading shimmer are skipped, and the refresh icon dims instead of spinning.
-- Automated checks cover parsing, caching, refresh rules, and text and layout rules. They do not exercise the flyout. High contrast, a failed avatar image, and the section-level "Stale data." line have not been verified live. See [interaction testing](docs/interaction-testing.md).
+- Automated checks cover parsing, caching, refresh rules, and text and layout rules. They do not exercise the flyout. High contrast, a failed avatar image, and the section-level "Stale data." line have not been verified live.
 
 ## Build and run
 

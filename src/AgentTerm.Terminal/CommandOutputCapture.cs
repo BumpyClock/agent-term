@@ -5,7 +5,6 @@ namespace AgentTerm.Terminal;
 /// One owned command's output. The streamed transcript is lossless up to <see cref="Limit"/> characters: decoded text in
 /// stream order, CSI and control strings removed, CR and other C0 controls kept. <see cref="Resolve"/> may replace it
 /// with the final screen result, which applies CR rewrites and cursor movement as the terminal displayed them.
-/// See docs/libghostty/command-output.md for the contract between the two.
 /// </summary>
 public sealed class CommandOutputCapture(string? commandId = null)
 {
