@@ -33,6 +33,9 @@
     <Project Path="tests/AgentTerm.Renderer.Smoke/AgentTerm.Renderer.Smoke.csproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="tests/AgentTerm.PerformanceCapture.Smoke/AgentTerm.PerformanceCapture.Smoke.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
     <Project Path="tests/AgentTerm.Terminal.Smoke/AgentTerm.Terminal.Smoke.csproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>

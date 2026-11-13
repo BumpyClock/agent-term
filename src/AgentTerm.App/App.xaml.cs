@@ -15,6 +15,8 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _window = new MainWindow();
+        PerformanceCapture.Start(_window.DispatcherQueue);
+        _window.Closed += (_, _) => PerformanceCapture.Stop();
         _window.Activate();
     }
 }

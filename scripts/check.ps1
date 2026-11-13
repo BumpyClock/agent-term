@@ -3,6 +3,10 @@ $root = Split-Path $PSScriptRoot -Parent
 & (Join-Path $PSScriptRoot 'build-native.ps1')
 & dotnet build (Join-Path $root 'src/AgentTerm.App/AgentTerm.App.csproj') -c Release -p:Platform=x64
 if ($LASTEXITCODE -ne 0) { throw "App build failed with exit code $LASTEXITCODE." }
+foreach ($mode in 'enabled', 'disabled', 'storage-failure') {
+    & dotnet run --project (Join-Path $root 'tests/AgentTerm.PerformanceCapture.Smoke/AgentTerm.PerformanceCapture.Smoke.csproj') -c Release -- $mode
+    if ($LASTEXITCODE -ne 0) { throw "Performance capture checks failed for $mode." }
+}
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.Icons.Smoke/AgentTerm.Icons.Smoke.csproj') -c Release
 if ($LASTEXITCODE -ne 0) { throw "Icon smoke tests failed with exit code $LASTEXITCODE." }
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.AgentUi.Smoke/AgentTerm.AgentUi.Smoke.csproj') -c Release

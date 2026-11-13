@@ -317,11 +317,14 @@ public sealed partial class TerminalSurface : UserControl
         _paintedFrame = null;
     }
 
+    private static int _nextCapturePaneId;
+    internal int CapturePaneId { get; } = Interlocked.Increment(ref _nextCapturePaneId);
+
     private void Draw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         if (_suspended) { args.DrawingSession.Clear(Microsoft.UI.Colors.Transparent); return; }
         var measured = DrawCompleted;
-        var started = measured is null ? 0 : Stopwatch.GetTimestamp();
+        var started = measured is null && !PerformanceCapture.Enabled ? 0 : Stopwatch.GetTimestamp();
         if (_frame is { } frame)
         {
             var top = (float)Geometry.Top;
@@ -335,6 +338,7 @@ public sealed partial class TerminalSurface : UserControl
             args.DrawingSession.Clear(_acrylicBackground ? Color.FromArgb(0, 0, 0, 0) : Color.FromArgb(255, shade, shade, shade));
         }
         measured?.Invoke(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        if (PerformanceCapture.Enabled) PerformanceCapture.Record(PerformanceMetric.Draw, Stopwatch.GetElapsedTime(started).TotalMilliseconds, CapturePaneId);
         UpdateCursorOverlay();
     }
 

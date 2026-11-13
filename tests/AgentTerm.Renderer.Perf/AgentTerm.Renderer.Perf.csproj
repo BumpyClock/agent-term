@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <ProjectReference Include="$(TerminalProject)" />
     <Compile Include="$(TerminalSurfaceSource)" Link="TerminalSurface.cs" />
+    <Compile Include="../../src/AgentTerm.App/PerformanceCapture.cs" Link="PerformanceCapture.cs" />
     <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Automation.cs" Link="TerminalSurface.Automation.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Automation.cs')" />
     <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.AutomationText.cs" Link="TerminalSurface.AutomationText.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.AutomationText.cs')" />
     <Compile Include="$(TerminalSurfaceScrollingSource)" Link="TerminalSurface.Scrolling.cs" Condition="Exists('$(TerminalSurfaceScrollingSource)')" />
