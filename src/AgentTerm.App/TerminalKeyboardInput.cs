@@ -8,10 +8,15 @@ internal sealed class TerminalKeyboardInput
 {
     internal enum Route { Text, Direct, Shortcut }
     internal readonly record struct PhysicalKey(uint ScanCode, bool Extended);
-    internal readonly record struct KeyEvent(uint Key, TerminalModifiers Modifiers, TerminalKeyAction Action, string? Text = null);
+    internal readonly record struct KeyEvent(uint Key, TerminalModifiers Modifiers, TerminalKeyAction Action,
+        string? Text = null, PhysicalKey Physical = default,
+        TerminalModifiers ConsumedModifiers = TerminalModifiers.None, uint? LayoutCodepoint = null);
+
+    internal static TerminalModifiers ShortcutModifiers(TerminalModifiers modifiers) =>
+        modifiers & (TerminalModifiers.Shift | TerminalModifiers.Control | TerminalModifiers.Alt | TerminalModifiers.Super);
 
     private readonly record struct PressedKey(uint Key, TerminalModifiers Modifiers, TerminalKeyAction Action,
-        Route Route, TerminalModifiers ConsumedModifiers, bool Forwarded, bool CharacterPending);
+        Route Route, TerminalModifiers ConsumedModifiers, uint? LayoutCodepoint, bool Forwarded, bool CharacterPending);
 
     private readonly Dictionary<PhysicalKey, PressedKey> _pressed = [];
     private (PhysicalKey Key, char Value)? _highSurrogate;
@@ -19,19 +24,27 @@ internal sealed class TerminalKeyboardInput
     internal bool IsShortcut(PhysicalKey physical) =>
         _pressed.TryGetValue(physical, out var key) && key.Route == Route.Shortcut;
 
+    internal bool IsForwarded(PhysicalKey physical) =>
+        _pressed.TryGetValue(physical, out var key) && key.Forwarded;
+
     internal TerminalKeyAction KeyDown(PhysicalKey physical, uint key, TerminalModifiers modifiers, bool wasDown,
-        Route route, TerminalModifiers consumedModifiers = TerminalModifiers.None)
+        Route route, TerminalModifiers consumedModifiers = TerminalModifiers.None, uint? layoutCodepoint = null)
     {
-        bool forwarded = wasDown && _pressed.TryGetValue(physical, out var previous) && previous.Forwarded;
+        bool held = _pressed.TryGetValue(physical, out var previous);
+        // A key already delivered to the application must finish there even if
+        // modifiers change during autorepeat and now resemble a local shortcut.
+        if (wasDown && held && previous.Forwarded && route == Route.Shortcut) route = previous.Route;
+        bool forwarded = wasDown && held && previous.Forwarded;
         var action = forwarded ? TerminalKeyAction.Repeat : TerminalKeyAction.Press;
-        _pressed[physical] = new PressedKey(key, modifiers & ~consumedModifiers, action, route, consumedModifiers,
+        _pressed[physical] = new PressedKey(key, modifiers, action, route, consumedModifiers, layoutCodepoint,
             forwarded || route == Route.Direct, route == Route.Text);
         return action;
     }
 
     internal KeyEvent? KeyUp(PhysicalKey physical, TerminalModifiers modifiers) =>
         _pressed.Remove(physical, out var key) && key.Forwarded
-            ? new KeyEvent(key.Key, modifiers & ~key.ConsumedModifiers, TerminalKeyAction.Release)
+            ? new KeyEvent(key.Key, modifiers, TerminalKeyAction.Release, Physical: physical,
+                ConsumedModifiers: key.ConsumedModifiers, LayoutCodepoint: key.LayoutCodepoint)
             : null;
 
     internal KeyEvent? Text(PhysicalKey? physical, string text)
@@ -73,16 +86,18 @@ internal sealed class TerminalKeyboardInput
             return new KeyEvent(0, TerminalModifiers.None, TerminalKeyAction.Press, rune.ToString());
 
         _pressed[physical] = key with { Forwarded = true, CharacterPending = false };
-        return new KeyEvent(key.Key, key.Modifiers, key.Action, rune.ToString());
+        return new KeyEvent(key.Key, key.Modifiers, key.Action, rune.ToString(), physical,
+            key.ConsumedModifiers, key.LayoutCodepoint);
     }
 
     internal KeyEvent[] Reset()
     {
         var releases = new List<KeyEvent>();
-        foreach (var key in _pressed.Values)
+        foreach (var (physical, key) in _pressed)
         {
             if (key.Forwarded)
-                releases.Add(new KeyEvent(key.Key, TerminalModifiers.None, TerminalKeyAction.Release));
+                releases.Add(new KeyEvent(key.Key, TerminalModifiers.None, TerminalKeyAction.Release,
+                    Physical: physical, ConsumedModifiers: key.ConsumedModifiers, LayoutCodepoint: key.LayoutCodepoint));
         }
         _pressed.Clear();
         _highSurrogate = null;

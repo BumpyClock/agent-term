@@ -7,6 +7,8 @@ internal static class InputChecks
     {
         CheckKeyboardRouting();
         CheckComposition();
+        InputGapChecks.Run();
+        KeyboardSelectionChecks.Run();
         using var terminal = new GhosttyTerminal();
 
         Check("a"u8, Key(0x41, text: "a"), "Printable key");
@@ -136,9 +138,9 @@ internal static class InputChecks
 
         keyboard.KeyDown(letter, 0x45, ctrlAlt, false, TerminalKeyboardInput.Route.Text, ctrlAlt);
         keyboard.KeyDown(tab, 0x09, TerminalModifiers.Shift, false, TerminalKeyboardInput.Route.Direct);
-        Expect(keyboard.Character(letter, '€') is { Key: 0x45, Text: "€", Modifiers: TerminalModifiers.None } &&
-            keyboard.KeyUp(letter, ctrlAlt) is { Key: 0x45, Action: TerminalKeyAction.Release, Modifiers: TerminalModifiers.None },
-            "AltGr text should match its own key and consume Ctrl and Alt.");
+        Expect(keyboard.Character(letter, '€') is { Key: 0x45, Text: "€", Modifiers: ctrlAlt, ConsumedModifiers: ctrlAlt } &&
+            keyboard.KeyUp(letter, ctrlAlt) is { Key: 0x45, Action: TerminalKeyAction.Release, Modifiers: ctrlAlt, ConsumedModifiers: ctrlAlt },
+            "AltGr text should preserve raw Ctrl and Alt separately from consumed modifiers.");
 
         keyboard.KeyDown(tab, 0x09, TerminalModifiers.Control | TerminalModifiers.Shift, false,
             TerminalKeyboardInput.Route.Shortcut);

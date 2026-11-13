@@ -12,7 +12,8 @@ public sealed partial class GhosttyTerminal
 
     /// <summary>Encodes a Windows virtual key or committed UTF-8 text for the active terminal mode.</summary>
     public unsafe byte[] EncodeKey(uint virtualKey, TerminalModifiers modifiers, TerminalKeyAction action,
-        string? text = null)
+        string? text = null, uint scanCode = 0, bool extended = false,
+        TerminalModifiers consumedModifiers = TerminalModifiers.None, uint? layoutCodepoint = null)
     {
         ThrowIfDisposed();
         var nativeAction = action switch
@@ -22,7 +23,8 @@ public sealed partial class GhosttyTerminal
             TerminalKeyAction.Release => InputNative.KeyAction.Release,
             _ => throw new ArgumentOutOfRangeException(nameof(action))
         };
-        var key = GetGhosttyKey(virtualKey);
+        var key = GetPhysicalKey(virtualKey, scanCode, extended);
+        uint identity = scanCode == 0 ? virtualKey : 0x10000u | scanCode | (extended ? 0x100u : 0);
         // The encoder expects text from the layout before Ctrl/Alt transforms.
         // Control characters are represented by their physical keys instead.
         if (action == TerminalKeyAction.Release || text.AsSpan().IndexOfAnyInRange('\0', '\u001f') >= 0 ||
@@ -33,15 +35,15 @@ public sealed partial class GhosttyTerminal
 
         bool shifted = (modifiers & TerminalModifiers.Shift) != 0;
         uint asciiCodepoint = GetAsciiKey(virtualKey);
-        uint unshiftedCodepoint = asciiCodepoint;
+        uint unshiftedCodepoint = layoutCodepoint ?? asciiCodepoint;
         if (action == TerminalKeyAction.Release)
         {
             // Windows does not send text with key-up. Report the same layout codepoint
             // as the corresponding press when Kitty requests release events.
-            if (_pressedLayoutCodepoints?.Remove(virtualKey, out var pressedCodepoint) == true)
+            if (_pressedLayoutCodepoints?.Remove(identity, out var pressedCodepoint) == true)
                 unshiftedCodepoint = pressedCodepoint;
         }
-        else if (asciiCodepoint != 0 && !string.IsNullOrEmpty(text) &&
+        else if (layoutCodepoint is null && asciiCodepoint != 0 && !string.IsNullOrEmpty(text) &&
             Rune.TryGetRuneAt(text, 0, out var rune) && rune.Utf16SequenceLength == text.Length)
         {
             if (Rune.IsLetter(rune))
@@ -50,21 +52,25 @@ public sealed partial class GhosttyTerminal
                 unshiftedCodepoint = (uint)rune.Value;
 
             if (unshiftedCodepoint != asciiCodepoint)
-                (_pressedLayoutCodepoints ??= [])[virtualKey] = unshiftedCodepoint;
+                (_pressedLayoutCodepoints ??= [])[identity] = unshiftedCodepoint;
             else
-                _pressedLayoutCodepoints?.Remove(virtualKey);
+                _pressedLayoutCodepoints?.Remove(identity);
         }
         else if (action == TerminalKeyAction.Press)
         {
-            _pressedLayoutCodepoints?.Remove(virtualKey);
+            _pressedLayoutCodepoints?.Remove(identity);
         }
+
+        if (action != TerminalKeyAction.Release && layoutCodepoint is { } layout)
+            (_pressedLayoutCodepoints ??= [])[identity] = layout;
 
         if (string.IsNullOrEmpty(text) && asciiCodepoint != 0 && action != TerminalKeyAction.Release &&
             (modifiers & (TerminalModifiers.Control | TerminalModifiers.Alt)) != 0)
         {
             // Shortcut keydowns may arrive without a Windows character event.
-            var ascii = (char)asciiCodepoint;
-            text = (shifted ? GetShiftedAscii(ascii) : ascii).ToString();
+            var logical = layoutCodepoint ?? asciiCodepoint;
+            text = layoutCodepoint is not null ? char.ConvertFromUtf32((int)logical) :
+                (shifted ? GetShiftedAscii((char)logical) : (char)logical).ToString();
         }
 
         if (_keyEncoder is null)
@@ -85,8 +91,21 @@ public sealed partial class GhosttyTerminal
         const string eventError = "Could not set a libghostty-vt key event field.";
         ThrowIfFailed(InputNative.ghostty_key_event_set_action(_keyEvent, nativeAction), eventError);
         ThrowIfFailed(InputNative.ghostty_key_event_set_key(_keyEvent, key), eventError);
+        var encoderModifiers = modifiers;
+        const TerminalModifiers legacyTextModifiers = TerminalModifiers.Control | TerminalModifiers.Alt;
+        if (!string.IsNullOrEmpty(text) && (consumedModifiers & legacyTextModifiers) != 0)
+        {
+            byte kittyFlags = 0;
+            ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 8, &kittyFlags), "Could not read native keyboard protocol flags.");
+            // libghostty-vt 1.0.1's legacy Ctrl/fixterms/modifyOtherKeys paths
+            // use raw mods even when text translation consumed Ctrl/Alt. Keep
+            // raw data in routing and Kitty, and normalize only this boundary.
+            // Remove when a pinned native update passes InputGapChecks without it.
+            if (kittyFlags == 0) encoderModifiers &= ~(consumedModifiers & legacyTextModifiers);
+        }
         // TerminalModifiers uses the corresponding GhosttyMods bit values.
-        ThrowIfFailed(InputNative.ghostty_key_event_set_mods(_keyEvent, (ushort)modifiers), eventError);
+        ThrowIfFailed(InputNative.ghostty_key_event_set_mods(_keyEvent, (ushort)encoderModifiers), eventError);
+        ThrowIfFailed(InputNative.ghostty_key_event_set_consumed_mods(_keyEvent, (ushort)consumedModifiers), eventError);
         ThrowIfFailed(InputNative.ghostty_key_event_set_unshifted_codepoint(_keyEvent, unshiftedCodepoint), eventError);
 
         byte[] utf8 = string.IsNullOrEmpty(text) ? [] : Encoding.UTF8.GetBytes(text);
@@ -309,13 +328,17 @@ public sealed partial class GhosttyTerminal
         internal enum Key
         {
             Unidentified = 0, Backquote = 1, Backslash = 2, BracketLeft = 3, BracketRight = 4, Comma = 5,
-            Digit0 = 6, Equal = 16, IntlBackslash = 17, A = 20, Minus = 46, Period = 47, Quote = 48,
+            Digit0 = 6, Equal = 16, IntlBackslash = 17, IntlRo = 18, IntlYen = 19, A = 20, Minus = 46, Period = 47, Quote = 48,
             Semicolon = 49, Slash = 50, AltLeft = 51, AltRight = 52, Backspace = 53, CapsLock = 54,
             ContextMenu = 55, ControlLeft = 56, ControlRight = 57, Enter = 58, MetaLeft = 59, MetaRight = 60,
-            ShiftLeft = 61, ShiftRight = 62, Space = 63, Tab = 64, Delete = 68, End = 69, Help = 70,
+            ShiftLeft = 61, ShiftRight = 62, Space = 63, Tab = 64, Convert = 65, KanaMode = 66, NonConvert = 67,
+            Delete = 68, End = 69, Help = 70,
             Home = 71, Insert = 72, PageDown = 73, PageUp = 74, ArrowDown = 75, ArrowLeft = 76, ArrowRight = 77,
             ArrowUp = 78, NumLock = 79, Numpad0 = 80, NumpadAdd = 90, NumpadClear = 92, NumpadDecimal = 95,
-            NumpadDivide = 96, NumpadMultiply = 104, NumpadSubtract = 107, NumpadSeparator = 108, Escape = 120,
+            NumpadDivide = 96, NumpadEnter = 97, NumpadEqual = 98, NumpadMultiply = 104, NumpadSubtract = 107,
+            NumpadSeparator = 108, NumpadUp = 109, NumpadDown = 110, NumpadRight = 111, NumpadLeft = 112,
+            NumpadBegin = 113, NumpadHome = 114, NumpadEnd = 115, NumpadInsert = 116, NumpadDelete = 117,
+            NumpadPageUp = 118, NumpadPageDown = 119, Escape = 120,
             F1 = 121, PrintScreen = 148, ScrollLock = 149, Pause = 150
         }
 
@@ -363,6 +386,9 @@ public sealed partial class GhosttyTerminal
 
         [LibraryImport(Library)]
         internal static partial int ghostty_key_event_set_mods(KeyEventHandle keyEvent, ushort mods);
+
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_event_set_consumed_mods(KeyEventHandle keyEvent, ushort mods);
 
         [LibraryImport(Library)]
         internal static partial int ghostty_key_event_set_unshifted_codepoint(KeyEventHandle keyEvent, uint codepoint);
