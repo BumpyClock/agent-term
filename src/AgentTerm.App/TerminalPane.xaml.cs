@@ -13,6 +13,7 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
 {
     private readonly MainPage _page;
     private readonly PaneAcrylicBackdrop _backdrop = new();
+    private readonly ProgramActivity _activity = new(ProgramActivityKind.PaneEdge);
     internal event Action<bool>? SplitRequested;
     internal event Action? CloseRequested;
 
@@ -20,6 +21,7 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
     {
         _page = page;
         InitializeComponent();
+        ActivityHost.Children.Add(_activity);
         page.AttachAgentControls(Header);
         Header.SplitRequested += sideBySide => SplitRequested?.Invoke(sideBySide);
         Header.CloseRequested += () => CloseRequested?.Invoke();
@@ -36,6 +38,15 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
         ApplyMaterial();
     }
 
+    internal IReadOnlyList<ProgramStatus> ReadProgramStatuses()
+    {
+        var records = _page.ReadProgramStatuses();
+        _activity.Working = ProgramStatusPresentation.ActivePrimary(records)?.State == ProgramState.Working;
+        return records;
+    }
+
+    internal void SetActive(bool active) => _activity.Active = active;
+
     internal void SetFocused(bool focused, bool multiplePanes)
     {
         ActiveBorder.Visibility = focused && multiplePanes ? Visibility.Visible : Visibility.Collapsed;
@@ -47,6 +58,7 @@ internal sealed partial class TerminalPane : UserControl, IDisposable
 
     public void Dispose()
     {
+        _activity.Active = false;
         TerminalPreferences.Current.Changed -= ApplyMaterial;
         _page.TerminalBackgroundChanged -= ApplyMaterial;
         _page.PaneStatus.Changed -= UpdateHeader;

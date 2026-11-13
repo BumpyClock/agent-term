@@ -9,7 +9,7 @@ namespace AgentTerm_App;
 public sealed partial class AgentStatusBar : UserControl
 {
     internal const double CompactButtonWidth = 24;
-    private readonly ActivityLabel _taskLabel = new();
+    private readonly TextBlock _taskLabel = new() { Style = AgentUi.Style("AgentLabelText") };
     private string _status = "";
     private string _detail = "";
     private string _task = "";
@@ -57,7 +57,7 @@ public sealed partial class AgentStatusBar : UserControl
         Changed?.Invoke();
     }
 
-    internal void ShowTask(AgentState state, bool visible, bool animate)
+    internal void ShowTask(AgentState state, bool visible)
     {
         var label = state switch
         {
@@ -66,7 +66,7 @@ public sealed partial class AgentStatusBar : UserControl
             AgentState.Starting or AgentState.Running or AgentState.Interrupting => "Agent working",
             _ => "",
         };
-        _taskLabel.Update(label, animate && state is AgentState.Running or AgentState.Starting);
+        _taskLabel.Text = state is AgentState.Starting or AgentState.Running or AgentState.Interrupting ? "" : label;
         var shown = visible ? label : "";
         if (_task == shown) return;
         _task = shown;
@@ -90,11 +90,12 @@ public sealed partial class AgentStatusBar : UserControl
         ShellStatus.FontFamily = _compact ? new Microsoft.UI.Xaml.Media.FontFamily("Segoe Fluent Icons") : FontFamily;
         ShellStatus.Visibility = Shown(_status.Length > 0);
         TaskStatusButton.Visibility = Shown(_task.Length > 0);
-        TaskStatusLabelHost.Visibility = Shown(!_compact);
+        TaskStatusLabelHost.Visibility = Shown(!_compact && _taskLabel.Text.Length > 0);
         InteractButton.Visibility = Shown(_interact);
         InteractLabel.Visibility = Shown(!_compact);
         InteractIcon.Visibility = Shown(_compact);
-        TaskStatusButton.Width = InteractButton.Width = _compact ? CompactButtonWidth : double.NaN;
+        TaskStatusButton.Width = _compact || _taskLabel.Text.Length == 0 ? CompactButtonWidth : double.NaN;
+        InteractButton.Width = _compact ? CompactButtonWidth : double.NaN;
     }
 
     private static Visibility Shown(bool shown) => shown ? Visibility.Visible : Visibility.Collapsed;

@@ -250,9 +250,13 @@ starts at the top. Clearing all reports restores the shell icon. Returning to a
 shell prompt or exiting the shell also restores its icon, while retained reports
 remain available in the card.
 
-Working tabs show an animated activity ring, or determinate progress when the
-program reports a percentage. Programs with a matching local PATH executable
-keep that executable's icon inside the activity ring and when idle or done.
+Working tabs replace the program icon with a compact 5-by-5 dot sweep
+animation. A fine comet travels along the top edge of each visible working pane.
+This applies to reported terminal-program activity and built-in agent turns, not
+process-name or terminal-output guesses. Waiting, failed, completed, and idle
+work stops the corresponding animation. The pane header keeps its task action
+but does not repeat an animated **Agent working** label. Programs with a matching
+local PATH executable retain its icon when idle or done.
 Coding agents use built-in marks because script-based CLI installs need not
 contain an executable icon. The reported `app` value selects the mark, ignoring
 case. Pi (`pi`) uses π. Claude Code (`claude`, `claude-code`), Codex (`codex`),
@@ -264,10 +268,12 @@ contrast uses the system foreground for every mark. Built-in marks take
 priority over PATH executable icons. Other unresolved commands keep the shell
 icon. No executable is
 launched to obtain its icon. Blocked and error reports use distinct attention
-symbols while their command is active. With Windows animations
-off or high contrast on, indeterminate work uses a static dotted ring; known
-percentages retain the determinate ring. The card also shows the state and exact
-percentage. Background tabs continue updating.
+symbols while their command is active. With Windows animations off or high
+contrast on, working tabs keep the normal full-size app icon. They do not show
+a static pixel grid or ring. The pane edge stays static. The status card and
+accessible details retain the state and exact reported percentage. Background
+tabs continue updating; hidden panes and offscreen or unloaded controls stop
+animation.
 
 No hooks, log scanning, or process-name guessing are used. Programs must emit the
 protocol themselves. AgentTerm answers capability queries and supports all five

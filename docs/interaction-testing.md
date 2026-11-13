@@ -253,6 +253,14 @@ Removed the Program status menu action from both tab layouts. The existing hover
 
 The isolated Release build, native `--status-layout` checks, and changed-file lint passed. The updated app launched and remained responsive. The interactive suite stopped at its foreground-ownership guard before injecting input, so the new pointer regressions remain unverified. The previous app window and its sessions were left open.
 
+### Program activity animation verification
+
+Working tabs now use a diagonal dot-sweep animation instead of the older rings described in the historical verification above. Each visible working pane has a one-DIP comet on its top edge. The header retains its task-opening action without a working text label. Reduced motion and high contrast retain the normal app icon, with no static grid or ring. Reported percentages remain in status details.
+
+Run `dotnet run --project tests/AgentTerm.AgentUi.Smoke -c Release -- --program-activity` for native rendered-control checks. The fixture injects motion permission locally without changing Windows settings. It covers Pi, Claude and executable icon retention, animated versus static pixels, blocked/error/done/idle transitions, independent pane controls, live preference changes, ancestor collapse, unload, and reattachment. `--pane-header` covers task, approval and input handoff controls at narrow and wide widths. `--status-icons` covers executable and built-in brand artwork with the new animation.
+
+The startup-smoke build also accepts `--program-activity` after its report path and Top/Left argument. It feeds OSC reports through the real TerminalSession output path, then checks production top/left tab presentation, independent split-pane comets, blocked priority, hidden-tab cleanup and completion. It runs real shell commands before and after the checks and verifies painted, nonblank terminal output and input focus. Reports are under `artifacts/activity-implementation/app-activity-top.txt` and `app-activity-left.txt`. Both layouts passed. Native control captures are under `artifacts/program-status/activity-*.png`; reduced-motion samples stayed static and retained full-size icons. These are native fixture observations, not an authenticated Pi/Claude/Copilot session or a screen-reader speech test.
+
 ### Program titles
 
 Programs set the tab label with OSC 0 or OSC 2. The selected tab's label also becomes the window title (`<label> - AgentTerm`) for the taskbar and Alt+Tab. A leading spinner glyph (Dingbats or Braille block) is dropped because the tab already shows activity. An empty title, or ConPTY's startup executable path, falls back to the shell profile name. Integrated PowerShell clears the program title at each new prompt, so a stale agent title does not outlive the agent. Shells without integration keep the last title. Split tabs join up to two distinct pane labels.

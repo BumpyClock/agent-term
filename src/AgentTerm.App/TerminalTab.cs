@@ -63,7 +63,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         foreach (var pane in _panes)
         {
             if (ReferenceEquals(pane, _retiring)) continue;
-            var current = pane.Page.ReadProgramStatuses();
+            var current = pane.View.ReadProgramStatuses();
             if (count == _statusSources.Count) { _statusSources.Add((pane, current)); changed = true; }
             else if (!ReferenceEquals(_statusSources[count].Pane, pane) || !ReferenceEquals(_statusSources[count].Statuses, current))
             {
@@ -119,7 +119,11 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         _visible = visible;
         if (!visible) _motion.FinishAll();
         foreach (var pane in _panes)
-            pane.Page.SetActive(visible && !ReferenceEquals(pane, _retiring));
+        {
+            var active = visible && !ReferenceEquals(pane, _retiring);
+            pane.View.SetActive(active);
+            pane.Page.SetActive(active);
+        }
         UpdateFocus();
     }
 
@@ -201,6 +205,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         _motion.FinishAll();
         _retiring = old;
         old.Page.SetActive(false);
+        old.View.SetActive(false);
         old.View.IsHitTestVisible = false;
         old.View.IsEnabled = false;
         if (_panes.Count == 1)
@@ -356,6 +361,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         var page = new MainPage(profile);
         page.SetActive(_visible);
         var view = new TerminalPane(page);
+        view.SetActive(_visible);
         var pane = new Pane(page, view);
         page.Loaded += (_, _) =>
         {

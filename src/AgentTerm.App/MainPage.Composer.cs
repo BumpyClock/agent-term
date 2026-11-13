@@ -32,6 +32,12 @@ public sealed partial class MainPage
     private readonly record struct ChromeState(ShellPromptState Shell, bool Owns, bool EntryUnavailable, string? Placeholder, string? Hint,
         bool ReadOnly, FocusState Focus, bool CanSend, bool ApprovalPending, bool Busy, bool CanInterrupt, AgentState Agent, bool TaskShown, bool Animate);
 
+    private DateTimeOffset _agentStatusUpdatedAt = DateTimeOffset.UtcNow;
+    private ProgramStatus? AgentProgramStatus => !_agent.HasActiveTurn ? null : new(
+        "@agent", _agent.State is AgentState.WaitingForApproval or AgentState.WaitingForInput ? ProgramState.Blocked : ProgramState.Working,
+        _agent.State switch { AgentState.WaitingForApproval => "permission", AgentState.WaitingForInput => "question", _ => null },
+        null, "agentterm", "agentterm", _agent.RunningTask?.Title ?? "Agent task", null, _agentStatusUpdatedAt);
+
     private bool AgentBusy => _agent.HasActiveTurn;
     internal void AttachAgentControls(PaneHeader header) => header.AgentBar = _agentBar;
     private void AgentReply_Changing(TextBox sender, TextBoxTextChangingEventArgs args) => _promptFailure = null;
@@ -108,7 +114,7 @@ public sealed partial class MainPage
         AutomationProperties.SetAccessibilityView(StopAgentButton, busy ? AccessibilityView.Content : AccessibilityView.Raw);
         ToolTipService.SetToolTip(LeaveSurfaceButton, busy ? "Back to the terminal. The agent keeps working."
             : "Back to the terminal. This conversation is saved in its task card.");
-        _agentBar.ShowTask(state.Agent, state.TaskShown, state.Animate);
+        _agentBar.ShowTask(state.Agent, state.TaskShown);
     }
 
     private bool CanSend(string text)
@@ -120,7 +126,12 @@ public sealed partial class MainPage
 
     private CoalescedUpdate AgentUpdate => LazyInitializer.EnsureInitialized(ref _agentUpdate, () => new(
         () => DispatcherQueue.TryEnqueue(() => CompositionTarget.Rendering += AgentUpdate_Rendering),
-        () => { if (_state != SessionState.Disposed && _viewActive) RefreshAgent(IsLoaded); }));
+        () =>
+        {
+            if (_state == SessionState.Disposed) return;
+            _agentStatusUpdatedAt = DateTimeOffset.UtcNow;
+            if (_viewActive) RefreshAgent(IsLoaded);
+        }));
     private void AgentChanged() => AgentUpdate.Request();
     private void AgentUpdate_Rendering(object? sender, object args)
     {

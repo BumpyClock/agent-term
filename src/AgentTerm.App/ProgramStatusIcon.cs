@@ -12,11 +12,7 @@ internal sealed partial class ProgramStatusIcon : ContentControl
     public TabViewItem? Tab { get => (TabViewItem?)GetValue(TabProperty); set => SetValue(TabProperty, value); }
     private readonly Grid _layout = new() { Width = 20, Height = 20 };
     private readonly ContentPresenter _icon = new() { Width = 16, Height = 16, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-    private readonly ProgressRing _activity = new() { Width = 20, Height = 20, MinWidth = 0, MinHeight = 0 };
-    private readonly FrameworkElement _still = (FrameworkElement)Microsoft.UI.Xaml.Markup.XamlReader.Load("""
-        <Ellipse xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="18" Height="18"
-                 Stroke="{ThemeResource TextFillColorSecondaryBrush}" StrokeThickness="1.5" StrokeDashArray="2,2"/>
-        """);
+    private readonly ProgramActivity _activity;
     private readonly UISettings _settings = new();
     private readonly AccessibilitySettings _accessibility = new();
     private TabViewItem? _observed;
@@ -25,17 +21,20 @@ internal sealed partial class ProgramStatusIcon : ContentControl
     private IconSource? _source;
     private bool _loaded;
 
-    public ProgramStatusIcon()
+    public ProgramStatusIcon() : this(null) { }
+
+    internal ProgramStatusIcon(Func<bool>? motionAllowed)
     {
+        _activity = new(ProgramActivityKind.TabIcon, motionAllowed);
         IsTabStop = false;
         IsHitTestVisible = false;
         _layout.Children.Add(_icon);
         _layout.Children.Add(_activity);
-        _layout.Children.Add(_still);
+        _activity.Changed += UpdatePresentation;
         Content = _layout;
         AutomationProperties.SetAccessibilityView(this, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-        Loaded += (_, _) => { _loaded = true; Connect(); _settings.AnimationsEnabledChanged += SettingsChanged; _settings.ColorValuesChanged += SettingsChanged; };
-        Unloaded += (_, _) => { _loaded = false; Disconnect(); _activity.IsActive = false; _settings.AnimationsEnabledChanged -= SettingsChanged; _settings.ColorValuesChanged -= SettingsChanged; };
+        Loaded += (_, _) => { _loaded = true; Connect(); _settings.ColorValuesChanged += SettingsChanged; };
+        Unloaded += (_, _) => { _loaded = false; Disconnect(); _activity.Working = false; _settings.ColorValuesChanged -= SettingsChanged; };
     }
 
     private void SettingsChanged(UISettings sender, object args) => DispatcherQueue.TryEnqueue(Refresh);
@@ -49,7 +48,13 @@ internal sealed partial class ProgramStatusIcon : ContentControl
     private void Connect()
     {
         Disconnect();
-        if (!_loaded || Tab is not { } tab) return;
+        if (!_loaded || Tab is not { } tab)
+        {
+            _activity.Working = false;
+            _source = null;
+            _icon.Content = null;
+            return;
+        }
         _observed = tab;
         _statusToken = tab.RegisterPropertyChangedCallback(TabProgramStatus.DetailsProperty, (_, _) => Refresh());
         _iconToken = tab.RegisterPropertyChangedCallback(TabViewItem.IconSourceProperty, (_, _) => Refresh());
@@ -62,32 +67,32 @@ internal sealed partial class ProgramStatusIcon : ContentControl
         if (!ReferenceEquals(_source, tab.IconSource))
         {
             _source = tab.IconSource;
-            _icon.Content = _source switch
-            {
-                ImageIconSource image => new ImageIcon { Source = image.ImageSource },
-                FontIconSource font => new FontIcon { Glyph = font.Glyph, FontFamily = font.FontFamily, FontSize = 16 },
-                PathIconSource path => new Viewbox
-                {
-                    Child = new PathIcon { Data = AgentMarks.CreateGeometry(path), Width = AgentMarks.ViewBoxSize, Height = AgentMarks.ViewBoxSize }
-                },
-                _ => null
-            };
+            _icon.Content = Render(_source);
         }
-        if (_icon.Content is Viewbox { Child: PathIcon mark })
-        {
-            // High contrast replaces brand color with the system foreground.
-            if (_source is PathIconSource { Foreground: { } brand } && !_accessibility.HighContrast) mark.Foreground = brand;
-            else mark.ClearValue(IconElement.ForegroundProperty);
-        }
-        var primary = (tab.Tag as TabProgramStatus)?.Primary;
-        var working = primary?.State == AgentTerm.Terminal.ProgramState.Working;
-        var showProgress = working && (primary?.Progress is not null || (_settings.AnimationsEnabled && !_accessibility.HighContrast));
-        _icon.Width = _icon.Height = working ? 12 : 16;
-        if (_icon.Content is FontIcon fontIcon) fontIcon.FontSize = working ? 12 : 16;
-        _activity.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
-        _activity.IsIndeterminate = primary?.Progress is null;
-        _activity.Value = primary?.Progress ?? 0;
-        _activity.IsActive = showProgress;
-        _still.Visibility = working && !showProgress ? Visibility.Visible : Visibility.Collapsed;
+        ApplyBrand(_icon.Content, _source, _accessibility.HighContrast);
+        _activity.Working = (tab.Tag as TabProgramStatus)?.Primary?.State == AgentTerm.Terminal.ProgramState.Working;
+        UpdatePresentation();
     }
+
+    /// <summary>Renders a tab icon source as a 16-DIP element. Each call parses its own mark geometry.</summary>
+    internal static FrameworkElement? Render(IconSource? source) => source switch
+    {
+        ImageIconSource image => new ImageIcon { Source = image.ImageSource },
+        FontIconSource font => new FontIcon { Glyph = font.Glyph, FontFamily = font.FontFamily, FontSize = 16 },
+        PathIconSource path => new Viewbox
+        {
+            Child = new PathIcon { Data = AgentMarks.CreateGeometry(path), Width = AgentMarks.ViewBoxSize, Height = AgentMarks.ViewBoxSize }
+        },
+        _ => null
+    };
+
+    internal static void ApplyBrand(object? rendered, IconSource? source, bool highContrast)
+    {
+        if (rendered is not Viewbox { Child: PathIcon mark }) return;
+        // High contrast replaces brand color with the system foreground.
+        if (source is PathIconSource { Foreground: { } brand } && !highContrast) mark.Foreground = brand;
+        else mark.ClearValue(IconElement.ForegroundProperty);
+    }
+
+    private void UpdatePresentation() => _icon.Visibility = _activity.IsAnimating ? Visibility.Collapsed : Visibility.Visible;
 }

@@ -59,6 +59,13 @@ internal static class StartupChecks
                     await AssertTabTitleAsync(window, tabs, report);
                     return;
                 }
+                if (Environment.GetCommandLineArgs().Contains("--program-activity"))
+                {
+                    addTab.Invoke(window, [profile]);
+                    await AssertOutputAsync((TerminalTab)((TabViewItem)tabs.SelectedItem).Content, report, "activity fixture");
+                    await AssertProgramActivityAsync(window, tabs, addTab, profile, report);
+                    return;
+                }
                 await AssertSynchronizedTimeoutAsync(window, tabs, addTab, report);
                 for (var index = 0; index < 3; index++) addTab.Invoke(window, [profile]);
                 await Task.Delay(500);
@@ -154,6 +161,59 @@ internal static class StartupChecks
         await WaitAsync(() => Header() == "Command Prompt" && window.Title == "Command Prompt - AgentTerm", "empty title restores shell name");
         await AssertOutputAsync(tab, report, "title survivor");
         report.Add("PASS OSC 0/2 titles drive tab header and window title, spinner prefixes trimmed, executable-path and empty titles fall back to the shell name.");
+    }
+
+    private static async Task AssertProgramActivityAsync(MainWindow window, TabView tabs, MethodInfo addTab, ShellProfile profile, List<string> report)
+    {
+        var item = (TabViewItem)tabs.SelectedItem;
+        var tab = (TerminalTab)item.Content;
+        var firstPage = tab.ActivePage;
+        var first = Descendants(tab).OfType<TerminalPane>().Single();
+        var firstEdge = Field<ProgramActivity>(first, "_activity");
+        var motion = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled && !new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        void Emit(MainPage page, string value)
+        {
+            var bytes = Encoding.UTF8.GetBytes("\u001b]7501;" + value + "\u001b\\");
+            typeof(TerminalSession).GetMethod("ProcessOutput", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(Field<TerminalSession>(page, "_session"), [new ReadOnlyMemory<byte>(bytes)]);
+        }
+        Emit(firstPage, "app=pi:state=working:progress=42");
+        await WaitAsync(() => firstEdge.Working && firstEdge.IsAnimating == motion, "session-reported Pi activity");
+        await WaitAsync(() => Descendants((DependencyObject)window.Content).OfType<ProgramStatusIcon>()
+            .Where(icon => ReferenceEquals(icon.Tab, item)).Any(icon => Descendants(icon).OfType<ProgramActivity>().Any(activity => activity.IsAnimating == motion)), "visible tab activity");
+        tab.Split(sideBySide: true);
+        await WaitAsync(() => tab.PaneCount == 2, "activity split creation");
+        await AssertOutputAsync(tab, report, "activity second pane");
+        var secondPage = tab.ActivePage;
+        var second = Descendants(tab).OfType<TerminalPane>().Single(pane => !ReferenceEquals(pane, first));
+        var secondEdge = Field<ProgramActivity>(second, "_activity");
+        if (!firstEdge.Working || secondEdge.Working) throw new Exception("A new pane borrowed another pane's program activity.");
+        Emit(secondPage, "app=claude:state=working:progress=62");
+        await WaitAsync(() => secondEdge.Working && secondEdge.IsAnimating == motion, "second pane Claude activity");
+        Emit(firstPage, "app=pi:state=blocked:kind=permission");
+        await WaitAsync(() => !firstEdge.Working && secondEdge.Working && ((TabProgramStatus)item.Tag).Primary?.State == ProgramState.Blocked, "blocked priority across panes");
+        if (Descendants((DependencyObject)window.Content).OfType<ProgramStatusIcon>().Where(icon => ReferenceEquals(icon.Tab, item))
+            .SelectMany(Descendants).OfType<ProgramActivity>().Any(activity => activity.IsAnimating))
+            throw new Exception("A blocked tab kept its working loader.");
+        Emit(firstPage, "state=clear");
+        await WaitAsync(() => ((TabProgramStatus)item.Tag).Primary?.EffectiveApp == "claude", "remaining working program");
+        addTab.Invoke(window, [profile]);
+        await WaitAsync(() => !secondEdge.IsAnimating && !secondEdge.Active, "hidden pane animation cleanup");
+        tabs.SelectedItem = item;
+        await WaitAsync(() => secondEdge.Active && secondEdge.IsAnimating == motion, "shown pane animation restart");
+        Emit(secondPage, "app=claude:state=done");
+        await WaitAsync(() => !secondEdge.Working && !secondEdge.IsAnimating, "completed pane animation cleanup");
+        if (Descendants(first).Concat(Descendants(second)).OfType<TextBlock>().Any(text => text.Text == "Agent working" && text.Visibility == Visibility.Visible))
+            throw new Exception("A pane header still contains the removed working label.");
+        await AssertOutputAsync(tab, report, "activity survivor");
+        report.Add("PASS session-fed OSC activity in production tab layouts, independent split-pane comets, blocked priority, hidden-tab cleanup, completion and preserved shell input. Motion=" + motion);
+    }
+
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        yield return root;
+        for (var index = 0; index < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); index++)
+            foreach (var child in Descendants(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index))) yield return child;
     }
 
     private static T Field<T>(object instance, string name) =>

@@ -312,8 +312,8 @@ internal static class ProgramStatusUiChecks
         await CaptureAsync(canvas, "icon-working");
         status.Update([working with { Status = working.Status with { Progress = 62 } }]);
         await Task.Delay(300);
-        var ring = Descendants(icon).OfType<ProgressRing>().Single();
-        Check(!ring.IsIndeterminate && ring.Value == 62 && ring.Visibility == Visibility.Visible, "Reported progress must stay visible even when animation is disabled.");
+        Check(!Descendants(icon).OfType<ProgressRing>().Any(), "Working tabs must use the dot sweep instead of a progress ring.");
+        Check(AutomationProperties.GetHelpText(tab).Contains("Working · 62%"), "Reported progress must remain in accessible status details.");
         await CaptureAsync(canvas, "icon-progress");
         var executableIcon = tab.IconSource;
         status.Update([working with { Status = working.Status with { State = ProgramState.Done } }]);
@@ -329,7 +329,7 @@ internal static class ProgramStatusUiChecks
         Check(Descendants(icon).OfType<FontIcon>().Single().Glyph == "π", "Pi identity must render as pi, not a status circle or missing font glyph.");
         await CaptureAsync(canvas, "icon-pi-idle");
         status.Update([pi with { Status = pi.Status with { State = ProgramState.Working } }]);
-        Check(Descendants(icon).OfType<ContentPresenter>().Single(presenter => presenter.Content is FontIcon { Glyph: "π" }).Visibility == Visibility.Visible, "Pi identity must stay visible inside its activity ring.");
+        Check(Descendants(icon).OfType<ContentPresenter>().Single(presenter => presenter.Content is FontIcon { Glyph: "π" }).Visibility == (moving ? Visibility.Collapsed : Visibility.Visible), "Pi must use the loader while animating, or keep its normal icon with motion disabled.");
         await CaptureAsync(canvas, "icon-pi-working");
         status.Update([pi with { Status = pi.Status with { IsActive = false } }]);
         Check(ReferenceEquals(tab.IconSource, shell), "Exiting idle Pi must restore shell identity.");
@@ -345,12 +345,17 @@ internal static class ProgramStatusUiChecks
         await CaptureAsync(canvas, "icon-claude-idle");
         status.Update([claude with { Status = claude.Status with { State = ProgramState.Working } }]);
         await Task.Delay(100);
-        Check(Descendants(icon).OfType<PathIcon>().Single().Data is not null, "Claude identity must stay visible inside its activity ring.");
+        Check(Descendants(icon).OfType<ProgramActivity>().Single().IsAnimating == moving, "Claude must use the loader only while motion is enabled.");
         await CaptureAsync(canvas, "icon-claude-working");
         var sidebarIcon = new ProgramStatusIcon { Tab = tab };
         canvas.Children.Add(sidebarIcon);
         await Task.Delay(100);
-        Check(Descendants(sidebarIcon).OfType<PathIcon>().Single().Data is not null, "A second view of the same tab must render the mark without sharing its geometry.");
+        Check(Descendants(sidebarIcon).OfType<ProgramActivity>().Single().IsAnimating == moving, "Both views of a working tab must follow the same motion preference.");
+        status.Update([claude]);
+        await Task.Delay(100);
+        var firstMark = Descendants(icon).OfType<PathIcon>().Single();
+        var secondMark = Descendants(sidebarIcon).OfType<PathIcon>().Single();
+        Check(firstMark.Data is not null && secondMark.Data is not null && !ReferenceEquals(firstMark.Data, secondMark.Data), "Idle representations of the same tab must restore their own app geometry.");
         canvas.Children.Remove(sidebarIcon);
         status.Update([Report("", ProgramState.Idle, "codex", "Ready")]);
         await Task.Delay(100);
@@ -365,7 +370,7 @@ internal static class ProgramStatusUiChecks
         }
         status.Update([claude with { Status = claude.Status with { IsActive = false } }]);
         Check(ReferenceEquals(tab.IconSource, shell), "Exiting an agent must restore shell identity.");
-        Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% progress and static completion passed. Motion enabled={moving}.");
+        Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% accessible progress and static completion passed. Motion enabled={moving}.");
     }
 
     internal static async Task CheckLayoutAsync(Window window)
@@ -439,7 +444,7 @@ internal static class ProgramStatusUiChecks
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
             foreach (var child in Descendants(VisualTreeHelper.GetChild(root, index))) yield return child;
     }
-    private static async Task CaptureAsync(FrameworkElement element, string name)
+    internal static async Task CaptureAsync(FrameworkElement element, string name)
     {
         var presenter = element;
         while (VisualTreeHelper.GetParent(presenter) is FrameworkElement parent) presenter = parent;

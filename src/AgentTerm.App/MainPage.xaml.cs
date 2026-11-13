@@ -74,8 +74,21 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     internal void SetInputActive(bool active) => _inputActive = active;
     private bool _loadedOnce;
     private TerminalColor? _terminalBackground;
-    internal System.Collections.Generic.IReadOnlyList<ProgramStatus> ReadProgramStatuses() =>
-        _session?.ReadProgramStatuses() ?? [];
+    private System.Collections.Generic.IReadOnlyList<ProgramStatus>? _terminalPrograms;
+    private System.Collections.Generic.IReadOnlyList<ProgramStatus> _combinedPrograms = [];
+    private ProgramStatus? _reportedAgentStatus;
+    internal System.Collections.Generic.IReadOnlyList<ProgramStatus> ReadProgramStatuses()
+    {
+        var records = _session?.ReadProgramStatuses() ?? [];
+        if (AgentProgramStatus is not { } agent) return records;
+        if (!ReferenceEquals(records, _terminalPrograms) || agent != _reportedAgentStatus)
+        {
+            _terminalPrograms = records;
+            _reportedAgentStatus = agent;
+            _combinedPrograms = [.. records, agent];
+        }
+        return _combinedPrograms;
+    }
 
     public ShellProfile Profile { get; }
     internal string ProgramTitle => _session?.Title ?? "";

@@ -45,9 +45,11 @@ internal sealed record ProgramStatusPresentation(string Glyph, string Summary, s
         return new(glyph, Label(primary ?? records.OrderBy(record => Priority(record.Status.State)).First().Status), details.ToString().TrimEnd());
     }
 
-    internal static ProgramStatus? ActivePrimary(IReadOnlyList<PaneProgramStatus> records) => records
-        .Where(record => record.Status.IsActive)
-        .OrderBy(record => Priority(record.Status.State)).FirstOrDefault()?.Status;
+    internal static ProgramStatus? ActivePrimary(IReadOnlyList<PaneProgramStatus> records) => ActivePrimary(records.Select(record => record.Status));
+
+    internal static ProgramStatus? ActivePrimary(IEnumerable<ProgramStatus> records) => records
+        .Where(record => record.IsActive)
+        .OrderBy(record => Priority(record.State)).FirstOrDefault();
 
     internal static int CompareIds(string left, string right)
     {
