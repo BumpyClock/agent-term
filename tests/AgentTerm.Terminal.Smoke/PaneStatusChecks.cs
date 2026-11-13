@@ -30,6 +30,7 @@ internal static class PaneStatusChecks
         Check(GitStatusParser.ParseLines("2\t1\tname\0-\t-\tbinary\0") == new GitLineChanges(2, 1, true), "Binary entries must not contribute line totals.");
         await MonitorAsync();
         await SharingAsync();
+        await WslSharingAsync();
         await BoundariesAsync();
         var watched = await IdleQueriesPerMinuteAsync(true);
         var unwatched = await IdleQueriesPerMinuteAsync(false);
@@ -215,26 +216,26 @@ internal static class PaneStatusChecks
 
         childRepository = null;
         using var promoted = new PaneStatusMonitor(hub);
-        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 5; }, "A nonrepository must query once.");
-        Complete(4, new(GitQueryState.NoRepository));
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return hub.EntryCount == 1; }, "A nonrepository must retain membership discovery.");
         await Task.Delay(50);
+        Check(Count() == 4 && promoted.Result.State == GitQueryState.NoRepository, "A known nonrepository must not launch a Git query.");
         childRepository = nested;
         now += TimeSpan.FromSeconds(6);
-        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 6; }, "Creation-only watchers must retain the five-second cadence.");
-        Complete(5, Clean("promoted"));
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 5; }, "Creation-only watchers must retain the five-second cadence.");
+        Complete(4, Clean("promoted"));
         await Until(() => { promoted.Refresh(new("parent/child"), true, now); return promoted.Result == Clean("promoted"); }, "Git init must promote the pane.");
         Check(released == 3 && watchers[^1].Repository == nested, "Promotion must replace the creation watcher with a repository watcher.");
         now += TimeSpan.FromSeconds(6);
         watchers[^1].Changed();
         now += TimeSpan.FromMilliseconds(300);
-        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 7; }, "Later edits must refresh through the promoted watcher.");
-        Complete(6, Clean("edited"));
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 6; }, "Later edits must refresh through the promoted watcher.");
+        Complete(5, Clean("edited"));
         await Until(() => { promoted.Refresh(new("parent/child"), true, now); return promoted.Result == Clean("edited"); }, "The watcher refresh must publish.");
         var replacement = nested with { GitDirectory = "replacement/git", CommonDirectory = "replacement/git" };
         childRepository = replacement;
         now += TimeSpan.FromSeconds(6);
-        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 8; }, "Replacing repository metadata must rebind the entry.");
-        Complete(7, Clean("replacement"));
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 7; }, "Replacing repository metadata must rebind the entry.");
+        Complete(6, Clean("replacement"));
         await Until(() => { promoted.Refresh(new("parent/child"), true, now); return promoted.Result == Clean("replacement"); }, "Replacement must publish its own status.");
         Check(released == 4 && hub.EntryCount == 1, "Replacement must release the old metadata watcher.");
         hub.Paused = true;
@@ -242,9 +243,58 @@ internal static class PaneStatusChecks
         now += TimeSpan.FromMinutes(1);
         promoted.Refresh(new("parent/child"), true, now);
         await Task.Delay(50);
-        Check(scans == located && Count() == 8, "Pause must suppress membership scans as well as queries.");
+        Check(scans == located && Count() == 7, "Pause must suppress membership scans as well as queries.");
         promoted.Dispose();
         Check(released == 5 && hub.EntryCount == 0, "Promoted and replacement entries must be fully released.");
+    }
+
+    private static async Task WslSharingAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var discoveries = 0;
+        var queries = 0;
+        var repository = new GitRepository("/repo", "/repo/.git", "/repo/.git");
+        var hub = new GitStatusHub((directory, _) =>
+        {
+            Interlocked.Increment(ref queries);
+            Check(directory.Path == "/repo", "Shared WSL queries must target the canonical worktree.");
+            return Task.FromResult(Clean());
+        }, clock: () => now, locateWsl: directory =>
+        {
+            Interlocked.Increment(ref discoveries);
+            var found = directory.Path.StartsWith("/linked", StringComparison.Ordinal)
+                ? new GitRepository("/linked", "/repo/.git/worktrees/linked", "/repo/.git") : repository;
+            return Task.FromResult(new GitRepositoryDiscovery(found, GitQueryState.Ready));
+        });
+        var path = new ShellDirectory("/repo/subdir", "Ubuntu");
+        var first = await hub.AcquireAsync(path);
+        var second = await hub.AcquireAsync(path);
+        Check(ReferenceEquals(first, second) && discoveries == 1, "Repeated WSL membership requests must share bounded discovery results.");
+        var sibling = await hub.AcquireAsync(new("/repo/other", "Ubuntu"));
+        Check(ReferenceEquals(first, sibling), "WSL subdirectories must share one repository status entry.");
+        await hub.Ensure(first, now)!;
+        Check(hub.Ensure(sibling, now) is null && queries == 1, "WSL panes must share one due status query.");
+        var linked = await hub.AcquireAsync(new("/linked/subdir", "Ubuntu"));
+        var distro = await hub.AcquireAsync(new("/repo/subdir", "Debian"));
+        Check(!ReferenceEquals(first, linked) && !ReferenceEquals(first, distro), "Linked worktrees and distributions must not share status.");
+        now += TimeSpan.FromSeconds(6);
+        repository = repository with { GitDirectory = "/repo/.GIT", CommonDirectory = "/repo/.GIT" };
+        var replacement = await hub.AcquireAsync(path);
+        Check(!ReferenceEquals(first, replacement), "WSL metadata identity must remain case-sensitive and refresh after discovery expires.");
+        foreach (var entry in new[] { first, second, sibling, linked, distro, replacement }) hub.Release(entry);
+        Check(hub.EntryCount == 0, "WSL references must release all repository entries.");
+        var pendingDiscovery = new TaskCompletionSource<GitRepositoryDiscovery>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceledHub = new GitStatusHub((_, _) => throw new Exception("A disposed pane must not query after discovery."),
+            locateWsl: _ => { entered.TrySetResult(); return pendingDiscovery.Task; });
+        var canceled = new PaneStatusMonitor(canceledHub);
+        canceled.Refresh(path, true, now);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        canceled.Dispose();
+        pendingDiscovery.SetResult(new(repository, GitQueryState.Ready));
+        await Task.Delay(50);
+        Check(canceledHub.EntryCount == 0, "A canceled shared discovery must release membership without querying or publishing.");
+        Console.WriteLine($"WSL sharing used {queries} status query for three pane references; cached repeat discovery used one lookup.");
     }
 
     private static async Task<int> IdleQueriesPerMinuteAsync(bool watched)

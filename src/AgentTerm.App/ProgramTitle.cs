@@ -9,10 +9,24 @@ internal static class ProgramTitle
 {
     private const int MaximumLength = 80;
 
+    /// <summary>One pane's bounded cache. Raw title changes invalidate both tab and status-card labels.</summary>
+    internal sealed class Cache
+    {
+        private string? _source;
+        private string? _clean;
+        internal string? Read(string title)
+        {
+            if (_source == title) return _clean;
+            _source = title;
+            return _clean = Clean(title);
+        }
+    }
+
     /// <summary>Returns null when the title adds nothing over the shell name.</summary>
     internal static string? Clean(string title)
     {
         var builder = new StringBuilder(Math.Min(title.Length, MaximumLength));
+        Span<char> encoded = stackalloc char[2];
         var leading = true;
         foreach (var rune in title.EnumerateRunes())
         {
@@ -20,7 +34,7 @@ internal static class ProgramTitle
             // Agents animate a spinner glyph at the start of the title; the tab already shows activity.
             if (leading && (Rune.IsWhiteSpace(rune) || rune.Value is >= 0x2700 and <= 0x27BF or >= 0x2800 and <= 0x28FF)) continue;
             leading = false;
-            builder.Append(rune.ToString());
+            builder.Append(encoded[..rune.EncodeToUtf16(encoded)]);
         }
         var text = builder.ToString().TrimEnd();
         if (text.Length == 0) return null;

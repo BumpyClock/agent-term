@@ -1,5 +1,7 @@
 namespace AgentTerm_App.PaneStatus;
 
+internal sealed record GitRepositoryDiscovery(GitRepository? Repository, GitQueryState State = GitQueryState.NoRepository);
+
 internal sealed record GitRepository(string WorkTree, string GitDirectory, string CommonDirectory)
 {
     internal static GitRepository? Locate(string directory)

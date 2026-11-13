@@ -65,7 +65,7 @@ internal sealed class PaneStatusMonitor : IDisposable
         {
             if (running is null)
             {
-                var entry = await Task.Run(() => _hub.Acquire(directory));
+                var entry = await Task.Run(() => _hub.AcquireAsync(directory));
                 if (request.IsCancellationRequested || _disposed)
                 {
                     _hub.Release(entry);

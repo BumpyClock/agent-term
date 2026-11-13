@@ -7,6 +7,26 @@ namespace AgentTerm_App.PaneStatus;
 
 internal sealed class GitStatusProvider
 {
+    internal async Task<GitRepositoryDiscovery> LocateWslAsync(ShellDirectory directory)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            var result = await RunAsync(directory,
+                ["rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"], deadline.Token).ConfigureAwait(false);
+            if (result.Code != 0)
+                return new(null, result.Error.Contains("not a git repository", StringComparison.OrdinalIgnoreCase)
+                    ? GitQueryState.NoRepository : GitQueryState.Unavailable);
+            var paths = result.Output.TrimEnd('\r', '\n').Split('\n');
+            if (paths.Length != 3 || paths.Any(path => !path.StartsWith('/') || path.Contains('\r')))
+                return new(null, GitQueryState.Failed);
+            return new(new(paths[0], paths[1], paths[2]), GitQueryState.Ready);
+        }
+        catch (OperationCanceledException) { return new(null, GitQueryState.TimedOut); }
+        catch (Win32Exception) { return new(null, GitQueryState.Unavailable); }
+        catch (Exception error) when (error is IOException or InvalidOperationException) { return new(null, GitQueryState.Failed); }
+    }
+
     internal async Task<GitResult> QueryAsync(ShellDirectory directory, CancellationToken cancellation)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);

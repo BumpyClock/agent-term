@@ -14,6 +14,9 @@ internal sealed class GitStatusHub
 
     private readonly Func<ShellDirectory, CancellationToken, Task<GitResult>> _query;
     private readonly Func<ShellDirectory, GitRepository?> _locate;
+    private readonly Func<ShellDirectory, Task<GitRepositoryDiscovery>> _locateWsl;
+    private readonly Dictionary<ShellDirectory, (DateTimeOffset Started, Task<GitRepositoryDiscovery> Task)> _discoveries = [];
+    private const int DiscoveryCacheLimit = 256;
     private readonly Func<ShellDirectory, GitRepository?, Action, IDisposable?> _watch;
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Func<DateTimeOffset> _clock;
@@ -21,29 +24,56 @@ internal sealed class GitStatusHub
 
     internal GitStatusHub(Func<ShellDirectory, CancellationToken, Task<GitResult>> query,
         Func<ShellDirectory, GitRepository?>? locate = null, Func<ShellDirectory, GitRepository?, Action, IDisposable?>? watch = null,
-        Func<DateTimeOffset>? clock = null)
+        Func<DateTimeOffset>? clock = null, Func<ShellDirectory, Task<GitRepositoryDiscovery>>? locateWsl = null)
     {
         _query = query;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _locate = locate ?? (directory => directory.WslDistribution is null ? GitRepository.Locate(directory.Path) : null);
-        _watch = watch ?? ((directory, repository, changed) => repository is null ? GitRepository.WatchCreation(directory, changed) : repository.Watch(changed));
+        _locateWsl = locateWsl ?? new GitStatusProvider().LocateWslAsync;
+        _watch = watch ?? ((directory, repository, changed) => directory.WslDistribution is not null ? null
+            : repository is null ? GitRepository.WatchCreation(directory, changed) : repository.Watch(changed));
     }
 
     internal bool Paused { get; set; }
     internal int EntryCount { get { lock (_gate) return _entries.Count; } }
 
-    internal Entry Acquire(ShellDirectory directory)
+    private Task<GitRepositoryDiscovery> DiscoverAsync(ShellDirectory directory, bool refresh = false)
     {
-        var repository = _locate(directory);
+        if (directory.WslDistribution is null) return Task.FromResult(new GitRepositoryDiscovery(_locate(directory)));
+        lock (_gate)
+        {
+            var now = _clock();
+            if (_discoveries.TryGetValue(directory, out var cached) &&
+                (!cached.Task.IsCompleted || !refresh && now < cached.Started + UnwatchedInterval)) return cached.Task;
+            foreach (var expired in _discoveries.Where(pair => pair.Value.Task.IsCompleted && now >= pair.Value.Started + UnwatchedInterval).Select(pair => pair.Key).ToArray())
+                _discoveries.Remove(expired);
+            var task = _locateWsl(directory);
+            if (_discoveries.Count < DiscoveryCacheLimit || _discoveries.ContainsKey(directory)) _discoveries[directory] = (now, task);
+            return task;
+        }
+    }
+
+    internal async Task<Entry> AcquireAsync(ShellDirectory directory)
+    {
+        var discovery = await DiscoverAsync(directory).ConfigureAwait(false);
+        var repository = discovery.Repository;
         var canonical = repository is null ? directory : directory with { Path = repository.WorkTree };
         var key = directory.WslDistribution is { } distribution
             ? $"wsl:{distribution}:{canonical.Path}" : LocalKey(canonical.Path);
-        if (repository is not null) key += $"|{LocalKey(repository.GitDirectory)}|{LocalKey(repository.CommonDirectory)}";
+        if (repository is not null) key += directory.WslDistribution is null
+            ? $"|{LocalKey(repository.GitDirectory)}|{LocalKey(repository.CommonDirectory)}"
+            : $"|{repository.GitDirectory}|{repository.CommonDirectory}";
         Entry? entry;
         lock (_gate)
         {
-            if (_entries.TryGetValue(key, out entry)) { entry.Users++; return entry; }
+            if (_entries.TryGetValue(key, out entry))
+            {
+                entry.Users++;
+                if (repository is null && entry.Result?.State != discovery.State) { entry.Result = new(discovery.State); entry.Version++; }
+                return entry;
+            }
             entry = new(key, canonical, repository);
+            if (repository is null) { entry.Result = new(discovery.State); entry.Version = 1; }
             _entries.Add(key, entry);
         }
         var watcher = _watch(directory, repository, () => Invalidate(entry, _clock()));
@@ -89,7 +119,7 @@ internal sealed class GitStatusHub
 
     internal bool NeedsRefresh(Entry entry, DateTimeOffset now)
     {
-        lock (_gate) return entry.Running is null && Due(entry, now);
+        lock (_gate) return entry.Repository is not null && entry.Running is null && Due(entry, now);
     }
 
     private static bool Due(Entry entry, DateTimeOffset now)
@@ -104,7 +134,7 @@ internal sealed class GitStatusHub
     {
         lock (_gate)
         {
-            if (entry.Running is not null || entry.Users == 0) return entry.Running;
+            if (entry.Running is not null || entry.Users == 0 || entry.Repository is null) return entry.Running;
             if (!Due(entry, now)) return null;
             entry.Stale = false;
             return entry.Running = Task.Run(() => RunAsync(entry, now));
@@ -118,9 +148,9 @@ internal sealed class GitStatusHub
         try
         {
             // A removed repository can make Git walk into its parent. Never publish that result.
-            if (_locate(entry.Directory) != entry.Repository) return new(GitQueryState.NoRepository);
+            if ((await DiscoverAsync(entry.Directory).ConfigureAwait(false)).Repository != entry.Repository) return new(GitQueryState.NoRepository);
             var queried = await _query(entry.Directory, entry.Lifetime.Token).ConfigureAwait(false);
-            if (_locate(entry.Directory) == entry.Repository) result = queried;
+            if ((await DiscoverAsync(entry.Directory, refresh: true).ConfigureAwait(false)).Repository == entry.Repository) result = queried;
             return result ?? new(GitQueryState.NoRepository);
         }
         finally

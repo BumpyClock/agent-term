@@ -19,7 +19,12 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     private const double MinimumPaneWidth = 180;
     private const double MinimumPaneHeight = 184;
 
-    private sealed record Pane(MainPage Page, TerminalPane View);
+    private sealed record Pane(MainPage Page, TerminalPane View)
+    {
+        internal ProgramTitle.Cache TitleCache { get; } = new();
+        internal string? Label;
+        internal string? Badge;
+    }
 
     private readonly Grid _layout = new() { Margin = new Thickness(4) };
     private readonly Style _splitterStyle;
@@ -65,7 +70,7 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
             if (ReferenceEquals(pane, _retiring)) continue;
             var current = pane.View.ReadProgramStatuses();
             // The status card names each pane by its program title, which can change while reports do not.
-            var title = current.Count == 0 ? null : ProgramTitle.Clean(pane.Page.ProgramTitle);
+            var title = current.Count == 0 ? null : pane.TitleCache.Read(pane.Page.ProgramTitle);
             if (count == _statusSources.Count) { _statusSources.Add((pane, current, title)); changed = true; }
             else if (!ReferenceEquals(_statusSources[count].Pane, pane) || !ReferenceEquals(_statusSources[count].Statuses, current) || _statusSources[count].Title != title)
             {
@@ -86,14 +91,30 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     }
 
     private string _title = "";
+    private string _composedTitle = "";
+    private int _titlePaneCount = -1;
     internal string Title => _title.Length != 0 ? _title : _title = ComposeTitle();
 
     private string ComposeTitle()
     {
-        var title = string.Join(" · ", _panes.Select(pane => PaneLabel(pane.Page)).Distinct().Take(2));
+        var changed = _titlePaneCount != _panes.Count;
+        string? first = null, second = null, badge = null;
+        foreach (var pane in _panes)
+        {
+            var label = pane.TitleCache.Read(pane.Page.ProgramTitle) ?? pane.Page.Profile.Name;
+            var effect = pane.Page.EffectBadge;
+            changed |= label != pane.Label || effect != pane.Badge;
+            pane.Label = label;
+            pane.Badge = effect;
+            if (first is null) first = label;
+            else if (second is null && label != first) second = label;
+            if (badge is null && effect.Length != 0) badge = effect;
+        }
+        if (!changed) return _composedTitle;
+        _titlePaneCount = _panes.Count;
+        var title = second is null ? first ?? "" : first + " · " + second;
         // Progress and unseen requests from any pane show on the tab, so a background tab can ask for attention.
-        var badge = _panes.Select(pane => pane.Page.EffectBadge).FirstOrDefault(value => value.Length != 0);
-        return badge is null ? title : title + " · " + badge;
+        return _composedTitle = badge is null ? title : title + " · " + badge;
     }
 
     /// <summary>Picks up OSC 0 and OSC 2 titles. Called on the window's status tick.</summary>
@@ -106,7 +127,6 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         RaiseTitleChanged();
     }
 
-    private static string PaneLabel(MainPage page) => ProgramTitle.Clean(page.ProgramTitle) ?? page.Profile.Name;
     internal ShellProfile PrimaryProfile => _panes[0].Page.Profile;
     internal int PaneCount => _panes.Count;
     internal MainPage ActivePage => _active.Page;
