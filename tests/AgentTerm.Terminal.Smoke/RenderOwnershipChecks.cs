@@ -29,6 +29,7 @@ internal static class RenderOwnershipChecks
         CheckUnicodeClusters();
         CheckRetainedFrames();
         CheckFailureRecovery();
+        CheckImageRecovery();
         MeasureAnchoredBoundaries();
         CheckHandleLifetime();
         CheckConcurrentHolds();
@@ -312,6 +313,24 @@ internal static class RenderOwnershipChecks
         }
         finally { FailingAllocator.Fail = false; }
         Check(fresh.ReadFrame().Columns == 10, "a terminal recovers after its first capture failed.");
+    }
+
+    private static void CheckImageRecovery()
+    {
+        using var terminal = new GhosttyTerminal(30, 4) { RenderAllocator = FailingAllocator.Instance };
+        terminal.SetCellPixelSize(10, 20);
+        terminal.SetImageStorageLimit(TerminalImages.DefaultStorageLimit);
+        terminal.Write(KittyImageChecks.Apc("a=T,f=32,s=1,v=1,i=6,r=2,c=1,q=2,C=1", [7, 7, 7, 255]));
+        var stable = terminal.ReadFrame();
+        Write(terminal, "\r\n\r\n\r\n\r\n" + new string('x', 25) + "é̂");
+        FailingAllocator.Fail = true;
+        try { Check(ReferenceEquals(stable, terminal.ReadFrame()), "Failed image capture retains its frame."); }
+        finally { FailingAllocator.Fail = false; }
+        var recovered = terminal.ReadFrame();
+        Check(recovered.Images.Placements.Single().Row == -1,
+            "Allocator recovery rebuilds placement rows instead of reusing another state's generation.");
+        Check(ReferenceEquals(stable.Images.Placements.Single().Image, recovered.Images.Placements.Single().Image),
+            "Allocator recovery preserves immutable image identity.");
     }
 
     private static void MeasureAnchoredBoundaries()

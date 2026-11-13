@@ -9,6 +9,7 @@ HostContractChecks.Run();
 if (args.Contains("--host-only")) return;
 SnapshotArchiveChecks.Run();
 HistoryFeatureChecks.Run();
+if (args.Contains("--images-only")) { PngDecoderChecks.Run(); KittyImageChecks.Run(); return; }
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 ProgramTitleChecks.Run();
@@ -148,6 +149,8 @@ ProtocolStreamChecks.Run();
 ProtocolStreamEquivalenceChecks.Run();
 RenderChecks.Run();
 RenderOwnershipChecks.Run();
+PngDecoderChecks.Run();
+KittyImageChecks.Run();
 ProgramStatusChecks.Run();
 ProgramStatusPresentationChecks.Run();
 ThemeChecks.Run();

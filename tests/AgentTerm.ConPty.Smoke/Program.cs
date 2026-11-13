@@ -89,6 +89,12 @@ if (args.Contains("--protocol-events-only"))
     return;
 }
 
+if (args.Contains("--images-only"))
+{
+    await KittyImageSessionChecks.RunAsync();
+    return;
+}
+
 if (args.Contains("--title-only"))
 {
     await TitleChecks.RunAsync();
@@ -118,6 +124,7 @@ await DirectoryChecks.RunAsync();
 await TitleChecks.RunAsync();
 await HyperlinkSessionChecks.RunAsync();
 await ProtocolEventSessionChecks.RunAsync();
+await KittyImageSessionChecks.RunAsync();
 await SmartPromptChecks.RunAsync();
 await NativeStartupChecks.RunAsync();
 await PromptModeChecks.ProbeAsync();

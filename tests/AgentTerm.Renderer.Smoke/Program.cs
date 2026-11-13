@@ -16,6 +16,11 @@ internal static class Program
             "\x1b[7;1HUnicode: café 界 🙂 e\u0301" +
             "\x1b]12;#abcdef\x07\x1b[10;4H\x1b[2 q\x1b[?25h"));
         using var device = CanvasDevice.GetSharedDevice();
+        if (args.Contains("--images-only"))
+        {
+            KittyImageRenderChecks.Run(device);
+            return;
+        }
         if (args.Contains("--glyph-clipping-only"))
         {
             GlyphClippingChecks.Run(device);
@@ -105,6 +110,7 @@ internal static class Program
         AssertBackgroundContinuity(device);
         GlyphClippingChecks.Run(device);
         GridGeometryChecks.Run(device);
+        KittyImageRenderChecks.Run(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");
     }
 

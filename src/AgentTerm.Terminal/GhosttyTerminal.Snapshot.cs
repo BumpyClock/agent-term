@@ -43,7 +43,7 @@ public sealed partial class GhosttyTerminal
                 DecodeCheck(SnapshotNative.ghostty_snapshot_decoder_set(decoder, 1, &maximum));
                 DecodeCheck(SnapshotNative.ghostty_snapshot_decoder_set(decoder, 2, &yes));
                 DecodeCheck(SnapshotNative.ghostty_snapshot_decoder_set(decoder, 3, &yes));
-                ulong imageLimit = 64 * 1024 * 1024;
+                ulong imageLimit = TerminalImages.DefaultStorageLimit;
                 DecodeCheck(SnapshotNative.ghostty_snapshot_decoder_set(decoder, 4, &imageLimit));
                 DecodeCheck(SnapshotNative.ghostty_snapshot_decoder_decode(decoder, out terminal));
                 nuint consumed = 0;
