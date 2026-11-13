@@ -31,6 +31,12 @@ internal static class Program
         var window = new Window();
         try
         {
+            if (Environment.GetCommandLineArgs().Contains("--activity-parity") ||
+                Environment.GetCommandLineArgs().Contains("--activity-occlusion") || Environment.GetCommandLineArgs().Contains("--activity-transitions"))
+            {
+                await ProgramActivityChecks.RunAsync(window);
+                return;
+            }
             EffectsSettingsChecks.Run();
             if (Environment.GetCommandLineArgs().Contains("--request-focus-only"))
             {
@@ -147,7 +153,7 @@ internal static class Program
             Console.WriteLine($"Native single-tool timeline rendered {activeFrames} active frames; waiting and completed frames stayed static. Motion enabled={moving}.");
         }
         catch (Exception error) { Console.Error.WriteLine(error); _result = 1; }
-        finally { window.Close(); app.Exit(); }
+        finally { window.Close(); await ProgramActivityChecks.ShutdownTestDispatcherQueueAsync(); app.Exit(); }
     }
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)

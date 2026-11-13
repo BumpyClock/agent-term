@@ -105,7 +105,12 @@ internal static partial class StartupChecks
 
                 var active = (TerminalTab)((TabViewItem)tabs.SelectedItem).Content;
                 active.Split(sideBySide: true);
-                await WaitAsync(() => active.PaneCount == 2, "split pane creation");
+                await WaitAsync(() => active.CanSplit(sideBySide: false), "second split layout");
+                active.Split(sideBySide: false);
+                await WaitAsync(() => active.PaneCount == 3, "rapid split pane creation");
+                await AssertOutputAsync(active, report, "rapid split pane");
+                await active.CloseActivePaneAsync();
+                await WaitAsync(() => active.PaneCount == 2, "rapid split pane close");
                 await AssertOutputAsync(active, report, "split pane");
                 await AssertIndependentPaneSchedulingAsync(active, report);
                 await AssertRasterWorkerIsolationAsync(active, report);
@@ -184,6 +189,20 @@ internal static partial class StartupChecks
         var first = Descendants(tab).OfType<TerminalPane>().Single();
         var firstEdge = Field<ProgramActivity>(first, "_activity");
         var motion = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled && !new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        var artifactPrefix = "production-activity-" + Path.GetFileNameWithoutExtension(Report);
+        ProgramActivity VisibleTabActivity() => Descendants((DependencyObject)window.Content).OfType<ProgramStatusIcon>()
+            .Where(icon => ReferenceEquals(icon.Tab, item)).SelectMany(Descendants).OfType<ProgramActivity>()
+            .First(activity => activity.IsAnimating && activity.ActualWidth > 0 && activity.ActualHeight > 0);
+        async Task AssertMovingPixels(ProgramActivity activity, string context, int samples = 4)
+        {
+            if (!motion) return;
+            bool Native() => typeof(ProgramActivity).GetProperty("UsesSystemCompositor", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(activity) is true;
+            await WaitAsync(Native, context + " native renderer");
+            var frames = await ActivityPixelCapture.SampleAsync(window, activity, samples, artifactPrefix + "-" + context);
+            if (frames <= 1) throw new Exception($"Production {context} reports activity but its on-screen pixels do not move.");
+            if (!Native()) throw new Exception($"Production {context} fell back during native pixel validation.");
+            report.Add($"PASS production {context}: {frames} distinct on-screen frames.");
+        }
         void Emit(MainPage page, string value)
         {
             var bytes = Encoding.UTF8.GetBytes("\u001b]7501;" + value + "\u001b\\");
@@ -194,6 +213,8 @@ internal static partial class StartupChecks
         await WaitAsync(() => firstEdge.Working && firstEdge.IsAnimating == motion, "session-reported Pi activity");
         await WaitAsync(() => Descendants((DependencyObject)window.Content).OfType<ProgramStatusIcon>()
             .Where(icon => ReferenceEquals(icon.Tab, item)).Any(icon => Descendants(icon).OfType<ProgramActivity>().Any(activity => activity.IsAnimating == motion)), "visible tab activity");
+        if (motion) await AssertMovingPixels(VisibleTabActivity(), "selected-tab", 6);
+        await AssertMovingPixels(firstEdge, "single-pane-edge");
         tab.Split(sideBySide: true);
         await WaitAsync(() => tab.PaneCount == 2, "activity split creation");
         await AssertOutputAsync(tab, report, "activity second pane");
@@ -203,6 +224,8 @@ internal static partial class StartupChecks
         if (!firstEdge.Working || secondEdge.Working) throw new Exception("A new pane borrowed another pane's program activity.");
         Emit(secondPage, "app=claude:state=working:progress=62");
         await WaitAsync(() => secondEdge.Working && secondEdge.IsAnimating == motion, "second pane Claude activity");
+        await AssertMovingPixels(firstEdge, "unfocused-split-edge");
+        await AssertMovingPixels(secondEdge, "focused-split-edge");
         Emit(firstPage, "app=pi:state=blocked:kind=permission");
         await WaitAsync(() => !firstEdge.Working && secondEdge.Working && ((TabProgramStatus)item.Tag).Primary?.State == ProgramState.Blocked, "blocked priority across panes");
         if (Descendants((DependencyObject)window.Content).OfType<ProgramStatusIcon>().Where(icon => ReferenceEquals(icon.Tab, item))
@@ -212,10 +235,19 @@ internal static partial class StartupChecks
         await WaitAsync(() => ((TabProgramStatus)item.Tag).Primary?.EffectiveApp == "claude", "remaining working program");
         addTab.Invoke(window, [profile]);
         await WaitAsync(() => !secondEdge.IsAnimating && !secondEdge.Active, "hidden pane animation cleanup");
+        if (motion)
+        {
+            await WaitAsync(() => Descendants((DependencyObject)window.Content).OfType<ProgramStatusIcon>()
+                .Where(icon => ReferenceEquals(icon.Tab, item)).SelectMany(Descendants).OfType<ProgramActivity>().Any(activity => activity.IsAnimating),
+                "inactive tab indicator remains visible");
+            await AssertMovingPixels(VisibleTabActivity(), "inactive-tab", 6);
+        }
         tabs.SelectedItem = item;
         await WaitAsync(() => secondEdge.Active && secondEdge.IsAnimating == motion, "shown pane animation restart");
         Emit(secondPage, "app=claude:state=done");
         await WaitAsync(() => !secondEdge.Working && !secondEdge.IsAnimating, "completed pane animation cleanup");
+        if (await ActivityPixelCapture.SampleAsync(window, secondEdge, 3, artifactPrefix + "-completed-edge") != 1)
+            throw new Exception("Completed pane edge still has changing on-screen pixels.");
         if (Descendants(first).Concat(Descendants(second)).OfType<TextBlock>().Any(text => text.Text == "Agent working" && text.Visibility == Visibility.Visible))
             throw new Exception("A pane header still contains the removed working label.");
         await AssertOutputAsync(tab, report, "activity survivor");

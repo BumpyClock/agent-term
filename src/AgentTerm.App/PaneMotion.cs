@@ -47,16 +47,17 @@ internal sealed class PaneMotion
 
     private Task Start(FrameworkElement pane, Pose from, Pose to, int milliseconds, EasingMode mode)
     {
-        Finish(pane);
+        Finish(pane, restoreOverlay: false);
+        ProgramActivity.SetOverlaySuppressed(pane, true);
         pane.Opacity = to.Opacity;
-        var transform = new CompositeTransform
-        {
-            TranslateX = to.X,
-            TranslateY = to.Y,
-            ScaleX = to.ScaleX,
-            ScaleY = to.ScaleY
-        };
-        pane.RenderTransform = transform;
+        // Keep the same transform attached across motion and reparenting. Replacing
+        // it while a split is settling invalidates XAML's native local expression.
+        if (pane.RenderTransform is not CompositeTransform transform)
+            pane.RenderTransform = transform = new CompositeTransform();
+        transform.TranslateX = to.X;
+        transform.TranslateY = to.Y;
+        transform.ScaleX = to.ScaleX;
+        transform.ScaleY = to.ScaleY;
 
         var storyboard = new Storyboard { FillBehavior = FillBehavior.Stop };
         Add(pane, nameof(UIElement.Opacity), from.Opacity, to.Opacity);
@@ -91,11 +92,14 @@ internal sealed class PaneMotion
         }
     }
 
-    private void Finish(FrameworkElement pane)
+    private void Finish(FrameworkElement pane, bool restoreOverlay = true)
     {
         if (!_running.Remove(pane, out var running)) return;
         running.Storyboard.Stop();
-        pane.RenderTransform = null;
+        var transform = (CompositeTransform)pane.RenderTransform;
+        transform.TranslateX = transform.TranslateY = 0;
+        transform.ScaleX = transform.ScaleY = 1;
+        if (restoreOverlay) ProgramActivity.SetOverlaySuppressed(pane, false);
         running.Completion.SetResult();
     }
 }
