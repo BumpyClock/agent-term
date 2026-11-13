@@ -35,6 +35,7 @@ public sealed partial class MainPage
     private readonly List<Rectangle> _linkUnderlines = [];
     private TerminalLink? _hoverLink;
     private TerminalFrame? _hoverFrame;
+    private TerminalGridGeometry? _hoverGeometry;
     private bool _hoverEmphasis;
     private bool _hoverLookedUp;
     private int _hoverColumn = -1, _hoverRow = -1;
@@ -128,10 +129,12 @@ public sealed partial class MainPage
 
     private void ApplyLinkHover(TerminalLink? link, bool lookedUp, TerminalFrame frame, int column, int row, bool emphasis)
     {
-        var changed = emphasis != _hoverEmphasis || !SameLink(link, _hoverLink);
+        var geometry = Terminal.Geometry;
+        var changed = emphasis != _hoverEmphasis || !SameLink(link, _hoverLink) || geometry != _hoverGeometry;
         _hoverLink = link;
         _hoverLookedUp = lookedUp;
         _hoverFrame = frame;
+        _hoverGeometry = geometry;
         _hoverColumn = column;
         _hoverRow = row;
         _hoverEmphasis = emphasis;
@@ -152,6 +155,7 @@ public sealed partial class MainPage
         _hoverLink = null;
         _hoverLookedUp = false;
         _hoverFrame = null;
+        _hoverGeometry = null;
         _hoverColumn = _hoverRow = -1;
         _hoverEmphasis = false;
         if (_linkOverlay is not null) _linkOverlay.Visibility = Visibility.Collapsed;
@@ -207,6 +211,7 @@ public sealed partial class MainPage
         if (_linkOverlay is null || _linkLines is null || _linkChip is null || _linkChipTarget is null || _linkChipHint is null) return;
 
         var geometry = Terminal.Geometry;
+        _linkOverlay.Clip = new RectangleGeometry { Rect = new Rect(0, 0, Terminal.ActualWidth, Terminal.ActualHeight) };
         var index = row * frame.Columns + column;
         var color = index >= 0 && index < frame.Cells.Length ? frame.Cells[index].Foreground : frame.Foreground;
         var brush = new SolidColorBrush(Windows.UI.Color.FromArgb(emphasis ? (byte)255 : (byte)170, color.R, color.G, color.B));

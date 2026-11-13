@@ -47,6 +47,7 @@ public sealed partial class MainPage
                 // One below row covers every fractional position. Native offset advances each crossing.
                 var fraction = _presentedFrame?.OverscanBelow.Length > 0 ? _scrollAnimation.Fraction : 0;
                 Terminal.SetScrollFraction(fraction);
+                RefreshLinkFeedback();
                 if (_presentedFrame is { } frame) RefreshTaskCards(frame);
                 if (!_scrollAnimation.IsActive)
                 {
