@@ -30,13 +30,11 @@ public sealed partial class MainWindow
 
     private void UpdateCaptionSpacer()
     {
-        // AppWindow.Changed also fires while the window closes; the queued update can then run after AppWindow is gone.
         if (_captionSpacer?.XamlRoot is not { } root || AppWindow is not { } appWindow)
         {
             return;
         }
 
-        // A minimized window reports a negative RightInset, and setting a negative Width is a fatal E_INVALIDARG.
         var width = appWindow.TitleBar.RightInset / root.RasterizationScale;
         if (!double.IsFinite(width) || width < 0)
         {
@@ -47,42 +45,43 @@ public sealed partial class MainWindow
         UpdateGitHubFit();
     }
 
-    // Below a measured width the footer overflows and the avatar slides under the caption buttons, where a click
-    // would hit Close.
     private void UpdateGitHubFit()
     {
-        if (_captionSpacer is null || _fittingGitHub || WindowRoot.ActualWidth <= 0)
+        if (_closing || _captionSpacer is null || _fittingGitHub || WindowRoot.ActualWidth <= 0)
         {
             return;
         }
 
         _fittingGitHub = true;
-        try
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
-            // TabView settles its tab widths in follow-up passes; measure the settled layout.
-            WindowRoot.UpdateLayout();
-            var width = WindowRoot.ActualWidth;
-            if (GitHubButton.Visibility == Visibility.Collapsed)
+            try
             {
-                if (width <= _gitHubFailedWidth + 0.5)
+                if (_closing) return;
+                WindowRoot.UpdateLayout();
+                var width = WindowRoot.ActualWidth;
+                if (GitHubButton.Visibility == Visibility.Collapsed)
                 {
-                    return;
+                    if (width <= _gitHubFailedWidth + 0.5)
+                    {
+                        return;
+                    }
+
+                    GitHubButton.SetAvailable(true);
+                    WindowRoot.UpdateLayout();
                 }
 
-                GitHubButton.SetAvailable(true);
-                WindowRoot.UpdateLayout();
+                var right = GitHubButton.TransformToVisual(WindowRoot).TransformPoint(new Point(GitHubButton.ActualWidth, 0)).X;
+                if (right > width - _captionSpacer.Width + 0.5)
+                {
+                    _gitHubFailedWidth = width;
+                    GitHubButton.SetAvailable(false);
+                }
             }
-
-            var right = GitHubButton.TransformToVisual(WindowRoot).TransformPoint(new Point(GitHubButton.ActualWidth, 0)).X;
-            if (right > width - _captionSpacer.Width + 0.5)
+            finally
             {
-                _gitHubFailedWidth = width;
-                GitHubButton.SetAvailable(false);
+                _fittingGitHub = false;
             }
-        }
-        finally
-        {
-            _fittingGitHub = false;
-        }
+        })) _fittingGitHub = false;
     }
 }

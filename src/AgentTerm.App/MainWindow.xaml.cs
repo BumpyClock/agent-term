@@ -130,13 +130,11 @@ public sealed partial class MainWindow : Window
             stop.IsEnabled = page?.CanStopSession == true;
             restart.IsEnabled = page?.CanRestartSession == true;
         };
-        ProfileMenu.Items.Add(new MenuFlyoutSeparator());
-        var settings = new MenuFlyoutItem { Text = "Settings", KeyboardAcceleratorTextOverride = "Ctrl+," };
-        settings.Click += (_, _) => ShowSettings();
-        ProfileMenu.Items.Add(settings);
     }
 
     private void NewTabButton_Click(object sender, RoutedEventArgs args) => AddTab(DefaultProfile);
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs args) => ShowSettings();
 
     private void Tabs_Loaded(object sender, RoutedEventArgs args)
     {
@@ -176,7 +174,6 @@ public sealed partial class MainWindow : Window
         {
             item.Header = tab.Title;
             _ = SetShellIconAsync(item, tab);
-            if (ReferenceEquals(Tabs.SelectedItem, item)) UpdateWindowTitle();
         };
         tab.CloseRequested += async () => await CloseTabAsync(item);
         Tabs.TabItems.Add(item);
@@ -260,11 +257,7 @@ public sealed partial class MainWindow : Window
         var alt = Down(VirtualKey.Menu);
         var firstPress = !e.KeyStatus.WasKeyDown;
 
-        if (!control && !shift && !alt && e.Key == VirtualKey.F6 && _visibleTab?.ActivePage.FocusPromptMode() == true)
-        {
-            e.Handled = true;
-        }
-        else if (alt && !control && !shift && e.Key == VirtualKey.Down && IsTabHeader(e.OriginalSource))
+        if (alt && !control && !shift && e.Key == VirtualKey.Down && IsTabHeader(e.OriginalSource))
         {
             var header = (FrameworkElement)e.OriginalSource;
             var tabItem = header is SidebarTabItem row ? row.Tab : (TabViewItem)header;
@@ -299,7 +292,6 @@ public sealed partial class MainWindow : Window
         }
         else if (control && !shift && !alt && e.Key == VirtualKey.F4 && e.OriginalSource is SidebarTabItem focusedRow)
         {
-            // TabView's own Ctrl+F4 only sees focus inside the TabView; a focused sidebar row closes itself.
             e.Handled = true;
             if (firstPress) await CloseTabAsync(focusedRow.Tab, keyboard: true);
         }

@@ -4,12 +4,14 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using AgentTerm.Terminal;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
 
 namespace AgentTerm_App;
@@ -17,7 +19,8 @@ namespace AgentTerm_App;
 internal sealed partial class SettingsWindow : Window
 {
     private readonly record struct SettingsValues(string ProfileId, string FontFamily, int FontSize, bool UseAcrylic,
-        double BackgroundOpacity, TabPosition TabPosition, TerminalColorScheme ColorScheme, string LightThemeId, string DarkThemeId);
+        double BackgroundOpacity, TabPosition TabPosition, TerminalColorScheme ColorScheme, string LightThemeId, string DarkThemeId,
+        TerminalStartPosition TerminalStartPosition);
     private sealed record ProfileDraft(string? FontFamily, bool InheritFontSize, string? FontSizeText, bool? UseAcrylic,
         bool InheritOpacity, double? BackgroundOpacity, TerminalColorScheme? ColorScheme, string? LightThemeId, string? DarkThemeId);
 
@@ -44,6 +47,7 @@ internal sealed partial class SettingsWindow : Window
             var item = new NavigationViewItem { Content = profile.Name, Tag = profile.Id, Icon = new FontIcon { Glyph = "\uE756" } };
             _profileItems.Add(profile.Id, item);
             SettingsNavigation.MenuItems.Add(item);
+            _ = SetProfileIconAsync(item, profile);
         }
         RestoreDraft();
         SettingsNavigation.SelectedItem = StartupItem;
@@ -51,9 +55,24 @@ internal sealed partial class SettingsWindow : Window
             ShowNotice(InfoBarSeverity.Warning, "Settings could not be loaded", error);
     }
 
+    private static async Task SetProfileIconAsync(NavigationViewItem item, ShellProfile profile)
+    {
+        try
+        {
+            var icon = await Task.Run(() => ExecutableIcon.Read(profile.Executable));
+            if (icon is null) return;
+            using var stream = new MemoryStream(icon).AsRandomAccessStream();
+            var image = new BitmapImage { DecodePixelWidth = 32 };
+            await image.SetSourceAsync(stream);
+            item.Icon = new ImageIcon { Source = image };
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
+        {
+        }
+    }
+
     private void ApplyCaptionTheme()
     {
-        // The native caption needs its own theme setting with Windows App SDK 1.8.
         int dark = SettingsNavigation.ActualTheme == ElementTheme.Dark ? 1 : 0;
         _ = DwmSetWindowAttribute(WinRT.Interop.WindowNative.GetWindowHandle(this), 20, in dark, sizeof(int));
     }
@@ -101,7 +120,7 @@ internal sealed partial class SettingsWindow : Window
     {
         _saved = new SettingsValues(_preferences.DefaultProfileId ?? "", _preferences.FontFamily,
             _preferences.FontSize, _preferences.UseAcrylic, _preferences.BackgroundOpacity, _preferences.TabPosition,
-            _preferences.ColorScheme, _preferences.LightThemeId, _preferences.DarkThemeId);
+            _preferences.ColorScheme, _preferences.LightThemeId, _preferences.DarkThemeId, _preferences.TerminalStartPosition);
         _updatingControls = true;
         _savedOverrides = _preferences.ProfileOverrides.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         _profileDrafts.Clear();
@@ -125,6 +144,8 @@ internal sealed partial class SettingsWindow : Window
         BackgroundBox.SelectedIndex = _saved.UseAcrylic ? 1 : 0;
         TabPositionBox.SelectedIndex = (int)_saved.TabPosition;
         UpdateSelectionToolTip(TabPositionBox);
+        TerminalStartPositionBox.SelectedIndex = (int)_saved.TerminalStartPosition;
+        UpdateSelectionToolTip(TerminalStartPositionBox);
         OpacitySlider.Value = _saved.BackgroundOpacity * 100;
         DisplayOpacity();
         if (_shownProfileId is { } id) LoadProfileDraft(id);
@@ -291,7 +312,8 @@ internal sealed partial class SettingsWindow : Window
             SelectedValue(LightThemeBox) != _saved.LightThemeId || SelectedValue(DarkThemeBox) != _saved.DarkThemeId ||
             FontSizeBox.Text != _saved.FontSize.ToString(CultureInfo.InvariantCulture) ||
             BackgroundBox.SelectedIndex != (_saved.UseAcrylic ? 1 : 0) ||
-            OpacitySlider.Value != _saved.BackgroundOpacity * 100 || SelectedTabPosition != _saved.TabPosition || profilesDirty;
+            OpacitySlider.Value != _saved.BackgroundOpacity * 100 || SelectedTabPosition != _saved.TabPosition ||
+            SelectedTerminalStartPosition != _saved.TerminalStartPosition || profilesDirty;
         SaveButton.IsEnabled = DiscardButton.IsEnabled = dirty;
         FooterStatus.Text = dirty ? "Unsaved changes. Closing this window discards them." : "";
     }
@@ -337,7 +359,7 @@ internal sealed partial class SettingsWindow : Window
         try
         {
             _preferences.Update(profile, fontSize, BackgroundBox.SelectedIndex == 1, family, overrides, OpacitySlider.Value / 100,
-                SelectedTabPosition, colorScheme, lightThemeId, darkThemeId);
+                SelectedTabPosition, colorScheme, lightThemeId, darkThemeId, SelectedTerminalStartPosition);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -348,6 +370,9 @@ internal sealed partial class SettingsWindow : Window
         RestoreDraft();
         FooterStatus.Text = "Settings saved.";
     }
+
+    private TerminalStartPosition SelectedTerminalStartPosition =>
+        TerminalStartPositionBox.SelectedIndex == 1 ? TerminalStartPosition.Top : TerminalStartPosition.Bottom;
 
     private TabPosition SelectedTabPosition => TabPositionBox.SelectedIndex == 1 ? TabPosition.Left : TabPosition.Top;
 

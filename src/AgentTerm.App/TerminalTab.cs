@@ -48,7 +48,6 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
                 _shown = true;
                 if (CanAnimate) _motion.Enter(_active.View);
             }
-            FocusActivePane();
         };
     }
 
@@ -78,12 +77,13 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
     internal void FocusActivePane()
     {
         var pane = _active;
-        if (!_visible || ReferenceEquals(pane, _retiring)) return;
-        var focused = XamlRoot is null ? null : Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot);
+        if (!_visible || !IsLoaded || !pane.Page.IsLoaded || XamlRoot is not { } root || ReferenceEquals(pane, _retiring)) return;
+        var focused = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(root);
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (_visible && !IsClosing && ReferenceEquals(_active, pane) && !ReferenceEquals(pane, _retiring) &&
-                ReferenceEquals(focused, Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(XamlRoot)))
+            if (_visible && IsLoaded && pane.Page.IsLoaded && ReferenceEquals(XamlRoot, root) && !IsClosing &&
+                ReferenceEquals(_active, pane) && !ReferenceEquals(pane, _retiring) &&
+                ReferenceEquals(focused, Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(root)))
                 pane.Page.FocusTerminal();
         });
     }
@@ -308,6 +308,10 @@ internal sealed class TerminalTab : UserControl, IAsyncDisposable
         page.SetActive(_visible);
         var view = new TerminalPane(page);
         var pane = new Pane(page, view);
+        page.Loaded += (_, _) =>
+        {
+            if (ReferenceEquals(_active, pane)) FocusActivePane();
+        };
         page.SessionReady += () =>
         {
             if (ReferenceEquals(_active, pane)) page.FocusUnclaimedInput();

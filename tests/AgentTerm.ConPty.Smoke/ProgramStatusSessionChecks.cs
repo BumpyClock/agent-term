@@ -71,12 +71,12 @@ internal static class ProgramStatusSessionChecks
         await Wait(() => session.ReadText().Contains("status-fixture-input:"), "Fixture must reach its input prompt.");
         session.Send("answer\r");
         await Wait(() => session.PromptState == ShellPromptState.Ready, "Fixture command must return to the shell.");
-        if (session.ReadProgramStatuses() is not { Count: 1 } || session.ReadProgramStatuses()[0].Id != "completed")
+        if (session.ReadProgramStatuses() is not { Count: 1 } || session.ReadProgramStatuses()[0] is not { Id: "completed", IsActive: false })
             throw new Exception("Native prompt must clear active records while preserving completed reports.");
         session.SubmitCommand("Report-Status 'state=working:id=running'; Report-Status 'state=error:id=failed'; exit 0");
         await session.Completion.WaitAsync(TimeSpan.FromSeconds(25));
         records = session.ReadProgramStatuses();
-        if (records.Count != 2 || records.Any(r => r.State is ProgramState.Working or ProgramState.Blocked))
+        if (records.Count != 2 || records.Any(r => r.IsActive))
             throw new Exception("Process exit must clear active status while retaining completed and failed outcomes.");
         Console.WriteLine("Program status ConPTY checks passed detection round-trip, hierarchy, prompt cleanup and process exit.");
     }

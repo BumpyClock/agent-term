@@ -30,7 +30,23 @@ internal static class ProgramStatusUiChecks
         status.Update([working]);
         Check(ToolTipService.GetToolTip(tab) is ToolTip { IsEnabled: false } && ToolTipService.GetToolTip(sidebar) is null, "Status must have one rich surface, without a competing basic tooltip.");
         Check(AutomationProperties.GetHelpText(tab).Contains("Working · 30%") && AutomationProperties.GetHelpText(sidebar).Contains("Compiling"), "Both layouts must expose complete status to assistive technology.");
-        Check(!ReferenceEquals(tab.IconSource, shell), "Program status must replace the shell icon.");
+        Check(ReferenceEquals(tab.IconSource, shell), "Unresolved programs must retain shell identity instead of a generic status circle.");
+        var pi = Report("", ProgramState.Idle, "pi", "Waiting for input");
+        status.Update([pi]);
+        Check(tab.IconSource is FontIconSource { Glyph: "π", FontFamily.Source: "Segoe UI" }, "Pi must have built-in identity even without a PATH executable icon.");
+        var piIcon = tab.IconSource;
+        foreach (var state in new[] { ProgramState.Working, ProgramState.Done, ProgramState.Idle })
+        {
+            status.Update([pi with { Status = pi.Status with { State = state } }]);
+            Check(ReferenceEquals(tab.IconSource, piIcon), "Pi identity must survive activity and completion changes while running.");
+        }
+        var retained = pi with { Status = pi.Status with { State = ProgramState.Done, IsActive = false } };
+        status.Update([retained]);
+        Check(ReferenceEquals(tab.IconSource, shell) && AutomationProperties.GetHelpText(tab).Contains("Done"), "Shell readiness must restore shell identity without losing completion details.");
+        var newShell = new FontIconSource { Glyph = "S" };
+        status.SetShellIcon(newShell);
+        Check(ReferenceEquals(tab.IconSource, newShell), "Shell identity must follow shell changes with retained reports.");
+        status.SetShellIcon(shell);
         sidebar.IsCompact = true;
         Check(AutomationProperties.GetHelpText(sidebar).Contains("Alt+Down") && AutomationProperties.GetHelpText(sidebar).Contains("Ctrl+F4"), "Compact actions must remain accessible with status.");
         var blocked = working with { Status = working.Status with { State = ProgramState.Blocked, Kind = "question", Message = "Which target?" } };
@@ -274,6 +290,8 @@ internal static class ProgramStatusUiChecks
         var icon = new ProgramStatusIcon { Tab = tab, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         var canvas = new Grid { Width = 160, Height = 48, Padding = new Thickness(12), RequestedTheme = ElementTheme.Dark, Background = new SolidColorBrush(Microsoft.UI.Colors.Black), Children = { icon } };
         window.Content = canvas;
+        var shell = new FontIconSource { Glyph = "\uE756" };
+        status.SetShellIcon(shell);
         var working = Report("", ProgramState.Working, "cmd", "Icon fixture");
         status.Update([working]);
         for (var attempt = 0; attempt < 30 && tab.IconSource is not ImageIconSource; attempt++) await Task.Delay(100);
@@ -287,9 +305,24 @@ internal static class ProgramStatusUiChecks
         var ring = Descendants(icon).OfType<ProgressRing>().Single();
         Check(!ring.IsIndeterminate && ring.Value == 62 && ring.Visibility == Visibility.Visible, "Reported progress must stay visible even when animation is disabled.");
         await CaptureAsync(canvas, "icon-progress");
+        var executableIcon = tab.IconSource;
         status.Update([working with { Status = working.Status with { State = ProgramState.Done } }]);
+        Check(ReferenceEquals(tab.IconSource, executableIcon), "Completed work must retain executable identity while the program is running.");
         Check(await Program.SampleAsync(canvas, 3) == 1, "Completed tabs must stop animating.");
         await CaptureAsync(canvas, "icon-done");
+        status.Update([working with { Status = working.Status with { State = ProgramState.Done, IsActive = false } }]);
+        Check(ReferenceEquals(tab.IconSource, shell), "Returning to the shell must restore its icon even with retained outcomes.");
+        await CaptureAsync(canvas, "icon-shell");
+        var pi = Report("", ProgramState.Idle, "pi", "Ready");
+        status.Update([pi]);
+        await Task.Delay(100);
+        Check(Descendants(icon).OfType<FontIcon>().Single().Glyph == "π", "Pi identity must render as pi, not a status circle or missing font glyph.");
+        await CaptureAsync(canvas, "icon-pi-idle");
+        status.Update([pi with { Status = pi.Status with { State = ProgramState.Working } }]);
+        Check(Descendants(icon).OfType<ContentPresenter>().Single(presenter => presenter.Content is FontIcon { Glyph: "π" }).Visibility == Visibility.Visible, "Pi identity must stay visible inside its activity ring.");
+        await CaptureAsync(canvas, "icon-pi-working");
+        status.Update([pi with { Status = pi.Status with { IsActive = false } }]);
+        Check(ReferenceEquals(tab.IconSource, shell), "Exiting idle Pi must restore shell identity.");
         Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% progress and static completion passed. Motion enabled={moving}.");
     }
 

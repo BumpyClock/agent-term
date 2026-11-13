@@ -11,6 +11,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.System;
 
@@ -30,9 +31,9 @@ internal sealed class TabProgramStatus
     private bool _pinned;
     private XamlRoot? _root;
     private static TabProgramStatus? _openStatus;
-    internal ProgramStatus? Primary => _records.OrderBy(r => ProgramStatusPresentation.Priority(r.Status.State)).FirstOrDefault()?.Status;
+    internal ProgramStatus? Primary => ProgramStatusPresentation.ActivePrimary(_records);
     private string? _app;
-    private ImageIconSource? _programIcon;
+    private IconSource? _programIcon;
 
     internal TabProgramStatus(TabViewItem item)
     {
@@ -189,7 +190,7 @@ internal sealed class TabProgramStatus
     internal void SetShellIcon(IconSource icon)
     {
         _shellIcon = icon;
-        if (_presentation.Glyph.Length == 0) item.IconSource = icon;
+        RefreshIcon();
     }
 
     internal void Update(IReadOnlyList<PaneProgramStatus> records)
@@ -210,23 +211,24 @@ internal sealed class TabProgramStatus
         if (_app != app)
         {
             _app = app;
-            _programIcon = null;
-            _ = LoadProgramIconAsync(app);
+            _programIcon = string.Equals(app, "pi", StringComparison.OrdinalIgnoreCase)
+                ? new FontIconSource { Glyph = "π", FontFamily = new FontFamily("Segoe UI") } : null;
+            if (_programIcon is null) _ = LoadProgramIconAsync(app);
         }
         RefreshIcon();
         item.SetValue(DetailsProperty, _presentation.Details);
         AutomationProperties.SetHelpText(item, records.Count == 0 ? "" : _presentation.Details + "\nAlt+Down opens program status. Escape dismisses it.");
-        // A null tip lets TabViewItem recreate its automatic title tooltip when its template reloads.
         ToolTipService.SetToolTip(item, records.Count == 0 ? null : _suppressedTitleTip);
     }
 
-    private void RefreshIcon() => item.IconSource = _presentation.Glyph.Length == 0 ? _shellIcon
-        : _programIcon is not null && Primary?.State is ProgramState.Working or ProgramState.Idle ? _programIcon
-        : new FontIconSource { Glyph = _presentation.Glyph };
+    private void RefreshIcon() => item.IconSource = Primary?.State switch
+    {
+        ProgramState.Blocked or ProgramState.Error => new FontIconSource { Glyph = _presentation.Glyph },
+        _ => _programIcon ?? _shellIcon
+    };
 
     private async Task LoadProgramIconAsync(string? app)
     {
-        // The protocol reports a command name. Resolve only local PATH executables, never URLs or remote paths.
         if (app is null) return;
         try
         {

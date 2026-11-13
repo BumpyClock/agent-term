@@ -6,6 +6,7 @@ internal static class PreferencesChecks
     public static void Run()
     {
         CheckThemes();
+        CheckTerminalStartPosition();
         var path = Path.Combine(Path.GetTempPath(), "agent-term-settings-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
@@ -118,6 +119,52 @@ internal static class PreferencesChecks
             File.WriteAllText(path, "{broken");
             var invalid = new TerminalPreferences(path);
             if (invalid.LoadError is null || invalid.FontSize != 14) throw new Exception("Invalid settings should report the failure and use defaults.");
+        }
+        finally { File.Delete(path); File.Delete(path + ".tmp"); }
+    }
+
+    private static void CheckTerminalStartPosition()
+    {
+        static void Check(bool condition, string message)
+        {
+            if (!condition) throw new Exception(message);
+        }
+        var path = Path.Combine(Path.GetTempPath(), "agent-term-start-position-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            Check(new TerminalPreferences(path).TerminalStartPosition == TerminalStartPosition.Bottom,
+                "A fresh install must keep the bottom-aligned prompt.");
+            foreach (var json in new[]
+            {
+                """{"FontSize":17}""",
+                """{"FontSize":17,"TerminalStartPosition":null}""",
+                """{"FontSize":17,"TerminalStartPosition":"unknown"}"""
+            })
+            {
+                File.WriteAllText(path, json);
+                var older = new TerminalPreferences(path);
+                Check(older.TerminalStartPosition == TerminalStartPosition.Bottom && older.FontSize == 17 && older.LoadError is null,
+                    "Missing, null or unknown start positions must keep Bottom without losing other settings.");
+            }
+            File.WriteAllText(path, """{"TerminalStartPosition":"tOp"}""");
+            var preferences = new TerminalPreferences(path);
+            Check(preferences.TerminalStartPosition == TerminalStartPosition.Top, "Stored start position is case insensitive.");
+            var changes = 0;
+            preferences.Changed += () => changes++;
+            preferences.Update("pwsh", 18, terminalStartPosition: TerminalStartPosition.Bottom);
+            Check(changes == 1 && preferences.TerminalStartPosition == TerminalStartPosition.Bottom,
+                "Saving start position must notify open panes with the new value.");
+            Check(new TerminalPreferences(path).TerminalStartPosition == TerminalStartPosition.Bottom,
+                "Bottom must survive restart.");
+            preferences.Update("pwsh", 18, terminalStartPosition: TerminalStartPosition.Top);
+            var reopened = new TerminalPreferences(path);
+            Check(reopened.TerminalStartPosition == TerminalStartPosition.Top, "Top must survive restart.");
+            reopened.Update("cmd", 20);
+            Check(new TerminalPreferences(path).TerminalStartPosition == TerminalStartPosition.Top,
+                "Unrelated settings changes must preserve start position.");
+            reopened.Update("cmd", 20, terminalStartPosition: (TerminalStartPosition)999);
+            Check(new TerminalPreferences(path).TerminalStartPosition == TerminalStartPosition.Top,
+                "An unsupported update must preserve the existing start position.");
         }
         finally { File.Delete(path); File.Delete(path + ".tmp"); }
     }

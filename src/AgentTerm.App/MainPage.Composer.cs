@@ -14,9 +14,8 @@ public sealed partial class MainPage
     private readonly AgentSessionController _agent;
     private readonly AgentTimelineView _timelineView = new();
     private readonly Dictionary<AgentTask, (TerminalSession Session, TerminalAnchor Anchor, AgentTaskCard Card)> _cards = [];
-    private readonly PromptModeBar _modeBar = new();
+    private readonly AgentStatusBar _agentBar = new();
     private bool _replyIme;
-    private bool _legacy;
     private const string PausedReply = "Agent replies paused until this turn finishes";
     private string? _stopTip;
     private bool _surfaceOpen;
@@ -27,7 +26,7 @@ public sealed partial class MainPage
     private string? _promptFont;
 
     private bool AgentBusy => _agent.HasActiveTurn;
-    internal void AttachPromptModeControls(PaneHeader header) => header.ModeBar = _modeBar;
+    internal void AttachAgentControls(PaneHeader header) => header.AgentBar = _agentBar;
     private void AgentReply_Changing(TextBox sender, TextBoxTextChangingEventArgs args) => _promptFailure = null;
     private void AgentReply_Changed(object sender, RoutedEventArgs e) { if (AgentReply is not null) RefreshAgentChrome(); }
     private void AgentReply_FocusChanged(object sender, RoutedEventArgs e) => UpdatePromptGlyph();
@@ -38,9 +37,10 @@ public sealed partial class MainPage
 
     private void ApplyDisplayMode()
     {
-        Terminal.SetBottomAligned(!_legacy);
+        var bottom = TerminalPreferences.Current.TerminalStartPosition == TerminalStartPosition.Bottom;
+        Terminal.SetBottomAligned(bottom);
         if (_session is not { } session || _state is not (SessionState.Starting or SessionState.Running or SessionState.Idle)) return;
-        session.SetBottomAnchored(!_legacy);
+        session.SetBottomAnchored(bottom);
         if (_state != SessionState.Starting) RefreshOutput(session);
     }
 
@@ -82,8 +82,8 @@ public sealed partial class MainPage
         SubmitPrompt.Opacity = AgentReply.IsReadOnly ? 0 : 1;
         SubmitPrompt.IsHitTestVisible = !AgentReply.IsReadOnly;
 
-        _modeBar.ShowInteract(owns);
-        _modeBar.ShowMode(_legacy, state, session?.AgentEntryAvailable == false);
+        _agentBar.ShowInteract(owns);
+        _agentBar.ShowShellStatus(state, session?.AgentEntryAvailable == false);
 
         var approvalPending = request is ApprovalRequest;
         StopShortcut.Visibility = approvalPending ? Visibility.Collapsed : Visibility.Visible;
@@ -95,7 +95,7 @@ public sealed partial class MainPage
         AutomationProperties.SetAccessibilityView(StopAgentButton, AgentBusy ? AccessibilityView.Content : AccessibilityView.Raw);
         ToolTipService.SetToolTip(LeaveSurfaceButton, AgentBusy ? "Back to the terminal. The agent keeps working."
             : "Back to the terminal. This conversation is saved in its task card.");
-        _modeBar.ShowTask(_agent.State, !_surfaceOpen, _viewActive && IsLoaded);
+        _agentBar.ShowTask(_agent.State, !_surfaceOpen, _viewActive && IsLoaded);
     }
 
     private bool CanSend(string text)
@@ -171,6 +171,14 @@ public sealed partial class MainPage
         {
             var handoff = explicitHandoff || PaneInputFocused();
             _surfaceOpen = true;
+            Terminal.SuspendRendering();
+            _cursorTimer.Stop();
+            _synchronizedRefreshTimer.Stop();
+            if (_renderingSubscribed)
+            {
+                CompositionTarget.Rendering -= Refresh_Rendering;
+                _renderingSubscribed = false;
+            }
             Terminal.Visibility = HistoryScrollBar.Visibility = TaskCardLayer.Visibility = Visibility.Collapsed;
             AgentSurface.Visibility = Visibility.Visible;
             UpdateInputOwner(handoff);
@@ -183,6 +191,7 @@ public sealed partial class MainPage
     {
         if (!_surfaceOpen) return;
         _surfaceOpen = false;
+        Terminal.ResumeRendering();
         AgentSurface.Visibility = Visibility.Collapsed;
         Terminal.Visibility = HistoryScrollBar.Visibility = TaskCardLayer.Visibility = Visibility.Visible;
         if (_session is { } session)
@@ -338,17 +347,6 @@ public sealed partial class MainPage
                 else await SubmitReplyAsync();
                 return;
         }
-    }
-
-    internal bool FocusPromptMode() => _modeBar.FocusMode();
-
-    private void ToggleDisplayMode()
-    {
-        _legacy = !_legacy;
-        ApplyDisplayMode();
-        LeaveSurface();
-        RefreshAgentChrome();
-        FocusTerminal();
     }
 
     private void AllowAgentInput()

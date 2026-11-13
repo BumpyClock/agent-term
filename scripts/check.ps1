@@ -14,6 +14,11 @@ if ($LASTEXITCODE -ne 0) { throw "ConPTY smoke tests failed with exit code $LAST
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.Renderer.Smoke/AgentTerm.Renderer.Smoke.csproj') -c Release -- (Join-Path $root 'artifacts/renderer-smoke.png')
 if ($LASTEXITCODE -ne 0) { throw "Renderer smoke tests failed with exit code $LASTEXITCODE." }
 
+$transitions = Join-Path $root ('artifacts/retained-transitions-' + [Guid]::NewGuid().ToString('N') + '.json')
+& dotnet run --project (Join-Path $root 'tests/AgentTerm.Renderer.Perf/AgentTerm.Renderer.Perf.csproj') -c Release -- unused (Join-Path $root 'scripts/terminal-perf-workload.py') $transitions --verify-transitions --windowed
+if ($LASTEXITCODE -ne 0) { throw "Retained raster transition checks failed with exit code $LASTEXITCODE." }
+& (Join-Path $PSScriptRoot 'check-startup.ps1')
+
 & dotnet run --project (Join-Path $root 'tests/AgentTerm.Agents.Smoke/AgentTerm.Agents.Smoke.csproj') -c Release
 if ($LASTEXITCODE -ne 0) { throw "Agent behavior checks failed with exit code $LASTEXITCODE." }
 

@@ -30,6 +30,11 @@ internal static class ProgramStatusPresentationChecks
             .Select(id => Entry(ProgramState.Working, id) with { Status = Entry(ProgramState.Working, id).Status with { Title = id } }).ToArray()).Details;
         Check(hierarchy.IndexOf("build/test ·", StringComparison.Ordinal) < hierarchy.IndexOf("build-ui ·", StringComparison.Ordinal)
             && hierarchy.IndexOf("build/test ·", StringComparison.Ordinal) < hierarchy.IndexOf("build.x ·", StringComparison.Ordinal), "Child records must precede prefix-sharing siblings.");
+        var retained = entries.Select(entry => entry with { Status = entry.Status with { IsActive = false } }).ToArray();
+        var history = ProgramStatusPresentation.Create(retained);
+        Check(history.Glyph == "" && history.Details.Contains("Answer needed"), "Retained outcomes must remain readable without replacing the shell icon.");
+        var idle = Entry(ProgramState.Idle, pane: 2);
+        Check(ProgramStatusPresentation.ActivePrimary([.. retained, idle]) == idle.Status, "An active pane must own identity instead of a retained urgent outcome.");
         var empty = ProgramStatusPresentation.Create([]);
         Check(empty.Glyph == "" && empty.Summary == "" && empty.Details == "", "No reports must restore an ordinary shell tab.");
         Console.WriteLine("Program status presentation checks passed.");

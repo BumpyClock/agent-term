@@ -262,7 +262,6 @@
                     </Setter.Value>
                 </Setter>
             </Style>
-            <!-- Sidebar rows reuse PillTabStyle's TabViewItem theme keys so both positions share light, dark, and contrast colors. -->
             <Style x:Key="SidebarTabStyle" TargetType="local:SidebarTabItem">
                 <Setter Property="Margin" Value="4,2,2,2" />
                 <Setter Property="Padding" Value="0" />
@@ -279,7 +278,6 @@
                             <Grid x:Name="LayoutRoot">
                                 <Grid.Resources>
                                     <ResourceDictionary>
-                                        <!-- Same accent roles as the native ListView selection indicator; contrast themes follow the selected-tab highlight. -->
                                         <ResourceDictionary.ThemeDictionaries>
                                             <ResourceDictionary x:Key="Default">
                                                 <SolidColorBrush x:Key="SidebarTabSelectionIndicatorBrush" Color="{ThemeResource SystemAccentColorLight2}" />
@@ -456,7 +454,6 @@
                                             IsTextScaleFactorEnabled="False" IsTabStop="False"
                                             Style="{StaticResource SubtleButtonStyle}" HighContrastAdjustment="None" />
                                 </Grid>
-                                <!-- NavigationView's pill indicator, inset so it stays inside the rounded row in both widths. -->
                                 <Rectangle x:Name="SelectionIndicator" Margin="5,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center"
                                            Width="{ThemeResource NavigationViewSelectionIndicatorWidth}" Height="{ThemeResource NavigationViewSelectionIndicatorHeight}"
                                            RadiusX="{ThemeResource NavigationViewSelectionIndicatorRadius}" RadiusY="{ThemeResource NavigationViewSelectionIndicatorRadius}"
@@ -488,41 +485,52 @@
             <TabView.Resources>
                 <SolidColorBrush x:Key="TabViewBorderBrush" Color="Transparent" />
             </TabView.Resources>
+            <TabView.TabStripHeader>
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="12,0,12,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                    <Image Source="ms-appx:///Assets/AppIcon.ico" Width="16" Height="16" AutomationProperties.AccessibilityView="Raw" />
+                    <TextBlock Text="AgentTerm" VerticalAlignment="Center" FontSize="{ThemeResource TabViewItemHeaderFontSize}"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                </StackPanel>
+            </TabView.TabStripHeader>
             <TabView.TabStripFooter>
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                    <StackPanel x:Name="TabStripActions" Orientation="Horizontal" Margin="4,0,0,0" VerticalAlignment="Center">
-                        <StackPanel.Resources>
-                            <StaticResource x:Key="SubtleButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
-                        </StackPanel.Resources>
-                        <Button Width="28" Height="28" MinWidth="0" Padding="0" CornerRadius="14"
-                                Style="{StaticResource SubtleButtonStyle}" Click="NewTabButton_Click"
-                                AutomationProperties.Name="New tab" ToolTipService.ToolTip="New tab (Ctrl+Shift+T)">
-                            <FontIcon Glyph="&#xE710;" FontSize="12" />
-                        </Button>
-                        <Button Width="24" Height="28" MinWidth="0" Padding="0" CornerRadius="12"
-                                Style="{StaticResource SubtleButtonStyle}"
-                                AutomationProperties.Name="Profiles and settings" ToolTipService.ToolTip="Profiles and settings">
-                            <FontIcon Glyph="&#xE70D;" FontSize="9" />
-                            <Button.Flyout><MenuFlyout x:Name="ProfileMenu" Placement="BottomEdgeAlignedLeft" /></Button.Flyout>
-                        </Button>
-                    </StackPanel>
-                    <Grid x:Name="TabDragRegion" Grid.Column="1" MinWidth="48" Background="Transparent">
-                        <TextBlock x:Name="WindowTitleText" Visibility="Collapsed" Margin="12,0,8,0" VerticalAlignment="Center"
-                                   IsHitTestVisible="False" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxLines="1"
-                                   FontSize="{ThemeResource TabViewItemHeaderFontSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   AutomationProperties.AccessibilityView="Raw" />
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                    <Grid x:Name="TopTabActionsHost">
+                        <StackPanel x:Name="TabStripActions" Orientation="Horizontal" Margin="4,0,0,0" VerticalAlignment="Center">
+                            <StackPanel.Resources>
+                                <StaticResource x:Key="SubtleButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                            </StackPanel.Resources>
+                            <Button Width="28" Height="28" MinWidth="0" Padding="0" CornerRadius="14"
+                                    Style="{StaticResource SubtleButtonStyle}" Click="NewTabButton_Click"
+                                    AutomationProperties.Name="New tab" ToolTipService.ToolTip="New tab (Ctrl+Shift+T)">
+                                <FontIcon Glyph="&#xE710;" FontSize="12" />
+                            </Button>
+                            <Button Width="24" Height="28" MinWidth="0" Padding="0" CornerRadius="12"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    AutomationProperties.Name="Profiles" ToolTipService.ToolTip="Profiles">
+                                <FontIcon Glyph="&#xE70D;" FontSize="9" />
+                                <Button.Flyout><MenuFlyout x:Name="ProfileMenu" Placement="BottomEdgeAlignedLeft" /></Button.Flyout>
+                            </Button>
+                        </StackPanel>
                     </Grid>
-                    <local:GitHubDashboardButton x:Name="GitHubButton" Grid.Column="2" VerticalAlignment="Center" />
-                    <Border x:Name="CaptionSpacer" Grid.Column="3" Loaded="CaptionInset_Loaded" />
+                    <Grid x:Name="TabDragRegion" Grid.Column="1" MinWidth="48" Background="Transparent" />
+                    <Button Grid.Column="2" Width="32" Height="32" MinWidth="0" Padding="0" CornerRadius="16" VerticalAlignment="Top"
+                            Style="{StaticResource SubtleButtonStyle}" Click="SettingsButton_Click"
+                            AutomationProperties.Name="Settings" AutomationProperties.AcceleratorKey="Ctrl+," ToolTipService.ToolTip="Settings (Ctrl+,)">
+                        <FontIcon Glyph="&#xE713;" FontSize="14" />
+                    </Button>
+                    <local:GitHubDashboardButton x:Name="GitHubButton" Grid.Column="3" VerticalAlignment="Center" />
+                    <Border x:Name="CaptionSpacer" Grid.Column="4" Loaded="CaptionInset_Loaded" />
                 </Grid>
             </TabView.TabStripFooter>
         </TabView>
-        <!-- Native collection transitions replay on existing rows when tabs are added. Keep tab navigation visible throughout. -->
-        <local:SidebarTabList x:Name="TabList" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Stretch"
-                  Padding="0" SelectionMode="Single" SingleSelectionFollowsFocus="False" IsItemClickEnabled="True"
-                  CanReorderItems="True" CanDragItems="True" AllowDrop="True" TabNavigation="Once"
-                  ItemContainerTransitions="{x:Null}"
-                  AutomationProperties.Name="Tabs" ItemClick="TabList_ItemClick"
-                  SelectionChanged="TabList_SelectionChanged" DragItemsCompleted="TabList_DragItemsCompleted" />
+        <Grid x:Name="TabSidebar" Visibility="Collapsed" HorizontalAlignment="Left" RowDefinitions="Auto,*">
+            <Grid x:Name="SidebarActionsHost" MinHeight="36" HorizontalAlignment="Left" />
+            <local:SidebarTabList x:Name="TabList" Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                      Padding="0" SelectionMode="Single" SingleSelectionFollowsFocus="False" IsItemClickEnabled="True"
+                      CanReorderItems="True" CanDragItems="True" AllowDrop="True" TabNavigation="Once"
+                      ItemContainerTransitions="{x:Null}"
+                      AutomationProperties.Name="Tabs" ItemClick="TabList_ItemClick"
+                      SelectionChanged="TabList_SelectionChanged" DragItemsCompleted="TabList_DragItemsCompleted" />
+        </Grid>
     </Grid>
 </Window>

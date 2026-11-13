@@ -6,7 +6,10 @@ namespace AgentTerm.Terminal;
 public enum ProgramState { Idle, Working, Done, Blocked, Error }
 
 public sealed record ProgramStatus(string Id, ProgramState State, string? Kind, int? Progress,
-    string? App, string? EffectiveApp, string? Title, string? Message, DateTimeOffset UpdatedAt);
+    string? App, string? EffectiveApp, string? Title, string? Message, DateTimeOffset UpdatedAt)
+{
+    public bool IsActive { get; init; } = true;
+}
 
 /// <summary>Observes OSC 7501 without modifying terminal output. Access is serialized by the session.</summary>
 public sealed class ProgramStatusProtocol
@@ -34,8 +37,11 @@ public sealed class ProgramStatusProtocol
 
     public void EndCommand()
     {
-        foreach (var record in _records.Values.Where(r => r.State is ProgramState.Working or ProgramState.Blocked).ToArray())
-            Remove(record.Id);
+        foreach (var record in _records.Values.ToArray())
+        {
+            if (record.State is ProgramState.Working or ProgramState.Blocked) Remove(record.Id);
+            else _records[record.Id] = record with { IsActive = false };
+        }
     }
 
     public void Reset() { _records.Clear(); _recency.Clear(); }
@@ -57,7 +63,6 @@ public sealed class ProgramStatusProtocol
             if (key.Length > 16) return;
             if ((key == "title" && value.Length > 256) || (key == "msg" && value.Length > 2732)) return;
             if (key.Length == 0 || key.Any(c => c is < 'a' or > 'z')) continue;
-            // Validate every occurrence before applying anything, including overwritten duplicate fields.
             if ((key == "app" && value.Length > 32) || (key == "id" && !ValidId(value))) return;
             if (value.Any(c => !IsValueCharacter(c))) continue;
             if (key is "title" or "msg")

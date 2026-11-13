@@ -66,6 +66,11 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     public ShellProfile Profile => _profile;
     public Task<int> Completion => _completion;
     public int ProcessId => _connection.ProcessId;
+    /// <summary>Raised on the reader thread after output is parsed. Handlers must return promptly.</summary>
+    public event Action? OutputAvailable;
+
+    /// <summary>Remaining synchronized-output hold delay after ReadFrame, or null when no recapture is required.</summary>
+    public TimeSpan? PendingFrameRefreshDelay { get { lock (_gate) return _disposeTask is null ? _terminal.PendingFrameRefreshDelay : null; } }
 
     public IReadOnlyList<ProgramStatus> ReadProgramStatuses()
     {
@@ -472,6 +477,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
                 if (_disposeTask is null) _connection.SendReply(reply);
             }
         }
+        OutputAvailable?.Invoke();
     }
 
     public ValueTask DisposeAsync()
