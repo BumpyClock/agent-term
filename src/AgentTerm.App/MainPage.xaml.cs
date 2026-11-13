@@ -338,7 +338,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void UpdateCursorBlink()
     {
         if (CanRefreshFrames && _animationsEnabled &&
-            (_presentedFrame?.Cells.Any(c => c.Blink && !c.Hidden) == true ||
+            (Terminal.HasBlinkingText ||
              _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused))
         {
             if (!_cursorTimer.IsRunning) _cursorTimer.Start();

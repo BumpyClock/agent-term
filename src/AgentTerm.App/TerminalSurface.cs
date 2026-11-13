@@ -84,6 +84,8 @@ public sealed class TerminalSurface : UserControl
 
     private TerminalFrame? _frame;
     private bool _cursorPhase = true;
+    private bool _paintedTextPhase = true;
+    internal bool HasBlinkingText { get; private set; }
     private bool _resourcesReady;
     private bool _suspended;
     private float _terminalFontSize = 14;
@@ -168,6 +170,8 @@ public sealed class TerminalSurface : UserControl
         if (ReferenceEquals(_frame, frame)) return;
         var previous = _frame;
         _frame = frame;
+        if (previous is null || !ReferenceEquals(previous.Cells, frame.Cells))
+            HasBlinkingText = frame.Cells.Any(cell => cell.Blink && !cell.Hidden);
         PositionInput();
         if (previous is null || !ReferenceEquals(previous.Cells, frame.Cells) || previous.Columns != frame.Columns ||
             previous.Rows != frame.Rows || previous.Viewport.TopInset != frame.Viewport.TopInset || previous.Background != frame.Background ||
@@ -182,12 +186,16 @@ public sealed class TerminalSurface : UserControl
         if (_cursorPhase == visible) return;
         _cursorPhase = visible;
         UpdateCursorOverlay();
-        if (_frame?.Cells.Any(c => c.Blink && !c.Hidden) == true) { _paintedFrame = null; _canvas?.Invalidate(); _cursorCanvas?.Invalidate(); }
+        if (HasBlinkingText)
+        {
+            _canvas?.Invalidate();
+            _cursorCanvas?.Invalidate();
+        }
     }
 
     public void RefreshCursor()
     {
-        _cursorPhase = true;
+        SetCursorPhase(true);
         UpdateCursorOverlay();
     }
 
@@ -386,7 +394,7 @@ public sealed class TerminalSurface : UserControl
                 DrawFrameCore(drawing, frame, CellWidth, CellHeight, _glyphLayouts, false, false,
                     _terminalFontSize, _acrylicBackground, TerminalFontFamily, true, top, _cursorPhase);
         }
-        else if (!ReferenceEquals(previous!.Cells, frame.Cells))
+        else if (!ReferenceEquals(previous!.Cells, frame.Cells) || _paintedTextPhase != _cursorPhase && HasBlinkingText)
         {
             using var drawing = _renderTarget.CreateDrawingSession();
             var scale = _canvas.Dpi / 96;
@@ -398,12 +406,12 @@ public sealed class TerminalSurface : UserControl
             for (var row = 0; row < rows; row++)
             for (var col = 0; col < frame.Columns;)
             {
-                if (previous.Cells[row * frame.Columns + col] == frame.Cells[row * frame.Columns + col]) { col++; continue; }
+                if (!CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) { col++; continue; }
                 var first = Math.Max(0, col - 2);
                 var lastChanged = col++;
                 while (col < frame.Columns && col <= lastChanged + 4)
                 {
-                    if (previous.Cells[row * frame.Columns + col] != frame.Cells[row * frame.Columns + col]) lastChanged = col;
+                    if (CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) lastChanged = col;
                     col++;
                 }
                 var end = Math.Min(frame.Columns, lastChanged + 3);
@@ -437,15 +445,19 @@ public sealed class TerminalSurface : UserControl
             }
         }
         _paintedFrame = frame;
+        _paintedTextPhase = _cursorPhase;
     }
+
+    internal static bool CellNeedsRepaint(TerminalCell previous, TerminalCell current, bool textPhaseChanged) =>
+        !ReferenceEquals(previous, current) || textPhaseChanged && current.Blink && !current.Hidden;
 
     public static void DrawFrame(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, bool focused, bool cursorPhase, float fontSize = 14, bool transparentBackground = false,
-        string fontFamily = FallbackFont, bool hideCursor = false, float gridTop = 0)
+        string fontFamily = FallbackFont, bool hideCursor = false, float gridTop = 0, bool textPhase = true)
     {
         using var layouts = new GlyphLayouts();
         DrawFrameCore(drawing, frame, cellWidth, cellHeight, layouts, focused, cursorPhase, fontSize,
-            transparentBackground, fontFamily, hideCursor, gridTop);
+            transparentBackground, fontFamily, hideCursor, gridTop, textPhase);
     }
 
     private static void DrawFrameCore(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
