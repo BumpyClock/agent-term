@@ -121,6 +121,9 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
                 Timeline.Apply(item);
                 switch (item)
                 {
+                    // Stop owns the turn until the provider settles it. A request that raced Stop is declined, not shown: hiding it alone would strand the provider's callback.
+                    case ApprovalRequest { Request: var id } when _operation?.Stop is not null: await session.RespondAsync(new(id), _lifetime.Token); break;
+                    case QuestionRequest { Request: var id } when _operation?.Stop is not null: await session.RespondAsync(new(id), _lifetime.Token); break;
                     case ApprovalRequest approval: _requests.Enqueue(approval); UpdateRequestState(); break;
                     case QuestionRequest question: _requests.Enqueue(question); UpdateRequestState(); break;
                     case TurnFailed failed: Timeline.Message(item.Turn, MessageRole.Failure, failed.Message); Finish(AgentState.Failed); break;

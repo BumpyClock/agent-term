@@ -96,7 +96,56 @@ static class LifecycleChecks
             Check(session.Disposed, "Failure cleanup completes after Stop.");
             Check(await controller.SubmitAsync("retry", location) && harness.Sessions.Count == 2, "Retry after failure cleanup opens a fresh session.");
         }
+        var late = new DeclineHarness();
+        await using (var controller = new AgentSessionController(late))
+        {
+            var states = new List<(AgentState State, bool Request)>();
+            controller.Changed += () => states.Add((controller.State, controller.Request is not null));
+            await controller.SubmitAsync("stop me", location);
+            var session = late.Session;
+            var stop = controller.InterruptAsync();
+            Check(controller.State == AgentState.Interrupting, "Stop publishes Interrupting before the provider drains.");
+            var approval = Guid.NewGuid();
+            var question = Guid.NewGuid();
+            session.Emit(new TextDelta(session.Turn, "kept text"));
+            session.Emit(new ApprovalRequest(session.Turn, approval, "late approval", "call"));
+            session.Emit(new QuestionRequest(session.Turn, question, "late question", [], true));
+            await wait(() => session.Responses.Count == 2 || controller.State != AgentState.Interrupting);
+            Check(controller.State == AgentState.Interrupting && controller.Request is null && !controller.CanSubmit && !controller.CanInterrupt, "Late requests must not replace Interrupting or become actionable.");
+            Check(!controller.AwaitsApproval("call"), "A declined late approval must not make its tool row claim it awaits approval.");
+            Check(session.Responses.Count(r => r.Request == approval) == 1 && session.Responses.Count(r => r.Request == question) == 1, "Each late request is declined exactly once.");
+            Check(session.Responses.All(r => !r.Approved && r.Answer is null), "Late requests are declined, never approved or answered.");
+            Check(controller.Timeline.Entries.OfType<TimelineMessage>().Any(m => m.Role == MessageRole.Assistant && m.Text == "kept text"), "Output delivered while stopping is retained.");
+            session.Emit(new TurnInterrupted(session.Turn));
+            await wait(() => controller.CanSubmit);
+            session.StopRelease.SetResult();
+            await stop;
+            Check(controller.State == AgentState.Idle && controller.Request is null && controller.CurrentTask?.LastOutcome == WorkStatus.Cancelled, "Stopped turn settles idle and cancelled.");
+            Check(controller.Timeline.Entries.OfType<TimelineMessage>().Count(m => m.Role == MessageRole.Cancelled) == 1, "Stop records exactly one stopped notice.");
+            Check(states.All(s => s.State is not (AgentState.WaitingForApproval or AgentState.WaitingForInput) && !s.Request), "No observer may see a late request while stopping.");
+            Check(session.Responses.Count == 2, "Settling does not decline anything further.");
+        }
         Console.WriteLine("Controller lifecycle and UI-context checks passed.");
+    }
+    private sealed class DeclineHarness : IAgentHarness
+    {
+        public DeclineSession Session { get; } = new();
+        public Task<HarnessDescription> DescribeAsync(AgentLocation location, CancellationToken cancellationToken = default) => Task.FromResult(new HarnessDescription(true, "fixture", []));
+        public Task<IAgentSession> OpenAsync(AgentOptions options, CancellationToken cancellationToken = default) => Task.FromResult<IAgentSession>(Session);
+    }
+    /// <summary>Holds native Stop open like a provider draining a turn, and records every response it receives.</summary>
+    private sealed class DeclineSession : IAgentSession
+    {
+        private readonly System.Threading.Channels.Channel<AgentEvent> _events = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+        public Guid Turn;
+        public TaskCompletionSource StopRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<AgentResponse> Responses { get; } = [];
+        public void Emit(AgentEvent item) => _events.Writer.TryWrite(item);
+        public IAsyncEnumerable<AgentEvent> Events(CancellationToken cancellationToken = default) => _events.Reader.ReadAllAsync(cancellationToken);
+        public Task SubmitAsync(AgentPrompt prompt, CancellationToken cancellationToken = default) { Turn = prompt.Turn; return Task.CompletedTask; }
+        public Task RespondAsync(AgentResponse response, CancellationToken cancellationToken = default) { lock (Responses) Responses.Add(response); return Task.CompletedTask; }
+        public Task InterruptAsync(Guid turn, CancellationToken cancellationToken = default) => StopRelease.Task;
+        public ValueTask DisposeAsync() { _events.Writer.TryComplete(); return ValueTask.CompletedTask; }
     }
     private sealed class Terminal : IHostTerminal
     {
