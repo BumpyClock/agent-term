@@ -40,7 +40,11 @@ public sealed partial class GhosttyTerminal
     // Where search last installed the terminal selection, in owned screen coordinates. A selection elsewhere belongs to the user.
     private ScreenSpan? _searchSelection;
     private (long Content, long Offset, long Search, int Screen) _highlightKey = (-1, -1, -1, -1);
+    private (long Content, long Offset, int Screen) _highlightDataKey = (-1, -1, -1);
+    private (TerminalSearchSpan Span, ScreenSpan Match)[] _highlightData = [];
     private TerminalSearchHighlights? _highlights;
+    internal int HighlightFeeds { get; private set; }
+    internal int HighlightExactChecks { get; private set; }
     private SearchResults? _completedSearch;
 
     internal sealed record SearchResults(long ContentVersion, long Candidates, long Matches, bool[]? ExactFlags);
@@ -227,11 +231,6 @@ public sealed partial class GhosttyTerminal
         return MatchText(selected, _searchCaseSensitive);
     }
 
-    /// <summary>
-    /// Feeds the search and converts the viewport's matches to owned frame rows. Call only from a live frame capture
-    /// under terminal exclusion, never from the render-hold callback, which runs inside a terminal write.
-    /// Returns null without an active query. Unchanged content, viewport and selection reuse the previous instance.
-    /// </summary>
     internal unsafe TerminalSearchHighlights? CaptureSearchHighlights()
     {
         ThrowIfDisposed();
@@ -240,26 +239,39 @@ public sealed partial class GhosttyTerminal
         var screen = ActiveScreen();
         var key = (ContentVersion, native.Offset, _searchRevision, screen);
         if (key == _highlightKey) return _highlights;
-        ThrowIfFailed(SearchNative.ghostty_search_feed(_search), "Could not feed search highlights.");
-        var count = ReadMatches(SearchDataViewportMatches);
+        var dataKey = (ContentVersion, native.Offset, screen);
+        if (dataKey != _highlightDataKey)
+        {
+            ThrowIfFailed(SearchNative.ghostty_search_feed(_search), "Could not feed search highlights.");
+            HighlightFeeds++;
+            var count = ReadMatches(SearchDataViewportMatches);
+            ThrowIfFailed(Native.ghostty_terminal_grid_ref(_handle, new Native.Point { Tag = PointViewport }, out var topRef), "Could not locate the viewport.");
+            Native.PointValue top = default;
+            ThrowIfFailed(SearchNative.ghostty_terminal_point_from_grid_ref(_handle, &topRef, PointScreen, &top), "Could not locate the viewport.");
+            var matches = new List<(TerminalSearchSpan, ScreenSpan)>();
+            long first = top.Y, last = top.Y + _rows - 1;
+            for (var i = 0; i < count; i++)
+            {
+                var match = _matchScratch[i];
+                if (ToScreen(match) is not { } span || span.EndY < first || span.StartY > last) continue;
+                if (SearchNeedsExactFilter)
+                {
+                    HighlightExactChecks++;
+                    if (!MatchText(match, exact: true)) continue;
+                }
+                for (long y = Math.Max(first, span.StartY); y <= Math.Min(last, span.EndY); y++)
+                    matches.Add((new((int)(y - first), y == span.StartY ? span.StartX : 0, y == span.EndY ? span.EndX : _columns - 1, false), span));
+            }
+            _highlightData = [.. matches];
+            _highlightDataKey = dataKey;
+        }
         Native.Selection selectedMatch = default;
         var selected = SearchNative.ghostty_search_get(_search, SearchDataSelectedMatch, &selectedMatch) == NativeResult.Success ? ToScreen(selectedMatch) : null;
-        ThrowIfFailed(Native.ghostty_terminal_grid_ref(_handle, new Native.Point { Tag = PointViewport }, out var topRef), "Could not locate the viewport.");
-        Native.PointValue top = default;
-        ThrowIfFailed(SearchNative.ghostty_terminal_point_from_grid_ref(_handle, &topRef, PointScreen, &top), "Could not locate the viewport.");
-        var spans = new List<TerminalSearchSpan>();
-        long first = top.Y, last = top.Y + _rows - 1;
-        for (var i = 0; i < count; i++)
-        {
-            var match = _matchScratch[i];
-            if (ToScreen(match) is not { } span || span.EndY < first || span.StartY > last) continue;
-            if (SearchNeedsExactFilter && !MatchText(match, exact: true)) continue;
-            var isSelected = span == selected;
-            for (long y = Math.Max(first, span.StartY); y <= Math.Min(last, span.EndY); y++)
-                spans.Add(new((int)(y - first), y == span.StartY ? span.StartX : 0, y == span.EndY ? span.EndX : _columns - 1, isSelected));
-        }
+        var spans = new TerminalSearchSpan[_highlightData.Length];
+        for (var i = 0; i < spans.Length; i++)
+            spans[i] = _highlightData[i].Span with { Selected = _highlightData[i].Match == selected };
         _highlightKey = key;
-        return _highlights = new TerminalSearchHighlights(ContentVersion, native.Offset, screen != 0, [.. spans]);
+        return _highlights = new TerminalSearchHighlights(ContentVersion, native.Offset, screen != 0, spans);
     }
 
     private unsafe int ReadMatches(int data)
@@ -324,6 +336,8 @@ public sealed partial class GhosttyTerminal
         _candidateCount = 0;
         _searchRevision++;
         _highlights = null;
+        _highlightDataKey = (-1, -1, -1);
+        _highlightData = [];
     }
 
     // Terminal disposal is the only caller. The formatter borrows the terminal, so it goes before the handle.
