@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using AgentTerm_App.GitHub;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -29,7 +30,7 @@ internal sealed partial class GitHubDashboardButton : UserControl
     private double _avatarRight;
     private bool _openedWithKeyboard;
     private bool _closeNow;
-    private bool _warmed;
+    private DispatcherQueueTimer? _warmup;
     private GitHubDashboardView? _dashboard;
 
     public GitHubDashboardButton()
@@ -56,6 +57,8 @@ internal sealed partial class GitHubDashboardButton : UserControl
     private GitHubDashboardView EnsureDashboard()
     {
         if (_dashboard is { } existing) return existing;
+        _warmup?.Stop();
+        _warmup = null;
         var view = _dashboard = new GitHubDashboardView();
         view.IdentityChanged += (login, url) =>
         {
@@ -71,26 +74,27 @@ internal sealed partial class GitHubDashboardButton : UserControl
 
     private async void Warm()
     {
-        if (_warmed) return;
-        _warmed = true;
-        var queue = DispatcherQueue;
+        if (_warmup is not null || _dashboard is not null) return;
+        var idle = _warmup = DispatcherQueue.CreateTimer();
+        idle.Interval = IdentityDelay;
+        idle.IsRepeating = false;
+        idle.Tick += (_, _) => { if (ReferenceEquals(_warmup, idle) && IsLoaded) EnsureDashboard(); };
         try
         {
             var cached = await Task.Run(() => GitHubCache.Read(GitHubCache.DefaultPath()));
+            if (!ReferenceEquals(_warmup, idle)) return;
             if (_dashboard is null && cached.Login.Length != 0) _avatar.Set(cached.Login, cached.AvatarUrl);
         }
         catch (Exception exception) when (exception is GitHubException or IOException or UnauthorizedAccessException)
         {
         }
-        var idle = queue.CreateTimer();
-        idle.Interval = IdentityDelay;
-        idle.IsRepeating = false;
-        idle.Tick += (_, _) => EnsureDashboard();
-        idle.Start();
+        if (ReferenceEquals(_warmup, idle) && IsLoaded) idle.Start();
     }
 
     public void Shutdown()
     {
+        _warmup?.Stop();
+        _warmup = null;
         HideNow();
         _dashboard?.Shutdown();
     }

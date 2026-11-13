@@ -19,12 +19,13 @@ public sealed partial class GhosttyTerminal
 
     public unsafe int ReadActiveCursorRow()
     {
+        ThrowIfDisposed();
         ushort row = 0;
         ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 4, &row), "Could not read active cursor row.");
         return row;
     }
 
-    public long ActiveTop => ReadNativeViewport().TotalRows - _rows;
+    public long ActiveTop { get { ThrowIfDisposed(); return ReadNativeViewport().TotalRows - _rows; } }
 
     private void EnsurePresentation()
     {

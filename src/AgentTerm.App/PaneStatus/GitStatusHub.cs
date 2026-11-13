@@ -26,7 +26,7 @@ internal sealed class GitStatusHub
         _query = query;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _locate = locate ?? (directory => directory.WslDistribution is null ? GitRepository.Locate(directory.Path) : null);
-        _watch = watch ?? ((directory, repository, changed) => repository?.Watch(changed) ?? GitRepository.WatchCreation(directory, changed));
+        _watch = watch ?? ((directory, repository, changed) => repository is null ? GitRepository.WatchCreation(directory, changed) : repository.Watch(changed));
     }
 
     internal bool Paused { get; set; }
@@ -35,13 +35,15 @@ internal sealed class GitStatusHub
     internal Entry Acquire(ShellDirectory directory)
     {
         var repository = _locate(directory);
+        var canonical = repository is null ? directory : directory with { Path = repository.WorkTree };
         var key = directory.WslDistribution is { } distribution
-            ? $"wsl:{distribution}:{directory.Path}" : (repository?.WorkTree ?? directory.Path).ToUpperInvariant();
+            ? $"wsl:{distribution}:{canonical.Path}" : LocalKey(canonical.Path);
+        if (repository is not null) key += $"|{LocalKey(repository.GitDirectory)}|{LocalKey(repository.CommonDirectory)}";
         Entry? entry;
         lock (_gate)
         {
             if (_entries.TryGetValue(key, out entry)) { entry.Users++; return entry; }
-            entry = new(key);
+            entry = new(key, canonical, repository);
             _entries.Add(key, entry);
         }
         var watcher = _watch(directory, repository, () => Invalidate(entry, _clock()));
@@ -85,29 +87,41 @@ internal sealed class GitStatusHub
         }
     }
 
-    internal Task<GitResult>? Ensure(Entry entry, ShellDirectory directory, DateTimeOffset now)
+    internal bool NeedsRefresh(Entry entry, DateTimeOffset now)
+    {
+        lock (_gate) return entry.Running is null && Due(entry, now);
+    }
+
+    private static bool Due(Entry entry, DateTimeOffset now)
+    {
+        var backoff = entry.Duration * 10;
+        return entry.Completed == DateTimeOffset.MinValue
+            || now >= entry.Completed + Max(entry.Watcher is null || entry.Repository is null ? UnwatchedInterval : WatchedInterval, backoff)
+            || (entry.Stale && now >= entry.StaleSince + Debounce && now >= entry.Completed + Max(ChangeInterval, backoff));
+    }
+
+    internal Task<GitResult>? Ensure(Entry entry, DateTimeOffset now)
     {
         lock (_gate)
         {
             if (entry.Running is not null || entry.Users == 0) return entry.Running;
-            var backoff = entry.Duration * 10;
-            var due = entry.Completed == DateTimeOffset.MinValue
-                || now >= entry.Completed + Max(entry.Watcher is null ? UnwatchedInterval : WatchedInterval, backoff)
-                || (entry.Stale && now >= entry.StaleSince + Debounce && now >= entry.Completed + Max(ChangeInterval, backoff));
-            if (!due) return null;
+            if (!Due(entry, now)) return null;
             entry.Stale = false;
-            return entry.Running = Task.Run(() => RunAsync(entry, directory, now));
+            return entry.Running = Task.Run(() => RunAsync(entry, now));
         }
     }
 
-    private async Task<GitResult> RunAsync(Entry entry, ShellDirectory directory, DateTimeOffset started)
+    private async Task<GitResult> RunAsync(Entry entry, DateTimeOffset started)
     {
         var clock = Stopwatch.StartNew();
         GitResult? result = null;
         try
         {
-            result = await _query(directory, entry.Lifetime.Token).ConfigureAwait(false);
-            return result;
+            // A removed repository can make Git walk into its parent. Never publish that result.
+            if (_locate(entry.Directory) != entry.Repository) return new(GitQueryState.NoRepository);
+            var queried = await _query(entry.Directory, entry.Lifetime.Token).ConfigureAwait(false);
+            if (_locate(entry.Directory) == entry.Repository) result = queried;
+            return result ?? new(GitQueryState.NoRepository);
         }
         finally
         {
@@ -116,7 +130,7 @@ internal sealed class GitStatusHub
                 entry.Running = null;
                 entry.Duration = clock.Elapsed;
                 entry.Completed = started + clock.Elapsed;
-                if (result is not null && result != entry.Result)
+                if (entry.Users > 0 && result is not null && result != entry.Result)
                 {
                     entry.Result = result;
                     entry.Version++;
@@ -125,11 +139,15 @@ internal sealed class GitStatusHub
         }
     }
 
+    private static string LocalKey(string path) => OperatingSystem.IsWindows() ? path.ToUpperInvariant() : path;
+
     private static TimeSpan Max(TimeSpan first, TimeSpan second) => first > second ? first : second;
 
-    internal sealed class Entry(string key)
+    internal sealed class Entry(string key, ShellDirectory directory, GitRepository? repository)
     {
         internal string Key { get; } = key;
+        internal ShellDirectory Directory { get; } = directory;
+        internal GitRepository? Repository { get; } = repository;
         internal CancellationTokenSource Lifetime { get; } = new();
         internal IDisposable? Watcher;
         internal int Users = 1;

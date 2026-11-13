@@ -100,7 +100,7 @@ internal static partial class Program
             var frameWorkDurations = new List<double>();
             var heartbeatIntervals = new List<double>();
             var outputToDraw = new List<double>();
-            long outputArrival = 0, undrawnArrival = 0;
+            long outputArrival = 0, uncapturedArrival = 0, undrawnArrival = 0;
             var measuring = false;
             long lastDraw = 0, lastHeartbeat = 0;
             var draws = 0;
@@ -150,11 +150,15 @@ internal static partial class Program
                     var start = Stopwatch.GetTimestamp();
                     refreshPending = false;
                     var arrival = Interlocked.Exchange(ref outputArrival, 0);
+                    if (arrival != 0) uncapturedArrival = uncapturedArrival == 0 ? arrival : Math.Min(uncapturedArrival, arrival);
                     var frame = session.ReadFrame();
                     readFrames++;
                     surface.SetFrame(frame);
-                    if (arrival != 0 && lastFrame is { } shown && !ReferenceEquals(shown.Cells, frame.Cells))
-                        undrawnArrival = undrawnArrival == 0 ? arrival : Math.Min(undrawnArrival, arrival);
+                    if (uncapturedArrival != 0 && lastFrame is { } shown && !ReferenceEquals(shown.Cells, frame.Cells))
+                    {
+                        undrawnArrival = undrawnArrival == 0 ? uncapturedArrival : Math.Min(undrawnArrival, uncapturedArrival);
+                        uncapturedArrival = 0;
+                    }
                     if (schedule == "demand" && !renderingSubscribed)
                     {
                         CompositionTarget.Rendering += rendering;
@@ -289,6 +293,8 @@ internal static partial class Program
             var measurementStartQpc = Stopwatch.GetTimestamp();
             var started = Stopwatch.StartNew();
             capture?.Begin();
+            uncapturedArrival = undrawnArrival = 0;
+            Interlocked.Exchange(ref outputArrival, 0);
             measuring = true;
             goTimestamp = Stopwatch.GetTimestamp();
             File.WriteAllText(Path.Combine(work, "run-1.go"), "go");

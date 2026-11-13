@@ -29,7 +29,7 @@ public sealed class TerminalSurface : UserControl
     private readonly List<(int FirstRow, int EndRow, int FirstColumn, int EndColumn)> _damageSpans = [];
     private readonly Dictionary<(int First, int End), int> _damageColumns = [];
     private (Rect Bounds, TerminalCursor Cursor, TerminalCell Cell, TerminalColor? CursorText, bool Focused,
-        float CellWidth, float CellHeight, float FontSize, string FontFamily) _cursorContent;
+        float CellWidth, float CellHeight, float FontSize, string FontFamily, double GridTop) _cursorContent;
     private (double Width, double Height, float Dpi, float CellWidth, float CellHeight, float FontSize,
         string FontFamily, bool Transparent, float GridTop) _rasterMetrics;
     internal event Action<double>? DrawCompleted;
@@ -321,13 +321,9 @@ public sealed class TerminalSurface : UserControl
         }
         var cursor = frame.Cursor;
         var cell = frame.Cells[cursor.Row * frame.Columns + cursor.Column];
-        var x = cursor.Column * CellWidth;
-        var y = (float)Geometry.Top + cursor.Row * CellHeight;
-        var width = focused && cursor.Shape == TerminalCursorShape.Block ? CellWidth * Math.Max(1, (int)cell.Width) : CellWidth;
-        var left = MathF.Floor(x / 4) * 4 - 4;
-        var upper = MathF.Floor(y / 4) * 4 - 4;
-        var bounds = new Rect(left, upper, MathF.Ceiling((x + width) / 4) * 4 + 4 - left, MathF.Ceiling((y + CellHeight) / 4) * 4 + 4 - upper);
-        var content = (bounds, cursor, cell, frame.CursorText, focused, CellWidth, CellHeight, _terminalFontSize, TerminalFontFamily);
+        var columns = focused && cursor.Shape == TerminalCursorShape.Block ? Math.Max(1, (int)cell.Width) : 1;
+        var (bounds, gridTop) = CursorOverlayGeometry(Geometry, cursor.Column, cursor.Row, columns);
+        var content = (bounds, cursor, cell, frame.CursorText, focused, CellWidth, CellHeight, _terminalFontSize, TerminalFontFamily, gridTop);
         if (content != _cursorContent)
         {
             if (bounds != _cursorContent.Bounds)
@@ -342,6 +338,20 @@ public sealed class TerminalSurface : UserControl
         overlay.Opacity = cursor.Blink && focused && !_cursorPhase ? 0 : 1;
     }
 
+    // Bounds use coarse buckets to avoid resizing the overlay on every animation tick. The exact origin
+    // remains part of its content key so movement inside a bucket still redraws the cursor.
+    internal static (Rect Bounds, double GridTop) CursorOverlayGeometry(TerminalGridGeometry geometry,
+        int column, int row, int cellColumns)
+    {
+        var x = column * geometry.CellWidth;
+        var y = (float)geometry.Top + row * geometry.CellHeight;
+        var width = geometry.CellWidth * cellColumns;
+        var left = MathF.Floor(x / 4) * 4 - 4;
+        var upper = MathF.Floor(y / 4) * 4 - 4;
+        return (new Rect(left, upper, MathF.Ceiling((x + width) / 4) * 4 + 4 - left,
+            MathF.Ceiling((y + geometry.CellHeight) / 4) * 4 + 4 - upper), geometry.Top);
+    }
+
     private void DrawCursorOverlay(CanvasControl sender, CanvasDrawEventArgs args)
     {
         var drawing = args.DrawingSession;
@@ -350,7 +360,7 @@ public sealed class TerminalSurface : UserControl
         var content = _cursorContent;
         _glyphLayouts.Configure(TerminalFontFamily, _terminalFontSize, CellWidth, CellHeight);
         drawing.Transform = Matrix3x2.CreateTranslation(-(float)content.Bounds.X, -(float)content.Bounds.Y);
-        DrawCursor(drawing, frame, CellWidth, CellHeight, _glyphLayouts, content.Focused, true, false, (float)Geometry.Top);
+        DrawCursor(drawing, frame, CellWidth, CellHeight, _glyphLayouts, content.Focused, true, false, (float)content.GridTop);
     }
 
     private void UpdateRaster(CanvasDevice device, TerminalFrame frame, float top)

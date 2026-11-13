@@ -191,6 +191,7 @@ public sealed partial class GhosttyTerminal
     }
     private unsafe TerminalViewport ReadNativeViewport()
     {
+        ThrowIfDisposed();
         Scrollbar bar = default;
         ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 9, &bar), "Could not read terminal scrollbar.");
         return new TerminalViewport(checked((long)bar.Total), checked((long)bar.Offset), checked((int)bar.Length), ActiveScreen() != 0);

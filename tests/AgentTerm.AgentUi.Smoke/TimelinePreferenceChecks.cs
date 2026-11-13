@@ -31,8 +31,7 @@ internal static class TimelinePreferenceChecks
         preferences.Set(true, false);
         await CheckAsync(true);
         host.Children.Remove(view);
-        await Program.WaitAsync(() => !view.IsLoaded);
-        if (preferences.Subscribers != 0 || ring.IsActive) throw new Exception("Unloaded timelines must release settings callbacks and stop motion.");
+        await Program.WaitAsync(() => !view.IsLoaded && preferences.Subscribers == 0 && !ring.IsActive);
         preferences.Set(false, true);
         host.Children.Add(view);
         await Program.WaitAsync(() => view.IsLoaded);

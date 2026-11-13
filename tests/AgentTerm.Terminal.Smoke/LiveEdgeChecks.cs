@@ -3,8 +3,23 @@ using System.Text;
 
 internal static class LiveEdgeChecks
 {
+    private static void CheckDisposedGetters()
+    {
+        var terminal = new GhosttyTerminal(10, 3);
+        terminal.ReadFrame();
+        terminal.Dispose();
+        foreach (var read in new Action[] { () => terminal.ReadActiveCursorRow(), () => _ = terminal.ActiveTop,
+            () => terminal.ReadPresentedViewport() })
+        {
+            try { read(); }
+            catch (ObjectDisposedException) { continue; }
+            throw new InvalidOperationException("Disposed live-edge getters must reject before calling native code.");
+        }
+    }
+
     internal static void Run()
     {
+        CheckDisposedGetters();
         static void Check(bool ok, string message) { if (!ok) throw new Exception("Gate 0. " + message); }
         static string Row(TerminalFrame f, int row) => string.Concat(f.Cells.Skip(row * f.Columns).Take(f.Columns).Select(c => c.Text)).TrimEnd();
         using var t = new GhosttyTerminal(20, 6);

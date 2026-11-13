@@ -30,6 +30,7 @@ internal static class PaneStatusChecks
         Check(GitStatusParser.ParseLines("2\t1\tname\0-\t-\tbinary\0") == new GitLineChanges(2, 1, true), "Binary entries must not contribute line totals.");
         await MonitorAsync();
         await SharingAsync();
+        await BoundariesAsync();
         var watched = await IdleQueriesPerMinuteAsync(true);
         var unwatched = await IdleQueriesPerMinuteAsync(false);
         Check(watched == 2 && unwatched == 12, $"An idle watched pane must query twice per minute and an unwatched pane every 5 s. Actual: {watched}, {unwatched}.");
@@ -153,6 +154,99 @@ internal static class PaneStatusChecks
         Check(probe.Unwatched == 1 && probe.Hub.EntryCount == 0, "The last pane leaving a repository must stop watching it.");
     }
 
+    private static async Task BoundariesAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var parent = new GitRepository("parent", "parent/git", "parent/git");
+        var nested = new GitRepository("parent/child", "child/git", "child/git");
+        GitRepository? childRepository = parent;
+        var queries = new List<(ShellDirectory Directory, TaskCompletionSource<GitResult> Completion)>();
+        var watchers = new List<(GitRepository? Repository, Action Changed, Stop Lifetime)>();
+        var released = 0;
+        var located = 0;
+        var hub = new GitStatusHub((directory, _) =>
+        {
+            var completion = new TaskCompletionSource<GitResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (queries) queries.Add((directory, completion));
+            return completion.Task;
+        }, directory =>
+        {
+            Interlocked.Increment(ref located);
+            return directory.Path == "parent" ? parent : childRepository;
+        }, (_, repository, changed) =>
+        {
+            var lifetime = new Stop(() => Interlocked.Increment(ref released));
+            lock (watchers) watchers.Add((repository, changed, lifetime));
+            return lifetime;
+        }, () => now);
+        int Count() { lock (queries) return queries.Count; }
+        void Complete(int index, GitResult result) { lock (queries) queries[index].Completion.SetResult(result); }
+        using var left = new PaneStatusMonitor(hub);
+        using var right = new PaneStatusMonitor(hub);
+        void Refresh()
+        {
+            left.Refresh(new("parent"), true, now);
+            right.Refresh(new("parent/child"), true, now);
+        }
+        await Until(() => { Refresh(); return Count() == 1; }, "Parent and child must initially share one query.");
+        Check(queries[0].Directory.Path == "parent", "A shared query must target the canonical root.");
+        Complete(0, Clean("parent"));
+        await Until(() => { Refresh(); return left.Result == Clean("parent") && right.Result == Clean("parent"); }, "Both panes must adopt the parent branch.");
+        var scans = located;
+        for (var tick = 0; tick < 20; tick++) Refresh();
+        Check(scans == located, "Cheap UI polls must not scan repository membership.");
+        childRepository = nested;
+        now += TimeSpan.FromSeconds(6);
+        await Until(() => { Refresh(); return Count() == 2; }, "Nested git init must rebind without a cwd report.");
+        Check(queries[1].Directory.Path == "parent/child" && hub.EntryCount == 2, "A nested repository must own its query and entry.");
+        Complete(1, Clean("nested"));
+        await Until(() => { Refresh(); return right.Result == Clean("nested"); }, "The nested pane must show its own branch.");
+        Check(left.Result == Clean("parent") && Count() == 2, "Nested status must never replace the parent branch.");
+        now += TimeSpan.FromSeconds(31);
+        await Until(() => { Refresh(); return Count() == 4; }, "Each repository must have one due query.");
+        childRepository = parent;
+        now += TimeSpan.FromSeconds(6);
+        await Until(() => { Refresh(); return hub.EntryCount == 1; }, "Removal must release the old entry even while its query is running.");
+        for (var index = 2; index < 4; index++) Complete(index, queries[index].Directory.Path == "parent" ? Clean("current") : Clean("obsolete"));
+        await Until(() => { Refresh(); return right.Result == Clean("current") && left.Result == Clean("current"); }, "An old in-flight query must not overwrite the rebound pane.");
+        Check(released == 1, "Removing the nested repository must release its watcher.");
+        left.Dispose(); right.Dispose();
+        Check(hub.EntryCount == 0 && released == 2, "Disposal must release every repository reference.");
+
+        childRepository = null;
+        using var promoted = new PaneStatusMonitor(hub);
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 5; }, "A nonrepository must query once.");
+        Complete(4, new(GitQueryState.NoRepository));
+        await Task.Delay(50);
+        childRepository = nested;
+        now += TimeSpan.FromSeconds(6);
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 6; }, "Creation-only watchers must retain the five-second cadence.");
+        Complete(5, Clean("promoted"));
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return promoted.Result == Clean("promoted"); }, "Git init must promote the pane.");
+        Check(released == 3 && watchers[^1].Repository == nested, "Promotion must replace the creation watcher with a repository watcher.");
+        now += TimeSpan.FromSeconds(6);
+        watchers[^1].Changed();
+        now += TimeSpan.FromMilliseconds(300);
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 7; }, "Later edits must refresh through the promoted watcher.");
+        Complete(6, Clean("edited"));
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return promoted.Result == Clean("edited"); }, "The watcher refresh must publish.");
+        var replacement = nested with { GitDirectory = "replacement/git", CommonDirectory = "replacement/git" };
+        childRepository = replacement;
+        now += TimeSpan.FromSeconds(6);
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return Count() == 8; }, "Replacing repository metadata must rebind the entry.");
+        Complete(7, Clean("replacement"));
+        await Until(() => { promoted.Refresh(new("parent/child"), true, now); return promoted.Result == Clean("replacement"); }, "Replacement must publish its own status.");
+        Check(released == 4 && hub.EntryCount == 1, "Replacement must release the old metadata watcher.");
+        hub.Paused = true;
+        scans = located;
+        now += TimeSpan.FromMinutes(1);
+        promoted.Refresh(new("parent/child"), true, now);
+        await Task.Delay(50);
+        Check(scans == located && Count() == 8, "Pause must suppress membership scans as well as queries.");
+        promoted.Dispose();
+        Check(released == 5 && hub.EntryCount == 0, "Promoted and replacement entries must be fully released.");
+    }
+
     private static async Task<int> IdleQueriesPerMinuteAsync(bool watched)
     {
         var probe = new Probe(watched, Clean());
@@ -221,7 +315,7 @@ internal static class PaneStatusChecks
             await Git(root, "checkout", "--detach", "-q");
             Check((await provider.QueryAsync(new(root), default)).Snapshot?.Kind == GitBranchKind.Detached, "Real detached HEAD must be identified.");
             var outside = Directory.CreateDirectory(Path.Combine(root, "outside")).FullName;
-            await Git(root, "init", "-b", "nested", outside);
+            await NestedInitializationAsync(provider, root, outside);
             Check((await provider.QueryAsync(new(outside), default)).Snapshot?.Branch == "nested", "Nested repositories must select their own branch.");
             var notRepository = Directory.CreateDirectory(root + "-outside").FullName;
             try { Check((await provider.QueryAsync(new(notRepository), default)).State == GitQueryState.NoRepository, "Leaving Git must clear its status."); }
@@ -232,6 +326,27 @@ internal static class PaneStatusChecks
             foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)) File.SetAttributes(path, FileAttributes.Normal);
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static async Task NestedInitializationAsync(GitStatusProvider provider, string root, string child)
+    {
+        var hub = new GitStatusHub(provider.QueryAsync);
+        using var parentPane = new PaneStatusMonitor(hub);
+        using var childPane = new PaneStatusMonitor(hub);
+        var now = DateTimeOffset.UtcNow;
+        void Refresh()
+        {
+            parentPane.Refresh(new(root), true, now);
+            childPane.Refresh(new(child), true, now);
+        }
+        await Until(() => { Refresh(); return parentPane.Result.Snapshot is not null && childPane.Result == parentPane.Result; }, "Real parent and child panes must initially share status.");
+        Check(hub.EntryCount == 1, "Real panes must initially share one repository entry.");
+        await Git(child, "init", "-b", "nested");
+        now += TimeSpan.FromSeconds(6);
+        await Until(() => { Refresh(); return childPane.Result.Snapshot?.Branch == "nested"; }, "Real nested git init must rebind without changing either pane's directory.");
+        Check(parentPane.Result.Snapshot?.Kind == GitBranchKind.Detached && hub.EntryCount == 2, "Real nested git init must preserve the parent's detached branch.");
+        parentPane.Dispose(); childPane.Dispose();
+        Check(hub.EntryCount == 0, "Real nested entries must release all watchers.");
     }
 
     private static async Task WatchedRepositoryAsync(GitStatusProvider provider, string root, string file)

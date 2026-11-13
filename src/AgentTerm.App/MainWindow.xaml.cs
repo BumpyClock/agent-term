@@ -223,6 +223,7 @@ public sealed partial class MainWindow : Window
         var profile = tab.PrimaryProfile;
         var status = (TabProgramStatus)item.Tag;
         if (AppliedIcons.TryGetValue(item, out var applied) && applied == profile.Executable) return;
+        AppliedIcons.Remove(item);
         if (!ShellIcons.TryGetValue(profile.Executable, out var load))
         {
             status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
@@ -230,12 +231,12 @@ public sealed partial class MainWindow : Window
         }
         else if (!load.IsCompleted) status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
         var image = await load;
+        if (tab.PrimaryProfile.Id != profile.Id || tab.PrimaryProfile.Executable != profile.Executable) return;
         if (image is null)
         {
             status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
             return;
         }
-        if (tab.PrimaryProfile.Id != profile.Id) return;
         AppliedIcons.AddOrUpdate(item, profile.Executable);
         status.SetShellIcon(new ImageIconSource { ImageSource = image });
     }
