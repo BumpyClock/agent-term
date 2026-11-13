@@ -10,6 +10,7 @@ static class LifecycleChecks
     public static async Task RunAsync()
     {
         await ApprovalOwnershipAsync();
+        await CallbackOwnershipAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var abortEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseAbort = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -85,6 +86,56 @@ static class LifecycleChecks
             Check(await events.MoveNextAsync() && events.Current is TurnCompleted, "Native idle completes the turn without duplicating content.");
         }
         Console.WriteLine("Copilot native error/idle, concurrent Stop and bounded drain checks passed.");
+    }
+    private static async Task CallbackOwnershipAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var abortEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAbort = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using (var session = new CopilotHarness.Session(null, (_, _) => Task.CompletedTask, async _ => { abortEntered.TrySetResult(); await releaseAbort.Task; }))
+        {
+            var turn = Guid.NewGuid();
+            await session.SubmitAsync(new(turn, "stopping"));
+            var stopping = session.InterruptAsync(turn);
+            await abortEntered.Task.WaitAsync(timeout.Token);
+            var permission = session.RequestPermissionAsync("late permission", "late-call");
+            var question = session.RequestInputAsync("late question", ["yes"], true);
+            Check(permission.IsCompletedSuccessfully && !permission.Result, "A permission callback after Stop declines without waiting.");
+            Check(question.IsCompletedSuccessfully && question.Result is { Approved: false, Answer: null }, "A question callback after Stop declines without waiting.");
+            releaseAbort.SetResult();
+            session.OnEvent(Idle());
+            await stopping.WaitAsync(timeout.Token);
+            await using var events = session.Events(timeout.Token).GetAsyncEnumerator();
+            Check(await events.MoveNextAsync() && events.Current is TurnInterrupted interrupted && interrupted.Turn == turn, "A declined late callback emits no request.");
+        }
+        await using (var session = new CopilotHarness.Session(null, (_, _) => Task.CompletedTask, _ => Task.CompletedTask))
+        {
+            await using var events = session.Events(timeout.Token).GetAsyncEnumerator();
+            var turn = Guid.NewGuid();
+            await session.SubmitAsync(new(turn, "idle with pending requests"));
+            var permission = session.RequestPermissionAsync("pending permission", "call");
+            Check(await events.MoveNextAsync() && events.Current is ApprovalRequest approval && approval.Turn == turn && approval.CallId == "call", "Permission request names its owning turn.");
+            var stale = ((ApprovalRequest)events.Current).Request;
+            var question = session.RequestInputAsync("pending question", [], true);
+            Check(await events.MoveNextAsync() && events.Current is QuestionRequest asked && asked.Turn == turn, "Question request names its owning turn.");
+            session.OnEvent(Idle());
+            Check(!await permission.WaitAsync(timeout.Token), "Native idle declines an outstanding permission.");
+            Check((await question.WaitAsync(timeout.Token)) is { Approved: false, Answer: null }, "Native idle declines an outstanding question.");
+            Check(await events.MoveNextAsync() && events.Current is TurnCompleted completed && completed.Turn == turn, "Idle completes the turn.");
+            var orphan = session.RequestPermissionAsync("after idle", null);
+            var orphanQuestion = session.RequestInputAsync("after idle", [], true);
+            Check(orphan.IsCompletedSuccessfully && !orphan.Result && orphanQuestion.IsCompletedSuccessfully && orphanQuestion.Result.Answer is null, "A callback without an active turn declines without waiting.");
+            var next = Guid.NewGuid();
+            await session.SubmitAsync(new(next, "fresh turn"));
+            var fresh = session.RequestPermissionAsync("fresh permission", "fresh-call");
+            Check(await events.MoveNextAsync() && events.Current is ApprovalRequest freshApproval && freshApproval.Turn == next && freshApproval.Turn != Guid.Empty, "No orphan request precedes the fresh turn request.");
+            await session.RespondAsync(new(stale, false));
+            Check(!fresh.IsCompleted, "A stale response cannot settle the fresh request.");
+            await session.RespondAsync(new(((ApprovalRequest)events.Current).Request, true));
+            Check(await fresh.WaitAsync(timeout.Token), "Fresh turn approval succeeds.");
+            session.OnEvent(Idle());
+            Check(await events.MoveNextAsync() && events.Current is TurnCompleted done && done.Turn == next, "Fresh turn completes on its idle.");
+        }
     }
     private sealed class Terminal : IHostTerminal
     {

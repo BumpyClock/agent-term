@@ -95,7 +95,6 @@ public sealed class CopilotHarness : IAgentHarness
                     factoryOptions: new AIFunctionFactoryOptions { Name = "run_in_terminal", Description = "Execute in the user's EXISTING pane PowerShell. Cwd returned by this tool is authoritative. Output is bounded ConPTY terminal text with ANSI stripped; cursor redraws are not reconstructed. Use this tool for all shell and file operations. No independent shell or native file tools are available. Interactive programs require deliberate user input handoff." })],
                 OnPermissionRequest = async (request, invocation) =>
                 {
-                    var id = Guid.NewGuid();
                     (string Detail, string? CallId) gate = request switch
                     {
                         PermissionRequestShell shell => (shell.FullCommandText, shell.ToolCallId),
@@ -106,19 +105,21 @@ public sealed class CopilotHarness : IAgentHarness
                         PermissionRequestCustomTool tool => ($"{tool.ToolName}\n{tool.ToolDescription}\n{tool.Args}", tool.ToolCallId),
                         _ => ($"{request.Kind} permission. Review this tool activity before approving.", null),
                     };
-                    var reply = await RequestAsync(id, new ApprovalRequest(_turn ?? Guid.Empty, id, gate.Detail, gate.CallId));
-                    return reply.Approved ? PermissionDecision.ApproveOnce() : PermissionDecision.Reject("User declined.");
+                    return await RequestPermissionAsync(gate.Detail, gate.CallId) ? PermissionDecision.ApproveOnce() : PermissionDecision.Reject("User declined.");
                 },
                 OnUserInputRequest = async (request, invocation) =>
                 {
-                    var id = Guid.NewGuid();
                     var choices = request.Choices?.ToArray() ?? [];
-                    var reply = await RequestAsync(id, new QuestionRequest(_turn ?? Guid.Empty, id, request.Question, choices, request.AllowFreeform ?? true));
+                    var reply = await RequestInputAsync(request.Question, choices, request.AllowFreeform ?? true);
                     return new UserInputResponse { Answer = reply.Answer ?? "", WasFreeform = !choices.Contains(reply.Answer) };
                 },
             }, cancellationToken);
             _subscription = _native.On<SessionEvent>(OnEvent);
         }
+        internal async Task<bool> RequestPermissionAsync(string detail, string? callId) =>
+            (await RequestAsync((turn, id) => new ApprovalRequest(turn, id, detail, callId))).Approved;
+        internal Task<AgentResponse> RequestInputAsync(string question, string[] choices, bool allowFreeform) =>
+            RequestAsync((turn, id) => new QuestionRequest(turn, id, question, choices, allowFreeform));
         internal async Task<TerminalExecutionResult> RunInTerminalAsync(string command, string callId)
         {
             Turn owner;
@@ -126,11 +127,9 @@ public sealed class CopilotHarness : IAgentHarness
             lock (_gate)
             {
                 if (_terminal is null) return new(TerminalExecutionStatus.Unsupported);
-                if (_dispose is not null || _unusable || _active is not { } active || active.Stop is not null || active.Cancellation.IsCancellationRequested)
-                    return new(TerminalExecutionStatus.Denied);
+                if (!Admits(out var active)) return new(TerminalExecutionStatus.Denied);
                 owner = active;
-                var id = Guid.NewGuid();
-                approval = RequestAsync(id, new ApprovalRequest(owner.Id, id, command, callId));
+                approval = RequestAsync((turn, id) => new ApprovalRequest(turn, id, command, callId));
             }
             var reply = await approval;
             if (!reply.Approved) return new(TerminalExecutionStatus.Denied);
@@ -147,13 +146,31 @@ public sealed class CopilotHarness : IAgentHarness
             try { return await execution; }
             finally { lock (_gate) _executions.Remove(execution); }
         }
-        private async Task<AgentResponse> RequestAsync(Guid id, AgentEvent item)
+        private bool Admits([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Turn? owner)
         {
-            var completion = new TaskCompletionSource<AgentResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            lock (_requests) _requests.Add(id, completion);
-            _events.Writer.TryWrite(item);
-            try { return await completion.Task.WaitAsync(_lifetime.Token); }
+            owner = _active;
+            return _dispose is null && !_unusable && owner is { Stop: null } && !owner.Cancellation.IsCancellationRequested;
+        }
+        private Task<AgentResponse> RequestAsync(Func<Guid, Guid, AgentEvent> create)
+        {
+            lock (_gate)
+            {
+                if (!Admits(out var owner)) return Task.FromResult(new AgentResponse(Guid.Empty));
+                var id = Guid.NewGuid();
+                var completion = new TaskCompletionSource<AgentResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (_requests) _requests.Add(id, completion);
+                _events.Writer.TryWrite(create(owner.Id, id));
+                return AwaitAsync(id, completion.Task);
+            }
+        }
+        private async Task<AgentResponse> AwaitAsync(Guid id, Task<AgentResponse> reply)
+        {
+            try { return await reply.WaitAsync(_lifetime.Token); }
             finally { lock (_requests) _requests.Remove(id); }
+        }
+        private void DeclineRequests()
+        {
+            lock (_requests) foreach (var request in _requests.Values) request.TrySetResult(new(Guid.Empty));
         }
         internal void OnEvent(SessionEvent item)
         {
@@ -213,6 +230,7 @@ public sealed class CopilotHarness : IAgentHarness
             };
             if (normalized is TurnCompleted or TurnInterrupted or TurnFailed)
             {
+                DeclineRequests();
                 _active = null;
                 owner.Idle.TrySetResult();
                 owner.Cancellation.Dispose();
@@ -265,7 +283,7 @@ public sealed class CopilotHarness : IAgentHarness
                 lock (_gate)
                 {
                     if (!ReferenceEquals(_active, owner)) return;
-                    lock (_requests) foreach (var request in _requests.Values) request.TrySetResult(new(Guid.Empty));
+                    DeclineRequests();
                     owner.Cancellation.Cancel();
                     executions = _executions.ToArray();
                 }
