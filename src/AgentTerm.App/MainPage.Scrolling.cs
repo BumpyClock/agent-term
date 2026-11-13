@@ -13,8 +13,9 @@ public sealed partial class MainPage
     {
         var frame = _presentedFrame ?? session.ReadFrame();
         if (frame.Viewport.IsAlternateScreen) return;
+        // Animation needs the frame driver. CanRefreshFrames is false for retained history (stopped or exited, Idle), so scroll there at once.
         _scrollAnimation.Add(rows, frame.Viewport.Offset, frame.Viewport.MaximumOffset,
-            _animationsEnabled && _viewActive && IsLoaded && !_surfaceOpen && !_selecting);
+            _animationsEnabled && CanRefreshFrames && !_selecting);
         if (!_scrollAnimation.IsActive)
         {
             _scrollTick = 0;

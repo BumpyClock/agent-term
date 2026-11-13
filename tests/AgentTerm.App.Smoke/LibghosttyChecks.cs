@@ -72,6 +72,8 @@ internal static partial class StartupChecks
         var offset = Presented().Viewport.Offset;
         typeof(MainPage).GetField("_animationsEnabled", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(page, true);
         Invoke("ScrollHistoryWheel", session, -5d);
+        if (!Field<TerminalScrollAnimation>(page, "_scrollAnimation").IsActive)
+            throw new Exception("A running, visible page with animations enabled must animate history scrolling.");
         await WaitAsync(() => !Field<TerminalScrollAnimation>(page, "_scrollAnimation").IsActive, "fractional scrolling completion");
         await WaitAsync(() => !Field<bool>(page, "_renderingSubscribed") && !Field<bool>(page, "_frameRefreshQueued"), "scrolling frame pump becoming idle");
         if (Presented().Viewport.Offset != offset - 5 || Field<double>(surface, "_scrollFraction") != 0 ||
@@ -119,5 +121,83 @@ internal static partial class StartupChecks
         try { restored.ReadFrame(); throw new Exception("Closed archive retained its native terminal."); }
         catch (ObjectDisposedException) { }
         report.Add("PASS save, reopen, raster, read-only input, offline find, and close disposal through the real archive window.");
+
+        await AssertRetainedHistoryScrollAsync(page, report);
+    }
+
+    /// <summary>
+    /// A stopped or exited page keeps its terminal and history but has no frame driver (CanRefreshFrames needs Running).
+    /// A wheel there must move the viewport at once. Animating would only record a target that nothing advances.
+    /// </summary>
+    private static async Task AssertRetainedHistoryScrollAsync(MainPage page, List<string> report)
+    {
+        const BindingFlags NonPublic = BindingFlags.Instance | BindingFlags.NonPublic;
+        var animations = typeof(MainPage).GetField("_animationsEnabled", NonPublic)!;
+        var original = (bool)animations.GetValue(page)!;
+        var surface = (TerminalSurface)page.FindName("Terminal");
+        string State() => Field<object>(page, "_state").ToString()!;
+        TerminalFrame Presented() => Field<TerminalFrame>(page, "_presentedFrame");
+        try
+        {
+            foreach (var ending in new[] { "stop", "natural exit" })
+            {
+                if (State() == "Idle") await page.RestartSessionAsync();
+                await WaitAsync(() => State() == "Running", $"{ending} fixture session running");
+                var session = Field<TerminalSession>(page, "_session");
+                var processId = session.ProcessId;
+                var completion = session.Completion;
+
+                typeof(TerminalSession).GetMethod("ProcessOutput", NonPublic)!.Invoke(session, [new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(
+                    "\u001bc" + string.Concat(Enumerable.Range(0, Presented().Rows + 60).Select(i => $"retained-{i:D3}\r\n"))))]);
+                session.ScrollToBottom();
+                await WaitAsync(() => Field<int>(page, "_outputRefreshQueued") == 0, $"{ending} fixture output notification");
+                typeof(MainPage).GetMethod("RefreshOutput", NonPublic)!.Invoke(page, [session]);
+
+                if (ending == "stop") await page.StopSessionAsync();
+                else
+                {
+                    session.Send("exit\r");
+                    await WaitAsync(() => State() == "Idle" && completion.IsCompleted, "natural shell exit");
+                }
+
+                if (State() != "Idle" || !ReferenceEquals(Field<TerminalSession>(page, "_session"), session))
+                    throw new Exception($"After {ending} the page must retain its session in Idle, not {State()}.");
+                if (!Field<bool>(page, "_viewActive") || !page.IsLoaded || Field<bool>(page, "_surfaceOpen") || Field<bool>(page, "_selecting"))
+                    throw new Exception($"After {ending} the fixture must be visible, loaded and unselected so only session state can disable animation.");
+                if ((bool)typeof(MainPage).GetProperty("CanRefreshFrames", NonPublic)!.GetValue(page)!)
+                    throw new Exception($"After {ending} the frame driver must be unavailable.");
+                if (Presented().Viewport.MaximumOffset < 20 || Presented().Viewport.Offset < 10)
+                    throw new Exception($"After {ending} the fixture lost retained history: {Presented().Viewport}.");
+
+                // The same wheel runs with animations on and off, upward then downward, so one-step and accumulated input both count.
+                foreach (var (animate, rows) in new[] { (true, -5d), (true, 2d), (false, -3d), (true, -1d), (true, -1d) })
+                {
+                    animations.SetValue(page, animate);
+                    var context = $"{ending}, animations {(animate ? "on" : "off")}, wheel {rows:+0;-0}";
+                    var before = Presented().Viewport.Offset;
+                    var expected = Math.Clamp(before + (long)rows, 0, Presented().Viewport.MaximumOffset);
+                    typeof(MainPage).GetMethod("ScrollHistoryWheel", NonPublic)!.Invoke(page, [session, rows]);
+                    // Immediately, and again after the 140 ms animation would have finished, to catch a deferred driver.
+                    for (var check = 0; check < 2; check++)
+                    {
+                        var animation = Field<TerminalScrollAnimation>(page, "_scrollAnimation");
+                        var frame = Presented();
+                        if (frame.Viewport.Offset != expected || animation.IsActive || Field<long>(page, "_scrollTick") != 0 ||
+                            Field<double>(surface, "_scrollFraction") != 0 || frame.OverscanAbove.Length != 0 || frame.OverscanBelow.Length != 0)
+                            throw new Exception($"Retained history did not scroll immediately ({context}, check {check}). Offset {before} -> {frame.Viewport.Offset}, expected {expected}, " +
+                                $"animation active {animation.IsActive}, tick {Field<long>(page, "_scrollTick")}, fraction {Field<double>(surface, "_scrollFraction")}, overscan {frame.OverscanAbove.Length}/{frame.OverscanBelow.Length}.");
+                        if (Field<bool>(page, "_renderingSubscribed") || Field<bool>(page, "_frameRefreshQueued") ||
+                            Field<DispatcherQueueTimer>(page, "_chromeTimer").IsRunning || Field<DispatcherQueueTimer>(page, "_cursorTimer").IsRunning)
+                            throw new Exception($"Scrolling retained history started a render subscription or timer ({context}, check {check}).");
+                        if (State() != "Idle" || !ReferenceEquals(Field<TerminalSession>(page, "_session"), session) ||
+                            session.ProcessId != processId || !ReferenceEquals(session.Completion, completion))
+                            throw new Exception($"Scrolling retained history changed the session or restarted its process ({context}, check {check}).");
+                        if (check == 0) await Task.Delay(250);
+                    }
+                }
+                report.Add($"PASS wheel scrolls retained history immediately after {ending} with animations on and off, without a frame subscription, overscan or restart.");
+            }
+        }
+        finally { animations.SetValue(page, original); }
     }
 }
