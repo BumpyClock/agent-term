@@ -20,7 +20,7 @@ Five fresh Top trials and five Left trials passed the full startup sequence afte
 
 ## Focus ownership.
 
-Automatic focus checks exposed two independent ordering defects. The page allowed `FocusTerminal()` during `Starting` while disabling the terminal in that state, so the input could not receive focus. Splitting a pane also requested focus before the new page and input were loaded. The terminal now remains enabled during startup while its input handlers reject shell input until `Running`. Each pane requests focus from its own `Loaded` event. Deferred requests still preserve a user focus change and require the same active, loaded pane.
+Automatic focus checks exposed two independent ordering defects. The page allowed `FocusTerminal()` during `Starting` while disabling the terminal in that state, so the input could not receive focus. Splitting a pane also requested focus before the new page and input were loaded. The terminal now remains enabled and focusable during startup. Its text box stays read-only until `Running`, so startup keystrokes cannot enter the hidden editing buffer and disappear. Each pane requests focus from its own `Loaded` event. Deferred requests still preserve a user focus change and require the same active, loaded pane.
 
 ## Regression command.
 
@@ -33,6 +33,8 @@ pwsh -NoProfile -File scripts/check-startup.ps1 -Trials 5
 The script builds an isolated startup executable and launches fresh Left and Top layout trials. It changes only the process's in-memory tab preference. It does not save user settings or close user sessions.
 
 The checks require shell command execution, a painted marker, nonblank raster pixels and automatic input focus without an explicit focus repair. They also exercise rapid tab creation and switching, splits and pane closure, hidden raster release, idle subscription drain, output after idle, resize, and a synchronized update that must paint after its deadline with no further output.
+
+Review regressions also cover application mouse click and wheel selection clearing before any process echo, an invisible blinking cursor with no idle draws, switching back to a tab covered by the agent surface, and startup read-only input retaining focus. Both Left and Top layouts passed these checks after the review fixes.
 
 Each process writes its report and exits. A nonzero exit or timeout fails the script. The normal Windows check script runs one trial per layout and the retained-raster parity fixture.
 

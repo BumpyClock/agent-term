@@ -428,7 +428,11 @@ public sealed class TerminalSurface : UserControl
             _metrics = metrics;
         }
 
-        internal void FitGrid(int cells) => _capacity = Math.Clamp(cells * 2, 1024, 65536);
+        internal void FitGrid(int cells)
+        {
+            _capacity = Math.Clamp(cells * 2, 1024, 65536);
+            while (_layouts.Count > _capacity) EvictOldest();
+        }
 
         internal CanvasTextLayout Get(CanvasDevice device, string text, float width, bool bold, bool italic)
         {
@@ -440,15 +444,17 @@ public sealed class TerminalSurface : UserControl
                 Options = CanvasDrawTextOptions.Clip
             };
             _created++;
-            while (_layouts.Count >= _capacity)
-            {
-                var oldest = _order.Dequeue();
-                _layouts[oldest].Dispose();
-                _layouts.Remove(oldest);
-            }
+            if (_layouts.Count == _capacity) EvictOldest();
             _layouts.Add(key, layout);
             _order.Enqueue(key);
             return layout;
+        }
+
+        private void EvictOldest()
+        {
+            var oldest = _order.Dequeue();
+            _layouts[oldest].Dispose();
+            _layouts.Remove(oldest);
         }
 
         internal void Clear()

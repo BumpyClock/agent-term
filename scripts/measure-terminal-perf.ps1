@@ -20,6 +20,7 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force $output | Out-Null
 if (Get-ChildItem -LiteralPath $output) { throw 'Use an empty output directory.' }
 $results = @()
+$timeoutSeconds = $Seconds + 60
 foreach ($trial in 1..$Trials) {
     foreach ($side in 'baseline', 'fixed') {
         $executable = if ($side -eq 'baseline') { $BaselineExe } else { $FixedExe }
@@ -39,9 +40,9 @@ foreach ($trial in 1..$Trials) {
         }
         $process = [Diagnostics.Process]::Start($start)
         try {
-            if (-not $process.WaitForExit(60000)) {
+            if (-not $process.WaitForExit($timeoutSeconds * 1000)) {
                 $process.Kill($true)
-                throw "Fixture exceeded 60 seconds for $side trial $trial"
+                throw "Fixture exceeded $timeoutSeconds seconds for $side trial $trial"
             }
             if ($process.ExitCode -ne 0) { throw "Fixture failed for $side trial $trial. Inspect $resultPath.error.txt" }
         } finally { $process.Dispose() }

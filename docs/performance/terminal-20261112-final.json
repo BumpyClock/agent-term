@@ -612,5 +612,12 @@
   "boundary": "Fixture UI callback work. Excludes Win2D EndDraw, GPU completion and display presentation. Code and scheduling changed together.",
   "publishedBaselineRevision": "5606a460c7dbca60db3c2f78805c29d63c6802cc",
   "baselineTree": "fa79933ee1f88841a0a455f7cb53f9f7124b4e06",
-  "baselinePublicationNote": "Measured baselineRevision and publishedBaselineRevision have identical trees. Only commit email metadata changed for GitHub privacy."
+  "baselinePublicationNote": "Measured baselineRevision and publishedBaselineRevision have identical trees. Only commit email metadata changed for GitHub privacy.",
+  "sourceEquivalentRevision": "46eb3a12f3334ed273a31499896e356793487fe8",
+  "sourceHashConvention": "currentSourceHashes are raw measured Windows build-input bytes. currentSourceLfHashes normalize CRLF to LF for comparison with Git blobs.",
+  "currentSourceLfHashes": {
+    "currentRenderer": "BDAFACAF2973230988989720F23CF9035955ECA44A04DAFBD79A6871AD16B7D3",
+    "currentAdapter": "C083301FBC49FE21BFAEB9475CC9341B929C6386A4A37798F9844A3F4EE86985",
+    "currentSession": "99A6E47DB49FBB2BB8B8E9158E8A91A37EC9202DA42DD1A1677EA921A3B66EC1"
+  }
 }

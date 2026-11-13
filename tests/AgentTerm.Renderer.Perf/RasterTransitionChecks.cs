@@ -88,6 +88,12 @@ internal static partial class Program
         var cjkCreated = glyphCache.Created - createdBefore;
         if (cjkCreated <= capacity) throw new Exception($"CJK screens created {cjkCreated} layouts and never overflowed capacity {capacity}.");
 
+        if (glyphCache.Count <= 1024) throw new Exception("CJK shrink fixture did not fill more than the minimum cache capacity.");
+        terminal.Resize(16, 8);
+        await Check("cjk-cache-shrink");
+        if (glyphCache.Capacity != 1024 || glyphCache.Count > glyphCache.Capacity)
+            throw new Exception($"Shrinking the grid retained {glyphCache.Count} layouts above the new capacity {glyphCache.Capacity}.");
+
         fontSize = 17; surface.SetTerminalFont(fontSize, "FiraCode Nerd Font"); await Check("font-zoom");
         fontSize = 14; surface.SetTerminalFont(fontSize, "FiraCode Nerd Font"); await Check("font-restore");
         (window.AppWindow.Presenter as OverlappedPresenter)?.Restore();

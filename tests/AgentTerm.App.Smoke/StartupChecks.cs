@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text;
+using AgentTerm.Agents;
 using AgentTerm.Terminal;
 using AgentTerm_App;
 using Microsoft.Graphics.Canvas;
@@ -66,6 +68,10 @@ internal static class StartupChecks
                 }
                 await AssertIdleAndWakeAsync((TerminalTab)((TabViewItem)tabs.SelectedItem).Content, report);
                 await AssertInputClearsSelectionAsync((TerminalTab)((TabViewItem)tabs.SelectedItem).Content, report);
+                await AssertMouseClearsSelectionAsync((TerminalTab)((TabViewItem)tabs.SelectedItem).Content, report);
+                await AssertHiddenCursorIdleAsync((TerminalTab)((TabViewItem)tabs.SelectedItem).Content, report);
+                await AssertCoveredTabAsync(tabs, report);
+                AssertStartupInput((TerminalTab)((TabViewItem)tabs.SelectedItem).Content, report);
 
                 var splitter = (Style)((FrameworkElement)window.Content).Resources["PaneSplitterStyle"];
                 await using (var detached = new TerminalTab(profile, splitter))
@@ -292,6 +298,118 @@ internal static class StartupChecks
         session.Send("\u0003");
         await AssertOutputAsync(tab, report, "input selection clear");
         report.Add("PASS local input updates the selected frame synchronously, without waiting for process echo.");
+    }
+
+    private static void WriteTerminal(TerminalSession session, string text)
+    {
+        lock (Field<object>(session, "_gate"))
+            Field<GhosttyTerminal>(session, "_terminal").Write(Encoding.UTF8.GetBytes(text));
+    }
+
+    private static async Task AssertMouseClearsSelectionAsync(TerminalTab tab, List<string> report)
+    {
+        var page = tab.ActivePage;
+        var surface = (TerminalSurface)page.FindName("Terminal");
+        var session = Field<TerminalSession>(page, "_session");
+        var refresh = typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var mouse = typeof(MainPage).GetMethod("SendApplicationMouse", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        WriteTerminal(session, "\x1b[?1000h\x1b[?1006h");
+        try
+        {
+            foreach (var button in new[] { TerminalMouseButton.Left, TerminalMouseButton.WheelDown })
+            {
+                var row = Math.Max(session.ReadFrame().Viewport.TopInset, session.ReadFrame().Cursor.Row);
+                session.BeginSelection(0, row);
+                session.ExtendSelection(3, row);
+                session.EndSelection();
+                refresh.Invoke(page, [session]);
+                if (!Field<TerminalFrame>(surface, "_frame").HasSelection)
+                    throw new Exception("Mouse regression fixture did not create a visible selection.");
+                var point = new Windows.Foundation.Point(surface.CellWidth, surface.Geometry.RowTop(row) + surface.CellHeight / 2);
+                if (!(bool)mouse.Invoke(page, [point, TerminalMouseAction.Press, button])! ||
+                    Field<TerminalFrame>(surface, "_frame").HasSelection)
+                    throw new Exception("Application mouse press did not refresh the cleared selection before process echo.");
+            }
+        }
+        finally { WriteTerminal(session, "\x1b[?1000l\x1b[?1006l"); }
+        session.Send("\u0003");
+        await AssertOutputAsync(tab, report, "mouse selection clear");
+        report.Add("PASS application click and wheel clear selection synchronously, without process echo.");
+    }
+
+    private static async Task AssertHiddenCursorIdleAsync(TerminalTab tab, List<string> report)
+    {
+        var page = tab.ActivePage;
+        var surface = (TerminalSurface)page.FindName("Terminal");
+        var session = Field<TerminalSession>(page, "_session");
+        var canvas = Field<CanvasControl>(surface, "_canvas");
+        var draws = 0;
+        void Draw(CanvasControl _, CanvasDrawEventArgs __) => draws++;
+        WriteTerminal(session, "\x1b[1 q\x1b[?25l");
+        typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [session]);
+        try
+        {
+            await WaitAsync(() => Field<TerminalFrame?>(surface, "_paintedFrame")?.Cursor is { Visible: false, Blink: true },
+                "hidden blinking cursor paint");
+            await Task.Delay(750);
+            if (Field<DispatcherQueueTimer>(page, "_cursorTimer").IsRunning)
+                throw new Exception("Hidden cursor kept its blink timer running.");
+            canvas.Draw += Draw;
+            await Task.Delay(1200);
+            if (draws != 0) throw new Exception("Hidden blinking cursor kept drawing an idle terminal.");
+        }
+        finally
+        {
+            canvas.Draw -= Draw;
+            WriteTerminal(session, "\x1b[?25h\x1b[0 q");
+            typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [session]);
+        }
+        report.Add("PASS hidden blinking cursor has no blink timer or idle draws.");
+    }
+
+    private static async Task AssertCoveredTabAsync(TabView tabs, List<string> report)
+    {
+        var item = (TabViewItem)tabs.SelectedItem;
+        var tab = (TerminalTab)item.Content;
+        var page = tab.ActivePage;
+        var surface = (TerminalSurface)page.FindName("Terminal");
+        var task = Field<AgentSessionController>(page, "_agent").BeginTask();
+        typeof(MainPage).GetMethod("OpenSurface", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [task, true]);
+        try
+        {
+            tabs.SelectedItem = tabs.TabItems.OfType<TabViewItem>().First(other => other != item);
+            await Task.Delay(100);
+            tabs.SelectedItem = item;
+            await WaitAsync(() => page.IsLoaded && Field<bool>(page, "_viewActive"), "covered tab activation");
+            await Task.Delay(250);
+            if (surface.Visibility != Visibility.Collapsed || !Field<bool>(surface, "_suspended") ||
+                Field<CanvasControl?>(surface, "_canvas") is not null || Field<CanvasRenderTarget?>(surface, "_renderTarget") is not null)
+                throw new Exception("Covered tab reactivated hidden terminal rendering resources.");
+        }
+        finally { page.TryLeaveAgentSurface(); }
+        await AssertOutputAsync(tab, report, "terminal after covered tab");
+        report.Add("PASS switching to a covered tab retains no terminal canvas and leaving the agent surface repaints.");
+    }
+
+    private static void AssertStartupInput(TerminalTab tab, List<string> report)
+    {
+        var page = tab.ActivePage;
+        var surface = (TerminalSurface)page.FindName("Terminal");
+        var state = Field<object>(page, "_state");
+        var setState = typeof(MainPage).GetMethod("SetState", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        try
+        {
+            setState.Invoke(page, [Enum.Parse(state.GetType(), "Starting")]);
+            if (!surface.IsEnabled || !surface.Input.IsReadOnly || surface.Input.FocusState == FocusState.Unfocused)
+                throw new Exception("Starting terminal must retain focus while preventing text editing.");
+        }
+        finally
+        {
+            setState.Invoke(page, [state]);
+            typeof(MainPage).GetMethod("StartRefresh", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, null);
+        }
+        if (surface.Input.IsReadOnly) throw new Exception("Running terminal remained read-only after startup.");
+        report.Add("PASS startup input retains focus without permitting text editing until Running.");
     }
 
     private static async Task WaitAsync(Func<bool> ready, string condition)

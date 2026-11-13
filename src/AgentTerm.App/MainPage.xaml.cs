@@ -150,7 +150,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             CancelSelectionGesture();
             return;
         }
-        Terminal.ResumeRendering();
+        if (!_surfaceOpen) Terminal.ResumeRendering();
         if (_session is { } session && _state is SessionState.Running or SessionState.Idle)
         {
             session.SetTheme(CurrentTheme);
@@ -309,7 +309,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void UpdateCursorBlink()
     {
         if (_viewActive && IsLoaded && !_surfaceOpen && _state == SessionState.Running &&
-            _presentedFrame?.Cursor.Blink == true && Terminal.Input.FocusState != FocusState.Unfocused && _uiSettings.AnimationsEnabled)
+            _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused && _uiSettings.AnimationsEnabled)
         {
             if (!_cursorTimer.IsRunning) _cursorTimer.Start();
         }
@@ -561,7 +561,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                     ? applicationNotches > 0 ? TerminalMouseButton.WheelRight : TerminalMouseButton.WheelLeft
                     : applicationNotches > 0 ? TerminalMouseButton.WheelUp : TerminalMouseButton.WheelDown;
                 for (var index = 0; index < Math.Abs(applicationNotches); index++)
-                    SendApplicationMouse(point, TerminalMouseAction.Press, button);
+                    SendApplicationMouse(point.Position, TerminalMouseAction.Press, button);
                 e.Handled = true;
                 return;
             }
@@ -585,19 +585,20 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         (uint)Terminal.CellWidth, (uint)Terminal.CellHeight,
         (float)(Terminal.XamlRoot?.RasterizationScale ?? 1));
 
-    private bool SendApplicationMouse(PointerPoint point, TerminalMouseAction action, TerminalMouseButton? button)
+    private bool SendApplicationMouse(Point point, TerminalMouseAction action, TerminalMouseButton? button)
     {
         if (_state != SessionState.Running || _session is not { } session) return false;
         var geometry = Terminal.Geometry;
         var position = action == TerminalMouseAction.Press && button is not (TerminalMouseButton.WheelUp or TerminalMouseButton.WheelDown
             or TerminalMouseButton.WheelLeft or TerminalMouseButton.WheelRight)
-            ? geometry.ToFrame(point.Position) : geometry.ToFrameClamped(point.Position);
+            ? geometry.ToFrame(point) : geometry.ToFrameClamped(point);
         var modifiers = Modifiers();
         if (action == TerminalMouseAction.Release && button is { } released && _applicationMouseButtons.Contains(released))
             modifiers &= ~TerminalModifiers.Shift;
         if (!session.SendMouse(new(action, button, modifiers, (float)position.X, (float)position.Y), MouseGeometry()))
             return false;
         _applicationMousePosition = position;
+        if (action == TerminalMouseAction.Press) RefreshTerminalFrame(session);
         return true;
     }
 
@@ -628,7 +629,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             var point = e.GetCurrentPoint(Terminal);
             var button = ChangedMouseButton(point);
             if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
-            if (!_selecting && button is not null && SendApplicationMouse(point, TerminalMouseAction.Press, button))
+            if (!_selecting && button is not null && SendApplicationMouse(point.Position, TerminalMouseAction.Press, button))
             {
                 FocusTerminal(FocusState.Pointer);
                 var grid = Terminal.Geometry;
@@ -695,7 +696,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                     : point.Properties.IsMiddleButtonPressed ? TerminalMouseButton.Middle
                     : point.Properties.IsXButton1Pressed ? TerminalMouseButton.Back
                     : point.Properties.IsXButton2Pressed ? TerminalMouseButton.Forward : null;
-                if (SendApplicationMouse(point, TerminalMouseAction.Motion, button)) e.Handled = true;
+                if (SendApplicationMouse(point.Position, TerminalMouseAction.Motion, button)) e.Handled = true;
                 return;
             }
             _selectionPointer = point.Position;
@@ -729,7 +730,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
                 var button = ChangedMouseButton(point);
                 if (button is not null && _applicationMouseButtons.Contains(button.Value))
                 {
-                    if (SendApplicationMouse(point, TerminalMouseAction.Release, button)) e.Handled = true;
+                    if (SendApplicationMouse(point.Position, TerminalMouseAction.Release, button)) e.Handled = true;
                     _applicationMouseButtons.Remove(button.Value);
                 }
                 if (_applicationMouseButtons.Count == 0) Terminal.ReleasePointerCapture(e.Pointer);
@@ -1085,6 +1086,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             PaneStatus.Refresh(state == SessionState.Starting ? null : PaneStatus.Directory, false, DateTimeOffset.UtcNow);
         }
         Terminal.IsEnabled = state is SessionState.Starting or SessionState.Running || (state == SessionState.Idle && _session is not null);
+        Terminal.Input.IsReadOnly = state != SessionState.Running;
         SessionHeader.Visibility = state == SessionState.Idle ? Visibility.Visible : Visibility.Collapsed;
         SessionFooter.Visibility = state == SessionState.Running ? Visibility.Collapsed : Visibility.Visible;
         StopButton.IsEnabled = state is SessionState.Starting or SessionState.Running;

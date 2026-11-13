@@ -83,11 +83,13 @@ def main():
                 ticks += 1
                 if args.pattern != "held":
                     time.sleep(max(0, started + ticks / args.hz - time.monotonic()))
-            done.write_text(
+            pending = done.with_suffix(".tmp")
+            pending.write_text(
                 json.dumps({"ticks": ticks, "expectedTicks": expected_ticks, "bytes": byte_count,
                             "elapsed": time.monotonic() - started, "hz": args.hz, "pattern": args.pattern,
                             "idleUntil": f"run-{trial + 1}.go" if trial < args.trials else None})
             )
+            pending.replace(done)
     finally:
         sys.stdout.write("\x1b[?2026l\x1b[?25h\x1b[?1049l\r\nWorkload complete.\r\n")
         sys.stdout.flush()

@@ -1,6 +1,6 @@
 # Current renderer and demand scheduling, 2026-11-12.
 
-Five alternating trials per side passed the final native-fixture workload and image gates. The optimized p95 snapshot-plus-draw callback work was 7.64 to 8.29 ms, with a median of 7.88 ms. Every optimized trial passed the 16.6 ms p95 callback-work gate. This is not a measurement of displayed FPS or full-application frame time. Earlier functional checks below are labelled separately.
+Five alternating trials per side passed the native-fixture workload and image gates at `46eb3a1`, before the subsequent review fixes. The optimized p95 snapshot-plus-draw callback work was 7.64 to 8.29 ms, with a median of 7.88 ms. Every optimized trial passed the 16.6 ms p95 callback-work gate. This is not a measurement of displayed FPS or full-application frame time. Earlier functional checks below are labelled separately.
 
 Machine. Development desktop, 2560 × 1369.33 DIP terminal surface at 144 DPI when maximized, 1.5 rasterization scale. FiraCode Nerd Font at 14 DIP. Python 3 through real ConPTY.
 
@@ -11,7 +11,7 @@ Measured builds used local revision `88a4fd5` and completed with zero errors and
 - `src/AgentTerm.App/TerminalSurface.cs` at 5606a46. `82B3AD34781A0272C3EC7CBB995A289048165E0101C9969978C8E219363F3B1D`.
 - `src/AgentTerm.Terminal/GhosttyTerminal.Render.cs` at 5606a46. `9ED74768A3123AAB2791A09DBCEFB28C868EBFC613ECE23C577FA2B7FB2CAFCE`.
 
-The current side was a frozen, uncommitted source snapshot. Its renderer, adapter, session and native-library hashes are recorded in the [final trial evidence](terminal-20261112-final.json). The baseline and optimized executables used the same native DLL hash.
+The optimized side was a frozen source snapshot equivalent to `46eb3a1`. The [trial evidence](terminal-20261112-final.json) retains raw Windows build-input hashes and adds LF-normalized source hashes. The adapter and session used CRLF in the measured checkout and LF in Git; normalized bytes match exactly. This is a newline difference, not a code difference. The baseline and optimized executables used the same native DLL hash. These timings precede the later cache-shrink and refresh review fixes.
 
 ## Final alternating comparison.
 

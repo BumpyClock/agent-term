@@ -15,7 +15,7 @@ This page is for maintainers changing terminal rendering or refresh scheduling. 
 5. The refresh reads a snapshot and calls `TerminalSurface.SetFrame`.
 6. When the snapshot is held by synchronized output (`ESC[?2026h`), `TerminalSession.PendingFrameRefreshDelay` is the time left on the 1,000 ms hold. A nonrepeating timer requests one more refresh at that time, so a writer that never releases the hold still appears. The timer is stopped on every refresh and whenever the pane hides or the agent surface opens.
 
-A silent visible pane therefore makes no `ReadFrame` calls and keeps no Rendering subscription. Chrome and directory polling run every 250 ms. The cursor blink timer runs every 528 ms only while a blinking cursor is focused. Hidden, unloaded and stopped panes stop all of these. While the agent surface covers a pane, terminal refresh and cursor blink stop and the terminal raster is suspended.
+A silent visible pane therefore makes no `ReadFrame` calls and keeps no Rendering subscription. Chrome and directory polling run every 250 ms. The cursor blink timer runs every 528 ms only while a visible blinking cursor is focused. Hidden, unloaded and stopped panes stop all of these. While the agent surface covers a pane, terminal refresh and cursor blink stop and the terminal raster stays suspended across tab switches. Accepted application mouse presses refresh local selection changes without waiting for process output.
 
 At 5606a46 production polled `ReadFrame` every 33 ms. The fixture still offers that timer to compare code at matched cadence.
 
@@ -37,7 +37,7 @@ Computed, not measured. At the fixture geometry of 3840 by 2054 device pixels, o
 
 ## Glyph layout cache.
 
-Each surface caches clipped `CanvasTextLayout` objects keyed by text, width, bold and italic. Capacity is twice the grid's cell count, clamped to 1,024..65,536. Eviction is first in, first out.
+Each surface caches clipped `CanvasTextLayout` objects keyed by text, width, bold and italic. Capacity is twice the grid's cell count, clamped to 1,024..65,536. Eviction is first in, first out. Shrinking the grid immediately disposes entries above its new capacity, including when every glyph on the smaller screen is a cache hit.
 
 Twice the cell count leaves room for the visible glyph set and recent replacements in the measured grids. Text that keeps changing, such as streamed CJK, evicts older entries. Memory stays bounded at 65,536 layouts per visible surface. Grids with more distinct glyph keys than this cap can still churn. Suspended surfaces hold none.
 

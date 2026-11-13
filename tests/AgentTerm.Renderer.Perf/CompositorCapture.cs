@@ -50,8 +50,11 @@ internal sealed class CompositorCapture : IDisposable
     internal object End(string output)
     {
         Sample[] samples;
-        lock (_gate) { _measuring = false; samples = _samples.ToArray(); }
+        string? error;
+        lock (_gate) { _measuring = false; samples = _samples.ToArray(); error = _error; }
         File.WriteAllLines(Path.ChangeExtension(output, ".capture.ndjson"), samples.Select(sample => JsonSerializer.Serialize(sample)));
+        if (error is not null) throw new InvalidOperationException($"Compositor capture failed: {error}");
+        if (samples.Length == 0) throw new InvalidOperationException("Compositor capture delivered no frames.");
         var intervals = new List<double>();
         var changedIntervals = new List<double>();
         Sample? previous = null, previousChanged = null;
@@ -71,7 +74,7 @@ internal sealed class CompositorCapture : IDisposable
         return new
         {
             kind = "Windows.Graphics.Capture compositor delivery; not physical scanout",
-            error = _error, frames = samples.Length, changedCounterFrames = changed,
+            error, frames = samples.Length, changedCounterFrames = changed,
             distinctCounterHashes = samples.Select(sample => sample.CounterHash).Distinct().Count(),
             stableLabelHashes = samples.Select(sample => sample.StableLabelHash).Distinct().Count(),
             dominantStableLabelFrames = samples.GroupBy(sample => sample.StableLabelHash).Select(group => group.Count()).DefaultIfEmpty().Max(),

@@ -86,10 +86,10 @@ pwsh -NoProfile -File scripts/measure-terminal-perf.ps1 -BaselineExe $built.base
 & $fixture $python scripts/terminal-perf-workload.py artifacts/perf-trials/transitions.json --verify-transitions
 ```
 
-This mode draws a scripted sequence through the onscreen Canvas and compares the retained raster with a full redraw after every step. Steps cover sparse edits, erase, wide and combining glyphs, a partial combining edit, selection create, move, extend during output and clear, cursor-only movement, theme, colored and transparent backgrounds, suspend and resume, history scrolling with output while scrolled, enough distinct CJK screens to overflow the glyph cache, font zoom, resize, clear and reverse video. It fails on the first byte that differs and saves both images.
+This mode draws a scripted sequence through the onscreen Canvas and compares the retained raster with a full redraw after every step. Steps cover sparse edits, erase, wide and combining glyphs, a partial combining edit, selection create, move, extend during output and clear, cursor-only movement, theme, colored and transparent backgrounds, suspend and resume, history scrolling with output while scrolled, enough distinct CJK screens to overflow the glyph cache, shrinking a populated cache without a font reset, font zoom, resize, clear and reverse video. It fails on the first byte that differs and saves both images.
 
 ## Presentation evidence.
 
 PresentMon Console is available from the `Intel.PresentMon.Console` WinGet package. `--presentmon` starts a PID-scoped collector without elevation. On the development machine the live trace failed with access denied because the token lacks ETW privileges. Displayed 60 FPS is therefore unverified.
 
-`--capture-frames` records compositor-delivered frames of the fixture window through Windows.Graphics.Capture and hashes a counter region and a static label region. It writes `<output>.capture.ndjson`. Capture can miss or coalesce frames, so its rate is a lower bound and cannot establish physical scanout. Do not combine it with timing comparisons.
+`--capture-frames` records compositor-delivered frames of the fixture window through Windows.Graphics.Capture and hashes a counter region and a static label region. It writes `<output>.capture.ndjson` and fails if capture reports an error or supplies no frames. Capture can miss or coalesce frames, so its rate is a lower bound and cannot establish physical scanout. Do not combine it with timing comparisons.
