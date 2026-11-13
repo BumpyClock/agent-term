@@ -13,7 +13,7 @@ internal sealed class GitStatusProvider
         deadline.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
-            var status = await RunAsync(directory, ["status", "--porcelain=v2", "--branch", "--ahead-behind", "-z", "--untracked-files=normal"], deadline.Token);
+            var status = await RunAsync(directory, ["status", "--porcelain=v2", "--branch", "--ahead-behind", "-z", "--untracked-files=normal"], deadline.Token).ConfigureAwait(false);
             if (status.Code != 0)
             {
                 if (status.Error.Contains("unknown option", StringComparison.OrdinalIgnoreCase) && status.Error.Contains("no-lazy-fetch", StringComparison.OrdinalIgnoreCase))
@@ -26,13 +26,13 @@ internal sealed class GitStatusProvider
                 var baseline = "HEAD";
                 if (snapshot.Kind == GitBranchKind.Unborn)
                 {
-                    var tree = await RunAsync(directory, ["hash-object", "-t", "tree", "--stdin"], deadline.Token);
+                    var tree = await RunAsync(directory, ["hash-object", "-t", "tree", "--stdin"], deadline.Token).ConfigureAwait(false);
                     if (tree.Code != 0) return new(GitQueryState.Failed);
                     baseline = tree.Output.Trim();
                     if (baseline.Length is not (40 or 64) || !baseline.All(char.IsAsciiHexDigit)) return new(GitQueryState.Failed);
                 }
                 // The root pathspec includes the whole worktree, even when this pane is in a subdirectory.
-                var diff = await RunAsync(directory, ["diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--no-renames", baseline, "--", ":/"], deadline.Token);
+                var diff = await RunAsync(directory, ["diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--no-renames", baseline, "--", ":/"], deadline.Token).ConfigureAwait(false);
                 if (diff.Code != 0) return new(GitQueryState.Failed);
                 snapshot = snapshot with { Lines = GitStatusParser.ParseLines(diff.Output) };
             }

@@ -46,14 +46,30 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         var statusTimer = DispatcherQueue.CreateTimer();
         statusTimer.Interval = TimeSpan.FromMilliseconds(250);
-        statusTimer.Tick += (_, _) =>
+        void UpdateProgramStatuses()
         {
             if (_closing) return;
             foreach (var item in Tabs.TabItems.OfType<TabViewItem>())
-                if (item.Content is TerminalTab { IsClosing: false } tab && item.Tag is TabProgramStatus status)
-                    status.Update(tab.ReadProgramStatuses());
-        };
+                if (item.Content is TerminalTab { IsClosing: false } tab && item.Tag is TabProgramStatus status &&
+                    tab.TryReadProgramStatusChange(out var statuses))
+                    status.Update(statuses);
+        }
+        statusTimer.Tick += (_, _) => UpdateProgramStatuses();
         statusTimer.Start();
+        var minimized = false;
+        AppWindow.Changed += (window, _) =>
+        {
+            var current = window.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+            if (current == minimized) return;
+            minimized = current;
+            PaneStatus.GitStatusHub.Shared.Paused = minimized;
+            if (minimized) statusTimer.Stop();
+            else if (!_closing)
+            {
+                UpdateProgramStatuses();
+                statusTimer.Start();
+            }
+        };
         Closed += (_, _) => statusTimer.Stop();
         BuildProfileMenu();
         AddTab(DefaultProfile);

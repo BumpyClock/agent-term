@@ -16,13 +16,22 @@ public sealed class ProgramStatusProtocol
 {
     private readonly Dictionary<string, ProgramStatus> _records = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _recency = new();
+    private IReadOnlyList<ProgramStatus>? _snapshot;
     private static readonly UTF8Encoding Utf8 = new(false, true);
     public event Action? SupportRequested;
     public static ReadOnlySpan<byte> SupportReply => "\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\u001b\\"u8;
 
-    public IReadOnlyList<ProgramStatus> ReadStatuses() => _records.Values
+    public int Version { get; private set; }
+
+    public IReadOnlyList<ProgramStatus> ReadStatuses() => _snapshot ??= _records.Values
         .Select(record => record with { EffectiveApp = EffectiveApp(record.Id) })
         .ToArray();
+
+    private void Touch()
+    {
+        Version++;
+        _snapshot = null;
+    }
 
     private string? EffectiveApp(string id)
     {
@@ -40,11 +49,17 @@ public sealed class ProgramStatusProtocol
         foreach (var record in _records.Values.ToArray())
         {
             if (record.State is ProgramState.Working or ProgramState.Blocked) Remove(record.Id);
-            else _records[record.Id] = record with { IsActive = false };
+            else if (record.IsActive) { _records[record.Id] = record with { IsActive = false }; Touch(); }
         }
     }
 
-    public void Reset() { _records.Clear(); _recency.Clear(); }
+    public void Reset()
+    {
+        if (_records.Count == 0) return;
+        _records.Clear();
+        _recency.Clear();
+        Touch();
+    }
 
     public void Accept(string sequence, int byteLength)
     {
@@ -98,9 +113,15 @@ public sealed class ProgramStatusProtocol
         _recency.AddLast(id);
         _records[id] = new(id, state.Value, kind, progress, app, app,
             pairs.GetValueOrDefault("title"), pairs.GetValueOrDefault("msg"), DateTimeOffset.UtcNow);
+        Touch();
     }
 
-    private void Remove(string id) { _records.Remove(id); _recency.Remove(id); }
+    private void Remove(string id)
+    {
+        if (!_records.Remove(id)) return;
+        _recency.Remove(id);
+        Touch();
+    }
     private static bool IsValueCharacter(char c) => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or ',' or '+' or '/' or '=' or '-';
     private static bool ValidSegment(string value) => value.Length is >= 1 and <= 32 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '+' or '-');
     private static bool ValidId(string value) => value.Length <= 128 && value.Split('/') is var segments && segments.Length <= 8 && segments.All(ValidSegment);
