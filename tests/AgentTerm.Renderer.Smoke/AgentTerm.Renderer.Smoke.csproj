@@ -23,6 +23,8 @@
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.Images.cs" Link="TerminalSurface.Images.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.Rendering.cs" Link="TerminalSurface.Rendering.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.Presentation.cs" Link="TerminalSurface.Presentation.cs" />
+    <Compile Include="../../src/AgentTerm.App/TerminalSurface.GlyphRuns.cs" Link="TerminalSurface.GlyphRuns.cs" />
+    <Compile Include="../../src/AgentTerm.App/TerminalSurface.DirectWrite.cs" Link="TerminalSurface.DirectWrite.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.Automation.cs" Link="TerminalSurface.Automation.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.AutomationText.cs" Link="TerminalSurface.AutomationText.cs" />
     <Compile Include="../../src/AgentTerm.App/AcrylicRecipe.cs" Link="AcrylicRecipe.cs" />

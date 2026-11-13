@@ -39,8 +39,71 @@ internal static class TextRunRasterChecks
         AssertExactPerCell(new Setup(device, "Consolas", 96, 10, 0), Cells("a", "\u2A00", "b"), "narrow fallback glyph");
         foreach (var missing in ligatureFonts.Where(family => !installed.Contains(family)))
             Console.WriteLine($"SKIPPED ligature raster checks: font '{missing}' is not installed.");
+        AssertGlyphRunsMatchLayout(device, installed);
         ReportSegmentation();
         Console.WriteLine("Text run anchoring, fallback, RTL, style, selection and ligature checks passed.");
+    }
+
+    private static void AssertGlyphRunsMatchLayout(CanvasDevice device, HashSet<string> installed)
+    {
+        TerminalColor blue = new(90, 140, 255), amber = new(250, 200, 60);
+        var cases = new List<(string Family, float Dpi, float CellWidth, float CellHeight, string[] Cells, bool Bold, bool Italic, TerminalColor Foreground)>
+        {
+            ("MS Gothic", 96, 8, 17, ["✔️", "x"], true, false, blue),
+            ("MS Gothic", 96, 8, 17, ["✔︎", "x"], true, false, amber),
+            ("MS Gothic", 144, 10, 20, ["✔️", "x"], true, false, blue),
+            ("MS Gothic", 144, 10, 20, ["✔︎", "x"], true, false, amber),
+            ("MS Gothic", 144, 10, 20, ["─", "╮"], false, true, White),
+            ("Cascadia Mono", 96, 16, 32, ["╭", "│"], false, true, White),
+            ("Cascadia Code", 96, 16, 32, ["╭", "│"], false, true, White),
+            ("FiraCode Nerd Font", 96, 16, 32, ["é", "Å"], false, true, blue),
+        };
+        foreach (var dpi in new[] { 96f, 144f })
+        foreach (var bold in new[] { false, true })
+        foreach (var italic in new[] { false, true })
+            cases.Add(("Consolas", dpi, 10, 20, ["a", "α", "б", "b", "ω", "ж"], bold, italic, White));
+        using (var shaper = new DirectWriteShaper())
+        {
+            if (!shaper.Analyze("abαωбж") || shaper.Scripts.Length != 3 ||
+                shaper.Scripts[0] is not { Start: 0, Length: 2 } || shaper.Scripts[1] is not { Start: 2, Length: 2 } ||
+                shaper.Scripts[2] is not { Start: 4, Length: 2 })
+                throw new Exception("DirectWrite script analysis must split Latin, Greek and Cyrillic into ordered items.");
+            shaper.Dispose();
+        }
+        var previous = TerminalSurface.TextMode;
+        try
+        {
+            foreach (var (family, dpi, cellWidth, cellHeight, text, bold, italic, foreground) in cases)
+            {
+                if (!installed.Contains(family))
+                {
+                    Console.WriteLine($"SKIPPED glyph run parity: font '{family}' is not installed.");
+                    continue;
+                }
+                var cells = text.Select(value => new TerminalCell(value, 1, foreground, Black, bold, italic, false, false, false, false)).ToArray();
+                TerminalCell[] grid = [.. Enumerable.Repeat(Cell(" "), cells.Length), .. cells, .. Enumerable.Repeat(Cell(" "), cells.Length)];
+                var frame = new TerminalFrame(cells.Length, 3, grid,
+                    new TerminalCursor(0, 0, false, false, TerminalCursorShape.Block, White), White, Black);
+                byte[] Render(TerminalSurface.TextRendering mode)
+                {
+                    TerminalSurface.TextMode = mode;
+                    using var target = new CanvasRenderTarget(device, cells.Length * cellWidth, cellHeight * 3, dpi);
+                    using (var drawing = target.CreateDrawingSession())
+                        TerminalSurface.DrawFrame(drawing, frame, cellWidth, cellHeight, false, true, 14, fontFamily: family, hideCursor: true);
+                    return target.GetPixelBytes();
+                }
+                var layout = Render(TerminalSurface.TextRendering.Layout);
+                var glyphs = Render(TerminalSurface.TextRendering.GlyphRunClipped);
+                var differing = layout.Where((value, index) => value != glyphs[index]).Count();
+                if (differing != 0)
+                    throw new Exception($"Glyph runs differ from text layouts in {differing} bytes: {family} {dpi} DPI, " +
+                        $"cells [{string.Join(", ", text.Select(value => string.Join(" ", value.Select(c => $"U+{(int)c:X4}"))))}], bold={bold}, italic={italic}.");
+            }
+        }
+        finally
+        {
+            TerminalSurface.TextMode = previous;
+        }
     }
 
     private static void ReportSegmentation()

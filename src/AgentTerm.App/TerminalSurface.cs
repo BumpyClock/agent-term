@@ -407,6 +407,8 @@ public sealed partial class TerminalSurface : UserControl
                 drawing.FillRectangle(first * cellWidth, gridTop + span.Row * cellHeight,
                     (last - first + 1) * cellWidth, cellHeight, color);
             }
+        var glyphRuns = TextMode != TextRendering.Layout && drawing.Transform.IsIdentity;
+        var dpi = drawing.Dpi;
         for (var row = firstRow; row < endRow; row++)
         {
             var y = gridTop + row * cellHeight;
@@ -419,8 +421,15 @@ public sealed partial class TerminalSurface : UserControl
                 if (!DrawsText(first, textPhase)) { start = end; continue; }
                 while (end < frame.Columns && JoinsTextRun(frame, CellAt(row, end - 1), CellAt(row, end), textPhase)) end++;
                 var foreground = TextColor(frame, first);
+                var shape = glyphRuns && end - start > 1;
+                if (shape)
+                {
+                    layouts.Runs.Begin();
+                    for (var col = start; col < end; col++) layouts.Runs.AppendCell(CellAt(row, col).Text);
+                    if (layouts.Runs.Draw(drawing, device, dpi, start, y, foreground, first.Bold, first.Italic)) { start = end; continue; }
+                }
                 CanvasTextLayout? run = null;
-                if (end - start > 1)
+                if (end - start > 1 && !shape)
                 {
                     layouts.ResetKey();
                     for (var col = start; col < end; col++) layouts.AppendCell(CellAt(row, col).Text);
@@ -533,12 +542,22 @@ public sealed partial class TerminalSurface : UserControl
         private int _keyLength;
         private (string Family, float Size, float CellWidth, float CellHeight) _metrics;
 
+        internal GlyphRuns Runs { get; } = new();
+
         internal GlyphLayouts() => _lookup = _layouts.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        internal (int Count, int Cells, int Capacity, long Created) Usage => (_layouts.Count, _cachedCells, _capacity, _created);
+        internal (int Count, int Cells, int Capacity, long Created) Usage
+        {
+            get
+            {
+                var runs = Runs.Usage;
+                return (_layouts.Count + runs.Count, _cachedCells + runs.Cells, _capacity + runs.Capacity, _created + runs.Created);
+            }
+        }
 
         internal void Configure(string family, float size, float cellWidth, float cellHeight)
         {
+            Runs.Configure(family, size, cellWidth, cellHeight);
             var metrics = (family, size, cellWidth, cellHeight);
             if (_metrics == metrics) return;
             Clear();
@@ -549,6 +568,7 @@ public sealed partial class TerminalSurface : UserControl
         {
             _capacity = Math.Clamp(cells * 2, 1024, 65536);
             while (_cachedCells > _capacity) EvictOldest();
+            Runs.FitGrid(cells);
         }
 
         internal void ResetKey() => _keyLength = 0;
@@ -672,6 +692,7 @@ public sealed partial class TerminalSurface : UserControl
             _order.Clear();
             _cachedCells = 0;
             Array.Clear(_references);
+            Runs.Clear();
         }
 
         public void Dispose() => Clear();

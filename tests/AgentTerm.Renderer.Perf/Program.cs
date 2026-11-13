@@ -470,6 +470,8 @@ internal sealed class GlyphCacheProbe
     private static GlyphCacheProbe? Live(object cache)
     {
         var type = cache.GetType();
+        if (type.GetProperty("Usage", Private) is { } usage)
+            return new(() => ((int, int, int, long))usage.GetValue(cache)!);
         if (type.GetField("_layouts", Private) is not { } layouts || type.GetField("_capacity", Private) is not { } capacity ||
             type.GetField("_created", Private) is not { } created) return null;
         var cells = type.GetField("_cachedCells", Private);
@@ -484,21 +486,24 @@ internal sealed class GlyphCacheProbe
     {
         var type = typeof(TerminalSurface).GetNestedType("GlyphLayouts", BindingFlags.NonPublic)!;
         using var cache = (IDisposable)Activator.CreateInstance(type, true)!;
-        var probe = Live(cache)!;
         type.GetMethod("Configure", Private)!.Invoke(cache, ["Consolas", 14f, 10f, 20f]);
         type.GetMethod("FitGrid", Private)!.Invoke(cache, [120 * 40]);
-        var run = type.GetMethod("GetRun", Private);
-        var reset = type.GetMethod("ResetKey", Private);
-        var append = type.GetMethod("AppendCell", Private);
+        var runs = type.GetProperty("Runs", Private)?.GetValue(cache);
+        var target = runs ?? cache;
+        var probe = Live(target)!;
+        var run = runs is null ? type.GetMethod("GetRun", Private) : runs.GetType().GetMethod("Prepare", Private);
+        var reset = target.GetType().GetMethod(runs is null ? "ResetKey" : "Begin", Private);
+        var append = target.GetType().GetMethod("AppendCell", Private);
         var get = type.GetMethod("Get", Private)!;
         int accepted = 0, rejected = 0, maximumCells = 0;
         void Shape(string token)
         {
             if (run is not null)
             {
-                reset!.Invoke(cache, null);
-                foreach (var character in token) append!.Invoke(cache, [character.ToString()]);
-                if (run.Invoke(cache, [device, token.Length, false, false]) is not null) accepted++;
+                reset!.Invoke(target, null);
+                foreach (var character in token) append!.Invoke(target, [character.ToString()]);
+                object?[] arguments = runs is null ? [device, token.Length, false, false] : [device, false, false];
+                if (run.Invoke(target, arguments) is not null) accepted++;
                 else rejected++;
             }
             else

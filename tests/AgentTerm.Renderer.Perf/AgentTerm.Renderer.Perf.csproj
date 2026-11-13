@@ -29,5 +29,7 @@
     <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Images.cs" Link="TerminalSurface.Images.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Images.cs')" />
     <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Rendering.cs" Link="TerminalSurface.Rendering.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Rendering.cs')" />
     <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Presentation.cs" Link="TerminalSurface.Presentation.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Presentation.cs')" />
+    <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.GlyphRuns.cs" Link="TerminalSurface.GlyphRuns.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.GlyphRuns.cs')" />
+    <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.DirectWrite.cs" Link="TerminalSurface.DirectWrite.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.DirectWrite.cs')" />
   </ItemGroup>
 </Project>
