@@ -15,10 +15,10 @@ public sealed partial class GhosttyTerminal
         _viewRevision++;
     }
 
-    private unsafe void ConfigureOverscan(bool enabled)
+    private unsafe void ConfigureOverscan(IntPtr state, bool enabled)
     {
         OverscanRequest request = enabled ? new() { Above = 1, Below = 1 } : default;
-        ThrowIfFailed(OverscanNative.ghostty_render_state_set(_renderState, 2, &request), "Could not configure render overscan.");
+        ThrowIfFailed(OverscanNative.ghostty_render_state_set(state, 2, &request), "Could not configure render overscan.");
     }
 
     [StructLayout(LayoutKind.Sequential)]

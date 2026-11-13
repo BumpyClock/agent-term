@@ -7,7 +7,9 @@ namespace AgentTerm.Terminal;
 public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 {
     // Lock order: _renderGate, then _gate. _renderGate owns the terminal's render state, so a frame can finish
-    // iterating cells after _gate is released while output keeps parsing.
+    // iterating cells after _gate is released while output keeps parsing. Native callbacks run inside a terminal
+    // write under _gate and must never take _renderGate; the render-hold callback captures through its own
+    // in-flight handoff instead (see GhosttyTerminal.RenderHold.cs and docs/libghostty/render-ownership.md).
     private readonly object _renderGate = new();
     private readonly object _gate = new();
     private readonly GhosttyTerminal _terminal;

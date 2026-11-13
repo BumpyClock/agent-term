@@ -9,7 +9,7 @@ public sealed partial class GhosttyTerminal
     {
         ThrowIfDisposed();
         Native.Utf8String value = default;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 12, &value), "Could not read terminal title.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, (int)TerminalData.Title, &value), "Could not read terminal title.");
         return value.Length == 0 ? string.Empty : Marshal.PtrToStringUTF8(value.Data, checked((int)value.Length))!;
     }
 }

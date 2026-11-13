@@ -14,7 +14,7 @@ public sealed partial class GhosttyTerminal
         Native.Selection selection = default;
         if (selectionOnly)
         {
-            var result = RenderNative.ghostty_terminal_get(_raw, 31, &selection);
+            var result = RenderNative.ghostty_terminal_get(_handle, 31, &selection);
             if (result == -4) return null;
             ThrowIfFailed(result, "Could not read export selection.");
         }

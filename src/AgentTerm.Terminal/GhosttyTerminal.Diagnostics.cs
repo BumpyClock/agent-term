@@ -25,9 +25,9 @@ public sealed partial class GhosttyTerminal
             report.AppendLine($"Native {names[i]} {enabled != 0}");
         }
         DiagnosticNative.Memory memory = new() { Size = (nuint)sizeof(DiagnosticNative.Memory) };
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 42, &memory), "Could not read terminal memory.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 42, &memory), "Could not read terminal memory.");
         byte processingError = 0;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 33, &processingError), "Could not read VT processing status.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 33, &processingError), "Could not read VT processing status.");
         report.AppendLine($"Grid {_columns} x {_rows}, cell pixels {_cellWidthPx} x {_cellHeightPx}");
         report.AppendLine($"Host clipboard {_hostCapabilities.Clipboard}, host Kitty images {_hostCapabilities.KittyImages}");
         report.AppendLine($"Page resident bytes {memory.Values[2] + memory.Values[8]}, reserved bytes {memory.Values[1] + memory.Values[7]}");
