@@ -75,6 +75,11 @@ public sealed partial class TerminalSession
         }
     }
 
+    private void InvalidatePendingFrameCapture()
+    {
+        lock (_workerGate) _operationVersion++;
+    }
+
     private Task<T> EnqueueOperation<T>(Func<TerminalSession, T> operation)
     {
         if (_workerClosed) return Task.FromException<T>(new ObjectDisposedException(nameof(TerminalSession)));

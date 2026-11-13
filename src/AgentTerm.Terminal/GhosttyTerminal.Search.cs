@@ -11,8 +11,7 @@ namespace AgentTerm.Terminal;
 public readonly record struct TerminalSearchSpan(int Row, int StartColumn, int EndColumn, bool Selected);
 
 /// <summary>
-/// Owned search highlights for one frame capture. Coordinates were converted from native matches inside the same
-/// terminal exclusion as the frame, so they describe exactly that frame and never reference native memory.
+/// Owned search highlights for one frame capture. Coordinates describe the captured frame and never reference native memory.
 /// </summary>
 public sealed record TerminalSearchHighlights(long ContentVersion, long ViewportOffset, bool AlternateScreen, TerminalSearchSpan[] Spans);
 
@@ -155,6 +154,11 @@ public sealed partial class GhosttyTerminal
     internal bool ExactSearchCandidate(int index)
     {
         if (index >= _candidateCount || _candidates[index] is not { StartY: not uint.MaxValue } span) return false;
+        return ExactSearchSpan(span);
+    }
+
+    private bool ExactSearchSpan(ScreenSpan span)
+    {
         if (Native.ghostty_terminal_grid_ref(_handle, ScreenPoint(span.StartX, span.StartY), out var start) != 0 ||
             Native.ghostty_terminal_grid_ref(_handle, ScreenPoint(span.EndX, span.EndY), out var end) != 0) return false;
         return MatchText(new Native.Selection { Start = start, End = end }, exact: true);
@@ -231,7 +235,7 @@ public sealed partial class GhosttyTerminal
         return MatchText(selected, _searchCaseSensitive);
     }
 
-    internal unsafe TerminalSearchHighlights? CaptureSearchHighlights()
+    internal unsafe TerminalSearchHighlights? PrepareSearchHighlightsSynchronously()
     {
         ThrowIfDisposed();
         if (_search is null) return null;
@@ -274,17 +278,19 @@ public sealed partial class GhosttyTerminal
         return _highlights = new TerminalSearchHighlights(ContentVersion, native.Offset, screen != 0, spans);
     }
 
-    private unsafe int ReadMatches(int data)
+    private int ReadMatches(int data) => ReadMatches(_search!, data);
+
+    private unsafe int ReadMatches(SearchHandle search, int data)
     {
         var buffer = new SearchSelectionBuffer();
-        var result = SearchNative.ghostty_search_get(_search!, data, &buffer);
+        var result = SearchNative.ghostty_search_get(search, data, &buffer);
         if (result == NativeResult.Success) return 0;
         if (result != NativeResult.OutOfSpace) ThrowIfFailed(result, "Could not size search matches.");
         if (_matchScratch.Length < (int)buffer.Length) _matchScratch = new Native.Selection[(int)buffer.Length];
         fixed (Native.Selection* ptr = _matchScratch)
         {
             buffer = new SearchSelectionBuffer { Pointer = ptr, Capacity = (nuint)_matchScratch.Length };
-            ThrowIfFailed(SearchNative.ghostty_search_get(_search!, data, &buffer), "Could not read search matches.");
+            ThrowIfFailed(SearchNative.ghostty_search_get(search, data, &buffer), "Could not read search matches.");
         }
         return checked((int)buffer.Length);
     }
@@ -330,6 +336,9 @@ public sealed partial class GhosttyTerminal
     private void ResetSearch()
     {
         _completedSearch = null;
+        _highlightSearch?.Dispose();
+        _highlightSearch = null;
+        _highlightPreparation = null;
         _search?.Dispose();
         _search = null; _searchQuery = null;
         _needle = []; _needleFoldsCase = false;

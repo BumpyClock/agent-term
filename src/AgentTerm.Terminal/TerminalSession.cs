@@ -62,7 +62,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     public ShellProfile Profile => _profile;
     public Task<int> Completion => _completion;
     public int ProcessId => _connection.ProcessId;
-    /// <summary>Raised on the reader thread after output is parsed. Handlers must return promptly.</summary>
+    /// <summary>Raised on a background thread when output or search highlights are ready. Handlers must return promptly.</summary>
     public event Action? OutputAvailable;
 
     /// <summary>Remaining synchronized-output hold delay after ReadFrame, or null when no recapture is required.</summary>
@@ -270,7 +270,8 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-                capture = _terminal.BeginFrame();
+                ScheduleSearchHighlights();
+                capture = _terminal.BeginFrameWithPreparedSearch();
             }
             return _terminal.CompleteFrame(capture);
         }

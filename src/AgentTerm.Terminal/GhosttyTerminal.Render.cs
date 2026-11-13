@@ -52,7 +52,11 @@ public sealed partial class GhosttyTerminal
     /// exclusion as any terminal call. Pass the result to <see cref="CompleteFrame"/>, and keep other render-state
     /// users (<see cref="ReadFrame"/>, scrolling, anchors, presented viewport reads, disposal) out until it returns.
     /// </summary>
-    internal FrameCapture BeginFrame()
+    internal FrameCapture BeginFrame() => BeginFrameCore(prepareSearch: true);
+
+    internal FrameCapture BeginFrameWithPreparedSearch() => BeginFrameCore(prepareSearch: false);
+
+    private FrameCapture BeginFrameCore(bool prepareSearch)
     {
         ThrowIfDisposed();
         Volatile.Write(ref _frameRefreshAt, 0);
@@ -71,8 +75,7 @@ public sealed partial class GhosttyTerminal
             EnsureRender();
             TickImageAnimations();
             EnsurePresentation();
-            // Search feed must not run in a native write callback. Boundary captures omit highlights.
-            var capture = CaptureMetadata() with { SearchHighlights = CaptureSearchHighlights() };
+            var capture = CaptureMetadata() with { SearchHighlights = prepareSearch ? PrepareSearchHighlightsSynchronously() : ReadPreparedSearchHighlights() };
             using (var lease = new HandleLease(_render))
             {
                 ConfigureOverscan(lease.Raw, capture.OverscanEnabled);

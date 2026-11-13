@@ -21,7 +21,7 @@ public sealed partial class TerminalSession
         lock (_renderGate) lock (_gate)
         {
             ThrowIfClosed();
-            return _terminal.CaptureSearchHighlights();
+            return _terminal.PrepareSearchHighlightsSynchronously();
         }
     }
 }

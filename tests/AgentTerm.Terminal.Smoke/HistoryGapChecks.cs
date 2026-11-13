@@ -28,32 +28,32 @@ internal static class HistoryGapChecks
         terminal.Write("o"u8);
         Check(terminal.Find("foo", false), "Fixture needs a match.");
         var frame = terminal.ReadFrame();
-        var highlights = terminal.CaptureSearchHighlights()!;
+        var highlights = terminal.PrepareSearchHighlightsSynchronously()!;
         Check(highlights.ContentVersion == frame.ContentVersion && highlights.ViewportOffset == frame.Viewport.Offset, "Highlights describe the captured viewport.");
         Check(highlights.Spans.Length >= 3, $"All visible matches highlight, got {highlights.Spans.Length}.");
         foreach (var span in highlights.Spans)
             Check(CellsText(frame, span).Equals("foo", StringComparison.OrdinalIgnoreCase) || span.EndColumn == frame.Columns - 1 || span.StartColumn == 0,
                 $"Span {span} must cover match text, got <{CellsText(frame, span)}>.");
         Check(highlights.Spans.Count(s => s.Selected) >= 1 && terminal.ReadSelectionText()!.Equals("foo", StringComparison.OrdinalIgnoreCase), "The native current match is marked and selected.");
-        Check(ReferenceEquals(highlights, terminal.CaptureSearchHighlights()), "Unchanged state reuses the highlight snapshot.");
+        Check(ReferenceEquals(highlights, terminal.PrepareSearchHighlightsSynchronously()), "Unchanged state reuses the highlight snapshot.");
 
         terminal.ScrollTo(0);
         var top = terminal.ReadFrame();
-        var scrolled = terminal.CaptureSearchHighlights()!;
+        var scrolled = terminal.PrepareSearchHighlightsSynchronously()!;
         Check(scrolled.ViewportOffset == 0 && scrolled.Spans.Length > 0 && scrolled.Spans.All(s => CellsText(top, s).Equals("foo", StringComparison.OrdinalIgnoreCase)),
             "A viewport shift re-derives highlights for the new rows.");
 
         terminal.PrepareSearch("FOO", true);
-        var exact = terminal.CaptureSearchHighlights()!;
+        var exact = terminal.PrepareSearchHighlightsSynchronously()!;
         Check(exact.Spans.Length > 0 && exact.Spans.All(s => CellsText(top, s) == "FOO"), "Match case highlights only exact-case matches.");
         terminal.PrepareSearch("", false);
-        Check(terminal.CaptureSearchHighlights() is null, "Clearing the query removes highlights.");
+        Check(terminal.PrepareSearchHighlightsSynchronously() is null, "Clearing the query removes highlights.");
 
         // A match wrapped across a soft wrap yields one span per row. "fo" ends row 30 and "o" starts row 31.
         terminal.PrepareSearch("foo", false);
         terminal.ScrollToBottom();
         var bottom = terminal.ReadFrame();
-        var wrapped = terminal.CaptureSearchHighlights()!.Spans.Where(s => s.Row >= bottom.Rows - 2).ToArray();
+        var wrapped = terminal.PrepareSearchHighlightsSynchronously()!.Spans.Where(s => s.Row >= bottom.Rows - 2).ToArray();
         Check(wrapped.Any(s => s.EndColumn == bottom.Columns - 1 && s.StartColumn == bottom.Columns - 2) && wrapped.Any(s => s.StartColumn == 0 && s.EndColumn == 0),
             "A soft-wrapped match splits into per-row spans: " + string.Join(", ", wrapped));
     }
