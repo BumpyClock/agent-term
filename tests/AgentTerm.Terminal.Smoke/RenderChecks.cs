@@ -11,6 +11,7 @@ internal static class RenderChecks
     public static void Run()
     {
         CheckSnapshotOwnership();
+        OverscanChecks.Run();
         using var terminal = new GhosttyTerminal(12, 3);
         terminal.Write(Encoding.UTF8.GetBytes("\x1b]4;1;rgb:12/34/56\x1b\\\x1b[1;3;4;9;2;8;38;2;10;20;30;48;2;40;50;60mA\x1b[0;7;38;5;1;48;2;1;2;3mB\x1b[0m界e\u0301"));
         var frame = terminal.ReadFrame();

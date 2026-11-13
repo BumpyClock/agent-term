@@ -23,9 +23,13 @@ public sealed record TerminalCursor(int Column, int Row, bool Visible, bool Blin
     public bool PasswordInput { get; init; }
 }
 
+public sealed record TerminalOverscanRow(int ViewportY, TerminalCell[] Cells);
+
 public sealed record TerminalFrame(int Columns, int Rows, TerminalCell[] Cells,
     TerminalCursor Cursor, TerminalColor Foreground, TerminalColor Background)
 {
+    public TerminalOverscanRow[] OverscanAbove { get; init; } = [];
+    public TerminalOverscanRow[] OverscanBelow { get; init; } = [];
     public TerminalViewport Viewport { get; init; }
     public bool HasSelection { get; init; }
     public TerminalColor SelectionBackground { get; init; } = new(45, 92, 150);
