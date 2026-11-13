@@ -27,7 +27,8 @@ internal static partial class StartupChecks
         async Task Refresh()
         {
             Invoke("RefreshOutput", session);
-            await WaitAsync(() => !Field<bool>(page, "_captureInFlight") && !Field<bool>(page, "_captureRequested"), "worker frame presentation");
+            await WaitAsync(() => !Field<bool>(page, "_captureInFlight") && !Field<bool>(page, "_captureRequested"), "worker frame capture");
+            await WaitAsync(() => ReferenceEquals(surface.PresentedFrame, Presented()), "raster presentation of the captured frame");
         }
         session.SetBottomAnchored(false);
         session.ConfigureEffects(new TerminalEffectOptions { Notifications = NotificationStyle.InApp, ClipboardWrite = ClipboardWritePolicy.Ask });
@@ -37,15 +38,18 @@ internal static partial class StartupChecks
         var pixels = Convert.ToBase64String(Enumerable.Range(0, 16).SelectMany(_ => new byte[] { 240, 100, 20, 255 }).ToArray());
         Emit($"\x1b_Ga=T,f=32,s=4,v=4,c=4,r=2,i=991,q=2;{pixels}\x1b\\");
         await Refresh();
-        await WaitAsync(() => Field<TerminalFrame?>(surface, "_paintedFrame")?.Images.IsEmpty == false, "Kitty image in the live WinUI raster");
-        var frame = Presented();
+        await WaitAsync(() => surface.PresentedFrame?.Images.IsEmpty == false, "Kitty image in the presented terminal raster");
+        var frame = surface.PresentedFrame!;
         if (!frame.Cells.Any(cell => cell.Overline && cell.UnderlineStyle == TerminalUnderlineStyle.Curly))
-            throw new Exception("Decorations were not retained by the real terminal surface.");
-        var raster = Field<CanvasRenderTarget>(surface, "_renderTarget");
-        if (!raster.GetPixelColors().Any(c => c.R > 220 && c.G is > 75 and < 125 && c.B < 40))
-            throw new Exception("The inline image did not reach the WinUI raster.");
-        await raster.SaveAsync(Path.ChangeExtension(Report, ".png"), CanvasBitmapFileFormat.Png);
-        report.Add("PASS actual WinUI raster contains native Kitty pixels and full text decorations.");
+            throw new Exception("Decorations were not retained by the presented terminal frame.");
+        var raster = await surface.ReadPresentedRasterAsync();
+        if (raster.Request.Frame.Images.IsEmpty || !raster.Request.Frame.Cells.Any(cell => cell.Overline && cell.UnderlineStyle == TerminalUnderlineStyle.Curly))
+            throw new Exception("Image readback did not retain its decorated frame.");
+        if (!Bgra(raster.Pixels).Any(c => c.R > 220 && c.G is > 75 and < 125 && c.B < 40))
+            throw new Exception("The inline image did not reach the presented terminal raster.");
+        await SavePresentedRasterAsync(raster, Path.ChangeExtension(Report, ".png"));
+        frame = Presented();
+        report.Add("PASS presented terminal raster contains native Kitty pixels and the presented frame keeps full text decorations.");
 
         var link = session.ReadLinkAt(0, 1, frame) ?? throw new Exception("Displayed OSC 8 link is missing.");
         Invoke("ApplyLinkHover", link, true, frame, 0, 1, false);
@@ -84,6 +88,7 @@ internal static partial class StartupChecks
         await WaitAsync(() => !Field<TerminalScrollAnimation>(page, "_scrollAnimation").IsActive, "fractional scrolling completion");
         await WaitAsync(() => !Field<bool>(page, "_renderingSubscribed") && !Field<bool>(page, "_frameRefreshQueued") &&
             !Field<bool>(page, "_captureInFlight"), "scrolling frame pump becoming idle");
+        await WaitAsync(() => ReferenceEquals(surface.PresentedFrame, Presented()), "settled scroll frame presentation");
         if (Presented().Viewport.Offset != offset - 5 || Field<double>(surface, "_scrollFraction") != 0 ||
             Presented().OverscanAbove.Length != 0 || Presented().OverscanBelow.Length != 0)
             throw new Exception($"Smooth scrolling did not settle. Offset {offset} -> {Presented().Viewport.Offset}, fraction {Field<double>(surface, "_scrollFraction")}, overscan {Presented().OverscanAbove.Length}/{Presented().OverscanBelow.Length}.");
@@ -129,7 +134,10 @@ internal static partial class StartupChecks
         {
             viewer.Activate();
             var archiveSurface = Field<TerminalSurface>(viewer, "_surface");
-            await WaitAsync(() => archiveSurface.IsLoaded && Field<CanvasRenderTarget?>(archiveSurface, "_renderTarget") is not null, "offline archive raster");
+            await WaitAsync(() => archiveSurface.IsLoaded && archiveSurface.HasRenderResources && archiveSurface.PresentedFrame is not null, "offline archive raster presentation");
+            var archivePixels = Bgra((await archiveSurface.ReadPresentedRasterAsync()).Pixels).ToArray();
+            if (archivePixels.Length == 0 || archivePixels.All(pixel => pixel == archivePixels[0]))
+                throw new Exception("Offline archive presented a blank raster.");
             if (!archiveSurface.Input.IsReadOnly) throw new Exception("Offline archive input is editable.");
             Field<TextBox>(viewer, "_query").Text = "offline-search-marker";
             typeof(TerminalArchiveWindow).GetMethod("Find", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(viewer, [true]);
@@ -144,10 +152,6 @@ internal static partial class StartupChecks
         await AssertRetainedHistoryScrollAsync(page, report);
     }
 
-    /// <summary>
-    /// A stopped or exited page keeps its terminal and history but has no frame driver (CanRefreshFrames needs Running).
-    /// A wheel there must move the viewport at once. Animating would only record a target that nothing advances.
-    /// </summary>
     private static async Task AssertRetainedHistoryScrollAsync(MainPage page, List<string> report)
     {
         const BindingFlags NonPublic = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -188,7 +192,6 @@ internal static partial class StartupChecks
                 if (Presented().Viewport.MaximumOffset < 20 || Presented().Viewport.Offset < 10)
                     throw new Exception($"After {ending} the fixture lost retained history: {Presented().Viewport}.");
 
-                // The same wheel runs with animations on and off, upward then downward, so one-step and accumulated input both count.
                 foreach (var (animate, rows) in new[] { (true, -5d), (true, 2d), (false, -3d), (true, -1d), (true, -1d) })
                 {
                     animations.SetValue(page, animate);
@@ -196,7 +199,8 @@ internal static partial class StartupChecks
                     var before = Presented().Viewport.Offset;
                     var expected = Math.Clamp(before + (long)rows, 0, Presented().Viewport.MaximumOffset);
                     typeof(MainPage).GetMethod("ScrollHistoryWheel", NonPublic)!.Invoke(page, [session, rows]);
-                    await WaitAsync(() => Presented().Viewport.Offset == expected, "retained history worker presentation");
+                    await WaitAsync(() => Presented().Viewport.Offset == expected && surface.PresentedFrame?.Viewport.Offset == expected,
+                        "retained history raster presentation");
                     for (var check = 0; check < 2; check++)
                     {
                         var animation = Field<TerminalScrollAnimation>(page, "_scrollAnimation");
@@ -218,9 +222,27 @@ internal static partial class StartupChecks
                 var burstStart = Presented().Viewport.Offset;
                 typeof(MainPage).GetMethod("ScrollHistoryWheel", NonPublic)!.Invoke(page, [session, -1d]);
                 typeof(MainPage).GetMethod("ScrollHistoryWheel", NonPublic)!.Invoke(page, [session, -1d]);
-                await WaitAsync(() => Presented().Viewport.Offset == Math.Max(0, burstStart - 2), "queued wheel deltas accumulate before presentation");
+                await WaitAsync(() => Presented().Viewport.Offset == Math.Max(0, burstStart - 2) &&
+                    surface.PresentedFrame?.Viewport.Offset == Math.Max(0, burstStart - 2), "queued wheel deltas accumulate before raster presentation");
             }
         }
         finally { animations.SetValue(page, original); }
+    }
+
+    private static IEnumerable<(byte B, byte G, byte R, byte A)> Bgra(byte[] pixels)
+    {
+        for (var index = 0; index + 3 < pixels.Length; index += 4)
+            yield return (pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]);
+    }
+
+    private static async Task SavePresentedRasterAsync(TerminalSurface.RasterReadback raster, string path)
+    {
+        var metrics = raster.Request.Metrics;
+        var pixels = raster.Pixels;
+        using var image = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), metrics.Width, metrics.Height, metrics.Dpi);
+        if (pixels.Length != image.SizeInPixels.Width * image.SizeInPixels.Height * 4)
+            throw new Exception($"Presented raster has {pixels.Length} bytes, not {image.SizeInPixels.Width}x{image.SizeInPixels.Height} BGRA pixels.");
+        image.SetPixelBytes(pixels);
+        await image.SaveAsync(path, CanvasBitmapFileFormat.Png);
     }
 }

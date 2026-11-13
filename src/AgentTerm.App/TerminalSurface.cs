@@ -21,17 +21,11 @@ public sealed partial class TerminalSurface : UserControl
     private const string FallbackFont = "Consolas";
     private static readonly Lazy<string[]> AvailableFonts = new(FindTerminalFonts);
     private static Task? _fontLookup;
-    private CanvasControl? _canvas;
     private CanvasControl? _cursorCanvas;
-    private readonly GlyphLayouts _glyphLayouts = new();
-    private CanvasRenderTarget? _renderTarget;
+    private readonly GlyphLayouts _cursorLayouts = new();
     private TerminalFrame? _paintedFrame;
-    private readonly List<(int FirstRow, int EndRow, int FirstColumn, int EndColumn)> _damageSpans = [];
-    private readonly Dictionary<(int First, int End), int> _damageColumns = [];
     private (Rect Bounds, TerminalCursor Cursor, TerminalCell Cell, TerminalColor? CursorText, bool Focused,
         float CellWidth, float CellHeight, float FontSize, string FontFamily, double GridTop) _cursorContent;
-    private (double Width, double Height, float Dpi, float CellWidth, float CellHeight, float FontSize,
-        string FontFamily, bool Transparent, float GridTop) _rasterMetrics;
     internal event Action<double>? DrawCompleted;
     private readonly TextBox _input = new()
     {
@@ -74,7 +68,7 @@ public sealed partial class TerminalSurface : UserControl
         if (_bottomAligned == aligned) return;
         _bottomAligned = aligned;
         PositionInput();
-        _canvas?.Invalidate();
+        RequestRaster();
         UpdateCursorOverlay();
     }
 
@@ -84,9 +78,6 @@ public sealed partial class TerminalSurface : UserControl
 
     private TerminalFrame? _frame;
     private bool _cursorPhase = true;
-    private bool _paintedTextPhase = true;
-    internal bool HasBlinkingText { get; private set; }
-    private bool[] _rowBlink = [];
     private bool _resourcesReady;
     private bool _suspended;
     private float _terminalFontSize = 14;
@@ -107,6 +98,7 @@ public sealed partial class TerminalSurface : UserControl
         _input.Resources["TextControlBackgroundPointerOver"] = transparent;
         _input.Resources["TextControlBorderBrushPointerOver"] = transparent;
         var root = new Grid();
+        root.Children.Add(_rasterHost);
         root.Children.Add(_input);
         Content = root;
         PrefetchFonts();
@@ -114,18 +106,25 @@ public sealed partial class TerminalSurface : UserControl
         _input.LostFocus += (_, _) => UpdateCursorOverlay();
         Loaded += (_, _) =>
         {
+            TrackXamlRoot(XamlRoot);
             if (!_suspended) AttachCanvas();
         };
-        Unloaded += (_, _) => { if (!IsLoaded) ReleaseCanvas(); };
-        ActualThemeChanged += (_, _) => _canvas?.Invalidate();
-        SizeChanged += (_, _) => { PositionInput(); _canvas?.Invalidate(); UpdateCursorOverlay(); };
+        Unloaded += (_, _) =>
+        {
+            if (IsLoaded) return;
+            TrackXamlRoot(null);
+            ReleaseCanvas();
+        };
+        ActualThemeChanged += (_, _) => UpdateHostBackground();
+        SizeChanged += (_, _) => { PositionInput(); RequestRaster(); UpdateCursorOverlay(); };
     }
 
     public void SetAcrylicBackground(bool enabled)
     {
         if (_acrylicBackground == enabled) return;
         _acrylicBackground = enabled;
-        _canvas?.Invalidate();
+        UpdateHostBackground();
+        RequestRaster();
     }
 
     internal static IReadOnlyList<string> FontFamilies => AvailableFonts.Value;
@@ -158,12 +157,10 @@ public sealed partial class TerminalSurface : UserControl
         _terminalFontSize = size;
         _preferredFontFamily = preferredFamily;
         _terminalFontFamily = family;
-        _glyphLayouts.Clear();
-        ResetRaster();
         if (family is not null) _input.FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(family);
         _input.FontSize = size;
         if (_resourcesReady) MeasureCells();
-        _canvas?.Invalidate();
+        RequestRaster();
     }
 
     public void SetFrame(TerminalFrame frame)
@@ -171,28 +168,9 @@ public sealed partial class TerminalSurface : UserControl
         if (ReferenceEquals(_frame, frame)) return;
         var previous = _frame;
         _frame = frame;
-        if (previous is null || !ReferenceEquals(previous.Cells, frame.Cells))
-        {
-            if (previous is null || previous.Rows != frame.Rows || previous.Columns != frame.Columns)
-                _rowBlink = new bool[frame.Rows];
-            for (var row = 0; row < frame.Rows; row++)
-            {
-                if (previous is not null && previous.Rows == frame.Rows && previous.Columns == frame.Columns && previous.Cells.SharesRowWith(frame.Cells, row)) continue;
-                _rowBlink[row] = false;
-                for (var col = 0; col < frame.Columns; col++)
-                {
-                    var cell = frame.Cells[row * frame.Columns + col];
-                    if (cell.Blink && !cell.Hidden) { _rowBlink[row] = true; break; }
-                }
-            }
-            HasBlinkingText = _rowBlink.Any(value => value);
-        }
         PositionInput();
-        if (previous is null || !ReferenceEquals(previous.Cells, frame.Cells) || previous.Columns != frame.Columns ||
-            previous.Rows != frame.Rows || previous.Viewport.TopInset != frame.Viewport.TopInset || previous.Background != frame.Background ||
-            previous.SelectionBackground != frame.SelectionBackground || previous.SelectionForeground != frame.SelectionForeground ||
-            !ReferenceEquals(previous.Images, frame.Images) || !ReferenceEquals(previous.SearchHighlights, frame.SearchHighlights))
-            _canvas?.Invalidate();
+        if (previous is null) UpdateHostBackground();
+        if (previous is null || !RasterEquivalent(previous, frame)) RequestRaster();
         else if (ReferenceEquals(_paintedFrame, previous)) _paintedFrame = frame;
         NotifyAutomationFrameChanged(previous is null || !ReferenceEquals(previous.Cells, frame.Cells) ||
             previous.Viewport != frame.Viewport || previous.Columns != frame.Columns || previous.Rows != frame.Rows,
@@ -208,7 +186,7 @@ public sealed partial class TerminalSurface : UserControl
         UpdateCursorOverlay();
         if (HasBlinkingText)
         {
-            _canvas?.Invalidate();
+            RequestRaster();
             _cursorCanvas?.Invalidate();
         }
     }
@@ -239,11 +217,8 @@ public sealed partial class TerminalSurface : UserControl
 
     private void AttachCanvas()
     {
-        if (_canvas is not null) return;
-        var canvas = new CanvasControl();
-        _canvas = canvas;
-        canvas.Draw += Draw;
-        canvas.CreateResources += CreateResources;
+        if (_cursorCanvas is not null) return;
+        AttachRaster();
         var cursor = new CanvasControl
         {
             IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
@@ -252,48 +227,31 @@ public sealed partial class TerminalSurface : UserControl
         _cursorCanvas = cursor;
         _cursorContent = default;
         cursor.Draw += DrawCursorOverlay;
-        ((Grid)Content).Children.Insert(0, canvas);
+        cursor.CreateResources += CreateCursorResources;
         ((Grid)Content).Children.Insert(1, cursor);
-        canvas.Invalidate();
     }
 
     private void ReleaseCanvas()
     {
-        var canvas = _canvas;
         var cursor = _cursorCanvas;
-        _canvas = null;
         _cursorCanvas = null;
         _cursorContent = default;
-        _resourcesReady = false;
-        _glyphLayouts.Clear();
-        _imageBitmaps.Clear();
-        ResetRaster();
-        if (cursor is not null)
-        {
-            cursor.Draw -= DrawCursorOverlay;
-            cursor.RemoveFromVisualTree();
-            ((Grid)Content).Children.Remove(cursor);
-        }
-        if (canvas is null) return;
-        canvas.Draw -= Draw;
-        canvas.CreateResources -= CreateResources;
-        canvas.RemoveFromVisualTree();
-        ((Grid)Content).Children.Remove(canvas);
+        _cursorLayouts.Clear();
+        ReleaseRaster();
+        if (cursor is null) return;
+        cursor.Draw -= DrawCursorOverlay;
+        cursor.CreateResources -= CreateCursorResources;
+        cursor.RemoveFromVisualTree();
+        ((Grid)Content).Children.Remove(cursor);
     }
 
-    private void CreateResources(CanvasControl sender, Microsoft.Graphics.Canvas.UI.CanvasCreateResourcesEventArgs args)
-    {
-        _glyphLayouts.Clear();
-        _imageBitmaps.Clear();
-        ResetRaster();
-        _resourcesReady = true;
-        MeasureCells();
-    }
+    private void CreateCursorResources(CanvasControl sender, Microsoft.Graphics.Canvas.UI.CanvasCreateResourcesEventArgs args) =>
+        _cursorLayouts.Clear();
 
     private void MeasureCells()
     {
         using var format = CreateFormat(false, false, _terminalFontSize, TerminalFontFamily);
-        using var layout = new CanvasTextLayout(_canvas!, "M", format, 100, 100);
+        using var layout = new CanvasTextLayout(CanvasDevice.GetSharedDevice(), "M", format, 100, 100);
         CellWidth = (float)Math.Ceiling(layout.LayoutBounds.Width);
         CellHeight = (float)Math.Ceiling(layout.LayoutBounds.Height);
         PositionInput();
@@ -310,42 +268,13 @@ public sealed partial class TerminalSurface : UserControl
         _input.Height = CellHeight;
     }
 
-    private void ResetRaster()
-    {
-        _renderTarget?.Dispose();
-        _renderTarget = null;
-        _paintedFrame = null;
-    }
-
     private static int _nextCapturePaneId;
     internal int CapturePaneId { get; } = Interlocked.Increment(ref _nextCapturePaneId);
-
-    private void Draw(CanvasControl sender, CanvasDrawEventArgs args)
-    {
-        if (_suspended) { args.DrawingSession.Clear(Microsoft.UI.Colors.Transparent); return; }
-        var measured = DrawCompleted;
-        var started = measured is null && !PerformanceCapture.Enabled ? 0 : Stopwatch.GetTimestamp();
-        if (_frame is { } frame)
-        {
-            var top = (float)Geometry.Top;
-            UpdateRaster(args.DrawingSession.Device, frame, top);
-            args.DrawingSession.Clear(Microsoft.UI.Colors.Transparent);
-            args.DrawingSession.DrawImage(_renderTarget);
-        }
-        else
-        {
-            var shade = ActualTheme == ElementTheme.Light ? (byte)250 : (byte)0;
-            args.DrawingSession.Clear(_acrylicBackground ? Color.FromArgb(0, 0, 0, 0) : Color.FromArgb(255, shade, shade, shade));
-        }
-        measured?.Invoke(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
-        if (PerformanceCapture.Enabled) PerformanceCapture.Record(PerformanceMetric.Draw, Stopwatch.GetElapsedTime(started).TotalMilliseconds, CapturePaneId);
-        UpdateCursorOverlay();
-    }
 
     private void UpdateCursorOverlay()
     {
         if (_cursorCanvas is not { } overlay) return;
-        var frame = _frame;
+        var frame = _paintedFrame;
         var focused = _input.FocusState != FocusState.Unfocused;
         if (_suspended || !_resourcesReady || _compositionVisible || frame is null || !frame.Cursor.Visible ||
             frame.Cursor.Column < 0 || frame.Cursor.Column >= frame.Columns ||
@@ -357,7 +286,7 @@ public sealed partial class TerminalSurface : UserControl
         var cursor = frame.Cursor;
         var column = cursor.WideTail && cursor.Column > 0 ? cursor.Column - 1 : cursor.Column;
         var cell = frame.Cells[cursor.Row * frame.Columns + column];
-        var (bounds, gridTop) = CursorOverlayGeometry(Geometry, column, cursor.Row, Math.Max(1, (int)cell.Width));
+        var (bounds, gridTop) = CursorOverlayGeometry(GeometryFor(frame), column, cursor.Row, Math.Max(1, (int)cell.Width));
         var content = (bounds, cursor, cell, frame.CursorText, focused, CellWidth, CellHeight, _terminalFontSize, TerminalFontFamily, gridTop);
         if (content != _cursorContent)
         {
@@ -373,8 +302,6 @@ public sealed partial class TerminalSurface : UserControl
         overlay.Opacity = cursor.Blink && focused && !_cursorPhase ? 0 : 1;
     }
 
-    // Bounds use coarse buckets to avoid resizing the overlay on every animation tick. The exact origin
-    // remains part of its content key so movement inside a bucket still redraws the cursor.
     internal static (Rect Bounds, double GridTop) CursorOverlayGeometry(TerminalGridGeometry geometry,
         int column, int row, int cellColumns)
     {
@@ -391,104 +318,11 @@ public sealed partial class TerminalSurface : UserControl
     {
         var drawing = args.DrawingSession;
         drawing.Clear(Microsoft.UI.Colors.Transparent);
-        if (_suspended || _frame is not { } frame) return;
+        if (_suspended || _paintedFrame is not { } frame) return;
         var content = _cursorContent;
-        _glyphLayouts.Configure(TerminalFontFamily, _terminalFontSize, CellWidth, CellHeight);
+        _cursorLayouts.Configure(TerminalFontFamily, _terminalFontSize, CellWidth, CellHeight);
         drawing.Transform = Matrix3x2.CreateTranslation(-(float)content.Bounds.X, -(float)content.Bounds.Y);
-        DrawCursor(drawing, frame, CellWidth, CellHeight, _glyphLayouts, content.Focused, true, false, (float)content.GridTop, _cursorPhase);
-    }
-
-    private void UpdateRaster(CanvasDevice device, TerminalFrame frame, float top)
-    {
-        var metrics = (ActualWidth, ActualHeight, _canvas!.Dpi, CellWidth, CellHeight,
-            _terminalFontSize, TerminalFontFamily, _acrylicBackground, top);
-        var originChanged = _rasterMetrics.GridTop != top;
-        _rasterMetrics.GridTop = top;
-        if (_renderTarget is null || _rasterMetrics != metrics)
-        {
-            ResetRaster();
-            _renderTarget = new CanvasRenderTarget(device, (float)ActualWidth, (float)ActualHeight, _canvas.Dpi);
-            _rasterMetrics = metrics;
-        }
-        var previous = _paintedFrame;
-        var full = originChanged || frame.OverscanAbove.Length != 0 || frame.OverscanBelow.Length != 0 || previous is null || previous.Columns != frame.Columns || previous.Rows != frame.Rows ||
-            previous.Viewport.TopInset != frame.Viewport.TopInset || previous.Background != frame.Background ||
-            previous.SelectionBackground != frame.SelectionBackground || previous.SelectionForeground != frame.SelectionForeground ||
-            !ReferenceEquals(previous.SearchHighlights, frame.SearchHighlights);
-        _glyphLayouts.Configure(TerminalFontFamily, _terminalFontSize, CellWidth, CellHeight);
-        _glyphLayouts.FitGrid(frame.Cells.Length);
-        if (full)
-        {
-            using (var drawing = _renderTarget.CreateDrawingSession())
-                DrawFrameCore(drawing, frame, CellWidth, CellHeight, _glyphLayouts, false, false,
-                    _terminalFontSize, _acrylicBackground, TerminalFontFamily, true, top, _cursorPhase, _imageBitmaps, (float)ActualHeight);
-            _imageBitmaps.Trim(frame.Images);
-        }
-        else if (!ReferenceEquals(previous!.Cells, frame.Cells) || !ReferenceEquals(previous.Images, frame.Images) ||
-            _paintedTextPhase != _cursorPhase && HasBlinkingText)
-        {
-            using var drawing = _renderTarget.CreateDrawingSession();
-            var scale = _canvas.Dpi / 96;
-            var rows = TerminalGridGeometry.VisibleRows(frame);
-            var spans = _damageSpans;
-            var latest = _damageColumns;
-            spans.Clear();
-            latest.Clear();
-            if (!ReferenceEquals(previous.Images, frame.Images))
-                AddImageDamage(previous.Images, frame.Images, frame.Columns, rows, CellWidth, CellHeight, top, spans);
-            for (var row = 0; row < rows; row++)
-            {
-                if (previous.Cells.SharesRowWith(frame.Cells, row) && !(_paintedTextPhase != _cursorPhase && _rowBlink[row])) continue;
-                for (var col = 0; col < frame.Columns;)
-                {
-                    if (!CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) { col++; continue; }
-                    var first = col;
-                    while (first > 0 && (HasText(previous, row, first) || HasText(frame, row, first)) &&
-                        (HasText(previous, row, first - 1) || HasText(frame, row, first - 1))) first--;
-                    first = Math.Min(first, Math.Max(0, col - 2));
-                    var lastChanged = col++;
-                    while (col < frame.Columns && col <= lastChanged + 4)
-                    {
-                        if (CellNeedsRepaint(previous.Cells[row * frame.Columns + col], frame.Cells[row * frame.Columns + col], _paintedTextPhase != _cursorPhase)) lastChanged = col;
-                        col++;
-                    }
-                    var end = lastChanged + 1;
-                    while (end < frame.Columns && (HasText(previous, row, end - 1) || HasText(frame, row, end - 1)) &&
-                        (HasText(previous, row, end) || HasText(frame, row, end))) end++;
-                    end = Math.Max(end, Math.Min(frame.Columns, lastChanged + 3));
-                    col = Math.Max(col, end);
-                    if (latest.TryGetValue((first, end), out var previousSpan) && spans[previousSpan].EndRow == row)
-                    {
-                        var span = spans[previousSpan];
-                        spans[previousSpan] = (span.FirstRow, row + 1, first, end);
-                    }
-                    else
-                    {
-                        latest[(first, end)] = spans.Count;
-                        spans.Add((row, row + 1, first, end));
-                    }
-                }
-            }
-            foreach (var span in spans)
-            {
-                var left = MathF.Floor(span.FirstColumn * CellWidth * scale) / scale;
-                var right = MathF.Ceiling(span.EndColumn * CellWidth * scale) / scale;
-                var upper = MathF.Floor((top + span.FirstRow * CellHeight) * scale) / scale;
-                var lower = MathF.Ceiling((top + span.EndRow * CellHeight) * scale) / scale;
-                var damage = new Rect(left, upper, right - left, lower - upper);
-                using var clip = drawing.CreateLayer(1, damage);
-                drawing.Blend = CanvasBlend.Copy;
-                drawing.FillRectangle(damage, _acrylicBackground ? Microsoft.UI.Colors.Transparent : ToColor(frame.Background));
-                drawing.Blend = CanvasBlend.SourceOver;
-                DrawCells(drawing, frame, CellWidth, CellHeight, _glyphLayouts, top,
-                    Math.Max(0, (int)MathF.Floor((upper - top) / CellHeight)),
-                    Math.Min(rows, (int)MathF.Ceiling((lower - top) / CellHeight)),
-                    Math.Max(0, (int)MathF.Floor(left / CellWidth) - 1),
-                    Math.Min(frame.Columns, (int)MathF.Ceiling(right / CellWidth) + 1), _cursorPhase, _imageBitmaps, damageClip: damage);
-            }
-        }
-        _paintedFrame = frame;
-        _paintedTextPhase = _cursorPhase;
+        DrawCursor(drawing, frame, CellWidth, CellHeight, _cursorLayouts, content.Focused, true, false, (float)content.GridTop, _cursorPhase);
     }
 
     private static bool HasText(TerminalFrame frame, int row, int column) =>
@@ -505,7 +339,7 @@ public sealed partial class TerminalSurface : UserControl
         using var images = new ImageBitmaps();
         DrawFrameCore(drawing, frame, cellWidth, cellHeight, layouts, focused, cursorPhase, fontSize,
             transparentBackground, fontFamily, hideCursor, gridTop, textPhase, images);
-        drawing.Flush(); // Submit draws before the temporary bitmap owner is disposed.
+        drawing.Flush();
     }
 
     private static void DrawFrameCore(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
@@ -567,7 +401,6 @@ public sealed partial class TerminalSurface : UserControl
                 if (span.Row < firstRow || span.Row >= endRow || span.Row < 0 || span.Row >= frame.Rows) continue;
                 var first = Math.Max(firstColumn, Math.Clamp(span.StartColumn, 0, frame.Columns - 1));
                 var last = Math.Clamp(span.EndColumn, 0, frame.Columns - 1);
-                // Native matches end at a wide glyph's head. Cover its continuation cell too.
                 last = Math.Min(endColumn - 1, last + Math.Max(1, (int)CellAt(span.Row, last).Width) - 1);
                 if (last < first) continue;
                 var color = span.Selected ? Color.FromArgb(100, 255, 170, 30) : Color.FromArgb(65, 255, 210, 70);
@@ -701,6 +534,8 @@ public sealed partial class TerminalSurface : UserControl
         private (string Family, float Size, float CellWidth, float CellHeight) _metrics;
 
         internal GlyphLayouts() => _lookup = _layouts.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        internal (int Count, int Cells, int Capacity, long Created) Usage => (_layouts.Count, _cachedCells, _capacity, _created);
 
         internal void Configure(string family, float size, float cellWidth, float cellHeight)
         {

@@ -127,6 +127,64 @@ internal sealed class CompositorCapture : IDisposable
         double At(double percentile) => values.Count == 0 ? 0 : values[Math.Min(values.Count - 1, (int)(percentile * values.Count))];
     }
 
+    internal static async Task<(bool Matched, int Differences, string Sample, byte[] Actual)> WaitForSurfacePixelsAsync(Window window, AgentTerm_App.TerminalSurface surface,
+        int left, int top, int width, int height, byte[] expectedBgra, TimeSpan patience, int tolerance = 0)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        var client = new Point();
+        if (!ClientToScreen(hwnd, ref client)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        Marshal.ThrowExceptionForHR(DwmGetWindowAttribute(hwnd, 9, out var bounds, Marshal.SizeOf<Rect>()));
+        var origin = surface.TransformToVisual((UIElement)window.Content).TransformPoint(new Windows.Foundation.Point());
+        var scale = surface.XamlRoot.RasterizationScale;
+        var x = (int)Math.Round(client.X - bounds.Left + origin.X * scale) + left;
+        var y = (int)Math.Round(client.Y - bounds.Top + origin.Y * scale) + top;
+        using var device = new CanvasDevice();
+        var item = CreateItem(hwnd);
+        using var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
+        using var crop = new CanvasRenderTarget(device, width, height, 96);
+        var gate = new object();
+        var result = new TaskCompletionSource<(bool, int, string, byte[])>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var differences = -1;
+        var sample = "";
+        byte[] last = [];
+        pool.FrameArrived += (sender, _) =>
+        {
+            lock (gate)
+            {
+                if (result.Task.IsCompleted) return;
+                try
+                {
+                    using var frame = sender.TryGetNextFrame();
+                    if (frame is null) return;
+                    using var bitmap = CanvasBitmap.CreateFromDirect3D11Surface(device, frame.Surface);
+                    using (var drawing = crop.CreateDrawingSession())
+                    {
+                        drawing.Blend = Microsoft.Graphics.Canvas.CanvasBlend.Copy;
+                        drawing.DrawImage(bitmap, new Windows.Foundation.Rect(0, 0, width, height), new Windows.Foundation.Rect(x, y, width, height),
+                            1, CanvasImageInterpolation.NearestNeighbor);
+                    }
+                    var actual = crop.GetPixelBytes();
+                    last = actual;
+                    differences = 0;
+                    for (var index = 0; index < actual.Length; index += 4)
+                        if (Math.Abs(actual[index] - expectedBgra[index]) > tolerance || Math.Abs(actual[index + 1] - expectedBgra[index + 1]) > tolerance ||
+                            Math.Abs(actual[index + 2] - expectedBgra[index + 2]) > tolerance)
+                        {
+                            if (differences++ == 0)
+                                sample = $"first at pixel {index / 4}: actual BGR {actual[index]},{actual[index + 1]},{actual[index + 2]}; expected {expectedBgra[index]},{expectedBgra[index + 1]},{expectedBgra[index + 2]}";
+                        }
+                    if (differences == 0) result.TrySetResult((true, 0, "", actual));
+                }
+                catch (Exception error) { result.TrySetException(error); }
+            }
+        };
+        using var session = pool.CreateCaptureSession(item);
+        session.IsCursorCaptureEnabled = false;
+        session.StartCapture();
+        try { return await result.Task.WaitAsync(patience); }
+        catch (TimeoutException) { lock (gate) return (false, differences, sample, last); }
+    }
+
     private static GraphicsCaptureItem CreateItem(IntPtr hwnd)
     {
         const string className = "Windows.Graphics.Capture.GraphicsCaptureItem";

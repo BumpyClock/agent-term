@@ -152,6 +152,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _cursorTimer = DispatcherQueue.CreateTimer();
         _cursorTimer.Interval = TimeSpan.FromMilliseconds(528);
         _cursorTimer.Tick += (_, _) => Terminal.SetCursorPhase(((Environment.TickCount64 - _blinkStarted) / 528) % 2 == 0);
+        Terminal.BlinkingTextChanged += UpdateCursorBlink;
         _synchronizedRefreshTimer = DispatcherQueue.CreateTimer();
         _synchronizedRefreshTimer.IsRepeating = false;
         _synchronizedRefreshTimer.Tick += (_, _) => RequestFrameRefresh();

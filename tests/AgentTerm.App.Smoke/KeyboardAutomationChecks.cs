@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Automation.Text;
 
-// Run on the WinUI dispatcher from the app smoke entrypoint.
 internal static class KeyboardAutomationChecks
 {
     internal static void Run()

@@ -10,6 +10,7 @@
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <TerminalSurfaceSource Condition="'$(TerminalSurfaceSource)' == ''">$(MSBuildThisFileDirectory)../../src/AgentTerm.App/TerminalSurface.cs</TerminalSurfaceSource>
     <TerminalSurfaceScrollingSource>$([System.IO.Path]::GetDirectoryName('$(TerminalSurfaceSource)'))/TerminalSurface.Scrolling.cs</TerminalSurfaceScrollingSource>
@@ -26,5 +27,7 @@
     <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.AutomationText.cs" Link="TerminalSurface.AutomationText.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.AutomationText.cs')" />
     <Compile Include="$(TerminalSurfaceScrollingSource)" Link="TerminalSurface.Scrolling.cs" Condition="Exists('$(TerminalSurfaceScrollingSource)')" />
     <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Images.cs" Link="TerminalSurface.Images.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Images.cs')" />
+    <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Rendering.cs" Link="TerminalSurface.Rendering.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Rendering.cs')" />
+    <Compile Include="$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Presentation.cs" Link="TerminalSurface.Presentation.cs" Condition="Exists('$([System.IO.Path]::GetDirectoryName($(TerminalSurfaceSource)))/TerminalSurface.Presentation.cs')" />
   </ItemGroup>
 </Project>

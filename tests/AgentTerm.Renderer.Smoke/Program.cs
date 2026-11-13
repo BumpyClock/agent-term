@@ -31,6 +31,11 @@ internal static class Program
             TextRunRasterChecks.Run(device);
             return;
         }
+        if (args.Contains("--raster-worker-only"))
+        {
+            RasterWorkerChecks.Run(device);
+            return;
+        }
         SmoothScrollRasterChecks.Run(device);
         if (args.Contains("--smooth-scroll-only")) return;
         FidelityRasterChecks.Run(device);
@@ -118,6 +123,7 @@ internal static class Program
         TextRunRasterChecks.Run(device);
         GridGeometryChecks.Run(device);
         KittyImageRenderChecks.Run(device);
+        RasterWorkerChecks.Run(device);
         Console.WriteLine($"Renderer pixel checks passed. Snapshot: {output}");
     }
 

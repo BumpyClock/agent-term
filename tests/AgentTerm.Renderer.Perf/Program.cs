@@ -98,7 +98,8 @@ internal static partial class Program
             var pendingDelay = typeof(TerminalSession).GetProperty("PendingFrameRefreshDelay");
             if (outputDriven && (outputEvent is null || pendingDelay is null))
                 throw new ArgumentException("This TerminalSession revision lacks OutputAvailable or PendingFrameRefreshDelay. Use --schedule timer.");
-            var canvas = (CanvasControl)typeof(TerminalSurface).GetField("_canvas", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface)!;
+            var probe = new SurfaceProbe(surface);
+            if (!SurfaceProbe.ReportsPresentation) throw new Exception("This renderer does not report presented frames.");
             var glyphCache = GlyphCacheProbe.For(surface);
             var drawIntervals = new List<double>();
             var refreshDurations = new List<double>();
@@ -115,30 +116,25 @@ internal static partial class Program
             var maxGlyphLayouts = 0;
             var maxGlyphCells = 0;
             var pendingRefreshMs = 0d;
-            TerminalFrame? lastFrame = null, expectedFinalFrame = null;
-            var finalDraw = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            TerminalFrame? lastFrame = null;
             var heldShown = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
             long goTimestamp = 0;
             Exception? callbackError = null;
-            var completedEvent = typeof(TerminalSurface).GetEvent("DrawCompleted", BindingFlags.Instance | BindingFlags.NonPublic);
-            Action<double> completed = duration =>
-            {
-                if (!measuring) return;
-                drawWorkDurations.Add(duration);
-                frameWorkDurations.Add(pendingRefreshMs + duration);
-                pendingRefreshMs = 0;
-            };
-            completedEvent?.GetAddMethod(true)?.Invoke(surface, [completed]);
-            canvas.Draw += (_, _) =>
+            probe.OnPresented(duration =>
             {
                 totalDraws++;
+                if (measuring)
+                {
+                    drawWorkDurations.Add(duration);
+                    frameWorkDurations.Add(pendingRefreshMs + duration);
+                    pendingRefreshMs = 0;
+                }
                 if (glyphCache is not null)
                 {
                     maxGlyphLayouts = Math.Max(maxGlyphLayouts, glyphCache.Count);
                     maxGlyphCells = Math.Max(maxGlyphCells, glyphCache.Cells);
                 }
-                if (expectedFinalFrame is not null && ReferenceEquals(expectedFinalFrame, lastFrame)) finalDraw.TrySetResult();
-                if (pattern == "held" && goTimestamp != 0 && lastFrame is { } shown && FrameText(shown).Contains(HeldMarker))
+                if (pattern == "held" && goTimestamp != 0 && probe.Presented is { } shown && FrameText(shown).Contains(HeldMarker))
                     heldShown.TrySetResult(Stopwatch.GetElapsedTime(goTimestamp).TotalMilliseconds);
                 if (!measuring) { undrawnArrival = 0; return; }
                 var now = Stopwatch.GetTimestamp();
@@ -147,7 +143,7 @@ internal static partial class Program
                 if (lastDraw != 0) drawIntervals.Add(Stopwatch.GetElapsedTime(lastDraw, now).TotalMilliseconds);
                 lastDraw = now;
                 draws++;
-            };
+            });
             var holdTimer = window.DispatcherQueue.CreateTimer();
             holdTimer.IsRepeating = false;
             var outputQueued = 0;
@@ -362,34 +358,21 @@ internal static partial class Program
                 throw new Exception($"Work did not render. draws={draws}, changedFrames={changedFrames}, workloadText={text.Contains(marker)}.");
             if (glyphCache is not null && maxGlyphCells > glyphCache.Capacity)
                 throw new Exception($"Glyph cache held {maxGlyphCells} cells above its {glyphCache.Capacity} capacity.");
-            lastFrame = expectedFinalFrame = finalFrame;
+            lastFrame = finalFrame;
             surface.SetFrame(finalFrame);
-            canvas.Invalidate();
-            try { await finalDraw.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
-            catch (TimeoutException)
-            {
-                var ticks = 0;
-                EventHandler<object> probe = (_, _) => ticks++;
-                CompositionTarget.Rendering += probe;
-                var drawsBefore = totalDraws;
-                canvas.Invalidate();
-                await Task.Delay(1000);
-                CompositionTarget.Rendering -= probe;
-                var current = typeof(TerminalSurface).GetField("_canvas", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface);
-                throw new TimeoutException($"Final draw missing. ticks={ticks} drawsAfterProbe={totalDraws - drawsBefore} sameCanvas={ReferenceEquals(current, canvas)} canvasLoaded={canvas.IsLoaded} ready={canvas.ReadyToDraw} visible={window.Visible} surfaceLoaded={surface.IsLoaded} size={canvas.ActualWidth}x{canvas.ActualHeight}");
-            }
+            await probe.WhenPresentedAsync(finalFrame, $"Final frame (visible={window.Visible}, loaded={surface.IsLoaded}, size={surface.ActualWidth}x{surface.ActualHeight})");
             var gridTop = (float)TerminalGridGeometry.For(finalFrame, surface.ActualHeight, surface.CellWidth, surface.CellHeight, true).Top;
-            using var target = new CanvasRenderTarget(canvas, (float)surface.ActualWidth, (float)surface.ActualHeight, canvas.Dpi);
+            using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), (float)surface.ActualWidth, (float)surface.ActualHeight, probe.Dpi);
             using (var drawing = target.CreateDrawingSession())
                 TerminalSurface.DrawFrame(drawing, finalFrame, surface.CellWidth, surface.CellHeight, true, true,
                     transparentBackground: true, fontFamily: surface.TerminalFontFamily, hideCursor: true, gridTop: gridTop);
             var pixels = target.GetPixelBytes();
             if (!pixels.Any(value => value != 0)) throw new Exception("Final rendered frame is blank.");
-            var retained = typeof(TerminalSurface).GetField("_renderTarget", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(surface) as CanvasRenderTarget;
+            var retained = await probe.ReadRasterAsync();
             var retainedStatus = retained is null ? "not-available" : "exact-reference-match";
-            if (retained is not null && !retained.GetPixelBytes().SequenceEqual(pixels))
-                throw new Exception("Onscreen retained raster differs from the full reference renderer.");
-            await (retained ?? target).SaveAsync(Path.ChangeExtension(output, ".png"), CanvasBitmapFileFormat.Png);
+            if (retained is not null && (!retained.Pixels.SequenceEqual(pixels) || retained.Frame is { } painted && !ReferenceEquals(painted.Cells, finalFrame.Cells)))
+                throw new Exception("Presented retained raster differs from the full reference renderer.");
+            await target.SaveAsync(Path.ChangeExtension(output, ".png"), CanvasBitmapFileFormat.Png);
             if (presentMon is not null)
             {
                 await presentMon.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
@@ -400,17 +383,17 @@ internal static partial class Program
             {
                 elapsedSeconds = elapsed, cpuSeconds, allocatedBytes = allocated, gcPauseMs = pauseMs, gcCounts,
                 draws, changedFrames, columns, rows, surfaceWidth = surface.ActualWidth, surfaceHeight = surface.ActualHeight,
-                cellWidth = surface.CellWidth, cellHeight = surface.CellHeight, font = surface.TerminalFontFamily, dpi = canvas.Dpi,
+                cellWidth = surface.CellWidth, cellHeight = surface.CellHeight, font = surface.TerminalFontFamily, dpi = probe.Dpi,
                 rasterizationScale = surface.XamlRoot.RasterizationScale,
-                fixtureSchemaVersion = 4,
+                fixtureSchemaVersion = 5,
                 workloadHz = hz, workloadPattern = pattern,
                 refreshSchedule = schedule switch { "demand" => "output-demand", "deferred" => "output-demand-deferred", "composition" => "composition-continuous", _ => "timer" },
                 refreshIntervalMs = schedule == "timer" ? refreshMs : (int?)null,
                 readFrames, renderingSubscriptions, outputNotifications, holdTimerFires, heldLatencyMs, idle,
                 drawIntervals = Stats(drawIntervals), outputToDrawLatency = outputDriven ? Stats(outputToDraw) : null, refreshDurations = Stats(refreshDurations), heartbeatIntervals = Stats(heartbeatIntervals),
-                drawWorkAvailability = completedEvent is null ? "not-available" : "callback-elapsed-only",
-                drawWorkDurations = completedEvent is null ? null : Stats(drawWorkDurations),
-                frameWorkDurations = completedEvent is null ? null : Stats(frameWorkDurations), retainedRaster = retainedStatus,
+                drawWorkAvailability = SurfaceProbe.WorkerOwned ? "worker-preparation-elapsed" : "callback-elapsed-only",
+                drawWorkDurations = Stats(drawWorkDurations),
+                frameWorkDurations = Stats(frameWorkDurations), retainedRaster = retainedStatus,
                 glyphCache = glyphCache is null ? null : new { capacity = glyphCache.Capacity, maxLayouts = maxGlyphLayouts, maxCells = maxGlyphCells, createdEntries = glyphLayoutsCreated },
                 privateBytesStart, privateBytesEnd,
                 measurementStartQpcMs = measurementStartQpc * 1000d / Stopwatch.Frequency,
@@ -475,26 +458,33 @@ internal static partial class Program
 internal sealed class GlyphCacheProbe
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
-    private readonly object _cache;
-    private readonly FieldInfo _layouts, _capacity, _created;
-    private readonly FieldInfo? _cells;
+    private readonly Func<(int Count, int Cells, int Capacity, long Created)> _read;
 
-    private GlyphCacheProbe(object cache, FieldInfo layouts, FieldInfo capacity, FieldInfo created)
+    private GlyphCacheProbe(Func<(int Count, int Cells, int Capacity, long Created)> read) => _read = read;
+
+    internal int Count => _read().Count;
+    internal int Cells => _read().Cells;
+    internal int Capacity => _read().Capacity;
+    internal long Created => _read().Created;
+
+    private static GlyphCacheProbe? Live(object cache)
     {
-        (_cache, _layouts, _capacity, _created) = (cache, layouts, capacity, created);
-        _cells = cache.GetType().GetField("_cachedCells", Private);
+        var type = cache.GetType();
+        if (type.GetField("_layouts", Private) is not { } layouts || type.GetField("_capacity", Private) is not { } capacity ||
+            type.GetField("_created", Private) is not { } created) return null;
+        var cells = type.GetField("_cachedCells", Private);
+        return new(() =>
+        {
+            var count = ((System.Collections.ICollection)layouts.GetValue(cache)!).Count;
+            return (count, cells is null ? count : (int)cells.GetValue(cache)!, (int)capacity.GetValue(cache)!, (long)created.GetValue(cache)!);
+        });
     }
-
-    internal int Count => ((System.Collections.ICollection)_layouts.GetValue(_cache)!).Count;
-    internal int Cells => _cells is null ? Count : (int)_cells.GetValue(_cache)!;
-    internal int Capacity => (int)_capacity.GetValue(_cache)!;
-    internal long Created => (long)_created.GetValue(_cache)!;
 
     internal static void CheckUniqueTokens(CanvasDevice device, string output)
     {
         var type = typeof(TerminalSurface).GetNestedType("GlyphLayouts", BindingFlags.NonPublic)!;
         using var cache = (IDisposable)Activator.CreateInstance(type, true)!;
-        var probe = new GlyphCacheProbe(cache, type.GetField("_layouts", Private)!, type.GetField("_capacity", Private)!, type.GetField("_created", Private)!);
+        var probe = Live(cache)!;
         type.GetMethod("Configure", Private)!.Invoke(cache, ["Consolas", 14f, 10f, 20f]);
         type.GetMethod("FitGrid", Private)!.Invoke(cache, [120 * 40]);
         var run = type.GetMethod("GetRun", Private);
@@ -534,9 +524,14 @@ internal sealed class GlyphCacheProbe
 
     internal static GlyphCacheProbe? For(TerminalSurface surface)
     {
-        if (typeof(TerminalSurface).GetField("_glyphLayouts", Private)?.GetValue(surface) is not { } cache) return null;
-        var type = cache.GetType();
-        return type.GetField("_layouts", Private) is { } layouts && type.GetField("_capacity", Private) is { } capacity &&
-            type.GetField("_created", Private) is { } created ? new(cache, layouts, capacity, created) : null;
+        if (typeof(TerminalSurface).GetField("_glyphLayouts", Private)?.GetValue(surface) is { } cache) return Live(cache);
+        if (typeof(TerminalSurface).GetProperty("PresentedRasterStats", Private) is not { } stats) return null;
+        return new(() =>
+        {
+            if (stats.GetValue(surface) is not { } value) return (0, 0, 0, 0);
+            var type = value.GetType();
+            T Read<T>(string name) => (T)type.GetProperty(name)!.GetValue(value)!;
+            return (Read<int>("GlyphLayouts"), Read<int>("GlyphCells"), Read<int>("GlyphCapacity"), Read<long>("GlyphsCreated"));
+        });
     }
 }

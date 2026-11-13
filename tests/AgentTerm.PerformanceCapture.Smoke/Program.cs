@@ -10,7 +10,7 @@ if (mode == "storage-failure") File.WriteAllText(directory, "a file prevents dir
 try
 {
     PerformanceCapture.Start(new DispatcherQueue());
-    for (var index = 0; index < 100; index++) PerformanceCapture.Record(PerformanceMetric.Draw, 20, 7);
+    for (var index = 0; index < 100; index++) PerformanceCapture.Record(PerformanceMetric.RasterPreparation, 20, 7);
     if (mode == "disabled")
     {
         await Task.Delay(300);
@@ -28,7 +28,9 @@ try
             var lines = File.ReadAllLines(Directory.GetFiles(directory, "perf-*.jsonl").Single());
             using var document = JsonDocument.Parse(lines.Single());
             var root = document.RootElement;
-            var draw = root.GetProperty("metrics").GetProperty("Draw");
+            if (root.GetProperty("schema").GetInt32() != 2 || root.GetProperty("metrics").TryGetProperty("Draw", out _))
+                throw new Exception("Worker raster timings must not use the old UI draw metric.");
+            var draw = root.GetProperty("metrics").GetProperty("RasterPreparation");
             if (draw.GetProperty("count").GetInt64() != 100 || draw.GetProperty("meanMs").GetDouble() != 20)
                 throw new Exception("Aggregate counts or units incorrect.");
             if (root.GetProperty("slowEvents").GetArrayLength() != 64 || root.GetProperty("droppedSlowEvents").GetInt32() != 36)

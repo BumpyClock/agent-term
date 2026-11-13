@@ -9,7 +9,7 @@ public sealed partial class TerminalSurface
         if (_scrollFraction == fraction) return;
         _scrollFraction = fraction;
         PositionInput();
-        _canvas?.Invalidate();
+        RequestRaster();
         UpdateCursorOverlay();
     }
 

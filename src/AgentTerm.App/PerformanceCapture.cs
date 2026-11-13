@@ -4,7 +4,7 @@ using Microsoft.UI.Dispatching;
 
 namespace AgentTerm_App;
 
-internal enum PerformanceMetric { UiQueueDelay, OutputQueueDelay, CaptureLatency, FrameRefresh, Draw, InputDispatch }
+internal enum PerformanceMetric { UiQueueDelay, OutputQueueDelay, CaptureLatency, FrameRefresh, RasterPreparation, InputDispatch }
 
 internal static class PerformanceCapture
 {
@@ -115,7 +115,7 @@ internal static class PerformanceCapture
             using var process = Process.GetCurrentProcess();
             var record = new
             {
-                schema = 1, utc = DateTime.UtcNow, processId = Environment.ProcessId,
+                schema = 2, utc = DateTime.UtcNow, processId = Environment.ProcessId,
                 version = typeof(PerformanceCapture).Assembly.GetName().Version?.ToString(),
                 moduleId = typeof(PerformanceCapture).Module.ModuleVersionId,
                 cpuTotalMs = process.TotalProcessorTime.TotalMilliseconds,

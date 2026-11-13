@@ -5,8 +5,6 @@ using System.Text;
 using AgentTerm.Agents;
 using AgentTerm.Terminal;
 using AgentTerm_App;
-using Microsoft.Graphics.Canvas;
-using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -85,7 +83,7 @@ internal static partial class StartupChecks
                     foreach (var hidden in tabs.TabItems.OfType<TabViewItem>().Where(candidate => candidate != item))
                     {
                         var hiddenSurface = (TerminalSurface)((TerminalTab)hidden.Content).ActivePage.FindName("Terminal");
-                        if (Field<CanvasRenderTarget?>(hiddenSurface, "_renderTarget") is not null)
+                        if (hiddenSurface.HasRenderResources)
                             throw new Exception("Hidden tab retained its terminal raster.");
                     }
                 }
@@ -110,6 +108,7 @@ internal static partial class StartupChecks
                 await WaitAsync(() => active.PaneCount == 2, "split pane creation");
                 await AssertOutputAsync(active, report, "split pane");
                 await AssertIndependentPaneSchedulingAsync(active, report);
+                await AssertRasterWorkerIsolationAsync(active, report);
                 await AssertInputDoesNotWaitForCaptureAsync(active, report);
                 await AssertQueueSaturationKeepsSessionAsync(active, report);
                 await active.CloseActivePaneAsync();
@@ -136,6 +135,8 @@ internal static partial class StartupChecks
             }
             finally
             {
+                Directory.CreateDirectory(Path.GetDirectoryName(Report)!);
+                File.WriteAllLines(Report, report);
                 if (window is not null)
                 {
                     var tabs = (TabView)((FrameworkElement)window.Content).FindName("Tabs");
@@ -258,7 +259,7 @@ internal static partial class StartupChecks
             var text = session.ReadText();
             var diagnosticPath = Report + "." + context.Replace(' ', '-') + ".command-timeout.json";
             var supplied = Field<TerminalFrame?>(surface, "_frame");
-            var painted = Field<TerminalFrame?>(surface, "_paintedFrame");
+            var painted = surface.PresentedFrame;
             var processExited = true;
             try
             {
@@ -284,42 +285,26 @@ internal static partial class StartupChecks
         }
         try
         {
-            await WaitAsync(() => Field<TerminalFrame?>(surface, "_paintedFrame") is { } frame &&
-                FrameHasOutput(frame), context + " painted output");
+            await WaitAsync(() => surface.PresentedFrame is { } frame &&
+                FrameHasOutput(frame), context + " presented output");
         }
         catch (TimeoutException)
         {
-            var failedCanvas = Field<CanvasControl>(surface, "_canvas");
             var handle = WinRT.Interop.WindowNative.GetWindowHandle(_activeWindow!);
             report.Add($"Window state: hwnd={handle}; foreground={GetForegroundWindow()}; isForeground={GetForegroundWindow() == handle}; iconic={IsIconic(handle)}; visible={IsWindowVisible(handle)}; appWindowVisible={_activeWindow!.AppWindow.IsVisible}.");
             var supplied = Field<TerminalFrame?>(surface, "_frame");
-            report.Add($"Painting failure: page loaded={page.IsLoaded}; active={Field<bool>(page, "_viewActive")}; subscribed={Field<bool>(page, "_renderingSubscribed")}; queued={Field<bool>(page, "_frameRefreshQueued")}; canvas loaded={failedCanvas.IsLoaded}; ready={failedCanvas.ReadyToDraw}; suspended={Field<bool>(surface, "_suspended")}; resourcesReady={Field<bool>(surface, "_resourcesReady")}; raster={Field<CanvasRenderTarget?>(surface, "_renderTarget") is not null}; suppliedMarker={supplied is not null && string.Concat(supplied.Cells.Select(cell => cell.Text)).Contains(marker)}; metrics={surface.CellWidth}x{surface.CellHeight}");
-            for (DependencyObject? ancestor = failedCanvas; ancestor is not null; ancestor = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(ancestor))
+            report.Add($"Painting failure: page loaded={page.IsLoaded}; active={Field<bool>(page, "_viewActive")}; subscribed={Field<bool>(page, "_renderingSubscribed")}; queued={Field<bool>(page, "_frameRefreshQueued")}; surface loaded={surface.IsLoaded}; suspended={Field<bool>(surface, "_suspended")}; resourcesReady={Field<bool>(surface, "_resourcesReady")}; raster={surface.HasRenderResources}; presentedStats={surface.PresentedRasterStats}; suppliedMarker={supplied is not null && string.Concat(supplied.Cells.Select(cell => cell.Text)).Contains(marker)}; metrics={surface.CellWidth}x{surface.CellHeight}");
+            for (DependencyObject? ancestor = surface; ancestor is not null; ancestor = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(ancestor))
                 if (ancestor is FrameworkElement element)
                     report.Add($"Ancestor {element.GetType().Name} {element.Name}: {element.Visibility}, {element.ActualWidth}x{element.ActualHeight}, opacity={element.Opacity}");
-            var recovery = new TaskCompletionSource();
-            void RecoveryDraw(CanvasControl _, CanvasDrawEventArgs __) => recovery.TrySetResult();
-            failedCanvas.Draw += RecoveryDraw;
-            failedCanvas.Invalidate();
-            await Task.WhenAny(recovery.Task, Task.Delay(2000));
-            failedCanvas.Draw -= RecoveryDraw;
-            report.Add($"Diagnostic late invalidation drew={recovery.Task.IsCompleted}; raster={Field<CanvasRenderTarget?>(surface, "_renderTarget") is not null}.");
             throw;
         }
-        var canvas = Field<CanvasControl>(surface, "_canvas");
-        var drawn = new TaskCompletionSource();
-        void Draw(CanvasControl sender, CanvasDrawEventArgs args) => drawn.TrySetResult();
-        canvas.Draw += Draw;
-        try
-        {
-            canvas.Invalidate();
-            await drawn.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        }
-        finally { canvas.Draw -= Draw; }
-        var raster = Field<CanvasRenderTarget>(surface, "_renderTarget");
-        var pixels = raster.GetPixelColors();
-        if (pixels.Length == 0 || !pixels.Any(pixel => pixel != pixels[0]))
-            throw new Exception(context + ": terminal raster contains no visible text.");
+        var raster = await surface.ReadPresentedRasterAsync();
+        if (!FrameHasOutput(raster.Request.Frame))
+            throw new Exception(context + ": raster readback frame does not contain the executed output.");
+        var pixels = raster.Pixels;
+        if (pixels.Length < 8 || !Enumerable.Range(1, pixels.Length / 4 - 1).Any(index => !pixels.AsSpan(index * 4, 4).SequenceEqual(pixels.AsSpan(0, 4))))
+            throw new Exception(context + ": presented terminal raster contains no visible text.");
         try { await WaitAsync(() => surface.Input.FocusState != FocusState.Unfocused, context + " terminal focus"); }
         catch (TimeoutException)
         {
@@ -327,7 +312,7 @@ internal static partial class StartupChecks
             report.Add($"Focus failure: tab loaded={tab.IsLoaded}; page loaded={page.IsLoaded}; active={Field<bool>(page, "_viewActive")}; input active={Field<bool>(page, "_inputActive")}; owner={Field<object>(page, "_inputOwner")}; focused={focused?.GetType().FullName}; focused name={(focused as FrameworkElement)?.Name}");
             throw;
         }
-        report.Add($"PASS {context}: shell PID {session.ProcessId}, executed marker, canvas draw, nonblank raster and terminal focus.");
+        report.Add($"PASS {context}: shell PID {session.ProcessId}, executed marker, presented frame, nonblank presented raster and terminal focus.");
     }
 
     private static async Task AssertQueueSaturationKeepsSessionAsync(TerminalTab tab, List<string> report)
@@ -441,12 +426,12 @@ internal static partial class StartupChecks
         var page = tab.ActivePage;
         var surface = (TerminalSurface)page.FindName("Terminal");
         await Task.Delay(750);
-        var painted = Field<TerminalFrame?>(surface, "_paintedFrame");
+        var painted = surface.PresentedFrame;
         for (var sample = 0; sample < 3; sample++)
         {
             await Task.Delay(250);
             if (Field<bool>(page, "_renderingSubscribed") || Field<bool>(page, "_frameRefreshQueued") ||
-                Field<int>(page, "_outputRefreshQueued") != 0 || !ReferenceEquals(painted, Field<TerminalFrame?>(surface, "_paintedFrame")))
+                Field<int>(page, "_outputRefreshQueued") != 0 || !ReferenceEquals(painted, surface.PresentedFrame))
                 throw new Exception("Idle pane continued scheduling terminal frame refreshes.");
         }
         await AssertOutputAsync(tab, report, "output after idle");
@@ -465,7 +450,7 @@ internal static partial class StartupChecks
         addTab.Invoke(window, [profile]);
         var tab = (TerminalTab)((TabViewItem)tabs.SelectedItem).Content;
         var surface = (TerminalSurface)tab.ActivePage.FindName("Terminal");
-        bool Painted(string marker) => Field<TerminalFrame?>(surface, "_paintedFrame") is { } frame &&
+        bool Painted(string marker) => surface.PresentedFrame is { } frame &&
             string.Concat(frame.Cells.Select(cell => cell.Text)).Contains(marker);
         try
         {
@@ -550,29 +535,38 @@ internal static partial class StartupChecks
         var page = tab.ActivePage;
         var surface = (TerminalSurface)page.FindName("Terminal");
         var session = Field<TerminalSession>(page, "_session");
-        var canvas = Field<CanvasControl>(surface, "_canvas");
         var draws = 0;
-        void Draw(CanvasControl _, CanvasDrawEventArgs __) => draws++;
+        void Draw(double _) => draws++;
         WriteTerminal(session, "\x1b[1 q\x1b[?25l");
         typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [session]);
         try
         {
-            await WaitAsync(() => Field<TerminalFrame?>(surface, "_paintedFrame")?.Cursor is { Visible: false, Blink: true },
+            await WaitAsync(() => surface.PresentedFrame?.Cursor is { Visible: false, Blink: true },
                 "hidden blinking cursor paint");
             await Task.Delay(750);
             if (Field<DispatcherQueueTimer>(page, "_cursorTimer").IsRunning)
                 throw new Exception("Hidden cursor kept its blink timer running.");
-            canvas.Draw += Draw;
+            surface.DrawCompleted += Draw;
             await Task.Delay(1200);
             if (draws != 0) throw new Exception("Hidden blinking cursor kept drawing an idle terminal.");
+            WriteTerminal(session, "\x1b7\x1b[1;1H\x1b[5mBLINK\x1b[0m\x1b8");
+            typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [session]);
+            await WaitAsync(() => surface.HasBlinkingText && Field<DispatcherQueueTimer>(page, "_cursorTimer").IsRunning,
+                "worker-reported blinking text starts the timer with the cursor hidden");
+            var blinkDraws = draws;
+            await WaitAsync(() => draws > blinkDraws, "blinking text publishes another raster without new output");
+            WriteTerminal(session, "\x1b7\x1b[1;1H     \x1b8");
+            typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [session]);
+            await WaitAsync(() => !surface.HasBlinkingText && !Field<DispatcherQueueTimer>(page, "_cursorTimer").IsRunning,
+                "removing the last blinking text stops the timer");
         }
         finally
         {
-            canvas.Draw -= Draw;
+            surface.DrawCompleted -= Draw;
             WriteTerminal(session, "\x1b[?25h\x1b[0 q");
             typeof(MainPage).GetMethod("RefreshOutput", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [session]);
         }
-        report.Add("PASS hidden blinking cursor has no blink timer or idle draws.");
+        report.Add("PASS hidden cursor has no idle draws; worker-reported blinking text starts and stops its timer.");
     }
 
     private static async Task AssertCoveredTabAsync(TabView tabs, List<string> report)
@@ -591,7 +585,7 @@ internal static partial class StartupChecks
             await WaitAsync(() => page.IsLoaded && Field<bool>(page, "_viewActive"), "covered tab activation");
             await Task.Delay(250);
             if (surface.Visibility != Visibility.Collapsed || !Field<bool>(surface, "_suspended") ||
-                Field<CanvasControl?>(surface, "_canvas") is not null || Field<CanvasRenderTarget?>(surface, "_renderTarget") is not null)
+                surface.HasRenderResources || Field<object?>(surface, "_cursorCanvas") is not null)
                 throw new Exception("Covered tab reactivated hidden terminal rendering resources.");
         }
         finally { page.TryLeaveAgentSurface(); }
