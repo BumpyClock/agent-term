@@ -78,5 +78,42 @@ static class TaskChecks
         Check(controller.Tasks.SequenceEqual([first, second]), "tasks keep invocation order");
         for (var i = 0; i < AgentSessionController.TaskLimit + 3; i++) controller.BeginTask();
         Check(controller.Tasks.Count == AgentSessionController.TaskLimit && !controller.Tasks.Contains(first), "task history is bounded");
+        await RequestOwnershipAsync(location, wait);
+    }
+
+    /// <summary>A request is actionable only in the task that owns its turn, even when that task is not the newest or the one being viewed.</summary>
+    private static async Task RequestOwnershipAsync(AgentLocation location, Func<Func<bool>, Task> wait)
+    {
+        static void Check(bool ok, string message) { if (!ok) throw new Exception("Request ownership: " + message); }
+        var harness = new FakeHarness();
+        await using var controller = new AgentSessionController(harness);
+        var session = harness.Session;
+        async Task CompleteAsync(string text)
+        {
+            Check(await controller.SubmitAsync(text, location), "submit " + text);
+            session.Emit(new TurnCompleted(session.Turn));
+            await wait(() => controller.State == AgentState.Idle);
+        }
+        var a = controller.BeginTask();
+        await CompleteAsync("task a");
+        var b = controller.BeginTask();
+        await CompleteAsync("task b");
+        controller.ActivateTask(a);
+        Check(await controller.SubmitAsync("task a follow up", location), "submit follow up in a");
+        var turn = session.Turn;
+        Check(a.Contains(turn) && !b.Contains(turn) && controller.RunningTask == a, "the follow up belongs to the older task");
+        controller.ActivateTask(b);
+        var approval = new ApprovalRequest(turn, Guid.NewGuid(), "Write-Output owned");
+        session.Emit(approval);
+        await wait(() => controller.Request == approval);
+        Check(controller.CurrentTask == b, "an arriving request does not switch the viewed task");
+        Check(controller.RequestFor(a) == approval, "the owning task can act on its request");
+        Check(controller.RequestFor(b) is null, "a viewed task that does not own the turn cannot act on the request");
+        Check(controller.RequestFor(null) is null, "no task view means no actionable request");
+        Check(await controller.RespondAsync(new(approval.Request, true)) && session.Response == new AgentResponse(approval.Request, true), "the owner's answer reaches the provider with its id");
+        var question = new QuestionRequest(turn, Guid.NewGuid(), "Pick", [], true);
+        session.Emit(question);
+        await wait(() => controller.Request == question);
+        Check(controller.RequestFor(b) is null && controller.RequestFor(a) == question, "a freeform question follows the same ownership");
     }
 }

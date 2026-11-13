@@ -23,6 +23,8 @@
                         <TextBlock Text="&#x21B5;" VerticalAlignment="Center" Opacity="0.8" />
                     </StackPanel>
                 </Button>
+                <Button x:Name="ShowOwner" Style="{StaticResource AccentButtonStyle}" Padding="10,3" MinHeight="0" Click="ShowOwner_Click"
+                        Content="Show task" AutomationProperties.Name="Show task" ToolTipService.ToolTip="Open the task that is waiting" />
             </local:RequestHeaderLayout>
             <Border x:Name="RequestDetail" Grid.Row="1" Padding="10,6" CornerRadius="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
                 <ScrollViewer MaxHeight="120" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">

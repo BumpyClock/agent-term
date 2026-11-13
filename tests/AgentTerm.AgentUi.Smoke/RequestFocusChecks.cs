@@ -93,11 +93,71 @@ internal static class RequestFocusChecks
         await left.WaitDismissedAsync("approval with focus in the other pane");
         if (!ReferenceEquals(Focused(root), right.Approve)) failures.Add($"Dismissal took focus from the other pane to {Describe(Focused(root))}.");
 
+        if (!await CheckOwnershipAsync())
+        {
+            Console.WriteLine("Request ownership checks inconclusive: Ctrl+C could not be injected because the fixture window was not foreground.");
+            return Inconclusive;
+        }
+
         if (failures.Count > 0) throw new Exception("Request focus regression:\n" + string.Join("\n", failures));
         Console.WriteLine(inconclusive
             ? "Request focus checks passed, but Escape could not be injected because the fixture window was not foreground. Inconclusive."
             : "Request focus checks passed. Escape tunnelled from the visible reply field after each dismissal.");
         return inconclusive ? Inconclusive : 0;
+
+        // Task B's request must not be answerable from task A's view: not by Run, Reject, Ctrl+C or a choice. Show task is the only way across.
+        async Task<bool> CheckOwnershipAsync()
+        {
+            var owner = left.Agent.RunningTask!;
+            var other = left.Agent.BeginTask();
+            await Settle();
+            var hidden = new ApprovalRequest(left.Harness.Session.Turn, Guid.NewGuid(), "Write-Output owner only");
+            left.Harness.Session.Emit(hidden);
+            await Program.WaitAsync(() => left.Agent.Request == hidden && left.ShowOwner.Visibility == Visibility.Visible);
+            await Settle();
+            if (left.Agent.CurrentTask != other) failures.Add("A request arriving for another task switched the viewed task.");
+            if (left.Panel.Shown is not null) failures.Add($"Wrong task view shows {left.Panel.Shown} as actionable.");
+            if (left.Approve.Visibility != Visibility.Collapsed || left.Reject.Visibility != Visibility.Collapsed || left.Detail.Visibility != Visibility.Collapsed)
+                failures.Add("Wrong task view shows approval actions or the command.");
+            if (left.Panel.Visibility != Visibility.Visible || !left.Title.Text.Contains(owner.Title)) failures.Add($"Wrong task view notice reads '{left.Title.Text}', expected the owner '{owner.Title}'.");
+            if (!left.Reply.IsReadOnly) failures.Add("Wrong task view left the reply editable for another task's request.");
+            await left.Panel.ApproveAsync();
+            await left.Panel.DenyAsync();
+            Require(left.ShowOwner.Focus(FocusState.Keyboard) && ReferenceEquals(Focused(root), left.ShowOwner), "Setup: Show task button did not accept keyboard focus.");
+            if (!await probe.CtrlCAsync(window)) return false;
+            await Settle();
+            if (left.Harness.Session.LastResponse?.Request == hidden.Request || left.Agent.Request != hidden)
+                failures.Add($"Wrong task view answered another task's request: {left.Harness.Session.LastResponse}.");
+            new ButtonAutomationPeer(left.ShowOwner).Invoke();
+            await Program.WaitAsync(() => left.Panel.Shown == hidden);
+            await Settle();
+            if (left.Agent.CurrentTask != owner) failures.Add("Show task did not open the owning task.");
+            if (!ReferenceEquals(Focused(root), left.Reply) || left.Reply.FocusState != FocusState.Keyboard)
+                failures.Add($"Show task left focus on {Describe(Focused(root))}, expected the keyboard-focused reply.");
+            if (left.Approve.Visibility != Visibility.Visible || left.ShowOwner.Visibility != Visibility.Collapsed) failures.Add("Owner view did not restore Run and Reject.");
+            Require(left.Reject.Focus(FocusState.Keyboard), "Setup: Reject did not accept keyboard focus in the owner view.");
+            if (!await probe.CtrlCAsync(window)) return false;
+            await left.WaitDismissedAsync("Ctrl+C in the owner view");
+            if (left.Harness.Session.LastResponse != new AgentResponse(hidden.Request))
+                failures.Add($"Owner view Ctrl+C sent {left.Harness.Session.LastResponse}, expected a rejection of {hidden.Request}.");
+
+            left.Agent.ActivateTask(other);
+            var question = new QuestionRequest(left.Harness.Session.Turn, Guid.NewGuid(), "Owner question", ["alpha"], true);
+            left.Harness.Session.Emit(question);
+            await Program.WaitAsync(() => left.Agent.Request == question && left.ShowOwner.Visibility == Visibility.Visible);
+            await Settle();
+            if (left.Panel.Shown is not null || left.Choices.Visibility != Visibility.Collapsed || left.Choices.Children.Count != 0 || !left.Reply.IsReadOnly)
+                failures.Add("Wrong task view offered another task's question choices or freeform reply.");
+            new ButtonAutomationPeer(left.ShowOwner).Invoke();
+            await Program.WaitAsync(() => left.Panel.Shown == question && left.Choices.Children.Count == 1);
+            if (left.Reply.IsReadOnly) failures.Add("Owner view kept the freeform reply read-only.");
+            new ButtonAutomationPeer(left.Choices.Children.OfType<Button>().Single()).Invoke();
+            await left.WaitDismissedAsync("owner view choice");
+            if (left.Harness.Session.LastResponse != new AgentResponse(question.Request, Answer: "alpha"))
+                failures.Add($"Owner view choice sent {left.Harness.Session.LastResponse}.");
+            Console.WriteLine("Another task's request showed only its owner notice; Show task opened the owner, which answered by id.");
+            return true;
+        }
 
         async Task ApproveFromInsideAsync(string label, FocusState expected)
         {
@@ -154,11 +214,12 @@ internal static class RequestFocusChecks
             Reply = new TextBox { Name = name + "Reply", AcceptsReturn = true, PlaceholderText = "Reply to the agent" };
             Panel.Visibility = Visibility.Collapsed;
             Panel.Attach(Agent, Reply);
+            Panel.ShowTaskRequested += () => { if (Agent.RunningTask is { } owner) Agent.ActivateTask(owner); };
             View = new StackPanel { Spacing = 8, Children = { Panel, Reply } };
             Agent.Changed += () => dispatcher.TryEnqueue(() =>
             {
-                Panel.Update();
-                Reply.IsReadOnly = Agent.HasActiveTurn && Agent.Request is not QuestionRequest { AllowFreeform: true };
+                Panel.Update(Agent.CurrentTask);
+                Reply.IsReadOnly = Agent.HasActiveTurn && Agent.RequestFor(Agent.CurrentTask) is not QuestionRequest { AllowFreeform: true };
             });
         }
 
@@ -169,6 +230,7 @@ internal static class RequestFocusChecks
         public StackPanel View { get; }
         public Button Approve => (Button)Panel.FindName("ApproveRequest");
         public Button Reject => (Button)Panel.FindName("DenyRequest");
+        public Button ShowOwner => (Button)Panel.FindName("ShowOwner");
         public TextBlock RequestText => (TextBlock)Panel.FindName("RequestText");
         public TextBlock Title => (TextBlock)Panel.FindName("RequestTitle");
         public FrameworkElement Detail => (FrameworkElement)Panel.FindName("RequestDetail");

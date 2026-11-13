@@ -39,6 +39,8 @@ public sealed partial class MainPage
         null, "agentterm", "agentterm", _agent.RunningTask?.Title ?? "Agent task", null, _agentStatusUpdatedAt);
 
     private bool AgentBusy => _agent.HasActiveTurn;
+    /// <summary>The pending request this surface may answer. Another task's request is answered only from that task's view.</summary>
+    private AgentEvent? ViewedRequest => _surfaceOpen ? _agent.RequestFor(_agent.CurrentTask) : null;
     internal void AttachAgentControls(PaneHeader header) => header.AgentBar = _agentBar;
     private void AgentReply_Changing(TextBox sender, TextBoxTextChangingEventArgs args) => _promptFailure = null;
     private void AgentReply_Changed(object sender, RoutedEventArgs e) { if (AgentReply is not null) RefreshAgentChrome(); }
@@ -67,7 +69,7 @@ public sealed partial class MainPage
             var font = new FontFamily(_promptFont + ", Cascadia Mono, Consolas");
             AgentReply.FontFamily = PromptGlyph.FontFamily = PromptHint.FontFamily = RequestPanel.DetailFont = _timelineView.Mono = font;
         }
-        var request = _agent.Request;
+        var request = ViewedRequest;
         var text = AgentReply.Text;
         var busy = AgentBusy;
         var readOnly = busy && request is not QuestionRequest { AllowFreeform: true };
@@ -121,7 +123,8 @@ public sealed partial class MainPage
     {
         if (!_surfaceOpen || _startingTask || string.IsNullOrWhiteSpace(text)) return false;
         if (PromptRouter.Parse(text) is AgentIntent) return true;
-        return _agent.Request is QuestionRequest { AllowFreeform: true } || (_agent.CanSubmit && _agent.Request is null);
+        var request = ViewedRequest;
+        return request is QuestionRequest { AllowFreeform: true } || (_agent.CanSubmit && request is null);
     }
 
     private CoalescedUpdate AgentUpdate => LazyInitializer.EnsureInitialized(ref _agentUpdate, () => new(
@@ -160,6 +163,8 @@ public sealed partial class MainPage
             AgentOutput.VerticalAnchorRatio = 1;
             AgentOutput.ViewChanged += (_, _) => _followOutput = AgentOutput.ScrollableHeight - AgentOutput.VerticalOffset < 24;
             AgentTimelineHost.SizeChanged += (_, _) => { if (_followOutput) AgentOutput.ChangeView(null, AgentOutput.ScrollableHeight, null, true); };
+            // Only the person switches tasks. A request arriving for another task never moves the view or the draft.
+            RequestPanel.ShowTaskRequested += () => { if (_agent.RunningTask is { } owner) OpenSurface(owner, false); };
         }
         var task = _agent.CurrentTask;
         _timelineView.Update(_agent, task, active);
@@ -170,7 +175,7 @@ public sealed partial class MainPage
             SurfaceTitle.Text = heading;
             ToolTipService.SetToolTip(SurfaceTitle, task?.Title);
         }
-        RequestPanel.Update();
+        RequestPanel.Update(task);
     }
 
     private bool PaneInputFocused()
@@ -260,7 +265,7 @@ public sealed partial class MainPage
         var text = AgentReply.Text;
         if (!CanSend(text)) return;
         _promptFailure = null;
-        if (_agent.Request is QuestionRequest { AllowFreeform: true }) await SendToAgentAsync(text);
+        if (ViewedRequest is QuestionRequest { AllowFreeform: true }) await SendToAgentAsync(text);
         else if (PromptRouter.Parse(text) is AgentIntent agent)
         {
             AgentReply.Text = "";
@@ -369,7 +374,7 @@ public sealed partial class MainPage
                 LeaveSurface();
                 return;
             case VirtualKey.C when ctrl && !shift && AgentReply.SelectionLength == 0:
-                if (_agent.Request is ApprovalRequest) { e.Handled = true; await RequestPanel.DenyAsync(); }
+                if (ViewedRequest is ApprovalRequest) { e.Handled = true; await RequestPanel.DenyAsync(); }
                 else if (AgentBusy) { e.Handled = true; InterruptAgent_Click(sender, e); }
                 return;
             case VirtualKey.Back when AgentReply.Text.Length == 0:

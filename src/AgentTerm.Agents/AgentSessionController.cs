@@ -22,6 +22,8 @@ public sealed class AgentSessionController(IAgentHarness harness, Func<IHostTerm
     public AgentLocation? Location { get; private set; }
     private readonly Queue<AgentEvent> _requests = new();
     public AgentEvent? Request => _requests.TryPeek(out var request) ? request : null;
+    /// <summary>The pending request when <paramref name="task"/> owns its turn, else null. A request is actionable only in its owning task's view.</summary>
+    public AgentEvent? RequestFor(AgentTask? task) => Request is { } request && task?.Contains(request.Turn) == true ? request : null;
     /// <summary>Any queued approval, not only the shown one, names this call. A row must not claim it is running while it waits.</summary>
     public bool AwaitsApproval(string callId) => _requests.Any(r => r is ApprovalRequest { CallId: { } id } && id == callId);
     public bool HasActiveTurn => _operation is not null;

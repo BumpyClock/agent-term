@@ -15,7 +15,11 @@ public sealed partial class AgentRequestPanel : UserControl
 
     public AgentRequestPanel() => InitializeComponent();
 
+    /// <summary>The request this view may answer. Null while the pending request belongs to another task.</summary>
     internal AgentEvent? Shown { get; private set; }
+    /// <summary>Raised by Show task. The host opens the request's owning task.</summary>
+    internal event Action? ShowTaskRequested;
+    private string? _notice;
     internal FontFamily DetailFont { set => RequestText.FontFamily = value; }
 
     internal void Attach(AgentSessionController agent, Control reply)
@@ -24,15 +28,21 @@ public sealed partial class AgentRequestPanel : UserControl
         _reply = reply;
     }
 
-    internal void Update()
+    /// <param name="viewed">The task whose view hosts this panel. Another task's request shows only a notice, never its actions.</param>
+    internal void Update(AgentTask? viewed)
     {
-        var request = _agent?.Request;
-        if (_applied && request == Shown) return;
+        var request = _agent?.RequestFor(viewed);
+        var notice = request is null && _agent?.Request is { } pending
+            ? $"{(_agent.RunningTask?.Title is { Length: > 0 } title ? $"“{title}”" : "Another task")} {(pending is ApprovalRequest ? "is waiting for your approval." : "is waiting for your answer.")}"
+            : null;
+        if (_applied && request == Shown && notice == _notice) return;
         _applied = true;
+        if ((request != Shown || (notice is null) != (_notice is null))
+            && _reply is not null && XamlRoot is { } root && FocusManager.GetFocusedElement(root) is DependencyObject focused && Contains(focused))
+            _reply.Focus(focused is Control { FocusState: FocusState.Keyboard } ? FocusState.Keyboard : FocusState.Programmatic);
+        _notice = notice;
         if (request != Shown)
         {
-            if (_reply is not null && XamlRoot is { } root && FocusManager.GetFocusedElement(root) is DependencyObject focused && Contains(focused))
-                _reply.Focus(focused is Control { FocusState: FocusState.Keyboard } ? FocusState.Keyboard : FocusState.Programmatic);
             Shown = request;
             RequestChoices.Children.Clear();
             if (request is QuestionRequest question)
@@ -45,11 +55,12 @@ public sealed partial class AgentRequestPanel : UserControl
         }
         var approval = request as ApprovalRequest;
         var asked = request as QuestionRequest;
-        Visibility = request is null ? Visibility.Collapsed : Visibility.Visible;
-        RequestTitle.Text = approval is not null ? "Allow the agent to run this?" : asked?.Question ?? "";
+        Visibility = request is null && notice is null ? Visibility.Collapsed : Visibility.Visible;
+        RequestTitle.Text = notice ?? (approval is not null ? "Allow the agent to run this?" : asked?.Question ?? "");
         RequestText.Text = approval?.Description ?? "";
         RequestDetail.Visibility = approval is not null ? Visibility.Visible : Visibility.Collapsed;
         ApproveRequest.Visibility = DenyRequest.Visibility = approval is not null ? Visibility.Visible : Visibility.Collapsed;
+        ShowOwner.Visibility = notice is not null ? Visibility.Visible : Visibility.Collapsed;
         RequestChoices.Visibility = asked?.Choices.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -76,6 +87,7 @@ public sealed partial class AgentRequestPanel : UserControl
 
     private async void ApproveRequest_Click(object sender, RoutedEventArgs e) => await ApproveAsync();
     private async void DenyRequest_Click(object sender, RoutedEventArgs e) => await DenyAsync();
+    private void ShowOwner_Click(object sender, RoutedEventArgs e) => ShowTaskRequested?.Invoke();
 }
 
 public sealed partial class RequestHeaderLayout : Panel
