@@ -1,6 +1,24 @@
 <Project>
+  <UsingTask TaskName="VerifyNativeArtifact" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)scripts/VerifyNativeArtifact.cs" />
+    </Task>
+  </UsingTask>
+  <PropertyGroup>
+    <_NativePlatform Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</_NativePlatform>
+    <_NativePlatform Condition="$([MSBuild]::IsOSPlatform('Linux'))">linux-x64</_NativePlatform>
+    <_NativeDirectory>$(MSBuildThisFileDirectory)artifacts/native/$(_NativePlatform)</_NativeDirectory>
+    <_NativeLibrary Condition="'$(_NativePlatform)' == 'win-x64'">$(_NativeDirectory)/bin/ghostty-vt.dll</_NativeLibrary>
+    <_NativeLibrary Condition="'$(_NativePlatform)' == 'linux-x64'">$(_NativeDirectory)/lib/libghostty-vt.so</_NativeLibrary>
+    <_NativeRebuild Condition="'$(_NativePlatform)' == 'win-x64'">pwsh -File scripts/build-native.ps1</_NativeRebuild>
+    <_NativeRebuild Condition="'$(_NativePlatform)' == 'linux-x64'">bash scripts/check-linux.sh</_NativeRebuild>
+  </PropertyGroup>
+  <Target Name="VerifyNativeProvenance" BeforeTargets="PrepareForBuild;ComputeFilesToPublish" Condition="('$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe') And '$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(_NativePlatform)' == ''" Text="Native artifacts are supported on Windows x64 and Linux x64 only." />
+    <VerifyNativeArtifact PinFile="$(MSBuildThisFileDirectory)native-dependencies.json" ArtifactDirectory="$(_NativeDirectory)" LibraryFile="$(_NativeLibrary)" RebuildCommand="$(_NativeRebuild)" />
+  </Target>
   <ItemGroup Condition="'$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe'">
-    <Content Include="$(MSBuildThisFileDirectory)artifacts/native/win-x64/bin/ghostty-vt.dll" Condition="$([MSBuild]::IsOSPlatform('Windows')) And Exists('$(MSBuildThisFileDirectory)artifacts/native/win-x64/bin/ghostty-vt.dll')" Link="ghostty-vt.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="$(MSBuildThisFileDirectory)artifacts/native/linux-x64/lib/libghostty-vt.so*" Condition="$([MSBuild]::IsOSPlatform('Linux'))" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(_NativeLibrary)" Condition="'$(_NativePlatform)' == 'win-x64'" Link="ghostty-vt.dll" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="$(_NativeDirectory)/lib/libghostty-vt.so*" Condition="'$(_NativePlatform)' == 'linux-x64'" Link="%(Filename)%(Extension)" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
   </ItemGroup>
 </Project>

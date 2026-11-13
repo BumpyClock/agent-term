@@ -71,13 +71,34 @@ Expand-Stamped $zigArchive $manifest.zig.windows.sha256 $zigDir {
 }
 
 $prefix = if ($env:AGENTTERM_NATIVE_PREFIX) { $env:AGENTTERM_NATIVE_PREFIX } else { Join-Path $root 'artifacts/native/win-x64' }
-Push-Location $source
+$builder = Join-Path $deps 'agentterm-native'
+New-Item -ItemType Directory -Force $builder | Out-Null
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'native/build.zig') -Destination (Join-Path $builder 'build.zig') -Force
+# Only the verified extraction is a dependency. Keep build configuration in the repository;
+# do not patch the pinned upstream build or request its unused static-library install step.
+@"
+.{
+    .name = .agentterm_native,
+    .fingerprint = 0x31d305adb0e18785,
+    .version = "0.0.0",
+    .minimum_zig_version = "$($manifest.zig.version)",
+    .paths = .{"build.zig", "build.zig.zon"},
+    .dependencies = .{ .ghostty = .{ .path = "../libghostty-vt-$($ghostty.version)" }, },
+}
+"@ | Set-Content -LiteralPath (Join-Path $builder 'build.zig.zon')
+Remove-Item -LiteralPath (Join-Path $prefix 'native-build.json') -Force -ErrorAction SilentlyContinue
+Push-Location $builder
 try {
-    & (Join-Path $zigDir 'zig.exe') build -Demit-lib-vt -Doptimize=ReleaseFast -Dtarget=x86_64-windows-gnu --prefix $prefix
+    & (Join-Path $zigDir 'zig.exe') build -Doptimize=ReleaseFast -Dtarget=x86_64-windows-gnu --prefix $prefix --cache-dir (Join-Path $source '.zig-cache') --summary all
     if ($LASTEXITCODE -ne 0) { throw "Native build failed with exit code $LASTEXITCODE." }
 } finally { Pop-Location }
 $dll = Join-Path $prefix 'bin/ghostty-vt.dll'
 if (-not (Test-Path $dll)) { throw 'Native build did not produce ghostty-vt.dll.' }
+# Probe out of process so neither this shell nor MSBuild retains a DLL lock.
+$reportedVersion = & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'probe-native-version.ps1') -Library $dll
+if ($LASTEXITCODE -ne 0 -or "$reportedVersion".Trim() -ne $ghostty.version) {
+    throw "Built native library reports '$reportedVersion'; expected '$($ghostty.version)'. No provenance written."
+}
 [ordered]@{
     ghostty = $ghostty.version
     sourceSha256 = $ghostty.sha256

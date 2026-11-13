@@ -17,7 +17,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Baseline revision is not a commit.' }
 
 $sources = Join-Path $output 'baseline-src'
 New-Item -ItemType Directory $sources | Out-Null
-$paths = 'src/AgentTerm.Terminal', 'src/AgentTerm.Agents', 'src/AgentTerm.App/TerminalSurface.cs'
+$surfacePaths = @(git -C $root ls-tree -r --name-only $revision -- src/AgentTerm.App | Where-Object { $_ -match '/TerminalSurface(\.[^/]+)?\.cs$' })
+if ($LASTEXITCODE -ne 0 -or $surfacePaths.Count -eq 0) { throw 'Could not locate baseline renderer sources.' }
+$paths = @('src/AgentTerm.Terminal', 'src/AgentTerm.Agents') + $surfacePaths
 $archive = Join-Path $output 'baseline-src.tar'
 git -C $root archive --format=tar -o $archive $revision @paths
 if ($LASTEXITCODE -ne 0) { throw 'Could not export baseline sources.' }
@@ -34,7 +36,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Baseline fixture build failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Current fixture build failed.' }
 
 $current = git -C $root rev-parse HEAD
-$dirty = @(git -C $root status --porcelain -- src/AgentTerm.Terminal src/AgentTerm.Agents src/AgentTerm.App/TerminalSurface.cs tests/AgentTerm.Renderer.Perf scripts/terminal-perf-workload.py)
+$dirty = @(git -C $root status --porcelain -- src/AgentTerm.Terminal src/AgentTerm.Agents 'src/AgentTerm.App/TerminalSurface*.cs' tests/AgentTerm.Renderer.Perf scripts/terminal-perf-workload.py)
 $hash = { param($path) (Get-FileHash $path -Algorithm SHA256).Hash }
 $exe = 'bin/AgentTerm.Renderer.Perf/release_win-x64/AgentTerm.Renderer.Perf.exe'
 [pscustomobject]@{

@@ -52,7 +52,23 @@ zig="$deps/zig-x86_64-linux-$zig_version/zig"
 expand_stamped "$source_archive" "$ghostty_hash" "$source" -xzf
 expand_stamped "$zig_archive" "$zig_hash" "$deps/zig-x86_64-linux-$zig_version" -xJf
 prefix="$root/artifacts/native/linux-x64"
+rm -f "$prefix/native-build.json"
 (cd "$source" && "$zig" build -Demit-lib-vt -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu --prefix "$prefix")
+# ctypes runs in a separate process and attests the exact library bytes before managed builds.
+python3 - "$manifest" "$prefix" <<'PY'
+import ctypes, hashlib, json, pathlib, sys
+pin = json.load(open(sys.argv[1]))
+prefix = pathlib.Path(sys.argv[2])
+library = prefix / 'lib/libghostty-vt.so'
+native = ctypes.CDLL(str(library))
+native.ghostty_version.restype = ctypes.c_char_p
+version = native.ghostty_version().decode('utf-8')
+if version != pin['ghostty']['version']:
+    raise SystemExit(f"Built native library reports {version}; expected {pin['ghostty']['version']}")
+(prefix / 'native-build.json').write_text(json.dumps(dict(
+    ghostty=version, sourceSha256=pin['ghostty']['sha256'],
+    zig=pin['zig']['version'], dllSha256=hashlib.sha256(library.read_bytes()).hexdigest())))
+PY
 export LD_LIBRARY_PATH="$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 dotnet run --project "$root/tests/AgentTerm.Terminal.Smoke/AgentTerm.Terminal.Smoke.csproj" -c Release
 
