@@ -1,10 +1,12 @@
 using System.Text;
 using AgentTerm.Terminal;
 
-ProgramTitleChecks.Run();
-if (args.Contains("--program-title-only")) return;
+if (args.Contains("--snapshot-only")) { SnapshotArchiveChecks.Run(); return; }
 HostContractChecks.Run();
 if (args.Contains("--host-only")) return;
+SnapshotArchiveChecks.Run();
+ProgramTitleChecks.Run();
+if (args.Contains("--program-title-only")) return;
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 NativeProtocolChecks.Run();

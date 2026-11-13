@@ -21,14 +21,17 @@ public sealed partial class GhosttyTerminal : IDisposable
     private readonly List<byte[]> _responses = [];
     private ExceptionDispatchInfo? _callbackError;
 
-    public GhosttyTerminal(ushort columns = 80, ushort rows = 24)
+    public GhosttyTerminal(ushort columns = 80, ushort rows = 24) : this(columns, rows, IntPtr.Zero) { }
+
+    private GhosttyTerminal(ushort columns, ushort rows, IntPtr restored)
     {
         if (columns == 0)
             throw new ArgumentOutOfRangeException(nameof(columns), "Terminal width must be greater than zero.");
         if (rows == 0)
             throw new ArgumentOutOfRangeException(nameof(rows), "Terminal height must be greater than zero.");
 
-        var result = Native.ghostty_terminal_new(IntPtr.Zero, out var handle, columns, rows);
+        var handle = restored;
+        var result = restored == IntPtr.Zero ? Native.ghostty_terminal_new(IntPtr.Zero, out handle, columns, rows) : 0;
         ThrowIfFailed(result, "Could not create the libghostty-vt terminal.");
         _handle = new TerminalHandle(handle);
         _raw = handle;
@@ -46,8 +49,9 @@ public sealed partial class GhosttyTerminal : IDisposable
         };
         try
         {
-            ConfigureScrollback();
-            ConfigureHost();
+            if (restored == IntPtr.Zero) ConfigureScrollback();
+            ConfigureHost(restored != IntPtr.Zero);
+            ConfigureSnapshot();
             ThrowIfFailed(Native.ghostty_terminal_set(_handle, 2, Marshal.GetFunctionPointerForDelegate(_writePty)),
                 "Could not register terminal replies.");
         }

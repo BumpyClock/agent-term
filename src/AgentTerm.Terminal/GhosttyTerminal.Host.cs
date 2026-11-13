@@ -15,7 +15,7 @@ public sealed partial class GhosttyTerminal
 
     public static string HostVersion => "AgentTerm " + (typeof(GhosttyTerminal).Assembly.GetName().Version?.ToString(3) ?? "0.0.0");
 
-    private unsafe void ConfigureHost()
+    private unsafe void ConfigureHost(bool preserveImageStorage = false)
     {
         var versionBytes = Encoding.UTF8.GetBytes(HostVersion);
         _versionText = Marshal.AllocHGlobal(versionBytes.Length);
@@ -39,7 +39,7 @@ public sealed partial class GhosttyTerminal
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 5, Marshal.GetFunctionPointerForDelegate(_versionQuery)), "Could not set host identity.");
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 7, Marshal.GetFunctionPointerForDelegate(_sizeQuery)), "Could not set host geometry query.");
         ThrowIfFailed(Native.ghostty_terminal_set(_handle, 9, Marshal.GetFunctionPointerForDelegate(_attributesQuery)), "Could not set host capabilities.");
-        SetHostCapabilities(_hostCapabilities);
+        if (!preserveImageStorage) SetHostCapabilities(_hostCapabilities);
         fixed (byte* name = "xterm-256color"u8)
         {
             var value = new Native.Utf8String { Data = (IntPtr)name, Length = 14 };
