@@ -47,7 +47,7 @@ foreach ($trial in 1..$Trials) {
             if ($process.ExitCode -ne 0) { throw "Fixture failed for $side trial $trial. Inspect $resultPath.error.txt" }
         } finally { $process.Dispose() }
         $result = Get-Content $resultPath -Raw | ConvertFrom-Json
-        if ($result.draws -lt 10 -or $result.workload.ticks -ne ($Hz * $Seconds) -or $result.nonblankCells -lt 1000) {
+        if ($result.draws -lt [Math]::Min(10, $Hz * $Seconds) -or $result.workload.ticks -ne ($Hz * $Seconds) -or $result.nonblankCells -lt 1000) {
             throw "Workload validity failed for $side trial $trial"
         }
         $results += [pscustomobject]@{ side = $side; trial = $trial; schedule = $schedule; result = $result }

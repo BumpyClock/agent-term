@@ -4,7 +4,7 @@ Five alternating trials per side passed workload, raster equality and the optimi
 
 ## Inputs and scope.
 
-The optimized source is `18714f8e0fea1f7f464c586cbc6d624b7e7fc131`. The build began with a clean working tree. Baseline is `5606a460c7dbca60db3c2f78805c29d63c6802cc`. Both sides were rebuilt with the same fixture and native library. [Trial evidence](terminal-20261112-review.json) records raw Windows build-input hashes, LF-normalized hashes matching Git blobs, geometry and all ten trials. Source equivalence was checked before publication. Only documentation changed after the measured code commit.
+The optimized source is `18714f8e0fea1f7f464c586cbc6d624b7e7fc131`. The build began with a clean working tree. Baseline is `5606a460c7dbca60db3c2f78805c29d63c6802cc`. Both sides were rebuilt with the same fixture and native library. [Trial evidence](terminal-20261112-review.json) records raw Windows build-input hashes, LF-normalized hashes matching Git blobs, geometry and all ten trials. Source equivalence was checked before publication. Later fixture admission fixes allow early start signals and bound minimum update counts by the configured workload. They leave the measured renderer, adapter and session source files unchanged.
 
 Each trial generated 720 updates at 60 Hz over 12 seconds, with 2,412 nonblank cells on a 284 by 76 grid. The surface was 2560 by 1369.33 DIP at 144 DPI, using FiraCode Nerd Font at 14 DIP. Other user applications remained open. Tests and other fixture processes did not run concurrently. All ten final rasters had the same hash `F84AF40D6D743638BAC6212195F4CB40EC66C4321AB992BBE3718394F2C0E89C`.
 

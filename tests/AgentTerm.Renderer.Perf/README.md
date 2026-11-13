@@ -51,6 +51,8 @@ Other options are `--seconds 12`, `--idle-seconds 2`, `--windowed`, `--capture-f
 
 A timed run fails unless it sees actual Canvas draws, changed snapshots, visible rows, nonblank pixels, the expected update count and workload completion within 10% of the configured duration. When the renderer has a retained raster, the run also requires it to match a full redraw byte for byte. When it has a glyph cache, the run requires the cache never to exceed its capacity. Failed runs write `<output>.error.txt` and exit nonzero. Final pixels are saved as PNG.
 
+Minimum draw and changed-snapshot counts are capped at the configured update count, so `--hz 1 --seconds 1` remains a valid one-update smoke run. The initial workload directory must be fresh. After readiness or a preceding completion marker is published, the next start gate may already exist when its trial begins. The workload protocol regression runs through pre-commit and can also run with `python -m unittest discover -s tests/AgentTerm.Renderer.Perf -p test_workload.py`.
+
 ## Metrics.
 
 - `refreshDurations` is the elapsed time of `ReadFrame` plus `SetFrame`.

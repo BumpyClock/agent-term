@@ -34,6 +34,12 @@ The real 60-second comparison completed both 3,600-update trials with identical 
 
 The source-hash mismatch claim was a newline mismatch. Raw measured Windows hashes are retained. LF-normalized adapter and session bytes equal the Git blobs at `46eb3a1` exactly. The evidence now records both conventions and the equivalent revision instead of relabelling measured hashes.
 
+Copilot's next review found two fixture admission defects. A valid start gate can arrive immediately after readiness or the preceding completion marker. The workload now checks freshness before publishing readiness and does not reject that valid gate inside the trial loop. A deterministic protocol test covers early first and second gates and still rejects stale directories. The old code fails both early-gate cases. This test runs in pre-commit on Windows and Linux.
+
+Minimum draw and changed-snapshot counts now stop at the expected workload count. A real one-update comparison at 1 Hz for one second passed both timer and demand schedules with identical final pixels. The old native fixture failed this case despite one draw, one changed snapshot and the expected output. This is a functional check, not timing qualification. These fixture changes leave the measured production source hashes unchanged.
+
+The possible-secret alert targeted `currentSourceLfHashes.currentSession`. Recomputing SHA-256 from the `TerminalSession.cs` Git blob at `46eb3a1` reproduces that value exactly. It is a source digest, not a credential, and remains in the evidence.
+
 ## Remaining limits.
 
 Displayed 60 FPS, GPU residency, monitor-to-monitor DPI changes, and forced device loss were not established by these runs. See [current measurements](terminal-20261112-current.md), [startup evidence](../terminal-startup.md), and [the measurement boundary](../terminal-frame-budget.md).

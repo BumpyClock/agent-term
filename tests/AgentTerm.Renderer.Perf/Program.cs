@@ -314,7 +314,7 @@ internal static partial class Program
             var finalFrame = session.ReadFrame();
             var text = FrameText(finalFrame);
             var marker = pattern == "held" ? HeldMarker : "Agent task";
-            var minimumUpdates = pattern == "held" ? 1 : 10;
+            var minimumUpdates = Math.Min(10, expectedTicks);
             if (draws < minimumUpdates || changedFrames < minimumUpdates || !text.Contains(marker) || TerminalGridGeometry.VisibleRows(finalFrame) == 0)
                 throw new Exception($"Work did not render. draws={draws}, changedFrames={changedFrames}, workloadText={text.Contains(marker)}.");
             if (glyphCache is not null && maxGlyphLayouts > glyphCache.Capacity)

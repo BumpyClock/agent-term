@@ -61,7 +61,7 @@ def main():
         for trial in range(1, args.trials + 1):
             gate = args.output / f"run-{trial}.go"
             done = args.output / f"run-{trial}.done.json"
-            if gate.exists() or done.exists():
+            if done.exists():
                 raise FileExistsError("Use a fresh workload directory without previous signals")
             deadline = time.monotonic() + 300
             while not gate.exists():
