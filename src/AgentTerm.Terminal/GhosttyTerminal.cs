@@ -7,11 +7,13 @@ namespace AgentTerm.Terminal;
 /// <summary>
 /// Managed lifetime wrapper around libghostty-vt state, render snapshots, and input encoding.
 /// The terminal is a state machine. It does not create a shell, PTY, or window.
-/// Callers must serialize all access to an instance, including disposal.
+/// Callers must serialize all access to an instance, including disposal. The one exception is the second phase of a
+/// split frame capture (BeginFrame, then CompleteFrame), which may overlap any call that leaves the render state alone.
 /// </summary>
 public sealed partial class GhosttyTerminal : IDisposable
 {
     private readonly TerminalHandle _handle;
+    private readonly IntPtr _raw;
     private ushort _columns;
     private ushort _rows;
     private bool _disposed;
@@ -29,6 +31,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         var result = Native.ghostty_terminal_new(IntPtr.Zero, out var handle, columns, rows);
         ThrowIfFailed(result, "Could not create the libghostty-vt terminal.");
         _handle = new TerminalHandle(handle);
+        _raw = handle;
         _columns = columns;
         _rows = rows;
         _writePty = (_, _, data, length) =>
@@ -59,7 +62,7 @@ public sealed partial class GhosttyTerminal : IDisposable
 
         fixed (byte* bytes = data)
         {
-            Native.ghostty_terminal_vt_write(_handle, bytes, (nuint)data.Length);
+            Native.ghostty_terminal_vt_write(_raw, bytes, (nuint)data.Length);
         }
         _presentationDirty = true;
         CheckSelectionScreen();
@@ -73,7 +76,7 @@ public sealed partial class GhosttyTerminal : IDisposable
     {
         ThrowIfDisposed();
         Native.Utf8String value = default;
-        ThrowIfFailed(RenderNative.ghostty_terminal_get(_handle, 13, &value), "Could not read terminal directory.");
+        ThrowIfFailed(RenderNative.ghostty_terminal_get(_raw, 13, &value), "Could not read terminal directory.");
         return value.Length == 0 ? string.Empty : Marshal.PtrToStringUTF8(value.Data, checked((int)value.Length))!;
     }
 
@@ -195,15 +198,15 @@ public sealed partial class GhosttyTerminal : IDisposable
         }
     }
 
-    private static class Native
+    private static partial class Native
     {
         private const string Library = "ghostty-vt";
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate void WritePtyCallback(IntPtr terminal, IntPtr userdata, IntPtr data, nuint length);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_terminal_set(TerminalHandle terminal, int option, IntPtr value);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_terminal_set(TerminalHandle terminal, int option, IntPtr value);
 
         internal enum FormatterOption { Selection = 4 }
 
@@ -245,34 +248,34 @@ public sealed partial class GhosttyTerminal : IDisposable
             internal byte Rectangle;
         }
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_terminal_new(IntPtr allocator, out IntPtr terminal, ushort columns, ushort rows);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_terminal_new(IntPtr allocator, out IntPtr terminal, ushort columns, ushort rows);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_terminal_free(IntPtr terminal);
+        [LibraryImport(Library)]
+        internal static partial void ghostty_terminal_free(IntPtr terminal);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern unsafe void ghostty_terminal_vt_write(TerminalHandle terminal, byte* data, nuint length);
+        [LibraryImport(Library)]
+        internal static unsafe partial void ghostty_terminal_vt_write(IntPtr terminal, byte* data, nuint length);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_terminal_resize(TerminalHandle terminal, ushort columns, ushort rows, uint cellWidthPx, uint cellHeightPx);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_terminal_resize(TerminalHandle terminal, ushort columns, ushort rows, uint cellWidthPx, uint cellHeightPx);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_formatter_terminal_new(IntPtr allocator, out IntPtr formatter, TerminalHandle terminal);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_formatter_terminal_new(IntPtr allocator, out IntPtr formatter, TerminalHandle terminal);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_terminal_grid_ref(TerminalHandle terminal, Point point, out GridRef gridRef);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_terminal_grid_ref(TerminalHandle terminal, Point point, out GridRef gridRef);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_formatter_set(FormatterHandle formatter, FormatterOption option, in Selection value);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_formatter_set(FormatterHandle formatter, FormatterOption option, in Selection value);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_formatter_format_alloc(FormatterHandle formatter, IntPtr allocator, out IntPtr output, out nuint length);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_formatter_format_alloc(FormatterHandle formatter, IntPtr allocator, out IntPtr output, out nuint length);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_formatter_free(IntPtr formatter);
+        [LibraryImport(Library)]
+        internal static partial void ghostty_formatter_free(IntPtr formatter);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_free(IntPtr allocator, IntPtr output, nuint length);
+        [LibraryImport(Library)]
+        internal static partial void ghostty_free(IntPtr allocator, IntPtr output, nuint length);
     }
 }

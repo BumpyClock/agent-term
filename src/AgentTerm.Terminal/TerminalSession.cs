@@ -6,6 +6,9 @@ namespace AgentTerm.Terminal;
 /// <summary>Owns one shell and serializes access to its Ghostty terminal state.</summary>
 public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 {
+    // Lock order: _renderGate, then _gate. _renderGate owns the terminal's render state, so a frame can finish
+    // iterating cells after _gate is released while output keeps parsing.
+    private readonly object _renderGate = new();
     private readonly object _gate = new();
     private readonly GhosttyTerminal _terminal;
     private readonly ConPtyConnection _connection;
@@ -108,7 +111,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void Send(string text)
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
@@ -162,13 +165,12 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     /// </summary>
     public TerminalAnchor? ReserveRows()
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is not null || _mailboxPending is not null || _prompt.State != ShellPromptState.Ready) return null;
             _terminal.ScrollToBottom();
-            var frame = _terminal.ReadFrame();
-            if (frame.Viewport.IsAlternateScreen) return null;
+            if (_terminal.IsAlternateScreen) return null;
             var anchor = _terminal.AnchorActiveRow(_terminal.ReadActiveCursorRow());
             SubmitCommand("", "c:" + Guid.NewGuid().ToString("N")[..8]);
             return anchor;
@@ -176,7 +178,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     }
     public long? ReadAnchor(TerminalAnchor anchor)
     {
-        lock (_gate) return _disposeTask is null ? _terminal.ReadAnchor(anchor) : null;
+        lock (_renderGate) lock (_gate) return _disposeTask is null ? _terminal.ReadAnchor(anchor) : null;
     }
     public void ReleaseAnchor(TerminalAnchor anchor)
     {
@@ -252,16 +254,21 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public TerminalFrame ReadFrame()
     {
-        lock (_gate)
+        lock (_renderGate)
         {
-            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
-            return _terminal.ReadFrame();
+            GhosttyTerminal.FrameCapture capture;
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+                capture = _terminal.BeginFrame();
+            }
+            return _terminal.CompleteFrame(capture);
         }
     }
 
     public void SendKey(uint virtualKey, TerminalModifiers modifiers, TerminalKeyAction action, string? text = null)
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
@@ -269,6 +276,18 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
             if (bytes.Length != 0 && action != TerminalKeyAction.Release &&
                 virtualKey is not (0x10 or 0x11 or 0x12 or 0x5B or 0x5C or >= 0xA0 and <= 0xA5)) PrepareInput();
             _connection.Send(bytes);
+        }
+    }
+
+    public bool HasSelection
+    {
+        get
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+                return _terminal.HasSelection();
+            }
         }
     }
 
@@ -287,12 +306,12 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
     /// <summary>Returns true when application mouse tracking owns this event, including filtered events.</summary>
     public bool SendMouse(TerminalMouseEvent mouse, TerminalMouseGeometry geometry)
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return true;
             if ((mouse.Modifiers & TerminalModifiers.Shift) != 0 || !_terminal.IsMouseTrackingEnabled) return false;
-            var viewport = _terminal.ReadFrame().Viewport;
+            var viewport = _terminal.ReadPresentedViewport();
             var activeY = mouse.Y - (_terminal.ActiveTop - viewport.Offset) * geometry.CellHeight;
             if (mouse.Action == TerminalMouseAction.Release ||
                 mouse.Action == TerminalMouseAction.Motion && mouse.Button is (TerminalMouseButton.Left or TerminalMouseButton.Right or
@@ -308,7 +327,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void Paste(string text)
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
@@ -432,7 +451,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public bool Find(string query, bool forward, bool caseSensitive = false)
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             return _terminal.Find(query, forward, caseSensitive);
@@ -441,7 +460,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
 
     private void MutateView(Action change)
     {
-        lock (_gate)
+        lock (_renderGate) lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             change();
@@ -497,7 +516,7 @@ public sealed class TerminalSession : IAsyncDisposable, IHostTerminal
         try { await StopAsync().ConfigureAwait(false); }
         finally
         {
-            lock (_gate)
+            lock (_renderGate) lock (_gate)
             {
                 _connection.OutputReceived -= ProcessOutput;
                 _terminal.Dispose();

@@ -27,6 +27,12 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
+if (args.Contains("--concurrent-frame-only"))
+{
+    await ConcurrentFrameChecks.RunAsync();
+    return;
+}
+
 if (args.Contains("--mailbox-only"))
 {
     await MailboxChecks.RunAsync();
@@ -80,6 +86,7 @@ await TerminalEnvironmentChecks.RunAsync();
 await FullScreenChecks.RunAsync();
 await MouseSessionChecks.RunAsync();
 await ScrollbackSessionChecks.RunAsync();
+await ConcurrentFrameChecks.RunAsync();
 await ProfileChecks.RunAsync();
 await DirectoryChecks.RunAsync();
 await SmartPromptChecks.RunAsync();

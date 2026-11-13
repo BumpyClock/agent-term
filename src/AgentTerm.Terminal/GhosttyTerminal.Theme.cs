@@ -43,12 +43,12 @@ public sealed partial class GhosttyTerminal
 
     private static Rgb ToRgb(TerminalColor color) => new() { R = color.R, G = color.G, B = color.B };
 
-    private static unsafe class ThemeNative
+    private static unsafe partial class ThemeNative
     {
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate byte ColorSchemeCallback(IntPtr terminal, IntPtr userdata, int* scheme);
 
-        [DllImport("ghostty-vt", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_color_palette_default(Rgb* palette);
+        [LibraryImport("ghostty-vt")]
+        internal static partial void ghostty_color_palette_default(Rgb* palette);
     }
 }

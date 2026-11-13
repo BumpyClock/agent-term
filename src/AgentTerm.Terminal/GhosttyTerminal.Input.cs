@@ -169,7 +169,7 @@ public sealed partial class GhosttyTerminal
     private bool IsInputModeEnabled(InputNative.DecMode mode)
     {
         var config = new InputNative.ModeConfig { Mode = mode };
-        ThrowIfFailed(InputNative.ghostty_terminal_get(_handle, InputNative.TerminalDataMode, ref config),
+        ThrowIfFailed(InputNative.ghostty_terminal_get(_raw, InputNative.TerminalDataMode, ref config),
             $"Could not read libghostty-vt mode {(ushort)mode}.");
         return config.Value != 0;
     }
@@ -298,7 +298,7 @@ public sealed partial class GhosttyTerminal
         }
     }
 
-    private static class InputNative
+    private static partial class InputNative
     {
         private const string Library = "ghostty-vt";
         internal const int OutOfSpace = -3;
@@ -336,48 +336,48 @@ public sealed partial class GhosttyTerminal
             private readonly nuint _length = length;
         }
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_encoder_new(IntPtr allocator, out IntPtr encoder);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_encoder_new(IntPtr allocator, out IntPtr encoder);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_key_encoder_free(IntPtr encoder);
+        [LibraryImport(Library)]
+        internal static partial void ghostty_key_encoder_free(IntPtr encoder);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_encoder_set_from_terminal(KeyEncoderHandle encoder, TerminalHandle terminal);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_encoder_set_from_terminal(KeyEncoderHandle encoder, TerminalHandle terminal);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern unsafe int ghostty_key_encoder_encode(KeyEncoderHandle encoder, KeyEventHandle keyEvent,
+        [LibraryImport(Library)]
+        internal static unsafe partial int ghostty_key_encoder_encode(KeyEncoderHandle encoder, KeyEventHandle keyEvent,
             byte* buffer, nuint length, out nuint written);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_event_new(IntPtr allocator, out IntPtr keyEvent);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_event_new(IntPtr allocator, out IntPtr keyEvent);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void ghostty_key_event_free(IntPtr keyEvent);
+        [LibraryImport(Library)]
+        internal static partial void ghostty_key_event_free(IntPtr keyEvent);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_event_set_action(KeyEventHandle keyEvent, KeyAction action);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_event_set_action(KeyEventHandle keyEvent, KeyAction action);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_event_set_key(KeyEventHandle keyEvent, Key key);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_event_set_key(KeyEventHandle keyEvent, Key key);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_event_set_mods(KeyEventHandle keyEvent, ushort mods);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_event_set_mods(KeyEventHandle keyEvent, ushort mods);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_event_set_unshifted_codepoint(KeyEventHandle keyEvent, uint codepoint);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_event_set_unshifted_codepoint(KeyEventHandle keyEvent, uint codepoint);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_key_event_set_utf8(KeyEventHandle keyEvent, KeyText text);
+        [LibraryImport(Library)]
+        internal static partial int ghostty_key_event_set_utf8(KeyEventHandle keyEvent, KeyText text);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int ghostty_terminal_get(TerminalHandle terminal, int data, ref ModeConfig config);
+        [LibraryImport(Library), SuppressGCTransition]
+        internal static partial int ghostty_terminal_get(IntPtr terminal, int data, ref ModeConfig config);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern unsafe int ghostty_paste_encode(byte* data, nuint dataLength,
+        [LibraryImport(Library)]
+        internal static unsafe partial int ghostty_paste_encode(byte* data, nuint dataLength,
             [MarshalAs(UnmanagedType.U1)] bool bracketed, byte* buffer, nuint bufferLength, out nuint written);
 
-        [DllImport(Library, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern unsafe int ghostty_focus_encode(int focusEvent, byte* buffer, nuint length, out nuint written);
+        [LibraryImport(Library)]
+        internal static unsafe partial int ghostty_focus_encode(int focusEvent, byte* buffer, nuint length, out nuint written);
     }
 }
