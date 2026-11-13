@@ -10,12 +10,13 @@ public sealed partial class TerminalSession
     /// on from that frame (scrolled, grown, switched screen), so a stale frame never resolves another cell's link.
     /// The result is owned data and holds no native reference.
     /// </summary>
-    public TerminalLink? ReadLinkAt(int column, int row, TerminalViewport displayed)
+    public TerminalLink? ReadLinkAt(int column, int row, TerminalFrame displayed)
     {
         lock (_renderGate) lock (_gate)
         {
             if (_disposeTask is not null) return null;
-            return _terminal.ReadPresentedViewport() == displayed ? _terminal.ReadLink(column, row) : null;
+            return _terminal.ContentVersion == displayed.ContentVersion && _terminal.ReadPresentedViewport() == displayed.Viewport
+                ? _terminal.ReadLink(column, row) : null;
         }
     }
 
@@ -33,12 +34,4 @@ public sealed partial class TerminalSession
                 : new(_terminal.IsMouseTrackingEnabled, _terminal.ReadMouseShape());
     }
 
-    /// <summary>
-    /// libghostty-vt keeps an OSC 22 shape through a full reset. A program that exits without restoring it would
-    /// leave its pointer on the shell, so each integrated prompt asks for the default again. Runs under the session gate.
-    /// </summary>
-    private void ResetMouseShape()
-    {
-        if (_terminal.ReadMouseShape() != TerminalMouseShapes.Initial) _terminal.Write("\u001b]22;\u001b\\"u8);
-    }
 }

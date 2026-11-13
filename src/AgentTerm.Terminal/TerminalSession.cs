@@ -53,7 +53,6 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         _osc.Sequence += (sequence, _) => { if (IsTitleSequence(sequence)) _titlePending = true; };
         _osc.Reset += ClearTitle;
         _prompt.PromptStarted += ClearTitle;
-        _prompt.PromptStarted += ResetMouseShape;
         _osc.Output += bytes => _owned?.Capture.Feed(bytes);
         _prompt.Marker += message => _owned?.Capture.Marker(message);
         _columns = columns;

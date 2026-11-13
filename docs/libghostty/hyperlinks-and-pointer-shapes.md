@@ -7,7 +7,7 @@ Scope: OSC 8 hyperlinks and OSC 22 pointer shapes. Native source is libghostty-v
 - **Open a link.** Hold Ctrl and left-click a link. The open happens on release, and only if the pointer is still on a link with the same destination. Nothing opens because output arrived.
 - **See where it goes.** Hovering a link underlines it across every row it covers and shows the destination and a hint in a small chip at the pane corner. Holding Ctrl makes the underline thicker and the pointer a hand. A blocked link shows the no-entry pointer and the reason.
 - **Link menu.** Right-click a link, or press the Menu key (or Shift+F10) with the pointer on a link or with the text cursor on one. The menu has Open link, Copy link address, Copy and Paste. Items are disabled with a tooltip reason when the policy refuses them. Right-click off a link keeps the old behavior (copy selection, else paste).
-- **Program pointer shapes.** A program that sends OSC 22 sets the pointer over the pane. The default is the I-beam, because libghostty reports the text shape until a program asks for another. Each integrated prompt restores the default, because libghostty keeps the shape through a full reset.
+- **Program pointer shapes.** A program that sends OSC 22 sets the pointer over the pane. The default is the I-beam, because libghostty reports the text shape until a program asks for another. Programs restore their chosen shape with OSC 22. Prompt callbacks do not inject synthetic output into the parser.
 - **Selection.** A plain drag selects as before. Hover feedback is hidden during a selection drag. Ctrl+drag that starts on a link does not select. Shift keeps its selection override.
 
 ## Mouse tracking
@@ -34,7 +34,7 @@ Blocked as unsafe to copy as well: invalid UTF-8, control characters, spaces and
 - The link range comes from comparing the URI bytes of neighboring cells. The public API exposes no link id, so two adjacent links with identical URIs and different ids read as one run. This is a contract limit, not a regex guess.
 - A tail half of a wide character resolves to its first half. A wrapped wide character's spacer joins the link of the character that wrapped.
 - A link joins rows only across a soft wrap (the row's wrap flag). A hard line break starts a new run.
-- `TerminalSession.ReadLinkAt(column, row, displayedViewport)` takes `_renderGate` then `_gate`, and returns null when the terminal has moved off the viewport the caller is showing. Output after that frame cannot resolve another cell's link. The click path re-reads at press and again at release.
+- `TerminalSession.ReadLinkAt(column, row, displayedFrame)` takes `_renderGate` then `_gate`, and checks both viewport and captured content revision. Output or resize after that frame invalidates the lookup, including overwritten text at unchanged coordinates. The click path re-reads at press and again at release.
 - `TerminalSession.ReadMouseShape()` and `ReadPointerMode()` take only `_gate`. OSC 22 reaches the session through ConPTY, which a session test confirms.
 
 ## Where it lives
@@ -42,7 +42,7 @@ Blocked as unsafe to copy as well: invalid UTF-8, control characters, spaces and
 | File | Role |
 | --- | --- |
 | `src/AgentTerm.Terminal/GhosttyTerminal.Hyperlinks.cs` | native lookup, `LinkNative` imports |
-| `src/AgentTerm.Terminal/TerminalSession.Hyperlinks.cs` | scoped getters, prompt shape reset |
+| `src/AgentTerm.Terminal/TerminalSession.Hyperlinks.cs` | scoped getters and stale-frame rejection |
 | `src/AgentTerm.Terminal/TerminalLink.cs` | link types, URI policy, gesture routing |
 | `src/AgentTerm.Terminal/TerminalMouseShape.cs` | shape enum, nearest Windows pointer |
 | `src/AgentTerm.App/MainPage.Links.cs` | hover, overlay, click, menu, confirm dialog |
@@ -53,7 +53,6 @@ The OS pointer is separate from the text cursor, which `TerminalSurface` draws o
 ## Wiring in shared files
 
 - `TerminalSession` and `TerminalSurface` became `partial`.
-- `TerminalSession` constructor: `_prompt.PromptStarted += ResetMouseShape;`.
 - `MainPage.xaml.cs`: `InitializeLinks()` in the constructor, `HandleLinkPress` and the `TryShowLinkMenu` right-click call in the pointer press handler, a `_linkPress` early return in the move handler, `HandleLinkRelease` in the release handler, `CancelLinkPress` on capture lost, `ResetLinkInteraction` in `CancelSelectionGesture`, `RefreshLinkFeedback` after each presented frame, and `TryShowLinkMenuFromKeyboard` in `Terminal_KeyDown`.
 - Geometry: all hit testing uses `Terminal.Geometry.TryCellAt` and `RowTop`. If scroll geometry (overscan, smooth scroll) adds a pixel offset, `TryCellAt` and `RowTop` must include it. The link overlay uses `RowTop` for underlines.
 
@@ -72,4 +71,4 @@ Windows has no vertical text, zoom, copy, alias or grab pointer. They map to the
 ## Checks
 
 - `tests/AgentTerm.Terminal.Smoke/HyperlinkChecks.cs`: policy matrix, native lookup (split writes, ST and BEL, reset, adjacent links, wrap, wide glyphs, spacer heads, reflow, scroll, alternate screen, ownership, disposal), pointer mapping, click routing.
-- `tests/AgentTerm.ConPty.Smoke/HyperlinkSessionChecks.cs`: a real shell prints OSC 8 and OSC 22, stale viewport rejection, prompt shape reset, disposal. Run alone with `--hyperlink-only`.
+- `tests/AgentTerm.ConPty.Smoke/HyperlinkSessionChecks.cs`: a real shell prints OSC 8 and OSC 22, stale frame rejection, explicit pointer reset, disposal. Run alone with `--hyperlink-only`.

@@ -17,6 +17,7 @@ public sealed partial class GhosttyTerminal : IDisposable
     private ushort _columns;
     private ushort _rows;
     private bool _disposed;
+    internal long ContentVersion { get; private set; }
     private readonly Native.WritePtyCallback _writePty;
     private readonly List<byte[]> _responses = [];
     private ExceptionDispatchInfo? _callbackError;
@@ -64,6 +65,8 @@ public sealed partial class GhosttyTerminal : IDisposable
         ThrowIfDisposed();
         if (data.IsEmpty)
             return;
+
+        ContentVersion++;
 
         fixed (byte* bytes = data)
         {
@@ -149,6 +152,7 @@ public sealed partial class GhosttyTerminal : IDisposable
             throw new ArgumentOutOfRangeException(nameof(rows), "Terminal height must be greater than zero.");
 
         var previousGeometry = (_columns, _rows, _cellWidthPx, _cellHeightPx);
+        ContentVersion++;
         _columns = columns;
         _rows = rows;
         _cellWidthPx = cellWidthPx;

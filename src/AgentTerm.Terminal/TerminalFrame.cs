@@ -32,6 +32,7 @@ public sealed record TerminalFrame(int Columns, int Rows, TerminalCell[] Cells,
     public TerminalOverscanRow[] OverscanBelow { get; init; } = [];
     public TerminalViewport Viewport { get; init; }
     public bool HasSelection { get; init; }
+    public long ContentVersion { get; init; }
     public TerminalColor SelectionBackground { get; init; } = new(45, 92, 150);
     public TerminalColor SelectionForeground { get; init; } = new(255, 255, 255);
     public TerminalColor? CursorText { get; init; }

@@ -110,7 +110,7 @@ public sealed partial class MainPage
             }
             else if (!lookedUp || column != _hoverColumn || row != _hoverRow || !ReferenceEquals(frame, _hoverFrame))
             {
-                link = session.ReadLinkAt(column, row, frame.Viewport);
+                link = session.ReadLinkAt(column, row, frame);
                 lookedUp = true;
             }
             ApplyLinkHover(link, lookedUp, frame, onGrid ? column : -1, onGrid ? row : -1, TerminalLinkGesture.IsOpenModifier(modifiers));
@@ -250,7 +250,7 @@ public sealed partial class MainPage
             _selecting || _session is not { } session || _state is not (SessionState.Running or SessionState.Idle) ||
             _presentedFrame is not { } frame || !Terminal.Geometry.TryCellAt(point.Position, out var column, out var row))
             return false;
-        var link = session.ReadLinkAt(column, row, frame.Viewport);
+        var link = session.ReadLinkAt(column, row, frame);
         if (!TerminalLinkGesture.ClaimsPress(Modifiers(), TerminalMouseButton.Left, link is not null)) return false;
         FocusTerminal(FocusState.Pointer);
         _linkPress = new LinkPress(link!, column, row);
@@ -267,7 +267,7 @@ public sealed partial class MainPage
         Terminal.ReleasePointerCapture(e.Pointer);
         e.Handled = true;
         if (_session is { } session && _presentedFrame is { } frame && Terminal.Geometry.TryCellAt(point.Position, out var column, out var row) &&
-            session.ReadLinkAt(column, row, frame.Viewport) is { } link && TerminalLinkGesture.OpensOnRelease(press.Link, link))
+            session.ReadLinkAt(column, row, frame) is { } link && TerminalLinkGesture.OpensOnRelease(press.Link, link))
             _ = OpenLinkAsync(link);
         return true;
     }
@@ -278,7 +278,7 @@ public sealed partial class MainPage
     private bool TryShowLinkMenu(Point position)
     {
         if (_session is not { } session || _presentedFrame is not { } frame || !Terminal.Geometry.TryCellAt(position, out var column, out var row) ||
-            session.ReadLinkAt(column, row, frame.Viewport) is not { } link)
+            session.ReadLinkAt(column, row, frame) is not { } link)
             return false;
         ShowLinkMenu(position, link, session);
         return true;
@@ -294,14 +294,15 @@ public sealed partial class MainPage
         int column, row;
         if (_pointerOverTerminal && _hoverLink is { } hovered && _hoverColumn >= 0)
         {
-            (link, column, row) = (hovered, _hoverColumn, _hoverRow);
+            (column, row) = (_hoverColumn, _hoverRow);
+            link = session.ReadLinkAt(column, row, frame);
         }
         else
         {
             var cursor = frame.Cursor;
             if (!frame.Viewport.IsAtBottom || cursor.Column < 0 || cursor.Row < 0 || cursor.Column >= frame.Columns) return false;
             (column, row) = (cursor.Column, cursor.Row);
-            link = session.ReadLinkAt(column, row, frame.Viewport);
+            link = session.ReadLinkAt(column, row, frame);
         }
         if (link is null) return false;
         var geometry = Terminal.Geometry;
