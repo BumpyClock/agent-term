@@ -7,6 +7,7 @@ static async Task Wait(Func<bool> condition) { using var timeout = new Cancellat
 UiContext.Run(async () =>
 {
     TimelineChecks.Run();
+    CoalescingChecks.Run();
     await LifecycleChecks.RunAsync(Wait);
     foreach (var input in new[] { "git status", "/agentx do it", " /agent padded", "/Agent caps", "agent help", "$x = 1", "" }) Check(PromptRouter.Parse(input) == new ShellIntent(input), "Shell text stays shell: " + input);
     Check(PromptRouter.Parse("/agent") == new AgentIntent(""), "Bare /agent opens the surface");

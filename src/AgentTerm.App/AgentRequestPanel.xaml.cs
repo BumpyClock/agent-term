@@ -11,6 +11,7 @@ public sealed partial class AgentRequestPanel : UserControl
 {
     private AgentSessionController? _agent;
     private Control? _reply;
+    private bool _applied;
 
     public AgentRequestPanel() => InitializeComponent();
 
@@ -26,6 +27,8 @@ public sealed partial class AgentRequestPanel : UserControl
     internal void Update()
     {
         var request = _agent?.Request;
+        if (_applied && request == Shown) return;
+        _applied = true;
         if (request != Shown)
         {
             if (_reply is not null && XamlRoot is { } root && FocusManager.GetFocusedElement(root) is DependencyObject focused && Contains(focused))

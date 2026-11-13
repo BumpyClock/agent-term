@@ -6,6 +6,7 @@ using AgentTerm_App;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI.ViewManagement;
@@ -90,7 +91,7 @@ internal static class Program
             var moving = new UISettings().AnimationsEnabled && !new AccessibilitySettings().HighContrast;
             var activity = Descendants(view).OfType<Border>().First(b => Descendants(b).OfType<ActivityLabel>().Any(label => HasText(label, "pending")));
             var activeFrames = await SampleAsync(activity, 8);
-            if (moving ? activeFrames < 2 : activeFrames != 1) throw new Exception($"Single-tool activity rendered {activeFrames} distinct frames; motion enabled={moving}.");
+            if (moving ? activeFrames < 2 && !Shimmering(activity) : activeFrames != 1 || Shimmering(activity)) throw new Exception($"Single-tool activity rendered {activeFrames} distinct frames; motion enabled={moving}.");
             var approval = Guid.NewGuid();
             fixture.Session.Emit(new ApprovalRequest(fixture.Session.Turn, approval, "Fixture approval", "one"));
             await WaitAsync(() => controller.State == AgentState.WaitingForApproval);
@@ -98,7 +99,7 @@ internal static class Program
             if (Descendants(view).OfType<TextBlock>().Any(t => t.Style == AgentUi.Style("AgentBodyText") && t.Text.Length == 0 && IsVisible(t)))
                 throw new Exception("An empty assistant message rendered a blank reply row.");
             if (ShowsText(view, "running") || ShowsText(view, "pending")) throw new Exception("The gated call must say awaiting approval, not running or pending.");
-            if (await SampleAsync(activity, 3) != 1) throw new Exception("Waiting-for-approval activity kept animating.");
+            if (await SampleAsync(activity, 3) != 1 || Shimmering(activity)) throw new Exception("Waiting-for-approval activity kept animating.");
             await controller.RespondAsync(new(approval, true));
             fixture.Session.Emit(new ToolExecuting(fixture.Session.Turn, "one"));
             await WaitAsync(() => ShowsText(view, "running"));
@@ -107,7 +108,7 @@ internal static class Program
             fixture.Session.Emit(new TurnCompleted(fixture.Session.Turn));
             await WaitAsync(() => controller.State == AgentState.Idle);
             await WaitAsync(() => HasText(view, "Done"));
-            if (await SampleAsync(activity, 3) != 1) throw new Exception("Completed activity kept animating.");
+            if (await SampleAsync(activity, 3) != 1 || Shimmering(activity)) throw new Exception("Completed activity kept animating.");
             await controller.SubmitAsync("Stop fixture", new(Environment.CurrentDirectory));
             await controller.InterruptAsync();
             await WaitAsync(() => HasText(view, "Stopped before any reply."));
@@ -149,6 +150,9 @@ internal static class Program
             if (node is UIElement { Visibility: Visibility.Collapsed }) return false;
         return true;
     }
+
+    private static bool Shimmering(FrameworkElement element) =>
+        Descendants(element).OfType<TextBlock>().Any(text => ElementCompositionPreview.GetElementChildVisual(text) is not null);
 
     internal static async Task<int> SampleAsync(FrameworkElement element, int count)
     {

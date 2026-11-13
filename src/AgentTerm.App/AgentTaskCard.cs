@@ -11,6 +11,9 @@ internal sealed class AgentTaskCard : Button
     private readonly ActivityLabel _status = new();
     private readonly FontIcon _mark = AgentUi.Icon(AgentUi.Cross, "AgentCriticalIcon");
     private bool? _latest;
+    private (string Title, string Status, bool Animate, bool Failed)? _shown;
+    private bool? _placed;
+    private double _top = double.NaN, _width = double.NaN, _height = double.NaN;
     public AgentTask Task { get; }
 
     public AgentTaskCard(AgentTask task)
@@ -40,13 +43,25 @@ internal sealed class AgentTaskCard : Button
             ToolTipService.SetToolTip(this, latest ? "Open this agent task (Enter, or Ctrl+Shift+Y from the terminal)" : "Open this agent task (Enter)");
             AutomationProperties.SetAcceleratorKey(this, latest ? "Control+Shift+Y" : "");
         }
-        var failed = Task.LastOutcome == WorkStatus.Failed;
         var status = AgentUi.TaskStatus(controller, Task);
         var title = Task.Title.Length > 0 ? Task.Title : "New agent task";
-        if (_title.Text != title) _title.Text = title;
-        _status.Update(status, animate && running && controller.State is AgentState.Running or AgentState.Starting);
+        var working = animate && running && controller.State is AgentState.Running or AgentState.Starting;
+        var failed = Task.LastOutcome == WorkStatus.Failed && !running;
+        if (_shown == (title, status, working, failed)) return;
+        _shown = (title, status, working, failed);
+        _title.Text = title;
+        _status.Update(status, working);
         _status.Visibility = status.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _mark.Visibility = failed && !running ? Visibility.Visible : Visibility.Collapsed;
+        _mark.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
         AutomationProperties.SetName(this, $"Agent task: {title}{(status.Length > 0 ? ". " + status : "")}. Open conversation");
+    }
+
+    public void Place(bool visible, double top, double width, double height)
+    {
+        if (_placed != visible) { _placed = visible; Visibility = visible ? Visibility.Visible : Visibility.Collapsed; }
+        if (!visible) return;
+        if (_top != top) Canvas.SetTop(this, _top = top);
+        if (_width != width) Width = _width = width;
+        if (_height != height) Height = _height = height;
     }
 }
