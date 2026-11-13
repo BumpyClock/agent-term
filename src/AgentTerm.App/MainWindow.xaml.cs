@@ -21,7 +21,8 @@ namespace AgentTerm_App;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly IReadOnlyList<ShellProfile> _profiles = ShellProfile.Discover();
+    private readonly List<ShellProfile> _profiles = [.. ShellProfile.DiscoverBuiltIn()];
+    private int _profileItems;
     private TerminalTab? _visibleTab;
     private SettingsWindow? _settingsWindow;
     private bool _closing;
@@ -56,6 +57,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => statusTimer.Stop();
         BuildProfileMenu();
         AddTab(DefaultProfile);
+        _ = AddWslProfilesAsync();
         AppWindow.Closing += Window_Closing;
         Closed += (_, _) => _settingsWindow?.Close();
     }
@@ -80,24 +82,46 @@ public sealed partial class MainWindow : Window
         titleBar.ButtonPressedBackgroundColor = highContrast ? null : Windows.UI.Color.FromArgb(40, overlay, overlay, overlay);
     }
 
-    [DllImport("dwmapi.dll", ExactSpelling = true)]
-    private static extern int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
 
-    private ShellProfile DefaultProfile => _profiles.FirstOrDefault(profile =>
-        profile.Id == TerminalPreferences.Current.DefaultProfileId) ?? _profiles.FirstOrDefault() ?? ShellProfile.Default;
+    private ShellProfile DefaultProfile
+    {
+        get
+        {
+            var id = TerminalPreferences.Current.DefaultProfileId;
+            return _profiles.FirstOrDefault(profile => profile.Id == id) ?? ShellProfile.FromId(id)
+                ?? _profiles.FirstOrDefault() ?? ShellProfile.Default;
+        }
+    }
+
+    private async Task AddWslProfilesAsync()
+    {
+        var wsl = await Task.Run(ShellProfile.DiscoverWsl);
+        if (_closing) return;
+        foreach (var profile in wsl)
+        {
+            if (_profiles.Any(existing => existing.Id == profile.Id)) continue;
+            ProfileMenu.Items.Insert(_profileItems++, CreateProfileItem(profile));
+            _profiles.Add(profile);
+        }
+    }
+
+    private MenuFlyoutItem CreateProfileItem(ShellProfile profile)
+    {
+        var item = new MenuFlyoutItem { Text = profile.Name };
+        item.Click += (_, _) =>
+        {
+            if (Down(VirtualKey.Menu) && _visibleTab is { } tab) tab.SplitDuplicate(profile);
+            else AddTab(profile);
+        };
+        return item;
+    }
 
     private void BuildProfileMenu()
     {
-        foreach (var profile in _profiles)
-        {
-            var item = new MenuFlyoutItem { Text = profile.Name };
-            item.Click += (_, _) =>
-            {
-                if (Down(VirtualKey.Menu) && _visibleTab is { } tab) tab.SplitDuplicate(profile);
-                else AddTab(profile);
-            };
-            ProfileMenu.Items.Add(item);
-        }
+        foreach (var profile in _profiles) ProfileMenu.Items.Add(CreateProfileItem(profile));
+        _profileItems = _profiles.Count;
 
         ProfileMenu.Items.Add(new MenuFlyoutSeparator());
         var splitRight = new MenuFlyoutItem { Text = "Split right", KeyboardAcceleratorTextOverride = "Alt+Shift++" };
@@ -180,23 +204,45 @@ public sealed partial class MainWindow : Window
         Tabs.SelectedItem = item;
     }
 
+    private static readonly Dictionary<string, Task<BitmapImage?>> ShellIcons = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TabViewItem, string> AppliedIcons = new();
+
     private static async Task SetShellIconAsync(TabViewItem item, TerminalTab tab)
     {
         var profile = tab.PrimaryProfile;
         var status = (TabProgramStatus)item.Tag;
-        status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+        if (AppliedIcons.TryGetValue(item, out var applied) && applied == profile.Executable) return;
+        if (!ShellIcons.TryGetValue(profile.Executable, out var load))
+        {
+            status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+            ShellIcons[profile.Executable] = load = LoadShellIconAsync(profile.Executable);
+        }
+        else if (!load.IsCompleted) status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+        var image = await load;
+        if (image is null)
+        {
+            status.SetShellIcon(new FontIconSource { Glyph = "\uE756" });
+            return;
+        }
+        if (tab.PrimaryProfile.Id != profile.Id) return;
+        AppliedIcons.AddOrUpdate(item, profile.Executable);
+        status.SetShellIcon(new ImageIconSource { ImageSource = image });
+    }
+
+    private static async Task<BitmapImage?> LoadShellIconAsync(string executable)
+    {
         try
         {
-            var icon = await Task.Run(() => ExecutableIcon.Read(profile.Executable));
-            if (icon is null) return;
+            var icon = await Task.Run(() => ExecutableIcon.Read(executable));
+            if (icon is null) return null;
             using var stream = new MemoryStream(icon).AsRandomAccessStream();
             var image = new BitmapImage { DecodePixelWidth = 32 };
             await image.SetSourceAsync(stream);
-            if (tab.PrimaryProfile.Id == profile.Id)
-                status.SetShellIcon(new ImageIconSource { ImageSource = image });
+            return image;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException)
         {
+            return null;
         }
     }
 

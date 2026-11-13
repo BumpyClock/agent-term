@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Threading.Tasks;
 using AgentTerm_App.GitHub;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -16,6 +18,7 @@ internal sealed partial class GitHubDashboardButton : UserControl
     private const double WindowMargin = 8;
     private const double AvatarRightInset = 8;
     private const double AvatarSize = 24;
+    private static readonly TimeSpan IdentityDelay = TimeSpan.FromSeconds(5);
 
     private readonly GitHubAvatar _avatar = new(AvatarSize, 96);
     private readonly GitHubReveal _reveal = new();
@@ -26,6 +29,8 @@ internal sealed partial class GitHubDashboardButton : UserControl
     private double _avatarRight;
     private bool _openedWithKeyboard;
     private bool _closeNow;
+    private bool _warmed;
+    private GitHubDashboardView? _dashboard;
 
     public GitHubDashboardButton()
     {
@@ -35,23 +40,59 @@ internal sealed partial class GitHubDashboardButton : UserControl
         AvatarHost.Child = _avatar;
         GitHubMotion.AttachPress(DashboardButton, _avatar, 0.88f);
         _avatar.PictureFailed += () => ToolTipService.SetToolTip(DashboardButton, GitHubStrings.AvatarUnavailable);
-        Dashboard.IdentityChanged += (login, url) =>
+        DashboardButton.PointerEntered += (_, _) => EnsureDashboard();
+        Loaded += (_, _) =>
         {
-            ToolTipService.SetToolTip(DashboardButton, GitHubStrings.ButtonToolTip);
-            _avatar.Set(login, url);
+            _dashboard?.Start();
+            Warm();
         };
-        Dashboard.CloseRequested += () => DashboardFlyout.Hide();
-        Dashboard.Loaded += (_, _) => PrepareReveal();
-        Loaded += (_, _) => Dashboard.Start();
         Unloaded += (_, _) => Shutdown();
     }
 
     public event Action? FocusReturnRequested;
 
+    private GitHubDashboardView Dashboard => EnsureDashboard();
+
+    private GitHubDashboardView EnsureDashboard()
+    {
+        if (_dashboard is { } existing) return existing;
+        var view = _dashboard = new GitHubDashboardView();
+        view.IdentityChanged += (login, url) =>
+        {
+            ToolTipService.SetToolTip(DashboardButton, GitHubStrings.ButtonToolTip);
+            _avatar.Set(login, url);
+        };
+        view.CloseRequested += () => DashboardFlyout.Hide();
+        view.Loaded += (_, _) => PrepareReveal();
+        DashboardFlyout.Content = view;
+        view.Start();
+        return view;
+    }
+
+    private async void Warm()
+    {
+        if (_warmed) return;
+        _warmed = true;
+        var queue = DispatcherQueue;
+        try
+        {
+            var cached = await Task.Run(() => GitHubCache.Read(GitHubCache.DefaultPath()));
+            if (_dashboard is null && cached.Login.Length != 0) _avatar.Set(cached.Login, cached.AvatarUrl);
+        }
+        catch (Exception exception) when (exception is GitHubException or IOException or UnauthorizedAccessException)
+        {
+        }
+        var idle = queue.CreateTimer();
+        idle.Interval = IdentityDelay;
+        idle.IsRepeating = false;
+        idle.Tick += (_, _) => EnsureDashboard();
+        idle.Start();
+    }
+
     public void Shutdown()
     {
         HideNow();
-        Dashboard.Shutdown();
+        _dashboard?.Shutdown();
     }
 
     public void SetAvailable(bool available)

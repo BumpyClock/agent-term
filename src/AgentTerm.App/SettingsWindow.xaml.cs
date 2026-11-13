@@ -77,8 +77,8 @@ internal sealed partial class SettingsWindow : Window
         _ = DwmSetWindowAttribute(WinRT.Interop.WindowNative.GetWindowHandle(this), 20, in dark, sizeof(int));
     }
 
-    [DllImport("dwmapi.dll", ExactSpelling = true)]
-    private static extern int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmSetWindowAttribute(IntPtr window, uint attribute, in int value, uint size);
 
     internal void ActivateSettings()
     {
