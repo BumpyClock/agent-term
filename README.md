@@ -1,5 +1,7 @@
 # Agent Term
 
+Program titles omit directional controls and shell executable paths before applying the display length limit. Unicode grapheme joiners remain intact. Program status marks follow high contrast changes even without new reports. Nested task reports without visible parents retain their full IDs so equal task names remain distinguishable.
+
 A Windows terminal built with WinUI 3 on Windows App SDK 2.6.5, .NET 10, Win2D, Windows ConPTY, and libghostty-vt 1.0.0.
 
 Each tab or pane owns an independent shell, terminal state, and scrollback. The profile menu discovers installed PowerShell versions, Command Prompt, and individual WSL distributions. PowerShell loads your normal shell profile. Closing a pane releases its shell; switching tabs preserves it. Stopped and exited sessions keep their history available until restarted or closed.

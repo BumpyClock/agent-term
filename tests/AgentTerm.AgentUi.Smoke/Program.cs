@@ -65,6 +65,7 @@ internal static class Program
             }
             if (Environment.GetCommandLineArgs().Contains("--status-layout"))
             {
+                await ProgramStatusUiChecks.CheckIconPreferencesAsync(window);
                 await ProgramStatusUiChecks.CheckLayoutAsync(window);
                 await ProgramStatusUiChecks.CheckCardAsync(window);
                 return;
@@ -72,6 +73,7 @@ internal static class Program
             if (!Environment.GetCommandLineArgs().Contains("--timeline-only"))
             {
                 await ProgramActivityChecks.RunAsync(window);
+                await ProgramStatusUiChecks.CheckIconPreferencesAsync(window);
                 await ProgramStatusUiChecks.CheckDetailsAsync(window);
                 await ProgramStatusUiChecks.CheckCardAsync(window);
                 await ProgramStatusUiChecks.CheckIconsAsync(window);

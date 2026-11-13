@@ -1,6 +1,8 @@
 using System.Text;
 using AgentTerm.Terminal;
 
+ProgramTitleChecks.Run();
+if (args.Contains("--program-title-only")) return;
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 NativeProtocolChecks.Run();

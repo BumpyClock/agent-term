@@ -14,6 +14,12 @@ internal static class ProgramStatusUiChecks
 {
     internal static void Run()
     {
+        var orphanCard = new ProgramStatusCard();
+        var firstOrphan = new PaneProgramStatus(1, "PowerShell", new("build/test", ProgramState.Done, null, null, null, null, null, null, DateTimeOffset.Now));
+        var secondOrphan = firstOrphan with { Status = firstOrphan.Status with { Id = "deploy/test" } };
+        orphanCard.Update("PowerShell", [firstOrphan, secondOrphan], false);
+        var identities = Descendants(orphanCard).OfType<TextBlock>().Where(text => text.Name == "Identity").Select(text => text.Text).ToArray();
+        Check(identities.Any(text => text.StartsWith("build/test · ")) && identities.Any(text => text.StartsWith("deploy/test · ")), "Orphan nested reports with equal leaf names must retain distinct full identities.");
         var tab = new TabViewItem { Header = "PowerShell" };
         var status = new TabProgramStatus(tab);
         tab.Tag = status;
@@ -371,6 +377,87 @@ internal static class ProgramStatusUiChecks
         status.Update([claude with { Status = claude.Status with { IsActive = false } }]);
         Check(ReferenceEquals(tab.IconSource, shell), "Exiting an agent must restore shell identity.");
         Console.WriteLine($"Native executable icon resolved; tab activity rendered {frames} frames; 62% accessible progress and static completion passed. Motion enabled={moving}.");
+    }
+
+    internal static async Task CheckIconPreferencesAsync(Window window)
+    {
+        var preferences = new IconPreferences();
+        var tab = new TabViewItem { Header = "PowerShell" };
+        var status = new TabProgramStatus(tab);
+        tab.Tag = status;
+        var report = Report("", ProgramState.Working, "claude", "Selected report text");
+        status.Update([report]);
+        var icon = new ProgramStatusIcon(null, preferences) { Tab = tab };
+        var card = new ProgramStatusCard(preferences);
+        card.Update("PowerShell", [report], true);
+        var host = new StackPanel { Children = { icon, card } };
+        window.Content = host;
+        window.Activate();
+        await Task.Delay(150);
+        var text = Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Selected report text");
+        text.Select(text.ContentStart, text.ContentEnd);
+        var row = VisualTreeHelper.GetParent(text);
+        var tabMark = Descendants(icon).OfType<PathIcon>().Single();
+        var rowMark = Descendants(card).OfType<PathIcon>().Single();
+        var brand = Windows.UI.Color.FromArgb(255, 0xD9, 0x77, 0x57);
+        Check(preferences.Subscribers == 2, "Each loaded presentation must observe preferences once.");
+        foreach (var contrast in new[] { false, true, false })
+        {
+            preferences.SetContrast(contrast);
+            await Task.Delay(150);
+            foreach (var mark in new[] { tabMark, rowMark })
+                Check(contrast ? mark.ReadLocalValue(IconElement.ForegroundProperty) == DependencyProperty.UnsetValue
+                    : mark.Foreground is SolidColorBrush brush && brush.Color == brand,
+                    "Unchanged tab and row marks must enter and leave high contrast.");
+            Check(ReferenceEquals(rowMark, Descendants(card).OfType<PathIcon>().Single()) &&
+                ReferenceEquals(row, VisualTreeHelper.GetParent(text)) && text.SelectedText == "Selected report text",
+                "Preference refresh must preserve the rendered row, text identity and selection.");
+            foreach (var root in new DependencyObject[] { icon, card })
+            {
+                var activity = Descendants(root).OfType<ProgramActivity>().Single();
+                Check(activity.IsAnimating == !contrast, "Contrast must stop and restore permitted working motion.");
+                var presenter = Descendants(root).OfType<ContentPresenter>().Single(p => p.Content is Viewbox);
+                Check(presenter.Visibility == (contrast ? Visibility.Visible : Visibility.Collapsed), "A static mark must replace the sweep in high contrast.");
+            }
+        }
+        report = report with { Status = report.Status with { IsActive = false } };
+        card.Update("PowerShell", [report], true);
+        rowMark = Descendants(card).OfType<PathIcon>().Single();
+        foreach (var contrast in new[] { true, false })
+        {
+            preferences.SetContrast(contrast);
+            await Task.Delay(100);
+            Check(contrast ? rowMark.ReadLocalValue(IconElement.ForegroundProperty) == DependencyProperty.UnsetValue
+                : rowMark.Foreground is SolidColorBrush brush && brush.Color == brand,
+                "An exited report must refresh contrast in both directions without another report update.");
+            Check(ReferenceEquals(text, Descendants(card).OfType<TextBlock>().Single(t => t.Text == "Selected report text")) &&
+                ReferenceEquals(row, VisualTreeHelper.GetParent(text)) && text.SelectedText == "Selected report text" &&
+                !Descendants(card).OfType<ProgramActivity>().Single().IsAnimating,
+                "Exited reports must retain row identity, selected text and a static icon.");
+        }
+        host.Children.Clear();
+        await Task.Delay(100);
+        Check(preferences.Subscribers == 0, "Unloaded presentations must release preference subscriptions.");
+        Check(Descendants(card).OfType<ProgramActivity>().All(a => !a.IsAnimating), "Unloading must stop row motion.");
+        preferences.SetContrast(true);
+        host.Children.Add(icon);
+        host.Children.Add(card);
+        await Task.Delay(150);
+        Check(preferences.Subscribers == 2 && rowMark.ReadLocalValue(IconElement.ForegroundProperty) == DependencyProperty.UnsetValue,
+            "Reattachment must read preferences changed while unloaded without duplicating subscriptions.");
+        host.Children.Clear();
+        await Task.Delay(100);
+        Check(preferences.Subscribers == 0, "Repeated unload must release all subscriptions.");
+    }
+
+    private sealed class IconPreferences : IProgramIconPreferences
+    {
+        public bool HighContrast { get; private set; }
+        public bool AnimationsEnabled => true;
+        private Action? _changed;
+        internal int Subscribers => _changed?.GetInvocationList().Length ?? 0;
+        public event Action? Changed { add => _changed += value; remove => _changed -= value; }
+        internal void SetContrast(bool value) { HighContrast = value; _changed?.Invoke(); }
     }
 
     internal static async Task CheckLayoutAsync(Window window)

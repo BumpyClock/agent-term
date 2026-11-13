@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Windows.System;
-using Windows.UI.ViewManagement;
 
 namespace AgentTerm_App;
 
@@ -22,15 +21,16 @@ internal sealed partial class ProgramStatusCard : Grid
     private readonly Button _pin;
     private readonly Button _close;
     private readonly Dictionary<(int Pane, string Id), ReportRow> _entries = [];
-    private readonly AccessibilitySettings _accessibility = new();
+    private readonly IProgramIconPreferences? _iconPreferences;
     private (int Pane, string Id)[] _order = [];
     private readonly Dictionary<int, TextBlock> _headings = [];
     internal ScrollViewer Scroll { get; }
     internal event Action? KeepOpen;
     internal event Action? Dismiss;
 
-    internal ProgramStatusCard()
+    internal ProgramStatusCard(IProgramIconPreferences? iconPreferences = null)
     {
+        _iconPreferences = iconPreferences;
         var layout = (Grid)XamlReader.Load("""
             <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -119,7 +119,7 @@ internal sealed partial class ProgramStatusCard : Grid
                 }
                 previousPane = record.Pane;
                 if (!_entries.TryGetValue((record.Pane, record.Status.Id), out var row))
-                    _entries.Add((record.Pane, record.Status.Id), row = new ReportRow());
+                    _entries.Add((record.Pane, record.Status.Id), row = new ReportRow(_iconPreferences));
                 desired.Add(row.Root);
             }
             foreach (var stale in _entries.Keys.Where(key => !ordered.Any(r => r.Pane == key.Pane && r.Status.Id == key.Id)).ToArray()) _entries.Remove(stale);
@@ -137,7 +137,7 @@ internal sealed partial class ProgramStatusCard : Grid
         {
             var ancestors = ordered.Count(parent => parent.Pane == record.Pane && parent.Status.Id != record.Status.Id &&
                 (parent.Status.Id.Length == 0 || record.Status.Id.StartsWith(parent.Status.Id + "/", StringComparison.Ordinal)));
-            _entries[(record.Pane, record.Status.Id)].Update(record.Status, ancestors, _accessibility.HighContrast);
+            _entries[(record.Pane, record.Status.Id)].Update(record.Status, ancestors);
         }
         if (anchor is not null && _rows.Children.Contains(anchor))
         {
@@ -172,12 +172,10 @@ internal sealed partial class ProgramStatusCard : Grid
         private readonly TextBlock _state;
         private readonly TextBlock _message;
         private readonly TextBlock _identity;
-        private readonly ContentPresenter _icon;
-        private readonly ProgramActivity _activity = new(ProgramActivityKind.TabIcon);
-        private string? _iconKey;
+        private readonly ProgramIconPresentation _icon;
         internal Grid Root { get; }
 
-        internal ReportRow()
+        internal ReportRow(IProgramIconPreferences? preferences)
         {
             Root = (Grid)XamlReader.Load("""
                 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -190,10 +188,8 @@ internal sealed partial class ProgramStatusCard : Grid
                     </Grid.Resources>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                    <Grid x:Name="Lead" Width="20" Height="20" VerticalAlignment="Top">
-                        <ContentPresenter x:Name="Icon" Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    </Grid>
+                    <ContentPresenter x:Name="Lead" Width="20" Height="20" VerticalAlignment="Top"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     <TextBlock x:Name="Name" Grid.Column="1" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
                     <TextBlock x:Name="State" Grid.Column="2" FontSize="12" MaxWidth="150" TextWrapping="Wrap" VerticalAlignment="Top" Margin="0,2,0,0"/>
                     <TextBlock x:Name="Message" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" FontSize="14" TextWrapping="Wrap" IsTextSelectionEnabled="True"
@@ -206,10 +202,8 @@ internal sealed partial class ProgramStatusCard : Grid
             _state = (TextBlock)Root.FindName("State");
             _message = (TextBlock)Root.FindName("Message");
             _identity = (TextBlock)Root.FindName("Identity");
-            _icon = (ContentPresenter)Root.FindName("Icon");
-            ((Grid)Root.FindName("Lead")).Children.Add(_activity);
-            // As on the tab, the sweep replaces the icon while it animates. Without motion the icon stays.
-            _activity.Changed += () => _icon.Visibility = _activity.IsAnimating ? Visibility.Collapsed : Visibility.Visible;
+            _icon = new ProgramIconPresentation(preferences);
+            ((ContentPresenter)Root.FindName("Lead")).Content = _icon;
             Root.KeyDown += (_, e) =>
             {
                 // Text navigation belongs to the selectable text, not its enclosing ScrollViewer.
@@ -219,7 +213,7 @@ internal sealed partial class ProgramStatusCard : Grid
 
         internal bool HasSelection => _name.SelectedText.Length > 0 || _message.SelectedText.Length > 0 || _identity.SelectedText.Length > 0;
 
-        internal void Update(ProgramStatus status, int depth, bool highContrast)
+        internal void Update(ProgramStatus status, int depth)
         {
             var name = ProgramStatusPresentation.Name(status);
             SetSelectableText(_name, name);
@@ -231,7 +225,9 @@ internal sealed partial class ProgramStatusCard : Grid
             var time = status.UpdatedAt.ToLocalTime();
             var timestamp = time.Date == DateTime.Now.Date ? $"{time:HH:mm:ss}" : $"{time:MMM d, HH:mm:ss}";
             var app = status.Title is null ? null : ProgramStatusPresentation.OwnApp(status);
-            SetSelectableText(_identity, app is null || app == name ? timestamp : $"{app} · {timestamp}");
+            var identityText = app is null || app == name ? timestamp : $"{app} · {timestamp}";
+            if (depth == 0 && status.Id.Contains('/')) identityText = $"{ProgramStatusPresentation.Clean(status.Id)} · {identityText}";
+            SetSelectableText(_identity, identityText);
             AutomationProperties.SetName(_identity, $"{_identity.Text}. Updated {time:g}");
             // Nested rows start their symbol under the parent's name, so the tree reads as one column.
             Root.Margin = new Thickness(depth * 28, 0, 0, 0);
@@ -240,25 +236,9 @@ internal sealed partial class ProgramStatusCard : Grid
             var mark = status.State is not (ProgramState.Blocked or ProgramState.Error) &&
                 ProgramStatusPresentation.IdentityApp(status) is { } identity && AgentMarks.Has(identity) ? identity : null;
             var glyph = ProgramStatusPresentation.GlyphFor(status);
-            var key = mark is null ? $"{status.State}:{glyph}" : $"app:{mark}";
-            if (_iconKey != key)
-            {
-                _iconKey = key;
-                if (mark is not null)
-                {
-                    var source = AgentMarks.For(mark);
-                    _icon.Content = ProgramStatusIcon.Render(source);
-                    ProgramStatusIcon.ApplyBrand(_icon.Content, source, highContrast);
-                }
-                else
-                {
-                    var icon = new FontIcon { Glyph = glyph, FontSize = 14 };
-                    if (accent is not null) icon.Foreground = accent;
-                    _icon.Content = icon;
-                }
-            }
+            var source = mark is not null ? AgentMarks.For(mark) : new FontIconSource { Glyph = glyph, Foreground = accent };
             // Retained reports outlived their command, so only live work animates.
-            _activity.Working = status.IsActive && status.State == ProgramState.Working;
+            _icon.Update(source, status.IsActive && status.State == ProgramState.Working, mark is null ? 14 : 16);
         }
     }
 }
