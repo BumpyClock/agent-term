@@ -38,6 +38,7 @@ if (!OperatingSystem.IsWindows())
 
 if (args.Contains("--history-search-only")) { await HistorySearchChecks.RunAsync(); return; }
 if (args.Contains("--session-worker-only")) { await SessionWorkerChecks.RunAsync(); return; }
+if (args.Contains("--automation-selection-only")) { await AutomationSelectionChecks.RunAsync(); return; }
 if (args.Contains("--transport-only")) { await TransportChecks.RunAsync(); return; }
 if (args.Contains("--smart-prompt-only")) { await SmartPromptChecks.RunAsync(); return; }
 
@@ -132,6 +133,7 @@ await FullScreenChecks.RunAsync();
 await MouseSessionChecks.RunAsync();
 await ScrollbackSessionChecks.RunAsync();
 await ConcurrentFrameChecks.RunAsync();
+await AutomationSelectionChecks.RunAsync();
 await ProfileChecks.RunAsync();
 await DirectoryChecks.RunAsync();
 await TitleChecks.RunAsync();

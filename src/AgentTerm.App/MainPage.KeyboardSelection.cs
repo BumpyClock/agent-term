@@ -12,18 +12,25 @@ public sealed partial class MainPage
 
     private void InitializeTerminalAutomation()
     {
+        var wait = TimeSpan.FromMilliseconds(50);
+        static TimeoutException Busy() => new("The terminal is busy. Try the selection again.");
         Terminal.AutomationSelectRange = (frame, startColumn, startRow, endColumn, endRow) =>
         {
-            if (_session is not { } session || !session.TrySelectFrameRange(frame, startColumn, startRow, endColumn, endRow)) return false;
-            RefreshOutput(session);
+            if (_session is not { } session) return false;
+            switch (session.SelectFrameRange(frame, startColumn, startRow, endColumn, endRow, wait))
+            {
+                case TerminalSelectionOutcome.Busy: throw Busy();
+                case TerminalSelectionOutcome.Stale: return false;
+            }
+            RefreshTerminalFrame(session, refreshCards: true);
             return true;
         };
         Terminal.AutomationClearSelection = () =>
         {
             if (_session is not { } session) return;
-            session.ClearSelection();
+            if (session.ClearSelection(wait) == TerminalSelectionOutcome.Busy) throw Busy();
             SetKeyboardMarkMode(false);
-            RefreshOutput(session);
+            RefreshTerminalFrame(session, refreshCards: true);
         };
     }
 
