@@ -31,6 +31,8 @@ The integration passed the following checks on Windows with the pinned 1.0.1 DLL
 
 Boat Linux CI rebuilt the pinned native library and passed `scripts/check-linux.sh`, including Terminal, Agents and Copilot normalization. The sandbox was deleted and its absence confirmed. The Linux Git fixture skipped because the image's Git version was below 2.45; Windows exercised that fixture. File URI policy treats Windows path separators consistently on both platforms.
 
+The review correction run repeated the complete Terminal, ConPTY, Agent UI, renderer raster, live `--libghostty`, and Boat Linux suites. New regressions cover repository membership changes, retained icon contrast, pane reparenting, actual search-selection ownership, full URI confirmation, default-shell prompt navigation, anchored hold failures, cropped-image memory bounds and overscan layers, clipboard decision ownership, progress coalescing, and exact custom privacy limits. The integrated source was compared with the tested source after stack rebasing; all corrected file contents matched. No extra runtime pass is implied for changes that only relocate those commits between stack layers.
+
 The startup fixture is built with `-p:StartupSmoke=true`. `scripts/check-startup.ps1` runs both tab layouts. To run the feature fixture against the same build, pass a report path, `Left`, and `--libghostty` to its `AgentTerm.App.exe`. It writes a text report, a PNG raster and a `.agtvt` archive beside the report. Run GUI fixtures sequentially.
 
 ## Verification limits
