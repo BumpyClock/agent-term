@@ -46,7 +46,8 @@ public sealed partial class GhosttyTerminal
             var png = new ReadOnlySpan<byte>(data, (int)length);
             ulong width = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png[16..]);
             ulong height = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(png[20..]);
-            if (width == 0 || height == 0 || width * height > (ulong)PngDecoder.MaxPixels) return 0;
+            if (width == 0 || height == 0 || width * height > (ulong)PngDecoder.MaxPixels ||
+                width * height > (ulong)PngDecoder.MaxDecodedBytes / 4) return 0;
             size = (nuint)(width * height * 4);
             var pixels = PngDecoder.TryDecode(png, out var decodedWidth, out var decodedHeight);
             if (pixels is null || (ulong)decodedWidth != width || (ulong)decodedHeight != height) return 0;
@@ -144,6 +145,9 @@ public sealed partial class GhosttyTerminal
         var placements = storageLease.Raw;
         ThrowIfFailed(ImageNative.ghostty_kitty_graphics_get(graphics, 1, &placements), "Could not read image placements.");
         var visited = new HashSet<uint>();
+        uint width = 0, height = 0; int format = 0; Native.Utf8String pixels = default;
+        var imageKeys = stackalloc int[] { 3, 4, 5, 7 };
+        var imageValues = stackalloc void*[] { &width, &height, &format, &pixels };
         while (ImageNative.ghostty_kitty_graphics_placement_next(_storagePlacements) != 0)
         {
             uint id = 0;
@@ -155,11 +159,7 @@ public sealed partial class GhosttyTerminal
             ThrowIfFailed(ImageNative.ghostty_kitty_graphics_image_get(image, 9, &generation), "Could not read image generation.");
             seen.Add(generation);
             if (_rawImages.ContainsKey(generation)) continue;
-            uint width = 0, height = 0; int format = 0; Native.Utf8String pixels = default;
-            ThrowIfFailed(ImageNative.ghostty_kitty_graphics_image_get(image, 3, &width), "Could not read image width.");
-            ThrowIfFailed(ImageNative.ghostty_kitty_graphics_image_get(image, 4, &height), "Could not read image height.");
-            ThrowIfFailed(ImageNative.ghostty_kitty_graphics_image_get(image, 5, &format), "Could not read image format.");
-            var result = ImageNative.ghostty_kitty_graphics_image_get(image, 7, &pixels);
+            var result = ImageNative.ghostty_kitty_graphics_image_get_multi(image, 4, imageKeys, imageValues, null);
             if (result == -4) continue; // Pixels still arriving. The storage generation changes when they land.
             ThrowIfFailed(result, "Could not read image pixels.");
             var channels = format switch { 0 => 3, 1 => 4, 3 => 2, 4 => 1, _ => 0 };
@@ -183,8 +183,7 @@ public sealed partial class GhosttyTerminal
         {
             live.Add(raw.Generation);
             if (_imagePixels.ContainsKey(raw.Generation)) continue;
-            _imagePixels[raw.Generation] = new TerminalImageData(raw.Id, raw.Generation, raw.Width, raw.Height,
-                ToPremultipliedRgba(raw.Pixels, raw.Channels, raw.Width * raw.Height));
+            _imagePixels[raw.Generation] = raw.Materialize();
             added = true;
         }
         foreach (var generation in _imagePixels.Keys.Where(key => !live.Contains(key)).ToArray()) _imagePixels.Remove(generation);
@@ -200,6 +199,11 @@ public sealed partial class GhosttyTerminal
         StateGet(RenderStateData.ImageIterator, &iterator);
         var placements = new List<TerminalImagePlacement>();
         var missing = false;
+        int layer = 0, z = 0, column = 0, row = 0, kind = 2;
+        uint columns = 0, rows = 0, offsetX = 0, offsetY = 0, width = 0, height = 0, sourceX = 0, sourceY = 0, sourceWidth = 0, sourceHeight = 0, placementId = 0;
+        var keys = stackalloc int[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 };
+        var values = stackalloc void*[] { &layer, &z, &column, &row, &columns, &rows, &offsetX, &offsetY,
+            &width, &height, &sourceX, &sourceY, &sourceWidth, &sourceHeight, &placementId, &kind };
         while (ImageNative.ghostty_render_state_image_iterator_next(_imageIterator) != 0)
         {
             int protocol = 0;
@@ -208,13 +212,7 @@ public sealed partial class GhosttyTerminal
             uint id = 0; ulong generation = 0;
             ImageGet(2, &id); ImageGet(3, &generation);
             if (!_imagePixels.TryGetValue(generation, out var image)) { missing = true; continue; }
-            int layer = 0, z = 0, column = 0, row = 0, kind = 2;
-            uint columns = 0, rows = 0, offsetX = 0, offsetY = 0, width = 0, height = 0, sourceX = 0, sourceY = 0, sourceWidth = 0, sourceHeight = 0, placementId = 0;
-            ImageGet(4, &layer); ImageGet(5, &z); ImageGet(6, &column); ImageGet(7, &row);
-            ImageGet(8, &columns); ImageGet(9, &rows); ImageGet(10, &offsetX); ImageGet(11, &offsetY);
-            ImageGet(12, &width); ImageGet(13, &height);
-            ImageGet(14, &sourceX); ImageGet(15, &sourceY); ImageGet(16, &sourceWidth); ImageGet(17, &sourceHeight);
-            ImageGet(18, &placementId); ImageGet(19, &kind);
+            ThrowIfFailed(ImageNative.ghostty_render_state_image_get_multi(_imageIterator, 16, keys, values, null), "Could not read an image placement.");
             if (layer is < 0 or > 2 || width == 0 || height == 0 || sourceWidth == 0 || sourceHeight == 0 ||
                 (ulong)sourceX + sourceWidth > (ulong)image.Width || (ulong)sourceY + sourceHeight > (ulong)image.Height) continue;
             placements.Add(new TerminalImagePlacement(image, (TerminalImageLayer)layer, z, column, row,
@@ -323,7 +321,25 @@ public sealed partial class GhosttyTerminal
 
     internal sealed record ImageCapture(RawImage[] Images, int CellWidth, int CellHeight);
 
-    internal sealed record RawImage(uint Id, ulong Generation, int Width, int Height, int Channels, byte[] Pixels);
+    // Capture objects may survive storage deletion or replacement between BeginFrame and CompleteFrame.
+    // Only the render owner materializes them; terminal writers only retain/remove their references.
+    // Releasing the raw buffer here keeps later captures reusable without a second retained pixel copy.
+    internal sealed class RawImage(uint id, ulong generation, int width, int height, int channels, byte[] pixels)
+    {
+        private byte[]? _raw = pixels;
+        private TerminalImageData? _materialized;
+        internal ulong Generation { get; } = generation;
+        internal long RawBytes => _raw?.LongLength ?? 0;
+
+        internal TerminalImageData Materialize()
+        {
+            if (_materialized is not null) return _materialized;
+            _materialized = new TerminalImageData(id, Generation, width, height,
+                ToPremultipliedRgba(_raw!, channels, width * height));
+            _raw = null;
+            return _materialized;
+        }
+    }
 
     private sealed class ImageIteratorHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
@@ -344,10 +360,12 @@ public sealed partial class GhosttyTerminal
         [LibraryImport(Lib)] internal static partial void ghostty_render_state_image_iterator_free(IntPtr iterator);
         [LibraryImport(Lib), SuppressGCTransition] internal static partial byte ghostty_render_state_image_iterator_next(IntPtr iterator);
         [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_render_state_image_get(IntPtr iterator, int key, void* value);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_render_state_image_get_multi(IntPtr iterator, nuint count, int* keys, void** values, nuint* written);
         [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_kitty_graphics_get(IntPtr graphics, int key, void* value);
         [LibraryImport(Lib)] internal static partial int ghostty_kitty_graphics_animation_tick(IntPtr graphics, ulong nowMs, ulong* nextMs);
         [LibraryImport(Lib), SuppressGCTransition] internal static partial IntPtr ghostty_kitty_graphics_image(IntPtr graphics, uint imageId);
         [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_kitty_graphics_image_get(IntPtr image, int key, void* value);
+        [LibraryImport(Lib), SuppressGCTransition] internal static partial int ghostty_kitty_graphics_image_get_multi(IntPtr image, nuint count, int* keys, void** values, nuint* written);
         [LibraryImport(Lib)] internal static partial int ghostty_kitty_graphics_placement_iterator_new(IntPtr allocator, out IntPtr iterator);
         [LibraryImport(Lib)] internal static partial void ghostty_kitty_graphics_placement_iterator_free(IntPtr iterator);
         [LibraryImport(Lib), SuppressGCTransition] internal static partial byte ghostty_kitty_graphics_placement_next(IntPtr iterator);

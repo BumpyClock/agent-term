@@ -95,7 +95,7 @@ public sealed partial class GhosttyTerminal
 
     private static readonly Lazy<string?> LayoutMismatch = new(FindLayoutMismatch);
 
-    /// <summary>Null when every managed render mirror matches the linked library, otherwise the first difference.</summary>
+    /// <summary>Null when the checked managed render, input, protocol and host mirrors match the linked library.</summary>
     internal static string? RenderLayoutMismatch => LayoutMismatch.Value;
 
     private static string? FindLayoutMismatch()
@@ -105,18 +105,26 @@ public sealed partial class GhosttyTerminal
         if (!root.TryGetProperty("abi", out var abi) || abi.GetProperty("pointer_size").GetInt32() != IntPtr.Size)
             return "libghostty-vt pointer size does not match this process.";
         var types = root.GetProperty("types");
-        foreach (var (nativeName, managed, fields) in CheckedLayouts)
+        foreach (var (nativeName, managed, fields) in CheckedLayouts.Concat(InteropLayouts()))
         {
             if (!types.TryGetProperty(nativeName, out var type)) return $"{nativeName} is missing from the libghostty-vt manifest.";
             var size = Marshal.SizeOf(managed);
             if (type.GetProperty("size").GetInt32() != size) return $"{nativeName} is {type.GetProperty("size").GetInt32()} bytes; managed mirror is {size}.";
-            var nativeFields = type.GetProperty("fields");
             foreach (var (nativeField, managedField) in fields)
             {
-                if (!nativeFields.TryGetProperty(nativeField, out var field)) return $"{nativeName}.{nativeField} is missing from the libghostty-vt manifest.";
+                var containing = type;
+                var nativeOffset = 0;
+                var path = nativeField.Split('.');
+                for (var i = 0; i < path.Length; i++)
+                {
+                    if (!containing.GetProperty("fields").TryGetProperty(path[i], out var field))
+                        return $"{nativeName}.{nativeField} is missing from the libghostty-vt manifest.";
+                    nativeOffset += field.GetProperty("offset").GetInt32();
+                    if (i + 1 < path.Length) containing = types.GetProperty(field.GetProperty("type").GetString()!);
+                }
                 var offset = (int)Marshal.OffsetOf(managed, managedField);
-                if (field.GetProperty("offset").GetInt32() != offset)
-                    return $"{nativeName}.{nativeField} is at offset {field.GetProperty("offset").GetInt32()}; managed mirror uses {offset}.";
+                if (nativeOffset != offset)
+                    return $"{nativeName}.{nativeField} is at offset {nativeOffset}; managed mirror uses {offset}.";
             }
         }
         return null;

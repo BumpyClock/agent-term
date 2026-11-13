@@ -5,6 +5,8 @@ internal static class HostContractChecks
 {
     internal static void Run()
     {
+        if (GhosttyTerminal.RenderLayoutMismatch is { } mismatch) throw new Exception(mismatch);
+        CheckUnsupportedProtocols();
         using var terminal = new GhosttyTerminal(80, 24);
         string Drain() => string.Concat(terminal.TakeResponses().Select(Encoding.UTF8.GetString));
         void Equal(string expected, string actual, string reason)
@@ -57,5 +59,28 @@ internal static class HostContractChecks
         conpty.ScrollTo(0);
         Equal("o", conpty.ReadFrame().Cells[0].Text, "ConPTY resize preserves old history for inspection");
         Console.WriteLine("Host geometry, identity, capabilities, theme and diagnostic checks passed.");
+    }
+
+    private static void CheckUnsupportedProtocols()
+    {
+        using var terminal = new GhosttyTerminal();
+        terminal.Write("\u001b]984321;private-payload\a"u8);
+        if (terminal.ReadDiagnosticReport().Contains("984321")) throw new Exception("Unsupported protocol capture must be opt-in.");
+        terminal.SetUnknownSequenceDiagnostics(true);
+        terminal.Write("\u001b]984321;private-"u8);
+        terminal.Write("payload\a\u001b]984322;cancelled\u0018"u8);
+        terminal.Write(Encoding.UTF8.GetBytes("\u001b]984321;" + new string('x', 200) + "\a"));
+        terminal.Write("\u001b_unrecognized-private-data\u001b\\"u8);
+        var report = terminal.ReadDiagnosticReport();
+        if (!report.Contains("Unsupported OSC 984321: 2, truncated 1") || !report.Contains("Unsupported APC unknown: 1") ||
+            report.Contains("private") || report.Contains("984322"))
+            throw new Exception("Unsupported protocol counters must be bounded metadata from complete native events. " + report);
+        for (var i = 0; i < 100; i++) terminal.Write(Encoding.UTF8.GetBytes($"\u001b]{985000 + i};data\a"));
+        report = terminal.ReadDiagnosticReport();
+        if (report.Split('\n').Count(line => line.StartsWith("Unsupported OSC ")) > 16 || !report.Contains("Other unsupported sequences"))
+            throw new Exception("Unsupported protocol identifier storage must stay bounded.");
+        terminal.SetUnknownSequenceDiagnostics(false);
+        terminal.SetUnknownSequenceDiagnostics(true);
+        if (terminal.ReadDiagnosticReport().Contains("984321")) throw new Exception("Disabling diagnostics must release collected identifiers.");
     }
 }

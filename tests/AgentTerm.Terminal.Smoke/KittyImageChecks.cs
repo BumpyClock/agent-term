@@ -20,6 +20,7 @@ internal static class KittyImageChecks
     {
         CheckRequiresCellSize();
         CheckPlacementAndOwnership();
+        CheckCaptureBufferLifetime();
         CheckFormatsAndCompression();
         CheckCropScaleOffsetAndLayers();
         CheckScrollingAndScreens();
@@ -28,8 +29,50 @@ internal static class KittyImageChecks
         CheckRepliesAndDisabledMedia();
         CheckStorageLimit();
         CheckAnimation();
+        CheckComposition();
         CheckHoldCaptureAndLiveEdge();
         Console.WriteLine("Kitty image checks passed placement, ownership, formats, layers, scrolling, screens, replies and animation.");
+    }
+
+    private static void CheckCaptureBufferLifetime()
+    {
+        using var terminal = Terminal();
+        var red = Rgba((255, 0, 0, 128));
+        terminal.Write(Apc("a=T,f=32,s=1,v=1,i=42,q=2,C=1", red));
+        var capture = terminal.BeginFrame();
+        var rawBytes = capture.ImageCapture!.Images.Sum(image => image.RawBytes);
+        Check(rawBytes == 4, "A new capture must own the copied source pixels before conversion.");
+        terminal.Write(Apc("a=d,d=I,i=42,q=2"));
+        var frame = terminal.CompleteFrame(capture);
+        Check(frame.Images.Placements.Single().Image.Pixels.Span.SequenceEqual(Rgba((128, 0, 0, 128))),
+            "Deleting storage during a split capture must not invalidate captured pixels.");
+        Check(capture.ImageCapture.Images.Sum(image => image.RawBytes) == 0,
+            "Completed captures must release their raw copy after publishing immutable RGBA.");
+        Check(terminal.ReadFrame().Images.IsEmpty, "The next frame must observe deletion.");
+        terminal.Write(Apc("a=T,f=24,s=1,v=1,i=43,q=2,C=1", [10, 20, 30]));
+        var rgbCapture = terminal.BeginFrame();
+        var rgb = terminal.CompleteFrame(rgbCapture).Images.Placements.Single().Image;
+        Check(rgbCapture.ImageCapture!.Images.Sum(image => image.RawBytes) == 0 && rgb.ByteCount == 4,
+            "Expanded RGB images must also release their source copy.");
+        var repeated = terminal.BeginFrame();
+        Check(repeated.ImageCapture!.Images.Sum(image => image.RawBytes) == 0,
+            "Unchanged captures must reuse materialized image storage without copying raw pixels again.");
+        Check(ReferenceEquals(rgb, terminal.CompleteFrame(repeated).Images.Placements.Single().Image),
+            "Unchanged image generations must keep their immutable pixel object.");
+        Console.WriteLine($"Image capture retained raw bytes {rawBytes} -> 0 after conversion, with immutable pixels preserved across deletion.");
+    }
+
+    private static void CheckComposition()
+    {
+        using var terminal = Terminal();
+        terminal.Write(Apc("a=T,f=32,s=2,v=1,i=91,q=2,C=1", Rgba((255, 0, 0, 255), (0, 0, 255, 255))));
+        var before = terminal.ReadFrame().Images.Placements.Single().Image;
+        terminal.Write(Apc("a=c,i=91,r=1,c=1,w=1,h=1,x=1,q=2"));
+        var after = terminal.ReadFrame().Images.Placements.Single().Image;
+        Check(after.Generation != before.Generation && after.Pixels.Span.SequenceEqual(Rgba((255, 0, 0, 255), (255, 0, 0, 255))),
+            "Composing into the displayed Kitty frame must publish the new pixels and generation.");
+        Check(before.Pixels.Span.SequenceEqual(Rgba((255, 0, 0, 255), (0, 0, 255, 255))),
+            "Composition must not mutate pixels retained by an earlier frame.");
     }
 
     private static void CheckHoldCaptureAndLiveEdge()

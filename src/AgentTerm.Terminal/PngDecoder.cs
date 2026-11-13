@@ -17,11 +17,15 @@ public static class PngDecoder
     /// <summary>Largest decoded image accepted, in pixels. Matches a 16384 x 16384 frame.</summary>
     public const long MaxPixels = 16384L * 16384;
 
+    /// <summary>Decoded RGBA byte ceiling. Matches libghostty's PNG allocator limit.</summary>
+    public const long MaxDecodedBytes = 400L * 1024 * 1024;
+
     /// <summary>Returns straight RGBA pixels, or null when the data is not a PNG this decoder can read.</summary>
-    public static byte[]? TryDecode(ReadOnlySpan<byte> png, out int width, out int height, long maxPixels = MaxPixels)
+    public static byte[]? TryDecode(ReadOnlySpan<byte> png, out int width, out int height, long maxPixels = MaxPixels,
+        long maxDecodedBytes = MaxDecodedBytes)
     {
         width = height = 0;
-        try { return Decode(png, ref width, ref height, maxPixels); }
+        try { return Decode(png, ref width, ref height, maxPixels, maxDecodedBytes); }
         catch (Exception error) when (error is InvalidDataException or OverflowException or ArgumentException or IndexOutOfRangeException)
         {
             width = height = 0;
@@ -29,7 +33,7 @@ public static class PngDecoder
         }
     }
 
-    private static byte[]? Decode(ReadOnlySpan<byte> png, ref int width, ref int height, long maxPixels)
+    private static byte[]? Decode(ReadOnlySpan<byte> png, ref int width, ref int height, long maxPixels, long maxDecodedBytes)
     {
         if (png.Length < 8 || !png[..8].SequenceEqual(Signature)) return null;
         int depth = 0, colorType = -1, interlace = 0;
@@ -55,7 +59,9 @@ public static class PngDecoder
                 depth = data[8];
                 colorType = data[9];
                 interlace = data[12];
-                if (width <= 0 || height <= 0 || (long)width * height > maxPixels || data[10] != 0 || data[11] != 0 || interlace > 1) return null;
+                if (width <= 0 || height <= 0 || (long)width * height > maxPixels ||
+                    (long)width * height > Math.Min(maxDecodedBytes, Array.MaxLength) / 4 ||
+                    data[10] != 0 || data[11] != 0 || interlace > 1) return null;
                 var valid = colorType switch
                 {
                     0 => depth is 1 or 2 or 4 or 8 or 16,
@@ -102,20 +108,9 @@ public static class PngDecoder
             }
             if (total != expected) return null;
         }
-        var inflated = new byte[expected];
         compressed.Position = 0;
-        using (var zlib = new ZLibStream(compressed, CompressionMode.Decompress))
-        {
-            var read = 0;
-            while (read < inflated.Length)
-            {
-                var count = zlib.Read(inflated, read, inflated.Length - read);
-                if (count == 0) return null;
-                read += count;
-            }
-        }
+        using var zlib = new ZLibStream(compressed, CompressionMode.Decompress);
         var output = new byte[checked((long)width * height * 4)];
-        var offset = 0;
         foreach (var (x0, y0, dx, dy) in passes)
         {
             var (passWidth, passHeight) = PassSize(width, height, x0, y0, dx, dy);
@@ -125,10 +120,16 @@ public static class PngDecoder
             var current = new byte[stride];
             for (var y = 0; y < passHeight; y++)
             {
-                var filter = inflated[offset++];
-                inflated.AsSpan(offset, stride).CopyTo(current);
-                offset += stride;
-                if (!Unfilter(filter, current, previous, bytesPerPixel)) return null;
+                var filter = zlib.ReadByte();
+                if (filter < 0) return null;
+                var read = 0;
+                while (read < stride)
+                {
+                    var count = zlib.Read(current, read, stride - read);
+                    if (count == 0) return null;
+                    read += count;
+                }
+                if (!Unfilter((byte)filter, current, previous, bytesPerPixel)) return null;
                 for (var x = 0; x < passWidth; x++)
                     WritePixel(output, ((y0 + y * dy) * width + x0 + x * dx) * 4, current, x, depth, colorType, palette, transparency);
                 (previous, current) = (current, previous);
