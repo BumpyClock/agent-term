@@ -16,7 +16,7 @@ using Windows.UI.Text;
 
 namespace AgentTerm_App;
 
-public sealed class TerminalSurface : UserControl
+public sealed partial class TerminalSurface : UserControl
 {
     private const string FallbackFont = "Consolas";
     private static readonly Lazy<string[]> AvailableFonts = new(FindTerminalFonts);

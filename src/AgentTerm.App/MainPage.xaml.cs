@@ -123,6 +123,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         Terminal.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(Terminal_PointerReleased), true);
         Terminal.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(Terminal_PointerCaptureLost), true);
         Terminal.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Terminal_PointerWheelChanged), true);
+        InitializeLinks();
         ShellText.Text = profile.Name;
         _chromeTimer = DispatcherQueue.CreateTimer();
         _chromeTimer.Interval = TimeSpan.FromMilliseconds(250);
@@ -430,6 +431,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             }
         }
         else if (refreshCards) RefreshTaskCards(frame);
+        RefreshLinkFeedback();
         if (!refreshCards && previous?.Viewport == frame.Viewport) return;
         var viewport = frame.Viewport;
         (double Maximum, double ViewportSize, double LargeChange, double Value, bool Enabled) state =
@@ -674,6 +676,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             if (_session is not { } session) return;
             var point = e.GetCurrentPoint(Terminal);
+            if (HandleLinkPress(e, point)) return;
             var button = ChangedMouseButton(point);
             if (Down(VirtualKey.Shift) && _applicationMouseButtons.Count != 0) ReleaseApplicationMouse();
             if (!_selecting && button is not null && SendApplicationMouse(point.Position, TerminalMouseAction.Press, button))
@@ -692,6 +695,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             {
                 FocusTerminal(FocusState.Pointer);
                 e.Handled = true;
+                if (TryShowLinkMenu(point.Position)) return;
                 if (_presentedFrame?.HasSelection == true) CopySelection(session);
                 else await PasteAsync(session);
                 return;
@@ -735,6 +739,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         try
         {
             if (_session is not { } session) return;
+            if (_linkPress is not null) { e.Handled = true; return; }
             var point = e.GetCurrentPoint(Terminal);
             if (!_selecting)
             {
@@ -766,6 +771,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             if (_session is not { } session) return;
             var releasedPoint = e.GetCurrentPoint(Terminal);
+            if (HandleLinkRelease(e, releasedPoint)) return;
             if (_selecting && ChangedMouseButton(releasedPoint) is { } releasedButton && releasedButton != TerminalMouseButton.Left)
             {
                 e.Handled = true;
@@ -799,6 +805,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         try
         {
+            CancelLinkPress();
             ReleaseApplicationMouse();
             if (!_selecting) return;
             _selecting = false;
@@ -841,6 +848,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         if (_session is not { } session || _state is not (SessionState.Running or SessionState.Idle)) return;
         if (_composition.IsComposing) return;
+        if (TryShowLinkMenuFromKeyboard(e)) return;
         var status = e.KeyStatus;
         var physical = new TerminalKeyboardInput.PhysicalKey(status.ScanCode, status.IsExtendedKey);
         var key = IsSidedModifier(e.OriginalKey) ? e.OriginalKey : e.Key;
@@ -1149,6 +1157,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void CancelSelectionGesture()
     {
+        ResetLinkInteraction();
         ReleaseApplicationMouse();
         _selectionTimer.Stop();
         if (_selecting)

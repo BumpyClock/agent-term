@@ -149,6 +149,7 @@ ProgramStatusPresentationChecks.Run();
 ThemeChecks.Run();
 InputChecks.Run();
 MouseChecks.Run();
+HyperlinkChecks.Run();
 ScrollbackChecks.Run();
 PreferencesChecks.Run();
 TabPositionChecks.Run();
