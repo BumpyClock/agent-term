@@ -21,6 +21,8 @@ public sealed partial class GhosttyTerminal
     private TerminalFrame? _frame;
     private long _frameRefreshAt;
     private bool _frameReverse;
+    private bool _frameOverscanEnabled;
+    private byte[]? _framePalette;
     private bool _captureInFlight;
     private int _captureFailures;
 
@@ -141,6 +143,12 @@ public sealed partial class GhosttyTerminal
         var defaultBg = background.ToColor();
         Rgb* palette = stackalloc Rgb[256];
         StateGet(RenderStateData.Palette, palette);
+        var paletteBytes = new ReadOnlySpan<byte>(palette, 256 * sizeof(Rgb));
+        var paletteMatches = _framePalette is not null && paletteBytes.SequenceEqual(_framePalette);
+        OverscanRequest coverage = default;
+        StateGet(RenderStateData.Overscan, &coverage);
+        var coverageMatches = _frame is not null && _frameOverscanEnabled == capture.OverscanEnabled &&
+            _frame.OverscanAbove.Length == coverage.Above && _frame.OverscanBelow.Length == coverage.Below;
         var hasPosition = nativeCursor.ViewportHasValue != 0;
         var cursor = new TerminalCursor(hasPosition ? nativeCursor.ViewportX : 0, hasPosition ? nativeCursor.ViewportY : 0,
             nativeCursor.Visible != 0 && hasPosition, nativeCursor.Blinking != 0,
@@ -148,11 +156,11 @@ public sealed partial class GhosttyTerminal
             cursorHasColor != 0 ? cursorColor.ToColor() : reverse ? defaultBg : defaultFg)
             { WideTail = hasPosition && nativeCursor.WideTail != 0, PasswordInput = nativeCursor.PasswordInput != 0 };
         var images = CompleteImages(capture.ImageCapture);
-        if (dirty == RenderDirty.Clean && _frame is not null && current && ReferenceEquals(capture.SearchHighlights, _frame.SearchHighlights) && capture.ActiveScreenOffset == _frame.ActiveScreenOffset && ReferenceEquals(images, _frame.Images) && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
+        if (dirty == RenderDirty.Clean && _frame is not null && current && coverageMatches && paletteMatches && _frame.Columns == columns && _frame.Rows == rowsCount && ReferenceEquals(capture.SearchHighlights, _frame.SearchHighlights) && capture.ActiveScreenOffset == _frame.ActiveScreenOffset && ReferenceEquals(images, _frame.Images) && viewport == _frame.Viewport && hasSelection == _frame.HasSelection && reverse == _frameReverse && cursor == _frame.Cursor &&
             (reverse ? defaultBg : defaultFg) == _frame.Foreground && (reverse ? defaultFg : defaultBg) == _frame.Background)
             return capture.Boundary || _frame.ContentVersion == capture.ContentVersion ? _frame : _frame = _frame with { ContentVersion = capture.ContentVersion };
         var previous = _frame;
-        var captureAll = capture.OverscanEnabled || !current || dirty == RenderDirty.Full || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
+        var captureAll = !coverageMatches || !paletteMatches || !current || dirty == RenderDirty.Full || previous is null || previous.Columns != columns || previous.Rows != rowsCount ||
             previous.Viewport != viewport || previous.HasSelection != hasSelection || reverse != _frameReverse ||
             (reverse ? defaultBg : defaultFg) != previous.Foreground || (reverse ? defaultFg : defaultBg) != previous.Background ||
             (!current && hasSelection);
@@ -170,8 +178,8 @@ public sealed partial class GhosttyTerminal
         var cellValues = stackalloc void*[] { &raw, &style, &buffer };
         var capturedRows = 0;
         var visibleRows = 0;
-        var above = new List<TerminalOverscanRow>();
-        var below = new List<TerminalOverscanRow>();
+        var above = captureAll ? new List<TerminalOverscanRow>() : new List<TerminalOverscanRow>(previous!.OverscanAbove);
+        var below = captureAll ? new List<TerminalOverscanRow>() : new List<TerminalOverscanRow>(previous!.OverscanBelow);
         while (true)
         {
             int row;
@@ -186,11 +194,12 @@ public sealed partial class GhosttyTerminal
                 ushort dirtyRow = 0;
                 if (RenderNative.ghostty_render_state_row_iterator_next_dirty(_rowIterator, &dirtyRow) == 0) break;
                 row = dirtyRow;
+                if (capture.OverscanEnabled) RowGet(RenderRowData.ViewportY, &row);
             }
             if (row < -1 || row > rowsCount) throw new InvalidOperationException("Render state returned an unexpected overscan row.");
             var extra = row < 0 || row >= rowsCount;
             if (!extra) visibleRows++;
-            cellsChanged = true;
+            cellsChanged |= !extra;
             int selectionStart = -1, selectionEnd = -1;
             if (hasSelection)
             {
@@ -252,13 +261,18 @@ public sealed partial class GhosttyTerminal
                     rowCells[i + 1] = rowCells[i + 1] with { Selected = true };
             if (extra)
             {
-                (row < 0 ? above : below).Add(new TerminalOverscanRow(row, rowCells));
+                var extras = row < 0 ? above : below;
+                var overscanRow = new TerminalOverscanRow(row, rowCells);
+                if (captureAll) extras.Add(overscanRow);
+                else extras[0] = overscanRow;
             }
             else cellRows[row] = rowCells;
         }
         if (captureAll && visibleRows != rowsCount) throw new InvalidOperationException("Render state returned an incomplete grid.");
         if (reverse) (defaultFg, defaultBg) = (defaultBg, defaultFg);
         _frameReverse = reverse;
+        _frameOverscanEnabled = capture.OverscanEnabled;
+        if (!paletteMatches) _framePalette = paletteBytes.ToArray();
         _frame = new TerminalFrame(columns, rowsCount, cellsChanged ? new TerminalCellGrid(cellRows, columns) : previous!.Cells, cursor, defaultFg, defaultBg) {
             Images = images, ActiveScreenOffset = capture.ActiveScreenOffset, Viewport = viewport, HasSelection = hasSelection, ContentVersion = capture.ContentVersion,
             SearchHighlights = capture.SearchHighlights,
