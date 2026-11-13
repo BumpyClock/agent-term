@@ -21,6 +21,7 @@ internal static class Program
             GlyphClippingChecks.Run(device);
             return;
         }
+        FidelityRasterChecks.Run(device);
         AcrylicRecipeChecks.Run(device);
         using var image = new CanvasRenderTarget(device, 400, 240, 96);
         Draw(image, terminal.ReadFrame(), true);

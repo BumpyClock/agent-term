@@ -6,6 +6,7 @@ if (args.Contains("--program-title-only")) return;
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 NativeProtocolChecks.Run();
+FidelityChecks.Run();
 LiveEdgeChecks.Run();
 if (args.Contains("--gate0-only")) return;
 

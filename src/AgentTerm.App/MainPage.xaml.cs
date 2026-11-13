@@ -338,7 +338,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private void UpdateCursorBlink()
     {
         if (CanRefreshFrames && _animationsEnabled &&
-            _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused)
+            (_presentedFrame?.Cells.Any(c => c.Blink && !c.Hidden) == true ||
+             _presentedFrame?.Cursor is { Visible: true, Blink: true } && Terminal.Input.FocusState != FocusState.Unfocused))
         {
             if (!_cursorTimer.IsRunning) _cursorTimer.Start();
         }
@@ -417,6 +418,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         {
             _presentedFrame = frame;
             Terminal.SetFrame(frame);
+            UpdateCursorBlink();
             RefreshTaskCards(frame);
             if (_terminalBackground != frame.Background)
             {

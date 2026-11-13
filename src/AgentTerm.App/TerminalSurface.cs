@@ -182,6 +182,7 @@ public sealed class TerminalSurface : UserControl
         if (_cursorPhase == visible) return;
         _cursorPhase = visible;
         UpdateCursorOverlay();
+        if (_frame?.Cells.Any(c => c.Blink && !c.Hidden) == true) { _paintedFrame = null; _canvas?.Invalidate(); _cursorCanvas?.Invalidate(); }
     }
 
     public void RefreshCursor()
@@ -320,9 +321,9 @@ public sealed class TerminalSurface : UserControl
             return;
         }
         var cursor = frame.Cursor;
-        var cell = frame.Cells[cursor.Row * frame.Columns + cursor.Column];
-        var columns = focused && cursor.Shape == TerminalCursorShape.Block ? Math.Max(1, (int)cell.Width) : 1;
-        var (bounds, gridTop) = CursorOverlayGeometry(Geometry, cursor.Column, cursor.Row, columns);
+        var column = cursor.WideTail && cursor.Column > 0 ? cursor.Column - 1 : cursor.Column;
+        var cell = frame.Cells[cursor.Row * frame.Columns + column];
+        var (bounds, gridTop) = CursorOverlayGeometry(Geometry, column, cursor.Row, Math.Max(1, (int)cell.Width));
         var content = (bounds, cursor, cell, frame.CursorText, focused, CellWidth, CellHeight, _terminalFontSize, TerminalFontFamily, gridTop);
         if (content != _cursorContent)
         {
@@ -360,7 +361,7 @@ public sealed class TerminalSurface : UserControl
         var content = _cursorContent;
         _glyphLayouts.Configure(TerminalFontFamily, _terminalFontSize, CellWidth, CellHeight);
         drawing.Transform = Matrix3x2.CreateTranslation(-(float)content.Bounds.X, -(float)content.Bounds.Y);
-        DrawCursor(drawing, frame, CellWidth, CellHeight, _glyphLayouts, content.Focused, true, false, (float)content.GridTop);
+        DrawCursor(drawing, frame, CellWidth, CellHeight, _glyphLayouts, content.Focused, true, false, (float)content.GridTop, _cursorPhase);
     }
 
     private void UpdateRaster(CanvasDevice device, TerminalFrame frame, float top)
@@ -383,7 +384,7 @@ public sealed class TerminalSurface : UserControl
         {
             using (var drawing = _renderTarget.CreateDrawingSession())
                 DrawFrameCore(drawing, frame, CellWidth, CellHeight, _glyphLayouts, false, false,
-                    _terminalFontSize, _acrylicBackground, TerminalFontFamily, true, top);
+                    _terminalFontSize, _acrylicBackground, TerminalFontFamily, true, top, _cursorPhase);
         }
         else if (!ReferenceEquals(previous!.Cells, frame.Cells))
         {
@@ -432,7 +433,7 @@ public sealed class TerminalSurface : UserControl
                     Math.Max(0, (int)MathF.Floor((upper - top) / CellHeight)),
                     Math.Min(rows, (int)MathF.Ceiling((lower - top) / CellHeight)),
                     Math.Max(0, (int)MathF.Floor(left / CellWidth) - 1),
-                    Math.Min(frame.Columns, (int)MathF.Ceiling(right / CellWidth) + 1));
+                    Math.Min(frame.Columns, (int)MathF.Ceiling(right / CellWidth) + 1), _cursorPhase);
             }
         }
         _paintedFrame = frame;
@@ -449,19 +450,19 @@ public sealed class TerminalSurface : UserControl
 
     private static void DrawFrameCore(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, GlyphLayouts layouts, bool focused, bool cursorPhase, float fontSize, bool transparentBackground,
-        string fontFamily, bool hideCursor, float gridTop)
+        string fontFamily, bool hideCursor, float gridTop, bool textPhase = true)
     {
         layouts.Configure(fontFamily, fontSize, cellWidth, cellHeight);
         layouts.FitGrid(frame.Cells.Length);
         drawing.Clear(transparentBackground ? Color.FromArgb(0, 0, 0, 0) : ToColor(frame.Background));
         DrawCells(drawing, frame, cellWidth, cellHeight, layouts, gridTop,
-            0, TerminalGridGeometry.VisibleRows(frame), 0, frame.Columns);
-        DrawCursor(drawing, frame, cellWidth, cellHeight, layouts, focused, cursorPhase, hideCursor, gridTop);
+            0, TerminalGridGeometry.VisibleRows(frame), 0, frame.Columns, textPhase);
+        DrawCursor(drawing, frame, cellWidth, cellHeight, layouts, focused, cursorPhase, hideCursor, gridTop, textPhase);
     }
 
     private static void DrawCells(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, GlyphLayouts layouts, float gridTop,
-        int firstRow, int endRow, int firstColumn, int endColumn)
+        int firstRow, int endRow, int firstColumn, int endColumn, bool textPhase)
     {
         var device = drawing.Device;
         var antialiasing = drawing.Antialiasing;
@@ -494,7 +495,7 @@ public sealed class TerminalSurface : UserControl
         for (var col = firstColumn; col < endColumn; col++)
         {
             var cell = frame.Cells[row * frame.Columns + col];
-            if (cell.Width == 0 || cell.Hidden) continue;
+            if (cell.Width == 0 || cell.Hidden || (cell.Blink && !textPhase)) continue;
             var foreground = cell.Selected ? ToColor(frame.SelectionForeground) : ToColor(cell.Foreground);
             if (cell.Dim && !cell.Selected) foreground = Color.FromArgb(255, (byte)(foreground.R / 2), (byte)(foreground.G / 2), (byte)(foreground.B / 2));
             var x = col * cellWidth;
@@ -504,33 +505,55 @@ public sealed class TerminalSurface : UserControl
             {
                 drawing.DrawTextLayout(layouts.Get(device, cell.Text, width, cell.Bold, cell.Italic), x, y, foreground);
             }
-            if (cell.Underline) drawing.DrawLine(x, y + cellHeight - 2, x + width, y + cellHeight - 2, foreground);
+            if (cell.Underline)
+            {
+                var underline = cell.Selected ? foreground : cell.UnderlineColor is { } uc ? ToColor(uc) : foreground;
+                if (cell.Dim && !cell.Selected && cell.UnderlineColor is not null) underline = Color.FromArgb(255, (byte)(underline.R / 2), (byte)(underline.G / 2), (byte)(underline.B / 2));
+                var lineY = y + cellHeight - 2;
+                switch (cell.UnderlineStyle)
+                {
+                    case TerminalUnderlineStyle.Double:
+                        drawing.DrawLine(x, lineY - 2, x + width, lineY - 2, underline);
+                        goto default;
+                    case TerminalUnderlineStyle.Curly:
+                        for (float i = 0; i < width; i += 1) drawing.DrawLine(x + i, lineY + MathF.Sin(i * MathF.PI / 2), x + MathF.Min(i + 1, width), lineY + MathF.Sin((i + 1) * MathF.PI / 2), underline);
+                        break;
+                    case TerminalUnderlineStyle.Dotted:
+                    case TerminalUnderlineStyle.Dashed:
+                        var length = cell.UnderlineStyle == TerminalUnderlineStyle.Dotted ? 1 : 3;
+                        for (float i = 0; i < width; i += length * 2) drawing.DrawLine(x + i, lineY, x + MathF.Min(i + length, width), lineY, underline);
+                        break;
+                    default: drawing.DrawLine(x, lineY, x + width, lineY, underline); break;
+                }
+            }
+            if (cell.Overline) drawing.DrawLine(x, y + 1, x + width, y + 1, foreground);
             if (cell.Strikethrough) drawing.DrawLine(x, y + cellHeight / 2, x + width, y + cellHeight / 2, foreground);
         }
     }
 
     private static void DrawCursor(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
-        float cellHeight, GlyphLayouts layouts, bool focused, bool cursorPhase, bool hideCursor, float gridTop)
+        float cellHeight, GlyphLayouts layouts, bool focused, bool cursorPhase, bool hideCursor, float gridTop, bool textPhase)
     {
         var rows = TerminalGridGeometry.VisibleRows(frame);
         var device = drawing.Device;
         var cursor = frame.Cursor;
         if (hideCursor || !cursor.Visible || (cursor.Blink && focused && !cursorPhase) || cursor.Column < 0 || cursor.Column >= frame.Columns || cursor.Row < 0 || cursor.Row >= rows) return;
-        var cx = cursor.Column * cellWidth;
+        var column = cursor.WideTail && cursor.Column > 0 ? cursor.Column - 1 : cursor.Column;
+        var cell = frame.Cells[cursor.Row * frame.Columns + column];
+        var cursorWidth = cellWidth * Math.Max(1, (int)cell.Width);
+        var cx = column * cellWidth;
         var cy = gridTop + cursor.Row * cellHeight;
         var color = ToColor(cursor.Color);
-        if (!focused)
-            drawing.DrawRectangle(cx + 0.5f, cy + 0.5f, cellWidth - 1, cellHeight - 1, color);
+        if (!focused || cursor.Shape == TerminalCursorShape.Hollow)
+            drawing.DrawRectangle(cx + 0.5f, cy + 0.5f, cursorWidth - 1, cellHeight - 1, color);
         else if (cursor.Shape == TerminalCursorShape.Bar)
             drawing.FillRectangle(cx, cy, 2, cellHeight, color);
         else if (cursor.Shape == TerminalCursorShape.Underline)
-            drawing.FillRectangle(cx, cy + cellHeight - 2, cellWidth, 2, color);
+            drawing.FillRectangle(cx, cy + cellHeight - 2, cursorWidth, 2, color);
         else
         {
-            var cell = frame.Cells[cursor.Row * frame.Columns + cursor.Column];
-            var cursorWidth = cellWidth * Math.Max(1, (int)cell.Width);
             drawing.FillRectangle(cx, cy, cursorWidth, cellHeight, color);
-            if (!cell.Hidden && cell.Width != 0)
+            if (!cell.Hidden && cell.Width != 0 && (!cell.Blink || textPhase))
             {
                 drawing.DrawTextLayout(layouts.Get(device, cell.Text, cursorWidth, cell.Bold, cell.Italic),
                     cx, cy, ToColor(frame.CursorText ?? cell.Background));
@@ -645,7 +668,7 @@ internal readonly record struct TerminalGridGeometry(double Top, int Columns, in
             for (var column = 0; column < frame.Columns; column++)
             {
                 var cell = frame.Cells[row * frame.Columns + column];
-                if (!string.IsNullOrWhiteSpace(cell.Text) || cell.Background != frame.Background || cell.Underline || cell.Strikethrough)
+                if (!string.IsNullOrWhiteSpace(cell.Text) || cell.Background != frame.Background || cell.Underline || cell.Strikethrough || cell.Overline)
                     return false;
             }
         return true;
