@@ -27,7 +27,8 @@ dotnet build tests/AgentTerm.Renderer.Perf/AgentTerm.Renderer.Perf.csproj -c Rel
 
 ## Schedules.
 
-- `--schedule demand` is the default and mirrors production `MainPage`. `TerminalSession.OutputAvailable` wakes the UI thread once per burst. The UI thread adds a one-shot `CompositionTarget.Rendering` handler. That handler removes itself and queues one refresh after the Rendering dispatch. After each refresh, a nonrepeating timer is armed from `TerminalSession.PendingFrameRefreshDelay` so a synchronized-output hold is recaptured without new output. No terminal work runs while the shell is silent.
+- `--schedule demand` is the default and mirrors production `MainPage`. `TerminalSession.OutputAvailable` wakes the UI thread once per burst. If no snapshot was taken since the last `CompositionTarget.Rendering` tick, the wake refreshes at once. Each refresh adds a one-shot Rendering handler. A wake before that tick marks a refresh pending, and the handler queues it after the Rendering dispatch. After each refresh, a nonrepeating timer is armed from `TerminalSession.PendingFrameRefreshDelay` so a synchronized-output hold is recaptured without new output. No terminal work runs while the shell is silent.
+- `--schedule deferred` is the production schedule before immediate wakes. Every wake waits for a Rendering tick and refreshes after its dispatch. Use it on the baseline side to measure the latency change.
 - `--schedule timer --refresh-ms 33` polls `ReadFrame` on a fixed timer. This is the production schedule at 5606a46. Use it on both sides to compare code at matched cadence.
 - `--schedule composition` refreshes after every composition frame. No released production version used it. It is kept only to reproduce intermediate results.
 
@@ -61,6 +62,7 @@ Minimum draw and changed-snapshot counts are capped at the configured update cou
 - `refreshDurations` is the elapsed time of `ReadFrame` plus `SetFrame`.
 - `drawWorkDurations` is the elapsed time of the production Draw callback. It is null when the renderer has no `DrawCompleted` event. It excludes Win2D's later EndDraw, GPU work and display presentation.
 - `frameWorkDurations` adds refresh work since the previous draw to the draw callback. It is UI-thread elapsed work per drawn update, not CPU time or display latency.
+- `outputToDrawLatency` runs from the earliest `OutputAvailable` not yet captured to the main Canvas draw that first shows the snapshot holding it. Snapshots that change only the cursor are not counted, because they no longer redraw the main canvas. It is reported for `demand` and `deferred` only. It excludes EndDraw, GPU work and presentation.
 - `drawIntervals` is the time between Canvas callbacks. `heartbeatIntervals` is dispatcher delay measured by a 16 ms timer.
 - `readFrames`, `renderingSubscriptions`, `outputNotifications` and `holdTimerFires` count scheduler work during the whole run.
 - `idle` counts `ReadFrame` calls, Canvas draws, Rendering subscriptions and process CPU during `--idle-seconds` of shell silence after the workload ends. Demand scheduling should record zero reads.
@@ -82,6 +84,8 @@ pwsh -NoProfile -File scripts/measure-terminal-perf.ps1 -BaselineExe $built.base
 pwsh -NoProfile -File scripts/measure-terminal-perf.ps1 -BaselineExe $built.baselineExe -FixedExe $built.currentExe `
     -OutputDirectory artifacts/perf-shipped -Hz 60 -Pattern agent -BaselineSchedule timer -FixedSchedule demand
 ```
+
+To measure a scheduling change, build with `-BaselineRevision` set to the earlier commit and pass `-BaselineSchedule deferred -FixedSchedule demand`. The summary reports median `outputToDrawLatency` p50 and p95.
 
 `-RequireFrameBudget` also fails unless every current trial has instrumentation and p95 frame work below 16.6 ms. That gate does not establish 60 presented frames per second.
 

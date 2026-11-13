@@ -10,10 +10,14 @@ This page is for maintainers changing terminal rendering or refresh scheduling. 
 
 1. The ConPTY reader thread parses output under the session lock. After releasing the lock it raises `TerminalSession.OutputAvailable`.
 2. The handler enqueues at most one UI wake per burst.
-3. The UI wake adds a one-shot `CompositionTarget.Rendering` handler.
-4. That handler removes itself and queues one refresh after the Rendering dispatch. Queuing after the dispatch lets Win2D's own one-shot draw hook schedule the next frame.
-5. The refresh reads a snapshot and calls `TerminalSurface.SetFrame`.
+3. If no snapshot was taken since the last `CompositionTarget.Rendering` tick, the UI wake reads a snapshot and calls `TerminalSurface.SetFrame` at once. `CanvasControl.Invalidate` registers Win2D's one-shot Rendering hook, so the draw lands on the upcoming tick.
+4. Every snapshot adds a one-shot Rendering handler that marks the tick boundary. A wake that arrives before that tick only marks a refresh pending.
+5. At the tick the handler removes itself. If a refresh is pending it queues one after the Rendering dispatch, and that snapshot draws on the following tick. A flood therefore costs at most one snapshot per composition frame.
 6. When the snapshot is held by synchronized output (`ESC[?2026h`), `TerminalSession.PendingFrameRefreshDelay` is the time left on the 1,000 ms hold. A nonrepeating timer requests one more refresh at that time, so a writer that never releases the hold still appears. The timer is stopped on every refresh and whenever the pane hides or the agent surface opens.
+
+The previous schedule always waited for a Rendering tick before the snapshot, so isolated output drew one frame later. The fixture keeps it as `--schedule deferred`.
+
+Keystrokes do not read a snapshot. Process echo arrives through step 3. Input refreshes synchronously only when the presented frame has a selection or is scrolled into history, because sending input clears both locally. Selection checks read the presented frame instead of a fresh snapshot.
 
 A silent visible pane therefore makes no `ReadFrame` calls and keeps no Rendering subscription. Chrome and directory polling run every 250 ms. The cursor blink timer runs every 528 ms only while a visible blinking cursor is focused. Hidden, unloaded and stopped panes stop all of these. While the agent surface covers a pane, terminal refresh and cursor blink stop and the terminal raster stays suspended across tab switches. Accepted application mouse presses refresh local selection changes without waiting for process output.
 
@@ -25,7 +29,15 @@ Ghostty tracks dirty rows. The adapter copies only dirty rows into a new owned c
 
 ## Retained raster.
 
-Each surface keeps one `CanvasRenderTarget` with the drawn grid. Each draw compares the new snapshot with the last painted one. Changed cells become spans with 2 columns of margin, merged with identical spans on the next row. Each span is snapped to device pixels, cleared with a copy blend and redrawn with 1 more column on each side. The cursor is drawn on top of the copied raster every frame.
+Each surface keeps one `CanvasRenderTarget` with the drawn grid. Each draw compares the new snapshot with the last painted one. Changed cells become spans with 2 columns of margin, merged with identical spans on the next row. Each span is snapped to device pixels, cleared with a copy blend and redrawn with 1 more column on each side.
+
+Cell backgrounds skip cells that match the cleared default background. Adjacent cells in a row with the same fill, selection included, share one aliased `FillRectangle`. Text is still drawn per cell. An offscreen comparison of the HEAD and current `DrawFrame` matched byte for byte in 360 cases (opaque and transparent, selection, reverse video, 96 to 192 DPI, fractional cell width and grid top).
+
+## Cursor overlay.
+
+The cursor is drawn by a second, cell-sized `CanvasControl` above the main canvas. Its origin and size are multiples of 4 DIPs, so its pixels align with the main canvas at 25% scale steps. Blink toggles only its opacity. A cursor move or shape change redraws only the overlay. The main canvas invalidates only when cells, grid size, top inset, default background or selection colors change. A cursor-only snapshot shares the cell array, so the painted frame advances without a main draw. The overlay follows the main canvas lifetime: created per active attachment, released on suspend and unload.
+
+Measured with Windows.Graphics.Capture at 150% scale against HEAD: bar, underline, hollow, wide-cell block and colored block cursors matched byte for byte. Two block cursors over text differed by at most 1 per channel on 2 and 9 glyph pixels. The cause is inferred, not proven: glyph pixels with alpha just under 255 now blend over the main canvas instead of the window backdrop.
 
 A change in surface size, DPI, cell size, font, transparency, grid top, top inset, default background or selection colors repaints everything. Device loss and DPI changes recreate resources and repaint everything.
 

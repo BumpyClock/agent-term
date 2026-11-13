@@ -59,8 +59,9 @@ internal static partial class Program
             var idleSeconds = ReadInt("--idle-seconds", 2);
             var schedule = ReadOption("--schedule", "demand");
             var pattern = ReadOption("--pattern", "agent");
-            if (schedule is not ("demand" or "timer" or "composition") || pattern is not ("agent" or "dense" or "cjk" or "held"))
-                throw new ArgumentException("schedule must be demand/timer/composition; pattern must be agent/dense/cjk/held.");
+            if (schedule is not ("demand" or "deferred" or "timer" or "composition") || pattern is not ("agent" or "dense" or "cjk" or "held"))
+                throw new ArgumentException("schedule must be demand/deferred/timer/composition; pattern must be agent/dense/cjk/held.");
+            var outputDriven = schedule is "demand" or "deferred";
             if (File.Exists(output) || (Directory.Exists(work) && Directory.EnumerateFileSystemEntries(work).Any()))
                 throw new IOException("Use a fresh output path and workload directory.");
             Directory.CreateDirectory(work);
@@ -89,7 +90,7 @@ internal static partial class Program
             session.SetBottomAnchored(true);
             var outputEvent = typeof(TerminalSession).GetEvent("OutputAvailable");
             var pendingDelay = typeof(TerminalSession).GetProperty("PendingFrameRefreshDelay");
-            if (schedule == "demand" && (outputEvent is null || pendingDelay is null))
+            if (outputDriven && (outputEvent is null || pendingDelay is null))
                 throw new ArgumentException("This TerminalSession revision lacks OutputAvailable or PendingFrameRefreshDelay. Use --schedule timer.");
             var canvas = (CanvasControl)typeof(TerminalSurface).GetField("_canvas", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface)!;
             var glyphCache = GlyphCacheProbe.For(surface);
@@ -98,6 +99,8 @@ internal static partial class Program
             var drawWorkDurations = new List<double>();
             var frameWorkDurations = new List<double>();
             var heartbeatIntervals = new List<double>();
+            var outputToDraw = new List<double>();
+            long outputArrival = 0, undrawnArrival = 0;
             var measuring = false;
             long lastDraw = 0, lastHeartbeat = 0;
             var draws = 0;
@@ -126,8 +129,10 @@ internal static partial class Program
                 if (expectedFinalFrame is not null && ReferenceEquals(expectedFinalFrame, lastFrame)) finalDraw.TrySetResult();
                 if (pattern == "held" && goTimestamp != 0 && lastFrame is { } shown && FrameText(shown).Contains(HeldMarker))
                     heldShown.TrySetResult(Stopwatch.GetElapsedTime(goTimestamp).TotalMilliseconds);
-                if (!measuring) return;
+                if (!measuring) { undrawnArrival = 0; return; }
                 var now = Stopwatch.GetTimestamp();
+                if (undrawnArrival != 0) outputToDraw.Add(Stopwatch.GetElapsedTime(undrawnArrival, now).TotalMilliseconds);
+                undrawnArrival = 0;
                 if (lastDraw != 0) drawIntervals.Add(Stopwatch.GetElapsedTime(lastDraw, now).TotalMilliseconds);
                 lastDraw = now;
                 draws++;
@@ -137,15 +142,26 @@ internal static partial class Program
             var outputQueued = 0;
             var renderingSubscribed = false;
             var frameRefreshQueued = false;
+            var refreshPending = false;
             void Refresh()
             {
                 try
                 {
                     var start = Stopwatch.GetTimestamp();
+                    refreshPending = false;
+                    var arrival = Interlocked.Exchange(ref outputArrival, 0);
                     var frame = session.ReadFrame();
                     readFrames++;
                     surface.SetFrame(frame);
-                    if (schedule == "demand")
+                    if (arrival != 0 && lastFrame is { } shown && !ReferenceEquals(shown.Cells, frame.Cells))
+                        undrawnArrival = undrawnArrival == 0 ? arrival : Math.Min(undrawnArrival, arrival);
+                    if (schedule == "demand" && !renderingSubscribed)
+                    {
+                        CompositionTarget.Rendering += rendering;
+                        renderingSubscribed = true;
+                        renderingSubscriptions++;
+                    }
+                    if (outputDriven)
                     {
                         holdTimer.Stop();
                         if (pendingDelay!.GetValue(session) is TimeSpan delay)
@@ -165,20 +181,29 @@ internal static partial class Program
                 }
                 catch (Exception error) { callbackError = error; }
             }
-            void RequestFrameRefresh()
-            {
-                if (!refreshEnabled || frameRefreshQueued || renderingSubscribed) return;
-                rendering ??= (_, _) =>
+            if (outputDriven)
+                rendering = (_, _) =>
                 {
                     CompositionTarget.Rendering -= rendering;
                     renderingSubscribed = false;
-                    if (frameRefreshQueued || !refreshEnabled) return;
+                    if (frameRefreshQueued || !refreshEnabled || (schedule == "demand" && !refreshPending)) return;
+                    refreshPending = false;
                     frameRefreshQueued = window.DispatcherQueue.TryEnqueue(() =>
                     {
                         frameRefreshQueued = false;
                         if (refreshEnabled) Refresh();
                     });
                 };
+            void RequestFrameRefresh()
+            {
+                if (!refreshEnabled || frameRefreshQueued) return;
+                if (schedule == "demand")
+                {
+                    if (renderingSubscribed) refreshPending = true;
+                    else Refresh();
+                    return;
+                }
+                if (renderingSubscribed) return;
                 CompositionTarget.Rendering += rendering;
                 renderingSubscribed = true;
                 renderingSubscriptions++;
@@ -186,6 +211,7 @@ internal static partial class Program
             Action outputAvailable = () =>
             {
                 Interlocked.Increment(ref outputNotifications);
+                Interlocked.CompareExchange(ref outputArrival, Stopwatch.GetTimestamp(), 0);
                 if (!refreshEnabled || Interlocked.Exchange(ref outputQueued, 1) != 0) return;
                 if (!window.DispatcherQueue.TryEnqueue(() =>
                 {
@@ -193,23 +219,23 @@ internal static partial class Program
                     RequestFrameRefresh();
                 })) Interlocked.Exchange(ref outputQueued, 0);
             };
-            if (schedule == "demand")
+            if (outputDriven)
             {
                 outputEvent!.AddEventHandler(session, outputAvailable);
                 holdTimer.Tick += (_, _) => { holdTimerFires++; RequestFrameRefresh(); };
             }
             await Task.Run(session.Start);
-            if (schedule == "demand") RequestFrameRefresh();
+            if (outputDriven) RequestFrameRefresh();
             else if (schedule == "composition")
             {
-                var refreshPending = false;
+                var compositionQueued = false;
                 rendering = (_, _) =>
                 {
-                    if (refreshPending) return;
-                    refreshPending = true;
+                    if (compositionQueued) return;
+                    compositionQueued = true;
                     window.DispatcherQueue.TryEnqueue(() =>
                     {
-                        refreshPending = false;
+                        compositionQueued = false;
                         if (refreshEnabled) Refresh();
                     });
                 };
@@ -303,7 +329,7 @@ internal static partial class Program
             holdTimer.Stop();
             refreshEnabled = false;
             if (rendering is not null) { CompositionTarget.Rendering -= rendering; rendering = null; }
-            if (schedule == "demand") outputEvent!.RemoveEventHandler(session, outputAvailable);
+            if (outputDriven) outputEvent!.RemoveEventHandler(session, outputAvailable);
             heartbeat.Stop();
             if (callbackError is not null) throw new Exception("Refresh callback failed.", callbackError);
             var expectedTicks = pattern == "held" ? 1 : hz * seconds;
@@ -322,7 +348,19 @@ internal static partial class Program
             lastFrame = expectedFinalFrame = finalFrame;
             surface.SetFrame(finalFrame);
             canvas.Invalidate();
-            await finalDraw.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try { await finalDraw.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (TimeoutException)
+            {
+                var ticks = 0;
+                EventHandler<object> probe = (_, _) => ticks++;
+                CompositionTarget.Rendering += probe;
+                var drawsBefore = totalDraws;
+                canvas.Invalidate();
+                await Task.Delay(1000);
+                CompositionTarget.Rendering -= probe;
+                var current = typeof(TerminalSurface).GetField("_canvas", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface);
+                throw new TimeoutException($"Final draw missing. ticks={ticks} drawsAfterProbe={totalDraws - drawsBefore} sameCanvas={ReferenceEquals(current, canvas)} canvasLoaded={canvas.IsLoaded} ready={canvas.ReadyToDraw} visible={window.Visible} surfaceLoaded={surface.IsLoaded} size={canvas.ActualWidth}x{canvas.ActualHeight}");
+            }
             var gridTop = (float)TerminalGridGeometry.For(finalFrame, surface.ActualHeight, surface.CellWidth, surface.CellHeight, true).Top;
             using var target = new CanvasRenderTarget(canvas, (float)surface.ActualWidth, (float)surface.ActualHeight, canvas.Dpi);
             using (var drawing = target.CreateDrawingSession())
@@ -347,12 +385,12 @@ internal static partial class Program
                 draws, changedFrames, columns, rows, surfaceWidth = surface.ActualWidth, surfaceHeight = surface.ActualHeight,
                 cellWidth = surface.CellWidth, cellHeight = surface.CellHeight, font = surface.TerminalFontFamily, dpi = canvas.Dpi,
                 rasterizationScale = surface.XamlRoot.RasterizationScale,
-                fixtureSchemaVersion = 3,
+                fixtureSchemaVersion = 4,
                 workloadHz = hz, workloadPattern = pattern,
-                refreshSchedule = schedule switch { "demand" => "output-demand", "composition" => "composition-continuous", _ => "timer" },
+                refreshSchedule = schedule switch { "demand" => "output-demand", "deferred" => "output-demand-deferred", "composition" => "composition-continuous", _ => "timer" },
                 refreshIntervalMs = schedule == "timer" ? refreshMs : (int?)null,
                 readFrames, renderingSubscriptions, outputNotifications, holdTimerFires, heldLatencyMs, idle,
-                drawIntervals = Stats(drawIntervals), refreshDurations = Stats(refreshDurations), heartbeatIntervals = Stats(heartbeatIntervals),
+                drawIntervals = Stats(drawIntervals), outputToDrawLatency = outputDriven ? Stats(outputToDraw) : null, refreshDurations = Stats(refreshDurations), heartbeatIntervals = Stats(heartbeatIntervals),
                 drawWorkAvailability = completedEvent is null ? "not-available" : "callback-elapsed-only",
                 drawWorkDurations = completedEvent is null ? null : Stats(drawWorkDurations),
                 frameWorkDurations = completedEvent is null ? null : Stats(frameWorkDurations), retainedRaster = retainedStatus,
