@@ -61,6 +61,29 @@ internal static class SnapshotArchiveChecks
         SHA256.HashData(nativeTruncated.AsSpan(56), nativeTruncated.AsSpan(24, 32)); Reject(nativeTruncated, "native FINISH truncation");
         Throws(() => GhosttyTerminal.FromSnapshot(new byte[64 * 1024 * 1024 + 1]), "native size limit");
         Equal(true, original.ReadText().Contains(cluster), "failed decode leaves original intact");
+        var directory = Path.Combine(Path.GetTempPath(), "agentterm-archive-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "saved.agtvt");
+        try
+        {
+            File.WriteAllBytes(path, valid);
+            try { TerminalSnapshotArchive.SaveFile(path, ReadOnlySpan<byte>.Empty); throw new Exception("Invalid replacement was accepted."); }
+            catch (InvalidDataException) { }
+            if (!File.ReadAllBytes(path).SequenceEqual(valid)) throw new Exception("Failed archive encoding changed the existing file.");
+            if (OperatingSystem.IsWindows())
+            {
+                using var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                try { TerminalSnapshotArchive.SaveFile(path, original.ExportSnapshot()); throw new Exception("Locked archive was replaced."); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                if (!File.ReadAllBytes(path).SequenceEqual(valid)) throw new Exception("Failed replacement changed the existing archive.");
+            }
+            if (Directory.GetFiles(directory).Length != 1) throw new Exception("Failed archive writes leaked temporary files.");
+            TerminalSnapshotArchive.SaveFile(path, original.ExportSnapshot());
+            using var savedFile = File.OpenRead(path);
+            using var saved = TerminalSnapshotArchive.Open(savedFile);
+            Equal(original.ReadText(), saved.ReadText(), "atomic file replacement");
+        }
+        finally { File.Delete(path); Directory.Delete(directory); }
         restored.Dispose();
         try { restored.ReadText(); throw new Exception("Disposed archive terminal remained usable."); }
         catch (ObjectDisposedException) { }

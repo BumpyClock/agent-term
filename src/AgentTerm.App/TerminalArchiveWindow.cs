@@ -21,6 +21,8 @@ internal sealed class TerminalArchiveWindow : Window
     private bool _refreshing;
     private bool _selecting;
     private bool _closed;
+    private CancellationTokenSource? _findCancellation;
+    private Task _findTask = Task.CompletedTask;
 
     public TerminalArchiveWindow(GhosttyTerminal terminal, string name)
     {
@@ -93,7 +95,7 @@ internal sealed class TerminalArchiveWindow : Window
         Content = root;
         _surface.MetricsChanged += Refresh;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1040, 760));
-        Closed += (_, _) => { _closed = true; _surface.ReleaseResources(); _terminal.Dispose(); };
+        Closed += (_, _) => { _closed = true; _findCancellation?.Cancel(); _surface.ReleaseResources(); _terminal.Dispose(); };
         Refresh();
     }
 
@@ -110,8 +112,31 @@ internal sealed class TerminalArchiveWindow : Window
 
     private void Find(bool forward)
     {
-        _status.Text = _terminal.Find(_query.Text, forward) ? "Match selected" : "No match";
-        Refresh();
+        _findCancellation?.Cancel();
+        var cancellation = new CancellationTokenSource();
+        _findCancellation = cancellation;
+        _findTask = FindAsync(_findTask, _query.Text, forward, cancellation);
+    }
+
+    private async Task FindAsync(Task previous, string query, bool forward, CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await previous;
+            cancellation.Token.ThrowIfCancellationRequested();
+            _status.Text = "Searching…";
+            var found = await _terminal.FindIncrementallyAsync(query, forward, cancellation.Token);
+            if (_closed || cancellation.IsCancellationRequested) return;
+            _status.Text = found ? "Match selected" : "No match";
+            Refresh();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { if (!_closed && !cancellation.IsCancellationRequested) _status.Text = error.Message; }
+        finally
+        {
+            if (_findCancellation == cancellation) _findCancellation = null;
+            cancellation.Dispose();
+        }
     }
 
     private void Copy()

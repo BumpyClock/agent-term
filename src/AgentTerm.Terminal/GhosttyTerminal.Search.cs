@@ -21,6 +21,29 @@ public sealed partial class GhosttyTerminal
         return SelectSearchMatch(forward, caseSensitive, query);
     }
 
+    /// <summary>Incremental search for a single-dispatcher owner such as an offline viewer. Cancel and await an old search before starting another.</summary>
+    public async Task<bool> FindIncrementallyAsync(string query, bool forward, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+        PrepareSearch(query, false);
+        if (query.Length == 0) return false;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            FeedSearch();
+            int status;
+            do
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfDisposed();
+                status = TickSearch();
+                await Task.Delay(1, cancellationToken);
+            } while (status == 0);
+            if (status == 2) return SelectSearchMatch(forward, false, query);
+        }
+    }
+
     internal unsafe void PrepareSearch(string query, bool caseSensitive)
     {
         ThrowIfDisposed();

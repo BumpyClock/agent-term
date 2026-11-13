@@ -2,9 +2,13 @@
 
 Use the new-session dropdown menu and choose **Save terminal archive…**. Choose a `.agtvt` file. The selected pane is captured after the file picker closes. Saving is user-triggered. AgentTerm does not save terminal history automatically.
 
+Encoding, hashing, disk I/O, and decoding run off the window dispatcher. A save writes a temporary file beside the destination, flushes it to disk, and only then replaces the chosen file. A failed encode or replacement leaves the prior archive intact. Opening transfers the newly decoded terminal to the viewer's dispatcher before the viewer accesses it.
+
 Choose **Open terminal archive…** in the same menu. A separate offline window renders the archive through TerminalSurface. It owns a GhosttyTerminal, with no TerminalSession, PTY, process, transport tasks, agent command ownership, or polling timer. Closing it releases the terminal and graphics resources. Closing the main window closes its archive windows.
 
 Use the history scrollbar or mouse wheel. Drag to select and use **Copy selection** or Ctrl+C. Find text using the search field, Previous, Next, or Enter. Ctrl+F focuses search. Page Up and Page Down scroll history when search does not have focus. Large original grids also have horizontal and vertical screen-area scrollbars. The viewer retains the saved grid dimensions and hides its cursor. It does not feed keyboard input to the restored parser.
+
+Offline search yields between native search steps. A new query cancels and awaits the old search before taking ownership. Closing cancels search before disposing terminal and graphics resources.
 
 The binary payload preserves the native snapshot contract, including primary and alternate screens, active screen, history, modes, cursor, styles, palette, wide cells, graphemes, and tracked unfinished VT/UTF-8 input. Selection, viewport, and derived semantic-prompt state are omitted by native format version 1. Users can make new selections and search restored history. See the pinned `src/terminal/snapshot/screen.zig` description, lines 17–19. Archives restore terminal state, not a shell or agent execution. Kitty payloads are decoded by the native library; their host rendering follows the application's graphics support.
 

@@ -10,6 +10,7 @@ namespace AgentTerm_App;
 public sealed partial class MainWindow
 {
     private readonly List<TerminalArchiveWindow> _archiveWindows = [];
+    private bool _archivesClosed;
 
     private void ConfigureArchiveMenu()
     {
@@ -26,11 +27,8 @@ public sealed partial class MainWindow
                 picker.FileTypeChoices.Add("AgentTerm terminal archive", new List<string> { ".agtvt" });
                 WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
                 if (await picker.PickSaveFileAsync() is not { } file) return;
-                var snapshot = page.CaptureArchiveSnapshot();
-                using var stream = await file.OpenStreamForWriteAsync();
-                stream.SetLength(0);
-                TerminalSnapshotArchive.Save(stream, snapshot);
-                await stream.FlushAsync();
+                var snapshot = await page.CaptureArchiveSnapshotAsync();
+                await System.Threading.Tasks.Task.Run(() => TerminalSnapshotArchive.SaveFile(file.Path, snapshot));
             }
             catch (Exception exception) { await ShowArchiveError(exception); }
         };
@@ -43,7 +41,12 @@ public sealed partial class MainWindow
                 picker.FileTypeFilter.Add(".agtvt");
                 WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
                 if (await picker.PickSingleFileAsync() is not { } file) return;
-                using (var stream = await file.OpenStreamForReadAsync()) terminal = TerminalSnapshotArchive.Open(stream);
+                terminal = await System.Threading.Tasks.Task.Run(() =>
+                {
+                    using var stream = File.OpenRead(file.Path);
+                    return TerminalSnapshotArchive.Open(stream);
+                });
+                if (_archivesClosed) { terminal.Dispose(); return; }
                 var window = new TerminalArchiveWindow(terminal, file.Name);
                 terminal = null;
                 _archiveWindows.Add(window);
@@ -52,11 +55,12 @@ public sealed partial class MainWindow
             }
             catch (Exception exception) { terminal?.Dispose(); await ShowArchiveError(exception); }
         };
-        Closed += (_, _) => { foreach (var window in _archiveWindows.ToArray()) window.Close(); };
+        Closed += (_, _) => { _archivesClosed = true; foreach (var window in _archiveWindows.ToArray()) window.Close(); };
     }
 
     private async System.Threading.Tasks.Task ShowArchiveError(Exception exception)
     {
+        if (_archivesClosed) return;
         var dialog = new ContentDialog { XamlRoot = WindowRoot.XamlRoot, Title = "Terminal archive unavailable", Content = exception.Message, CloseButtonText = "Close" };
         await dialog.ShowAsync();
     }

@@ -9,6 +9,23 @@ public static class TerminalSnapshotArchive
     private const int HeaderSize = 56;
     private static ReadOnlySpan<byte> Magic => "AGTERMVT"u8;
 
+    /// <summary>Writes beside the destination, flushes, then replaces it. A failed write leaves the existing archive intact.</summary>
+    public static void SaveFile(string path, ReadOnlySpan<byte> snapshot)
+    {
+        var destination = Path.GetFullPath(path);
+        var temporary = Path.Combine(Path.GetDirectoryName(destination)!, ".agentterm-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.WriteThrough))
+            {
+                Save(stream, snapshot);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally { File.Delete(temporary); }
+    }
+
     public static void Save(Stream destination, ReadOnlySpan<byte> snapshot)
     {
         if (snapshot.IsEmpty || snapshot.Length > GhosttyTerminal.MaximumSnapshotBytes) throw new InvalidDataException("Invalid archive payload size.");
