@@ -12,6 +12,7 @@ internal static class RenderChecks
     {
         CheckSnapshotOwnership();
         CheckBackgroundPresence();
+        CheckStyleRuns();
         OverscanChecks.Run();
         using var terminal = new GhosttyTerminal(12, 3);
         terminal.Write(Encoding.UTF8.GetBytes("\x1b]4;1;rgb:12/34/56\x1b\\\x1b[1;3;4;9;2;8;38;2;10;20;30;48;2;40;50;60mA\x1b[0;7;38;5;1;48;2;1;2;3mB\x1b[0m界e\u0301"));
@@ -72,6 +73,27 @@ internal static class RenderChecks
             "Reverse-screen mode must follow the effective color source while preserving inverse backgrounds.");
     }
 
+    private static void CheckStyleRuns()
+    {
+        using var terminal = new GhosttyTerminal(8, 4);
+        terminal.Write(Encoding.ASCII.GetBytes("\x1b[?25l\x1b[44m\x1b[2K\x1b[0m\x1b[1;3HZ" +
+            "\x1b[2;1H\x1b[31mAB\x1b[32mC\x1b[0mD" + "\x1b[3;1H\x1b[31mE\x1b[0m" + "\x1b[4;1H\x1b[44m\x1b[K\x1b[0m\x1b[4;5H\x1b[K"));
+        var frame = terminal.ReadFrame();
+        TerminalCell At(int row, int column) => frame.Cells[row * frame.Columns + column];
+        var blue = At(0, 0).Background;
+        Check(blue != frame.Background && At(0, 0).HasBackground && At(0, 1).Background == blue &&
+            Enumerable.Range(3, 5).All(column => At(0, column).HasBackground && At(0, column).Background == blue),
+            "Background-only cells must keep their color around styled text.");
+        Check(!At(0, 2).HasBackground && At(0, 2).Background == frame.Background, "Default text between background-only cells must not inherit their color.");
+        var red = At(1, 0).Foreground;
+        Check(red != frame.Foreground && At(1, 1).Foreground == red && At(1, 2).Foreground != red && At(1, 3).Foreground == frame.Foreground,
+            "Each style change within a row must resolve its own colors.");
+        Check(At(2, 0).Foreground == red, "Equal styles on different rows must resolve to equal colors.");
+        Check(Enumerable.Range(0, 4).All(column => At(3, column).Background == blue) &&
+            Enumerable.Range(4, 4).All(column => !At(3, column).HasBackground && At(3, column).Background == frame.Background),
+            "Default blank cells after background-only cells must not inherit their color.");
+    }
+
     private static void CheckSnapshotOwnership()
     {
         using var terminal = new GhosttyTerminal(12, 4);
@@ -93,7 +115,19 @@ internal static class RenderChecks
         var moved = terminal.ReadFrame();
         Check(moved.Cursor.Column == 6 && moved.Cursor.Row == 1 && moved.Cursor.Shape == TerminalCursorShape.Bar,
             "A cursor-only update must publish the new cursor.");
-        Check(moved.Cells.SequenceEqual(edited.Cells), "A cursor-only update must preserve cell values.");
+        Check(ReferenceEquals(moved.Cells, edited.Cells), "A cursor-only update must keep the published cell grid.");
+        terminal.Write("\x1b[3;1HTHIRD"u8);
+        var rewritten = terminal.ReadFrame();
+        Check(ReferenceEquals(rewritten.Cells, edited.Cells), "Rewriting identical text must keep the published cell grid.");
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++)
+        {
+            terminal.Write(i % 2 == 0 ? "\x1b[3;1HTHIRD\x1b[2;7H"u8 : "\x1b[3;1HTHIRD\x1b[1;1H"u8);
+            terminal.ReadFrame();
+        }
+        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        Console.WriteLine($"Unchanged dirty-row captures: {allocated} managed bytes over 100 captures.");
+        Check(allocated < 100 * 512, "Captures whose dirty rows did not change must not allocate replacement rows.");
         terminal.Write("\x1b[1;1HFIRST"u8);
         var afterDroppedFrame = terminal.ReadFrame();
         Check(!original.Cells.SharesRowWith(afterDroppedFrame.Cells, 0) && !original.Cells.SharesRowWith(afterDroppedFrame.Cells, 2),

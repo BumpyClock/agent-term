@@ -31,6 +31,9 @@ public sealed partial class GhosttyTerminal
     private enum RenderRowData { Dirty = 1, Cells = 3, Selection = 4, ViewportY = 6 }
     private enum RenderCellData { Raw = 1, Style = 2, BackgroundColor = 5, ForegroundColor = 6, GraphemesUtf8 = 9 }
     private enum CellData { Codepoint = 1, ContentTag = 2, Wide = 3, StyleId = 6, Hyperlink = 7 }
+    private enum CellContent { Codepoint = 0, CodepointGrapheme = 1, BackgroundPalette = 2, BackgroundRgb = 3 }
+    /// <summary>False for background-only cells, whose color comes from the cell instead of its style.</summary>
+    private static bool ColorsFromStyle(CellContent content) => content is CellContent.Codepoint or CellContent.CodepointGrapheme;
     private enum CellWide { Narrow = 0, Wide = 1, SpacerTail = 2, SpacerHead = 3 }
     private enum CursorVisualStyle { Bar = 0, Block = 1, Underline = 2, BlockHollow = 3 }
     private enum TerminalOption { Mode = 35, RenderHold = 42 }
@@ -47,14 +50,20 @@ public sealed partial class GhosttyTerminal
 
     [StructLayout(LayoutKind.Sequential)] private struct Mode { public ushort Value; public byte Enabled; }
     [StructLayout(LayoutKind.Sequential)] private struct Rgb { public byte R, G, B; public readonly TerminalColor ToColor() => new(R, G, B); }
-    [StructLayout(LayoutKind.Explicit, Size = 16)] private struct Style
+    // style.h fixes GhosttyStyle at 16 bytes with zeroed reserved bits, so two library styles compare as two words.
+    [StructLayout(LayoutKind.Explicit, Size = 16)] private struct Style : IEquatable<Style>
     {
+        [FieldOffset(0)] public ulong Low;
+        [FieldOffset(8)] public ulong High;
         [FieldOffset(8)] public byte UnderlineTag;
         [FieldOffset(9)] public byte UnderlineR;
         [FieldOffset(10)] public byte UnderlineG;
         [FieldOffset(11)] public byte UnderlineB;
         [FieldOffset(12)] public ushort Flags;
         public readonly bool Has(StyleFlags flag) => ((StyleFlags)Flags & flag) != 0;
+        public readonly bool Equals(Style other) => Low == other.Low && High == other.High;
+        public override readonly bool Equals(object? obj) => obj is Style other && Equals(other);
+        public override readonly int GetHashCode() => HashCode.Combine(Low, High);
     }
     [StructLayout(LayoutKind.Sequential)] private unsafe struct ByteBuffer { public byte* Pointer; public nuint Capacity, Length; }
 
@@ -81,7 +90,7 @@ public sealed partial class GhosttyTerminal
     private static readonly (string Native, Type Managed, (string Native, string Managed)[] Fields)[] CheckedLayouts =
     [
         ("GhosttyColorRgb", typeof(Rgb), [("r", nameof(Rgb.R)), ("g", nameof(Rgb.G)), ("b", nameof(Rgb.B))]),
-        ("GhosttyStyle", typeof(Style), [("flags", nameof(Style.Flags))]),
+        ("GhosttyStyle", typeof(Style), [("fg_color", nameof(Style.Low)), ("underline_color", nameof(Style.High)), ("flags", nameof(Style.Flags))]),
         ("GhosttyBuffer", typeof(ByteBuffer), [("ptr", nameof(ByteBuffer.Pointer)), ("cap", nameof(ByteBuffer.Capacity)), ("len", nameof(ByteBuffer.Length))]),
         ("GhosttyTerminalModeConfig", typeof(Mode), [("mode", nameof(Mode.Value)), ("value", nameof(Mode.Enabled))]),
         ("GhosttyRenderStateRowSelection", typeof(RowSelection), [("size", nameof(RowSelection.Size)), ("start_x", nameof(RowSelection.StartX)), ("end_x", nameof(RowSelection.EndX))]),

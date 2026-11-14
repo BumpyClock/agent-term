@@ -22,7 +22,7 @@ public sealed partial class TerminalSurface
         internal void Add(CanvasDrawingSession drawing, TerminalFrame frame, TerminalCell cell, int column, float y, bool textPhase,
             Color? cursorText = null)
         {
-            if (!ShowsInk(cell, textPhase)) return;
+            if (!(cell.Underline || cell.Overline || cell.Strikethrough) || !ShowsInk(cell, textPhase)) return;
             var foreground = cursorText ?? TextColor(frame, cell);
             var end = column + cell.Width;
             if (cell.Underline)
