@@ -193,7 +193,7 @@ public sealed partial class GhosttyTerminal
             ImageGet(iterator, 1, &protocol);
             if (protocol != 0) continue;
             ImageGet(iterator, 2, &id); ImageGet(iterator, 3, &generation);
-            if (!_visibleImages.Contains((id, generation))) _visibleImages.Add((id, generation));
+            _visibleImages.Add((id, generation));
         }
     }
 
