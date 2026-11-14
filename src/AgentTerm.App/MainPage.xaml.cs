@@ -351,7 +351,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         if (!_acceptOutputNotifications || Volatile.Read(ref _surfaceOpen) || Interlocked.Exchange(ref _outputRefreshQueued, 1) != 0) return;
         var queued = PerformanceCapture.Enabled ? Stopwatch.GetTimestamp() : 0;
-        if (!_dispatcher.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        if (!_dispatcher.TryEnqueue(() =>
         {
             if (queued != 0) PerformanceCapture.Record(PerformanceMetric.OutputQueueDelay, Stopwatch.GetElapsedTime(queued).TotalMilliseconds, Terminal.CapturePaneId);
             if (!CanRefreshFrames)
@@ -402,7 +402,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _renderingSubscribed = false;
         if ((!_frameRefreshPending && !_scrollAnimation.IsActive) || _frameRefreshQueued || !CanRefreshFrames) return;
         _frameRefreshPending = false;
-        _frameRefreshQueued = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RefreshQueuedFrame);
+        _frameRefreshQueued = DispatcherQueue.TryEnqueue(RefreshQueuedFrame);
     }
 
     private void RefreshQueuedFrame()
