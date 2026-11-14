@@ -39,6 +39,7 @@ internal static class Program
         SmoothScrollRasterChecks.Run(device);
         if (args.Contains("--smooth-scroll-only")) return;
         FidelityRasterChecks.Run(device);
+        DecorationRunChecks.Run(device);
         SearchRasterChecks.Run(device);
         AcrylicRecipeChecks.Run(device);
         using var image = new CanvasRenderTarget(device, 400, 240, 96);

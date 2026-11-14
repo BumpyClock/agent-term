@@ -454,18 +454,15 @@ public sealed partial class TerminalSurface : UserControl
                     }
                 start = end;
             }
-            for (var col = firstColumn; col < endColumn; col++)
-            {
-                var cell = CellAt(row, col);
-                if (cell.Width == 0 || cell.Hidden || (cell.Blink && !textPhase)) continue;
-                DrawDecorations(drawing, cell, col * cellWidth, y, cellWidth * cell.Width, cellHeight, TextColor(frame, cell));
-            }
+            for (var col = firstColumn; col < endColumn; col++) layouts.Decorations.Add(drawing, frame, CellAt(row, col), col, y, textPhase);
+            layouts.Decorations.Flush(drawing);
         }
         DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images, viewportClip, damageClip);
     }
 
-    private static bool DrawsText(TerminalCell cell, bool textPhase) =>
-        cell.Width != 0 && !cell.Hidden && (!cell.Blink || textPhase) && !string.IsNullOrWhiteSpace(cell.Text);
+    private static bool ShowsInk(TerminalCell cell, bool textPhase) => cell.Width != 0 && !cell.Hidden && (!cell.Blink || textPhase);
+
+    private static bool DrawsText(TerminalCell cell, bool textPhase) => ShowsInk(cell, textPhase) && !string.IsNullOrWhiteSpace(cell.Text);
 
     internal static bool JoinsTextRun(TerminalFrame frame, TerminalCell left, TerminalCell right, bool textPhase) =>
         left.Width == 1 && right.Width == 1 && DrawsText(left, textPhase) && DrawsText(right, textPhase) &&
@@ -475,36 +472,10 @@ public sealed partial class TerminalSurface : UserControl
     private static Color TextColor(TerminalFrame frame, TerminalCell cell)
     {
         var color = ToColor(cell.Selected ? frame.SelectionForeground : cell.Foreground);
-        return cell.Dim && !cell.Selected ? Color.FromArgb(255, (byte)(color.R / 2), (byte)(color.G / 2), (byte)(color.B / 2)) : color;
+        return cell.Dim && !cell.Selected ? Dimmed(color) : color;
     }
 
-    private static void DrawDecorations(CanvasDrawingSession drawing, TerminalCell cell, float x, float y,
-        float width, float cellHeight, Color foreground, bool cursorText = false)
-    {
-        if (cell.Underline)
-        {
-            var underline = cursorText || cell.Selected ? foreground : cell.UnderlineColor is { } uc ? ToColor(uc) : foreground;
-            if (!cursorText && cell.Dim && !cell.Selected && cell.UnderlineColor is not null) underline = Color.FromArgb(255, (byte)(underline.R / 2), (byte)(underline.G / 2), (byte)(underline.B / 2));
-            var lineY = y + cellHeight - 2;
-            switch (cell.UnderlineStyle)
-            {
-                case TerminalUnderlineStyle.Double:
-                    drawing.DrawLine(x, lineY - 2, x + width, lineY - 2, underline);
-                    goto default;
-                case TerminalUnderlineStyle.Curly:
-                    for (float i = 0; i < width; i += 1) drawing.DrawLine(x + i, lineY + MathF.Sin(i * MathF.PI / 2), x + MathF.Min(i + 1, width), lineY + MathF.Sin((i + 1) * MathF.PI / 2), underline);
-                    break;
-                case TerminalUnderlineStyle.Dotted:
-                case TerminalUnderlineStyle.Dashed:
-                    var length = cell.UnderlineStyle == TerminalUnderlineStyle.Dotted ? 1 : 3;
-                    for (float i = 0; i < width; i += length * 2) drawing.DrawLine(x + i, lineY, x + MathF.Min(i + length, width), lineY, underline);
-                    break;
-                default: drawing.DrawLine(x, lineY, x + width, lineY, underline); break;
-            }
-        }
-        if (cell.Overline) drawing.DrawLine(x, y + 1, x + width, y + 1, foreground);
-        if (cell.Strikethrough) drawing.DrawLine(x, y + cellHeight / 2, x + width, y + cellHeight / 2, foreground);
-    }
+    private static Color Dimmed(Color color) => Color.FromArgb(255, (byte)(color.R / 2), (byte)(color.G / 2), (byte)(color.B / 2));
 
     private static void DrawCursor(CanvasDrawingSession drawing, TerminalFrame frame, float cellWidth,
         float cellHeight, GlyphLayouts layouts, bool focused, bool cursorPhase, bool hideCursor, float gridTop, bool textPhase)
@@ -528,12 +499,12 @@ public sealed partial class TerminalSurface : UserControl
         else
         {
             drawing.FillRectangle(cx, cy, cursorWidth, cellHeight, color);
-            if (!cell.Hidden && cell.Width != 0 && (!cell.Blink || textPhase))
+            if (ShowsInk(cell, textPhase))
             {
-                drawing.DrawTextLayout(layouts.Get(device, cell.Text, Math.Max(1, (int)cell.Width), cell.Bold, cell.Italic),
-                    cx, cy, ToColor(frame.CursorText ?? cell.Background));
-                DrawDecorations(drawing, cell, cx, cy, cursorWidth, cellHeight,
-                    ToColor(frame.CursorText ?? cell.Background), cursorText: true);
+                var text = ToColor(frame.CursorText ?? cell.Background);
+                drawing.DrawTextLayout(layouts.Get(device, cell.Text, cell.Width, cell.Bold, cell.Italic), cx, cy, text);
+                layouts.Decorations.Add(drawing, frame, cell, column, cy, textPhase, text);
+                layouts.Decorations.Flush(drawing);
             }
         }
     }
@@ -554,6 +525,8 @@ public sealed partial class TerminalSurface : UserControl
 
         internal GlyphRuns Runs { get; } = new();
 
+        internal DecorationRuns Decorations { get; } = new();
+
         internal GlyphLayouts() => _lookup = _layouts.GetAlternateLookup<ReadOnlySpan<char>>();
 
         internal (int Count, int Cells, int Capacity, long Created) Usage
@@ -568,6 +541,7 @@ public sealed partial class TerminalSurface : UserControl
         internal void Configure(string family, float size, float cellWidth, float cellHeight)
         {
             Runs.Configure(family, size, cellWidth, cellHeight);
+            Decorations.Configure(cellWidth, cellHeight);
             var metrics = (family, size, cellWidth, cellHeight);
             if (_metrics == metrics) return;
             Clear();
@@ -703,6 +677,7 @@ public sealed partial class TerminalSurface : UserControl
             _cachedCells = 0;
             Array.Clear(_references);
             Runs.Clear();
+            Decorations.Clear();
         }
 
         public void Dispose() => Clear();
