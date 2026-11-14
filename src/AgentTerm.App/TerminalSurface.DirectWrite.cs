@@ -215,6 +215,69 @@ internal sealed unsafe class DirectWriteShaper : IDisposable
         if (face != 0) Marshal.Release(face);
     }
 
+    /// <summary>
+    /// Ink bounds of positioned glyphs relative to the run origin on the baseline, in DIPs with y down.
+    /// Returns false when DirectWrite cannot report design metrics.
+    /// </summary>
+    internal static bool TryInkBounds(nint face, float fontSize, ReadOnlySpan<CanvasGlyph> glyphs, float originX,
+        out float left, out float right, out float top, out float bottom)
+    {
+        (left, right, top, bottom) = (float.MaxValue, float.MinValue, float.MaxValue, float.MinValue);
+        if (glyphs.IsEmpty) return true;
+        FontMetrics font;
+        ((delegate* unmanaged[Stdcall]<nint, FontMetrics*, void>)Slot(face, 8))(face, &font);
+        if (font.DesignUnitsPerEm == 0) return false;
+        var scale = fontSize / font.DesignUnitsPerEm;
+        Span<ushort> indices = glyphs.Length <= 256 ? stackalloc ushort[glyphs.Length] : new ushort[glyphs.Length];
+        Span<GlyphMetrics> metrics = glyphs.Length <= 256 ? stackalloc GlyphMetrics[glyphs.Length] : new GlyphMetrics[glyphs.Length];
+        for (var index = 0; index < glyphs.Length; index++) indices[index] = (ushort)glyphs[index].Index;
+        fixed (ushort* indexPointer = indices)
+        fixed (GlyphMetrics* metricPointer = metrics)
+            if (((delegate* unmanaged[Stdcall]<nint, ushort*, uint, GlyphMetrics*, int, int>)Slot(face, 10))(
+                face, indexPointer, (uint)glyphs.Length, metricPointer, 0) < 0) return false;
+        var pen = originX;
+        for (var index = 0; index < glyphs.Length; index++)
+        {
+            var glyph = glyphs[index];
+            var metric = metrics[index];
+            var x = pen + glyph.AdvanceOffset;
+            // Design space is y up from the baseline; the black box spans [yMin, yMax].
+            var yMax = metric.VerticalOriginY - metric.TopSideBearing;
+            var yMin = metric.VerticalOriginY - (int)metric.AdvanceHeight + metric.BottomSideBearing;
+            if (yMax > yMin && metric.AdvanceWidth > metric.LeftSideBearing + metric.RightSideBearing)
+            {
+                left = MathF.Min(left, x + metric.LeftSideBearing * scale);
+                right = MathF.Max(right, x + ((int)metric.AdvanceWidth - metric.RightSideBearing) * scale);
+                top = MathF.Min(top, -yMax * scale - glyph.AscenderOffset);
+                bottom = MathF.Max(bottom, -yMin * scale - glyph.AscenderOffset);
+            }
+            pen += glyph.Advance;
+        }
+        return true;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FontMetrics
+    {
+        internal ushort DesignUnitsPerEm, Ascent, Descent;
+        internal short LineGap;
+        internal ushort CapHeight, XHeight;
+        internal short UnderlinePosition;
+        internal ushort UnderlineThickness;
+        internal short StrikethroughPosition;
+        internal ushort StrikethroughThickness;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GlyphMetrics
+    {
+        internal int LeftSideBearing;
+        internal uint AdvanceWidth;
+        internal int RightSideBearing, TopSideBearing;
+        internal uint AdvanceHeight;
+        internal int BottomSideBearing, VerticalOriginY;
+    }
+
     [DllImport("dwrite.dll")]
     private static extern int DWriteCreateFactory(int factoryType, in Guid iid, out nint factory);
 

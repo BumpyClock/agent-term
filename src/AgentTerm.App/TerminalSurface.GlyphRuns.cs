@@ -35,10 +35,17 @@ public sealed partial class TerminalSurface
 
     private readonly record struct GlyphPart(CanvasFontFace Face, float FontSize, float Trailing, int Start, int Count);
 
-    private sealed class ShapedRun(StyleFace style, GlyphSegment[] segments)
+    /// <summary>Glyph ink extent relative to the run origin on the baseline, in DIPs with y down.</summary>
+    private readonly record struct InkBounds(float Left, float Right, float Top, float Bottom)
+    {
+        internal static readonly InkBounds Unknown = new(float.NegativeInfinity, float.PositiveInfinity, float.NegativeInfinity, float.PositiveInfinity);
+    }
+
+    private sealed class ShapedRun(StyleFace style, GlyphSegment[] segments, InkBounds ink)
     {
         internal StyleFace Style { get; } = style;
         internal GlyphSegment[] Segments { get; } = segments;
+        internal InkBounds Ink { get; } = ink;
     }
 
     private sealed class GlyphRuns
@@ -122,8 +129,15 @@ public sealed partial class TerminalSurface
             if (Prepare(device, bold, italic) is not { } shaped) return false;
             var x = column * _metrics.CellWidth;
             var baseline = SnapBaseline(dpi, y + shaped.Style.Baseline);
-            Counters.ClipLayers++;
-            using var layer = drawing.CreateLayer(1, new Rect(x, y, _cells * _metrics.CellWidth, _metrics.CellHeight));
+            var width = _cells * _metrics.CellWidth;
+            // A clip layer is a new WinRT object per call, and that churn forces full GCs. Only
+            // runs whose ink leaves their cells need one; the rest draw unclipped as before.
+            const float Tolerance = 0.01f;
+            var ink = shaped.Ink;
+            var overflows = ink.Left < -Tolerance || ink.Right > width + Tolerance ||
+                baseline + ink.Top < y - Tolerance || baseline + ink.Bottom > y + _metrics.CellHeight + Tolerance;
+            using var layer = overflows ? drawing.CreateLayer(1, new Rect(x, y, width, _metrics.CellHeight)) : null;
+            if (overflows) Counters.ClipLayers++;
             foreach (var segment in shaped.Segments)
                 Submit(drawing, device, segment.Face, segment.FontSize, new Vector2(x + segment.Offset, baseline), segment.Glyphs, color);
             return true;
@@ -272,7 +286,27 @@ public sealed partial class TerminalSurface
                 for (; next < part.Start; next++) pen += _glyphs[next].Advance;
                 segments[index] = new GlyphSegment(part.Face, part.FontSize, pen, _glyphs.AsSpan(part.Start, part.Count).ToArray());
             }
-            return new ShapedRun(style, segments);
+            return new ShapedRun(style, segments, MeasureInk(style, segments));
+        }
+
+        private static InkBounds MeasureInk(StyleFace style, GlyphSegment[] segments)
+        {
+            float left = float.MaxValue, right = float.MinValue, top = float.MaxValue, bottom = float.MinValue;
+            foreach (var segment in segments)
+            {
+                var own = ReferenceEquals(segment.Face, style.Face);
+                nint native;
+                try { native = own ? style.Native : DirectWriteShaper.CreateFontFace(segment.Face); }
+                catch (System.Runtime.InteropServices.COMException) { return InkBounds.Unknown; }
+                try
+                {
+                    if (!DirectWriteShaper.TryInkBounds(native, segment.FontSize, segment.Glyphs, segment.Offset,
+                        out var l, out var r, out var t, out var b)) return InkBounds.Unknown;
+                    (left, right, top, bottom) = (MathF.Min(left, l), MathF.Max(right, r), MathF.Min(top, t), MathF.Max(bottom, b));
+                }
+                finally { if (!own) DirectWriteShaper.ReleaseFontFace(native); }
+            }
+            return left > right ? new InkBounds(0, 0, 0, 0) : new InkBounds(left, right, top, bottom);
         }
 
         private void Reserve(int count)
