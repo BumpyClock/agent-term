@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Threading.Channels;
 using AgentTerm.Terminal;
 
 internal static class AutomationSelectionChecks
@@ -46,14 +47,10 @@ internal static class AutomationSelectionChecks
         var cleared = session.DispatchAsync(owner => owner.ClearSelection());
         var selected = Task.Run(() => session.SelectFrameRange(frame, 6, 0, 15, 0, Ample));
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        var workerGate = typeof(TerminalSession).GetField("_workerGate", flags)!.GetValue(session)!;
-        var outstanding = typeof(TerminalSession).GetField("_outstandingOperations", flags)!;
+        var queue = ((Channel<Action>)typeof(TerminalSession).GetField("_operations", flags)!.GetValue(session)!).Reader;
         try
         {
-            if (!SpinWait.SpinUntil(() =>
-            {
-                lock (workerGate) return (int)outstanding.GetValue(session)! == 3;
-            }, Ample)) throw new TimeoutException("Selection was not queued behind the clear.");
+            if (!SpinWait.SpinUntil(() => queue.Count == 2, Ample)) throw new TimeoutException("Selection was not queued behind the clear.");
         }
         finally { release.Set(); }
         await blocked;

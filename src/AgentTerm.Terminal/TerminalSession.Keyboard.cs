@@ -5,7 +5,7 @@ public sealed partial class TerminalSession
     public void SendPhysicalKey(uint virtualKey, TerminalModifiers modifiers, TerminalKeyAction action,
         string? text, uint scanCode, bool extended, TerminalModifiers consumedModifiers, uint? layoutCodepoint)
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;

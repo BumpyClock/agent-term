@@ -10,7 +10,7 @@ public sealed partial class TerminalSession
 
     public void SetHostCapabilities(TerminalHostCapabilities capabilities)
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             _terminal.SetHostCapabilities(capabilities);
@@ -20,18 +20,18 @@ public sealed partial class TerminalSession
 
     public string ReadDiagnosticReport()
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             return _terminal.ReadDiagnosticReport();
         }
     }
 
-    public bool UnknownSequenceDiagnosticsEnabled { get { lock (_gate) return _terminal.UnknownSequenceDiagnosticsEnabled; } }
+    public bool UnknownSequenceDiagnosticsEnabled { get { using (_gate.Enter()) return _terminal.UnknownSequenceDiagnosticsEnabled; } }
 
     public void SetUnknownSequenceDiagnostics(bool enabled)
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             _terminal.SetUnknownSequenceDiagnostics(enabled);

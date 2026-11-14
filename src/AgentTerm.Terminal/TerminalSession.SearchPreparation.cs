@@ -20,7 +20,7 @@ public sealed partial class TerminalSession
             while (true)
             {
                 bool completed;
-                lock (_gate)
+                using (_gate.Enter())
                 {
                     if (_disposeTask is not null) return;
                     completed = _terminal.PrepareSearchHighlightsSlice(SearchSlice);
@@ -31,11 +31,11 @@ public sealed partial class TerminalSession
         }
         catch (Exception error)
         {
-            lock (_gate) _highlightFailure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error);
+            using (_gate.Enter()) _highlightFailure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error);
         }
         finally
         {
-            lock (_gate) _highlightWorkerRunning = false;
+            using (_gate.Enter()) _highlightWorkerRunning = false;
         }
         InvalidatePendingFrameCapture();
         OutputAvailable?.Invoke();

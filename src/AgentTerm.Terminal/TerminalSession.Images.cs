@@ -20,7 +20,7 @@ public sealed partial class TerminalSession
     /// </summary>
     public void SetCellPixelSize(uint width, uint height)
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             _terminal.SetCellPixelSize(width, height);

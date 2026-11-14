@@ -8,7 +8,7 @@ public sealed partial class TerminalSession
     /// </summary>
     public string? ReadCommandOutput(long screenRow, int column)
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ThrowIfClosed();
             return _terminal.ReadCommandOutput(screenRow, column);
@@ -18,7 +18,7 @@ public sealed partial class TerminalSession
     /// <summary>Search highlights for the live terminal. Tests only; frames carry their own captured highlights.</summary>
     internal TerminalSearchHighlights? ReadSearchHighlights()
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ThrowIfClosed();
             return _terminal.PrepareSearchHighlightsSynchronously();
