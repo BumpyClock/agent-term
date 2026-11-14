@@ -250,8 +250,6 @@ public sealed partial class GhosttyTerminal
                 var underlineStyle = (TerminalUnderlineStyle)((style.Flags >> 8) & 7);
                 TerminalColor? underlineColor = style.UnderlineTag == 1 ? palette[style.UnderlineR].ToColor() : style.UnderlineTag == 2 ? new TerminalColor(style.UnderlineR, style.UnderlineG, style.UnderlineB) : null;
                 bool overline = style.Has(StyleFlags.Overline), textBlink = style.Has(StyleFlags.Blink);
-                // Published cells are immutable, so equal cells can share one instance. Reuse the previous
-                // frame's cell, else the left neighbour; blank and box-drawing runs then allocate once.
                 var left = index > 0 ? rowCells[index - 1] : null;
                 rowCells[index++] = Same(old) ? old! : Same(left) ? left!
                     : new TerminalCell(text, width, fg, bg, bold, italic, underline, strikethrough, dim, hidden)

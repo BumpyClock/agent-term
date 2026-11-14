@@ -7,6 +7,20 @@ namespace AgentTerm_App;
 
 internal readonly record struct ScriptRange(int Start, int Length, ushort Script, int Shapes);
 
+internal readonly record struct InkBounds(float Left, float Right, float Top, float Bottom)
+{
+    internal static readonly InkBounds Empty = new(float.MaxValue, float.MinValue, float.MaxValue, float.MinValue);
+
+    internal InkBounds Union(InkBounds other) =>
+        new(MathF.Min(Left, other.Left), MathF.Max(Right, other.Right), MathF.Min(Top, other.Top), MathF.Max(Bottom, other.Bottom));
+
+    internal bool Fits(float width, float top, float bottom)
+    {
+        const float Tolerance = 0.01f;
+        return Left >= -Tolerance && Right <= width + Tolerance && Top >= top - Tolerance && Bottom <= bottom + Tolerance;
+    }
+}
+
 internal sealed unsafe class DirectWriteShaper : IDisposable
 {
     private static readonly Guid FactoryId = new("b859ee5a-d838-4b5b-a2e8-1adc7d93db48");
@@ -215,18 +229,13 @@ internal sealed unsafe class DirectWriteShaper : IDisposable
         if (face != 0) Marshal.Release(face);
     }
 
-    /// <summary>
-    /// Ink bounds of positioned glyphs relative to the run origin on the baseline, in DIPs with y down.
-    /// Returns false when DirectWrite cannot report design metrics.
-    /// </summary>
-    internal static bool TryInkBounds(nint face, float fontSize, ReadOnlySpan<CanvasGlyph> glyphs, float originX,
-        out float left, out float right, out float top, out float bottom)
+    internal static InkBounds? MeasureInk(nint face, float fontSize, ReadOnlySpan<CanvasGlyph> glyphs, float originX)
     {
-        (left, right, top, bottom) = (float.MaxValue, float.MinValue, float.MaxValue, float.MinValue);
-        if (glyphs.IsEmpty) return true;
+        var ink = InkBounds.Empty;
+        if (glyphs.IsEmpty) return ink;
         FontMetrics font;
         ((delegate* unmanaged[Stdcall]<nint, FontMetrics*, void>)Slot(face, 8))(face, &font);
-        if (font.DesignUnitsPerEm == 0) return false;
+        if (font.DesignUnitsPerEm == 0) return null;
         var scale = fontSize / font.DesignUnitsPerEm;
         Span<ushort> indices = glyphs.Length <= 256 ? stackalloc ushort[glyphs.Length] : new ushort[glyphs.Length];
         Span<GlyphMetrics> metrics = glyphs.Length <= 256 ? stackalloc GlyphMetrics[glyphs.Length] : new GlyphMetrics[glyphs.Length];
@@ -234,7 +243,7 @@ internal sealed unsafe class DirectWriteShaper : IDisposable
         fixed (ushort* indexPointer = indices)
         fixed (GlyphMetrics* metricPointer = metrics)
             if (((delegate* unmanaged[Stdcall]<nint, ushort*, uint, GlyphMetrics*, int, int>)Slot(face, 10))(
-                face, indexPointer, (uint)glyphs.Length, metricPointer, 0) < 0) return false;
+                face, indexPointer, (uint)glyphs.Length, metricPointer, 0) < 0) return null;
         var pen = originX;
         for (var index = 0; index < glyphs.Length; index++)
         {
@@ -245,15 +254,11 @@ internal sealed unsafe class DirectWriteShaper : IDisposable
             var yMax = metric.VerticalOriginY - metric.TopSideBearing;
             var yMin = metric.VerticalOriginY - (int)metric.AdvanceHeight + metric.BottomSideBearing;
             if (yMax > yMin && metric.AdvanceWidth > metric.LeftSideBearing + metric.RightSideBearing)
-            {
-                left = MathF.Min(left, x + metric.LeftSideBearing * scale);
-                right = MathF.Max(right, x + ((int)metric.AdvanceWidth - metric.RightSideBearing) * scale);
-                top = MathF.Min(top, -yMax * scale - glyph.AscenderOffset);
-                bottom = MathF.Max(bottom, -yMin * scale - glyph.AscenderOffset);
-            }
+                ink = ink.Union(new(x + metric.LeftSideBearing * scale, x + ((int)metric.AdvanceWidth - metric.RightSideBearing) * scale,
+                    -yMax * scale - glyph.AscenderOffset, -yMin * scale - glyph.AscenderOffset));
             pen += glyph.Advance;
         }
-        return true;
+        return ink;
     }
 
     [StructLayout(LayoutKind.Sequential)]

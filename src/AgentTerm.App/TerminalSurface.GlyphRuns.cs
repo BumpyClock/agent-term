@@ -11,9 +11,9 @@ namespace AgentTerm_App;
 
 public sealed partial class TerminalSurface
 {
-    internal enum TextRendering { Layout, GlyphRunClipped }
+    internal enum TextRendering { Layout, GlyphRun }
 
-    internal static TextRendering TextMode { get; set; } = TextRendering.GlyphRunClipped;
+    internal static TextRendering TextMode { get; set; } = TextRendering.GlyphRun;
 
     internal record struct GlyphRunCounters(
         long StyleFaces, long CacheHits, long NativeShaped, long FallbackShaped, long ScriptSegments,
@@ -35,17 +35,11 @@ public sealed partial class TerminalSurface
 
     private readonly record struct GlyphPart(CanvasFontFace Face, float FontSize, float Trailing, int Start, int Count);
 
-    /// <summary>Glyph ink extent relative to the run origin on the baseline, in DIPs with y down.</summary>
-    private readonly record struct InkBounds(float Left, float Right, float Top, float Bottom)
-    {
-        internal static readonly InkBounds Unknown = new(float.NegativeInfinity, float.PositiveInfinity, float.NegativeInfinity, float.PositiveInfinity);
-    }
-
-    private sealed class ShapedRun(StyleFace style, GlyphSegment[] segments, InkBounds ink)
+    private sealed class ShapedRun(StyleFace style, GlyphSegment[] segments, InkBounds? ink)
     {
         internal StyleFace Style { get; } = style;
         internal GlyphSegment[] Segments { get; } = segments;
-        internal InkBounds Ink { get; } = ink;
+        internal InkBounds? Ink { get; } = ink;
     }
 
     private sealed class GlyphRuns
@@ -130,12 +124,7 @@ public sealed partial class TerminalSurface
             var x = column * _metrics.CellWidth;
             var baseline = SnapBaseline(dpi, y + shaped.Style.Baseline);
             var width = _cells * _metrics.CellWidth;
-            // A clip layer is a new WinRT object per call, and that churn forces full GCs. Only
-            // runs whose ink leaves their cells need one; the rest draw unclipped as before.
-            const float Tolerance = 0.01f;
-            var ink = shaped.Ink;
-            var overflows = ink.Left < -Tolerance || ink.Right > width + Tolerance ||
-                baseline + ink.Top < y - Tolerance || baseline + ink.Bottom > y + _metrics.CellHeight + Tolerance;
+            var overflows = shaped.Ink?.Fits(width, y - baseline, y + _metrics.CellHeight - baseline) != true;
             using var layer = overflows ? drawing.CreateLayer(1, new Rect(x, y, width, _metrics.CellHeight)) : null;
             if (overflows) Counters.ClipLayers++;
             foreach (var segment in shaped.Segments)
@@ -289,24 +278,23 @@ public sealed partial class TerminalSurface
             return new ShapedRun(style, segments, MeasureInk(style, segments));
         }
 
-        private static InkBounds MeasureInk(StyleFace style, GlyphSegment[] segments)
+        private static InkBounds? MeasureInk(StyleFace style, GlyphSegment[] segments)
         {
-            float left = float.MaxValue, right = float.MinValue, top = float.MaxValue, bottom = float.MinValue;
+            var ink = InkBounds.Empty;
             foreach (var segment in segments)
             {
                 var own = ReferenceEquals(segment.Face, style.Face);
                 nint native;
                 try { native = own ? style.Native : DirectWriteShaper.CreateFontFace(segment.Face); }
-                catch (System.Runtime.InteropServices.COMException) { return InkBounds.Unknown; }
+                catch (System.Runtime.InteropServices.COMException) { return null; }
                 try
                 {
-                    if (!DirectWriteShaper.TryInkBounds(native, segment.FontSize, segment.Glyphs, segment.Offset,
-                        out var l, out var r, out var t, out var b)) return InkBounds.Unknown;
-                    (left, right, top, bottom) = (MathF.Min(left, l), MathF.Max(right, r), MathF.Min(top, t), MathF.Max(bottom, b));
+                    if (DirectWriteShaper.MeasureInk(native, segment.FontSize, segment.Glyphs, segment.Offset) is not { } part) return null;
+                    ink = ink.Union(part);
                 }
                 finally { if (!own) DirectWriteShaper.ReleaseFontFace(native); }
             }
-            return left > right ? new InkBounds(0, 0, 0, 0) : new InkBounds(left, right, top, bottom);
+            return ink;
         }
 
         private void Reserve(int count)

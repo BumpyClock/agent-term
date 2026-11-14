@@ -226,7 +226,6 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
         }
     }
 
-    // The pipe quota lets ConPTY finish its next write while this thread parses the previous read.
     private const int OutputBufferBytes = 128 * 1024;
 
     private Exception? ReadOutput(IntPtr handle)

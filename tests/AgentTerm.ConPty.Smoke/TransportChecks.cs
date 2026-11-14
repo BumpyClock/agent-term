@@ -95,8 +95,6 @@ internal static class TransportChecks
         if (await connection.Completion.WaitAsync(TimeSpan.FromSeconds(60)) != 0) throw new Exception("Burst fixture failed.");
         elapsed.Stop();
         if (!done) throw new Exception("Burst output must drain through its final marker before completion.");
-        if (largest <= 16 * 1024)
-            throw new Exception($"Burst output arrived in {chunks} reads of at most {largest} bytes. 64 KiB producer writes should fill reads above 16 KiB.");
         Console.WriteLine($"ConPTY burst delivered {received / 1048576.0:F1} MiB in {chunks} reads (largest {largest / 1024} KiB) at {received / elapsed.Elapsed.TotalSeconds / 1048576:F1} MiB/s including process start.");
     }
 

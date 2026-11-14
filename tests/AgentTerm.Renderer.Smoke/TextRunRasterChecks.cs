@@ -93,7 +93,7 @@ internal static class TextRunRasterChecks
                     return target.GetPixelBytes();
                 }
                 var layout = Render(TerminalSurface.TextRendering.Layout);
-                var glyphs = Render(TerminalSurface.TextRendering.GlyphRunClipped);
+                var glyphs = Render(TerminalSurface.TextRendering.GlyphRun);
                 var differing = layout.Where((value, index) => value != glyphs[index]).Count();
                 if (differing != 0)
                     throw new Exception($"Glyph runs differ from text layouts in {differing} bytes: {family} {dpi} DPI, " +
