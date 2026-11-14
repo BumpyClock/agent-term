@@ -167,9 +167,7 @@ public sealed partial class GhosttyTerminal
             previous.Viewport != viewport || previous.HasSelection != hasSelection || reverse != _frameReverse ||
             (reverse ? defaultBg : defaultFg) != previous.Foreground || (reverse ? defaultFg : defaultBg) != previous.Background ||
             (!current && hasSelection);
-        var sameShape = previous is not null && previous.Columns == columns && previous.Rows == rowsCount;
-        var cellRows = captureAll ? new TerminalCell[rowsCount][] : previous!.Cells.CopyRows();
-        var cellsChanged = captureAll;
+        var grid = new TerminalCellGrid.Builder(previous?.Cells, columns, rowsCount);
         var rowPtr = _rowIterator;
         StateGet(RenderStateData.RowIterator, &rowPtr);
         byte* scratch = stackalloc byte[ScratchTextBytes];
@@ -181,8 +179,8 @@ public sealed partial class GhosttyTerminal
         var cellValues = stackalloc void*[] { &raw, &style, &buffer };
         var capturedRows = 0;
         var visibleRows = 0;
-        var above = captureAll ? new List<TerminalOverscanRow>() : new List<TerminalOverscanRow>(previous!.OverscanAbove);
-        var below = captureAll ? new List<TerminalOverscanRow>() : new List<TerminalOverscanRow>(previous!.OverscanBelow);
+        var above = captureAll ? [] : previous!.OverscanAbove;
+        var below = captureAll ? [] : previous!.OverscanBelow;
         while (true)
         {
             int row;
@@ -202,7 +200,6 @@ public sealed partial class GhosttyTerminal
             if (row < -1 || row > rowsCount) throw new InvalidOperationException("Render state returned an unexpected overscan row.");
             var extra = row < 0 || row >= rowsCount;
             if (!extra) visibleRows++;
-            cellsChanged |= !extra;
             int selectionStart = -1, selectionEnd = -1;
             if (hasSelection)
             {
@@ -213,8 +210,8 @@ public sealed partial class GhosttyTerminal
             }
             var cellPtr = _cellIterator;
             RowGet(RenderRowData.Cells, &cellPtr);
-            var rowCells = new TerminalCell[columns];
-            var oldRow = !extra && sameShape ? previous!.Cells.Row(row) : ReadOnlySpan<TerminalCell>.Empty;
+            var oldRow = extra ? default : grid.Previous(row);
+            var rowCells = oldRow.IsEmpty ? new TerminalCell[columns] : null;
             var index = 0;
             var start = 0;
             var end = columns;
@@ -250,10 +247,17 @@ public sealed partial class GhosttyTerminal
                 var underlineStyle = (TerminalUnderlineStyle)((style.Flags >> 8) & 7);
                 TerminalColor? underlineColor = style.UnderlineTag == 1 ? palette[style.UnderlineR].ToColor() : style.UnderlineTag == 2 ? new TerminalColor(style.UnderlineR, style.UnderlineG, style.UnderlineB) : null;
                 bool overline = style.Has(StyleFlags.Overline), textBlink = style.Has(StyleFlags.Blink);
-                var left = index > 0 ? rowCells[index - 1] : null;
-                rowCells[index++] = Same(old) ? old! : Same(left) ? left!
+                var left = index == 0 ? null : rowCells is null ? oldRow[index - 1] : rowCells[index - 1];
+                var cell = Same(old) ? old! : Same(left) ? left!
                     : new TerminalCell(text, width, fg, bg, bold, italic, underline, strikethrough, dim, hidden)
                     { HasBackground = hasBackground, Selected = selected, UnderlineStyle = underlineStyle, UnderlineColor = underlineColor, Overline = overline, Blink = textBlink };
+                if (rowCells is null && !ReferenceEquals(cell, old))
+                {
+                    rowCells = new TerminalCell[columns];
+                    oldRow[..index].CopyTo(rowCells);
+                }
+                if (rowCells is not null) rowCells[index] = cell;
+                index++;
 
                 bool Same(TerminalCell? cell) => cell is not null && cell.Text == text && cell.Width == width && cell.Foreground == fg && cell.Background == bg &&
                     cell.HasBackground == hasBackground && cell.Bold == bold && cell.Italic == italic && cell.Underline == underline &&
@@ -261,27 +265,28 @@ public sealed partial class GhosttyTerminal
                     cell.UnderlineStyle == underlineStyle && cell.UnderlineColor == underlineColor && cell.Overline == overline && cell.Blink == textBlink;
             }
             if (index != end) throw new InvalidOperationException("Render state returned an incomplete grid.");
+            if (rowCells is null) continue;
             for (var i = 0; i + 1 < rowCells.Length; i++)
                 if (rowCells[i].Width == 2 && rowCells[i].Selected && rowCells[i + 1].Width == 0)
                     rowCells[i + 1] = rowCells[i + 1] with { Selected = true };
             if (extra)
             {
-                var extras = row < 0 ? above : below;
                 var overscanRow = new TerminalOverscanRow(row, rowCells);
-                if (captureAll) extras.Add(overscanRow);
-                else extras[0] = overscanRow;
+                if (row < 0) above = captureAll ? [.. above, overscanRow] : [overscanRow];
+                else below = captureAll ? [.. below, overscanRow] : [overscanRow];
+                continue;
             }
-            else cellRows[row] = rowCells;
+            grid.Replace(row, rowCells);
         }
         if (captureAll && visibleRows != rowsCount) throw new InvalidOperationException("Render state returned an incomplete grid.");
         if (reverse) (defaultFg, defaultBg) = (defaultBg, defaultFg);
         _frameReverse = reverse;
         _frameOverscanEnabled = capture.OverscanEnabled;
         if (!paletteMatches) _framePalette = paletteBytes.ToArray();
-        _frame = new TerminalFrame(columns, rowsCount, cellsChanged ? new TerminalCellGrid(cellRows, columns) : previous!.Cells, cursor, defaultFg, defaultBg) {
+        _frame = new TerminalFrame(columns, rowsCount, grid.Build(), cursor, defaultFg, defaultBg) {
             Images = images, ActiveScreenOffset = capture.ActiveScreenOffset, Viewport = viewport, HasSelection = hasSelection, ContentVersion = capture.ContentVersion,
             SearchHighlights = capture.SearchHighlights,
-            OverscanAbove = above.ToArray(), OverscanBelow = below.ToArray(),
+            OverscanAbove = above, OverscanBelow = below,
             SelectionBackground = (capture.Theme ?? TerminalThemes.All[0]).SelectionBackground,
             SelectionForeground = (capture.Theme ?? TerminalThemes.All[0]).SelectionForeground,
             CursorText = capture.Theme is null ? null : capture.Theme.CursorText ?? background.ToColor(),

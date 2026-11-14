@@ -41,11 +41,34 @@ public sealed class TerminalCellGrid : IReadOnlyList<TerminalCell>
     public int Count => Length;
     public TerminalCell this[int index] => _rows[index / _columns][index % _columns];
     public TerminalCell this[Index index] => this[index.GetOffset(Length)];
-    internal TerminalCell[][] CopyRows() => (TerminalCell[][])_rows.Clone();
-    internal ReadOnlySpan<TerminalCell> Row(int row) => _rows[row];
     public bool SharesRowWith(TerminalCellGrid other, int row) => ReferenceEquals(_rows[row], other._rows[row]);
     public IEnumerator<TerminalCell> GetEnumerator() => _rows.SelectMany(row => row).GetEnumerator();
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+    /// <summary>
+    /// Assembles the next grid from a previous grid of the same shape. Rows that are not replaced stay shared, and
+    /// <see cref="Build"/> returns the previous grid itself when no row was replaced.
+    /// </summary>
+    internal struct Builder
+    {
+        private readonly TerminalCellGrid? _previous;
+        private readonly int _columns;
+        private TerminalCell[][]? _rows;
+
+        public Builder(TerminalCellGrid? previous, int columns, int rows)
+        {
+            _columns = columns;
+            if (previous is not null && previous._columns == columns && previous._rows.Length == rows) _previous = previous;
+            else _rows = new TerminalCell[rows][];
+        }
+
+        /// <summary>The previous row's cells, or empty when there is no previous grid of this shape.</summary>
+        public readonly ReadOnlySpan<TerminalCell> Previous(int row) => _previous is null ? default : _previous._rows[row];
+
+        public void Replace(int row, TerminalCell[] cells) => (_rows ??= (TerminalCell[][])_previous!._rows.Clone())[row] = cells;
+
+        public readonly TerminalCellGrid Build() => _rows is null ? _previous! : new TerminalCellGrid(_rows, _columns);
+    }
 }
 
 public sealed record TerminalFrame(int Columns, int Rows, TerminalCellGrid Cells,

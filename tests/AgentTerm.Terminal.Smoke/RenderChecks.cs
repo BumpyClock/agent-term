@@ -93,7 +93,19 @@ internal static class RenderChecks
         var moved = terminal.ReadFrame();
         Check(moved.Cursor.Column == 6 && moved.Cursor.Row == 1 && moved.Cursor.Shape == TerminalCursorShape.Bar,
             "A cursor-only update must publish the new cursor.");
-        Check(moved.Cells.SequenceEqual(edited.Cells), "A cursor-only update must preserve cell values.");
+        Check(ReferenceEquals(moved.Cells, edited.Cells), "A cursor-only update must keep the published cell grid.");
+        terminal.Write("\x1b[3;1HTHIRD"u8);
+        var rewritten = terminal.ReadFrame();
+        Check(ReferenceEquals(rewritten.Cells, edited.Cells), "Rewriting identical text must keep the published cell grid.");
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++)
+        {
+            terminal.Write(i % 2 == 0 ? "\x1b[3;1HTHIRD\x1b[2;7H"u8 : "\x1b[3;1HTHIRD\x1b[1;1H"u8);
+            terminal.ReadFrame();
+        }
+        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        Console.WriteLine($"Unchanged dirty-row captures: {allocated} managed bytes over 100 captures.");
+        Check(allocated < 100 * 512, "Captures whose dirty rows did not change must not allocate replacement rows.");
         terminal.Write("\x1b[1;1HFIRST"u8);
         var afterDroppedFrame = terminal.ReadFrame();
         Check(!original.Cells.SharesRowWith(afterDroppedFrame.Cells, 0) && !original.Cells.SharesRowWith(afterDroppedFrame.Cells, 2),
