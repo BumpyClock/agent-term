@@ -24,6 +24,7 @@ internal sealed partial class ProgramStatusCard : Grid
     private readonly IProgramIconPreferences? _iconPreferences;
     private (int Pane, string Id)[] _order = [];
     private readonly Dictionary<int, TextBlock> _headings = [];
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _clock;
     internal ScrollViewer Scroll { get; }
     internal event Action? KeepOpen;
     internal event Action? Dismiss;
@@ -68,6 +69,12 @@ internal sealed partial class ProgramStatusCard : Grid
         _pin.Click += (_, _) => KeepOpen?.Invoke();
         _close = (Button)layout.FindName("Close");
         _close.Click += (_, _) => Dismiss?.Invoke();
+        // Ages are minute-grained, so a half-minute tick keeps them current while the card is open.
+        _clock = DispatcherQueue.CreateTimer();
+        _clock.Interval = TimeSpan.FromSeconds(30);
+        _clock.Tick += (_, _) => RefreshAges();
+        Loaded += (_, _) => { RefreshAges(); _clock.Start(); };
+        Unloaded += (_, _) => _clock.Stop();
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key is not (VirtualKey.Home or VirtualKey.End) ||
@@ -159,6 +166,12 @@ internal sealed partial class ProgramStatusCard : Grid
         return string.Join(" · ", parts);
     }
 
+    private void RefreshAges()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var row in _entries.Values) row.RefreshAge(now);
+    }
+
     private static void SetSelectableText(TextBlock block, string text)
     {
         // Assigning even the same value clears WinUI's text selection.
@@ -173,6 +186,8 @@ internal sealed partial class ProgramStatusCard : Grid
         private readonly TextBlock _message;
         private readonly TextBlock _identity;
         private readonly ProgramIconPresentation _icon;
+        private string _identityPrefix = "";
+        private DateTimeOffset _updated;
         internal Grid Root { get; }
 
         internal ReportRow(IProgramIconPreferences? preferences)
@@ -222,13 +237,11 @@ internal sealed partial class ProgramStatusCard : Grid
             _state.Foreground = accent ?? (Brush)Root.Resources["Normal"];
             SetSelectableText(_message, ProgramStatusPresentation.Clean(status.Message ?? ""));
             _message.Visibility = _message.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-            var time = status.UpdatedAt.ToLocalTime();
-            var timestamp = time.Date == DateTime.Now.Date ? $"{time:HH:mm:ss}" : $"{time:MMM d, HH:mm:ss}";
             var app = status.Title is null ? null : ProgramStatusPresentation.OwnApp(status);
-            var identityText = app is null || app == name ? timestamp : $"{app} · {timestamp}";
-            if (depth == 0 && status.Id.Contains('/')) identityText = $"{ProgramStatusPresentation.Clean(status.Id)} · {identityText}";
-            SetSelectableText(_identity, identityText);
-            AutomationProperties.SetName(_identity, $"{_identity.Text}. Updated {time:g}");
+            _identityPrefix = app is null || app == name ? "" : $"{app} · ";
+            if (depth == 0 && status.Id.Contains('/')) _identityPrefix = $"{ProgramStatusPresentation.Clean(status.Id)} · {_identityPrefix}";
+            _updated = status.UpdatedAt;
+            RefreshAge(DateTimeOffset.UtcNow);
             // Nested rows start their symbol under the parent's name, so the tree reads as one column.
             Root.Margin = new Thickness(depth * 28, 0, 0, 0);
 
@@ -239,6 +252,13 @@ internal sealed partial class ProgramStatusCard : Grid
             var source = mark is not null ? AgentMarks.For(mark) : new FontIconSource { Glyph = glyph, Foreground = accent };
             // Retained reports outlived their command, so only live work animates.
             _icon.Update(source, status.IsActive && status.State == ProgramState.Working, mark is null ? 14 : 16);
+        }
+
+        internal void RefreshAge(DateTimeOffset now)
+        {
+            var age = ProgramStatusPresentation.Age(_updated, now);
+            SetSelectableText(_identity, $"{_identityPrefix}{age}");
+            AutomationProperties.SetName(_identity, $"{_identityPrefix}Updated {age}");
         }
     }
 }

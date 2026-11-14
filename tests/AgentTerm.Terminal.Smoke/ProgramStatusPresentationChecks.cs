@@ -20,10 +20,13 @@ internal static class ProgramStatusPresentationChecks
         var child = Entry(ProgramState.Blocked, "task/review", kind: "permission");
         child = child with { Status = child.Status with { Title = "Re\u202eview", Message = "Approve\u2066 changes", Progress = 42 } };
         var otherPane = Entry(ProgramState.Done, pane: 2);
+        Check(ProgramStatusPresentation.Age(now, now) == "just now" && ProgramStatusPresentation.Age(now - TimeSpan.FromMinutes(4), now) == "4m ago" &&
+            ProgramStatusPresentation.Age(now - TimeSpan.FromHours(3), now) == "3h ago", "Report times must read as relative ages.");
         var details = ProgramStatusPresentation.Create([child, parent, otherPane]);
         Check(details.Summary == "Approval needed · 42%", "Blocked detail must retain reason and percentage.");
         Check(details.Details.Contains("Pane 1 · PowerShell") && details.Details.Contains("Pane 2 · PowerShell"), "Split reports must identify their source pane.");
         Check(details.Details.Contains("    Review · Approval needed · 42%") && details.Details.Contains("task/review"), "Child task titles and ids must retain hierarchy.");
+        Check(!details.Details.Contains("Updated"), "Tab details rebuild only on report changes, so they must not carry an age that goes stale.");
         Check(details.Details.Contains("Approve changes") && !details.Details.Contains('\u202e') && !details.Details.Contains('\u2066'), "Direction overrides must not escape into tab details.");
         Check(details.Details.IndexOf("Claude Code · Working", StringComparison.Ordinal) >= 0 && !details.Details.Contains("claude-code"), "Known agents must use their product name, and nested tasks must not repeat the parent app.");
         Check(details.Details.IndexOf("Claude Code · Working", StringComparison.Ordinal) < details.Details.IndexOf("Review ·", StringComparison.Ordinal), "Parent must precede child even when reports arrive in reverse order.");

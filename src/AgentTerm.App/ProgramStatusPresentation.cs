@@ -38,11 +38,20 @@ internal sealed record ProgramStatusPresentation(string Glyph, string Summary, s
                 details.AppendLine($"{indent}{name} · {Label(status)}");
                 if (OwnApp(status) is { } app && app != name) details.AppendLine($"{indent}  {app}");
                 if (status.Id.Length > 0) details.AppendLine($"{indent}  {status.Id}");
-                details.AppendLine($"{indent}  Updated {status.UpdatedAt.ToLocalTime():HH:mm:ss}");
                 if (status.Message is { Length: > 0 } message) details.AppendLine($"{indent}  {Clean(message)}");
             }
         }
         return new(glyph, Label(primary ?? records.OrderBy(record => Priority(record.Status.State)).First().Status), details.ToString().TrimEnd());
+    }
+
+    /// <summary>Report age, such as "just now" or "4m ago". The status card refreshes it while open.</summary>
+    internal static string Age(DateTimeOffset updated, DateTimeOffset now)
+    {
+        var age = now - updated;
+        return age.TotalMinutes < 1 ? "just now"
+            : age.TotalHours < 1 ? $"{(int)age.TotalMinutes}m ago"
+            : age.TotalDays < 1 ? $"{(int)age.TotalHours}h ago"
+            : $"{(int)age.TotalDays}d ago";
     }
 
     internal static string PaneHeading(PaneProgramStatus record) =>

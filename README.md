@@ -246,7 +246,9 @@ automatically, including when a report arrives while the pointer is already over
 the tab. There is no **Program status** context-menu action.
 
 The card groups split panes and nested tasks, labels states and progress, and
-shows messages and update times. Each row leads with the agent's mark or a state
+shows messages and report ages such as **just now**, **4m ago**, or **3h ago**.
+Ages refresh every 30 seconds while the card is open. Tab tooltips and screen-reader
+details omit update times so they do not become stale. Each row leads with the agent's mark or a state
 symbol. A working session or subagent row shows the tab's dot sweep in place of
 that symbol. Known agents appear by product name, such as Claude Code for
 `claude-code`. Nested tasks do not repeat their parent's app. Split-pane headings
