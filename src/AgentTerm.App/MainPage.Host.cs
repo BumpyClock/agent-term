@@ -35,7 +35,7 @@ public sealed partial class MainPage
         KeyboardAccelerators.Add(diagnostics);
     }
 
-    private void HostRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => UpdateGridSize();
+    private void HostRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => QueueGridSize();
 
     /// <summary>Shared diagnostic command, also available with Ctrl+Shift+F12.</summary>
     public async Task ShowHostDiagnosticsAsync()

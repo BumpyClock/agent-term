@@ -11,9 +11,9 @@ namespace AgentTerm_App;
 
 public sealed partial class TerminalSurface
 {
-    internal enum TextRendering { Layout, GlyphRunClipped }
+    internal enum TextRendering { Layout, GlyphRun }
 
-    internal static TextRendering TextMode { get; set; } = TextRendering.GlyphRunClipped;
+    internal static TextRendering TextMode { get; set; } = TextRendering.GlyphRun;
 
     internal record struct GlyphRunCounters(
         long StyleFaces, long CacheHits, long NativeShaped, long FallbackShaped, long ScriptSegments,
@@ -35,10 +35,11 @@ public sealed partial class TerminalSurface
 
     private readonly record struct GlyphPart(CanvasFontFace Face, float FontSize, float Trailing, int Start, int Count);
 
-    private sealed class ShapedRun(StyleFace style, GlyphSegment[] segments)
+    private sealed class ShapedRun(StyleFace style, GlyphSegment[] segments, InkBounds? ink)
     {
         internal StyleFace Style { get; } = style;
         internal GlyphSegment[] Segments { get; } = segments;
+        internal InkBounds? Ink { get; } = ink;
     }
 
     private sealed class GlyphRuns
@@ -122,8 +123,10 @@ public sealed partial class TerminalSurface
             if (Prepare(device, bold, italic) is not { } shaped) return false;
             var x = column * _metrics.CellWidth;
             var baseline = SnapBaseline(dpi, y + shaped.Style.Baseline);
-            Counters.ClipLayers++;
-            using var layer = drawing.CreateLayer(1, new Rect(x, y, _cells * _metrics.CellWidth, _metrics.CellHeight));
+            var width = _cells * _metrics.CellWidth;
+            var overflows = shaped.Ink?.Fits(width, y - baseline, y + _metrics.CellHeight - baseline) != true;
+            using var layer = overflows ? drawing.CreateLayer(1, new Rect(x, y, width, _metrics.CellHeight)) : null;
+            if (overflows) Counters.ClipLayers++;
             foreach (var segment in shaped.Segments)
                 Submit(drawing, device, segment.Face, segment.FontSize, new Vector2(x + segment.Offset, baseline), segment.Glyphs, color);
             return true;
@@ -272,7 +275,26 @@ public sealed partial class TerminalSurface
                 for (; next < part.Start; next++) pen += _glyphs[next].Advance;
                 segments[index] = new GlyphSegment(part.Face, part.FontSize, pen, _glyphs.AsSpan(part.Start, part.Count).ToArray());
             }
-            return new ShapedRun(style, segments);
+            return new ShapedRun(style, segments, MeasureInk(style, segments));
+        }
+
+        private static InkBounds? MeasureInk(StyleFace style, GlyphSegment[] segments)
+        {
+            var ink = InkBounds.Empty;
+            foreach (var segment in segments)
+            {
+                var own = ReferenceEquals(segment.Face, style.Face);
+                nint native;
+                try { native = own ? style.Native : DirectWriteShaper.CreateFontFace(segment.Face); }
+                catch (System.Runtime.InteropServices.COMException) { return null; }
+                try
+                {
+                    if (DirectWriteShaper.MeasureInk(native, segment.FontSize, segment.Glyphs, segment.Offset) is not { } part) return null;
+                    ink = ink.Union(part);
+                }
+                finally { if (!own) DirectWriteShaper.ReleaseFontFace(native); }
+            }
+            return ink;
         }
 
         private void Reserve(int count)

@@ -29,6 +29,9 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private readonly DispatcherQueueTimer _chromeTimer;
     private readonly DispatcherQueueTimer _cursorTimer;
     private readonly DispatcherQueueTimer _synchronizedRefreshTimer;
+    private readonly DispatcherQueueTimer _gridResizeTimer;
+    private readonly TrailingThrottle _gridResize;
+    private TerminalGrid? _sentGrid;
     private readonly DispatcherQueue _dispatcher;
     private TerminalSession? _session;
     private SessionState _state;
@@ -156,6 +159,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _synchronizedRefreshTimer = DispatcherQueue.CreateTimer();
         _synchronizedRefreshTimer.IsRepeating = false;
         _synchronizedRefreshTimer.Tick += (_, _) => RequestFrameRefresh();
+        _gridResizeTimer = DispatcherQueue.CreateTimer();
+        _gridResizeTimer.IsRepeating = false;
+        _gridResizeTimer.Interval = TimeSpan.FromMilliseconds(25);
+        _gridResize = new(_gridResizeTimer.Start, _gridResizeTimer.Stop, SendSessionGrid);
+        _gridResizeTimer.Tick += (_, _) => _gridResize.Flush();
         Terminal.MetricsChanged += UpdateGridSize;
         ConfigureHostUi();
         SetFontSize(_appearance.FontSize);
@@ -257,11 +265,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             SetState(SessionState.Running);
             StatusText.Text = "Running · Local session";
             UpdateGridSize();
-            var columns = _columns;
-            var rows = _rows;
-            var cellWidth = HostCellWidth;
-            var cellHeight = HostCellHeight;
-            QueueSessionUpdate(session, s => s.Resize(columns, rows, cellWidth, cellHeight));
             RefreshOutput(session);
             if (_viewActive) StartRefresh();
             SessionReady?.Invoke();
@@ -596,7 +599,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async void Output_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        try { UpdateGridSize(); }
+        try { QueueGridSize(); }
         catch (Exception exception)
         {
             if (_state == SessionState.Running) await FailSessionAsync(exception);
@@ -606,7 +609,17 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private void UpdateGridSize()
     {
-        if (Terminal.ActualWidth <= 0 || Terminal.ActualHeight <= 0) return;
+        if (MeasureGrid()) _gridResize.Flush();
+    }
+
+    private void QueueGridSize()
+    {
+        if (MeasureGrid()) _gridResize.Request();
+    }
+
+    private bool MeasureGrid()
+    {
+        if (Terminal.ActualWidth <= 0 || Terminal.ActualHeight <= 0) return false;
         var columns = (ushort)Math.Clamp(Math.Floor(Terminal.ActualWidth / Terminal.CellWidth), 2, 1000);
         var rows = (ushort)Math.Clamp(Math.Floor(Terminal.ActualHeight / Terminal.CellHeight), 1, 1000);
         if (columns != _columns || rows != _rows || HostCellWidth != _hostCellWidth || HostCellHeight != _hostCellHeight)
@@ -616,14 +629,17 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _rows = rows;
             _hostCellWidth = HostCellWidth;
             _hostCellHeight = HostCellHeight;
-            if (_state is SessionState.Running or SessionState.Idle && _session is not null)
-            {
-                var cellWidth = _hostCellWidth;
-                var cellHeight = _hostCellHeight;
-                QueueSessionUpdate(_session, s => s.Resize(columns, rows, cellWidth, cellHeight), refresh: true);
-            }
         }
         GridSizeText.Text = $"{_columns} x {_rows}";
+        return true;
+    }
+
+    private void SendSessionGrid()
+    {
+        TerminalGrid grid = new(_columns, _rows, _hostCellWidth, _hostCellHeight);
+        if (_state is not (SessionState.Running or SessionState.Idle) || _session is not { } session || grid == _sentGrid) return;
+        _sentGrid = grid;
+        QueueSessionUpdate(session, s => s.Resize(grid.Columns, grid.Rows, grid.CellWidth, grid.CellHeight), refresh: true);
     }
 
     [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
@@ -1374,7 +1390,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async Task FailSessionAsync(Exception exception)
     {
-        if (exception is TerminalOperationQueueFullException) { ShowInteractionFailure(exception); return; }
+        if (exception is TerminalOperationQueueFullException)
+        {
+            _sentGrid = null;
+            ShowInteractionFailure(exception);
+            return;
+        }
         SetState(SessionState.Stopping);
         await ReleaseSessionAsync();
         if (_state != SessionState.Disposed)
@@ -1434,6 +1455,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         CancelFind();
         StopRefresh();
         CancelSelectionGesture();
+        _gridResize.Cancel();
+        _sentGrid = null;
         if (_session is not { } session)
             return _release;
 
@@ -1484,3 +1507,5 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         Terminal.ReleaseResources();
     }
 }
+
+internal readonly record struct TerminalGrid(ushort Columns, ushort Rows, uint CellWidth, uint CellHeight);

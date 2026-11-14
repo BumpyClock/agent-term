@@ -32,7 +32,7 @@ internal sealed class ProgramActivity : Grid
     private ProgramActivityOverlay? _native;
     private Color _accent;
     private Rect? _effectiveViewport;
-    private bool _geometryQueued;
+    private readonly TrailingThrottle _geometry;
     private bool _overlayUncovered;
     private double _rasterizationScale;
     private long? _animationOrigin;
@@ -59,6 +59,11 @@ internal sealed class ProgramActivity : Grid
         _kind = kind;
         _motionAllowed = motionAllowed ?? (() => _settings.AnimationsEnabled && !_accessibility.HighContrast);
         IsHitTestVisible = false;
+        var geometryTimer = DispatcherQueue.CreateTimer();
+        geometryTimer.IsRepeating = false;
+        geometryTimer.Interval = TimeSpan.FromMilliseconds(33);
+        _geometry = new(geometryTimer.Start, geometryTimer.Stop, UpdateNativeGeometry);
+        geometryTimer.Tick += (_, _) => _geometry.Flush();
         AutomationProperties.SetAccessibilityView(this, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
         if (kind == ProgramActivityKind.TabIcon)
         {
@@ -192,6 +197,7 @@ internal sealed class ProgramActivity : Grid
 
     private void Disconnect()
     {
+        _geometry.Cancel();
         _settings.AnimationsEnabledChanged -= SettingsChanged;
         _settings.ColorValuesChanged -= SettingsChanged;
         foreach (var entry in _visibility) entry.Element.UnregisterPropertyChangedCallback(VisibilityProperty, entry.Token);
@@ -263,7 +269,7 @@ internal sealed class ProgramActivity : Grid
             }
             else
             {
-                var animation = new DoubleAnimation { From = -_beam.Width, To = ActualWidth, Duration = new Duration(TimeSpan.FromSeconds(2.4)) };
+                var animation = new DoubleAnimation { From = -_beam.Width, To = ActualWidth, Duration = new Duration(TimeSpan.FromSeconds(BeamCycle)) };
                 Storyboard.SetTarget(animation, _travel);
                 Storyboard.SetTargetProperty(animation, nameof(TranslateTransform.X));
                 _animation.Children.Add(animation);
@@ -289,7 +295,7 @@ internal sealed class ProgramActivity : Grid
     }
 
     private double AnimationPhaseSeconds => _animationOrigin is { } origin
-        ? Stopwatch.GetElapsedTime(origin).TotalSeconds % (_kind == ProgramActivityKind.TabIcon ? SweepCycle : 2.4)
+        ? Stopwatch.GetElapsedTime(origin).TotalSeconds % (_kind == ProgramActivityKind.TabIcon ? SweepCycle : BeamCycle)
         : 0;
 
     private static bool IsSteady(VisualStateGroup group, VisualState? state) => state?.Name ==
@@ -315,45 +321,47 @@ internal sealed class ProgramActivity : Grid
 
     private void QueueNativeGeometry()
     {
-        if (!_working || !IsLoaded || _geometryQueued) return;
-        _geometryQueued = true;
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            _geometryQueued = false;
-            _overlayUncovered = IsOverlayUncovered();
-            Refresh();
-            if (_native is null || ActualWidth <= 0 || ActualHeight <= 0) return;
-            var scale = XamlRoot.RasterizationScale;
-            var transform = TransformToVisual(null);
-            var bounds = transform.TransformBounds(new Rect(0, 0, ActualWidth, ActualHeight));
-            var clipped = Intersect(bounds, new Rect(0, 0, XamlRoot.Size.Width, XamlRoot.Size.Height));
-            if (_effectiveViewport is { } viewport)
-                clipped = Intersect(clipped, transform.TransformBounds(Intersect(new Rect(0, 0, ActualWidth, ActualHeight), viewport)));
-            for (DependencyObject? node = this; node is UIElement element; node = VisualTreeHelper.GetParent(node))
-                if (element.Clip is { } clip)
-                    clipped = Intersect(clipped, element.TransformToVisual(null).TransformBounds(clip.Rect));
-            var position = new Vector2((float)(bounds.X * scale), (float)(bounds.Y * scale));
-            var size = new Vector2((float)(bounds.Width * scale), (float)(bounds.Height * scale));
-            var localClip = clipped.Width <= 0 || clipped.Height <= 0 ? new Rect() : LocalPixels(clipped);
-            Rect[] elements;
-            if (_kind == ProgramActivityKind.TabIcon)
-            {
-                if (_dots.Children.Cast<Ellipse>().Any(dot => dot.ActualWidth <= 0 || dot.ActualHeight <= 0)) return;
-                elements = _dots.Children.Cast<Ellipse>().Select(dot => LocalPixels(dot.TransformToVisual(null)
-                    .TransformBounds(new Rect(0, 0, dot.ActualWidth, dot.ActualHeight)))).ToArray();
-            }
-            else
-            {
-                if (_beam.ActualWidth <= 0 || _beam.ActualHeight <= 0) return;
-                elements = [LocalPixels(transform.TransformBounds(new Rect(_beam.ActualOffset.X, _beam.ActualOffset.Y,
-                    _beam.ActualWidth, _beam.ActualHeight)))];
-            }
-            _native.SetGeometry(new ActivityOverlayGeometry(position, size, localClip, elements,
-                _kind == ProgramActivityKind.PaneEdge ? (float)(-_beam.Width * bounds.Width / ActualWidth * scale) : 0, size.X), AnimationPhaseSeconds);
-            Refresh();
+        if (_working && IsLoaded) _geometry.Request();
+    }
 
-            Rect LocalPixels(Rect rect) => new((rect.X - bounds.X) * scale, (rect.Y - bounds.Y) * scale, rect.Width * scale, rect.Height * scale);
-        });
+    private void UpdateNativeGeometry()
+    {
+        _overlayUncovered = IsOverlayUncovered();
+        Refresh();
+        if (_native is null || ActualWidth <= 0 || ActualHeight <= 0) return;
+        var scale = XamlRoot.RasterizationScale;
+        var transform = TransformToVisual(null);
+        var bounds = transform.TransformBounds(new Rect(0, 0, ActualWidth, ActualHeight));
+        var clipped = Intersect(bounds, new Rect(0, 0, XamlRoot.Size.Width, XamlRoot.Size.Height));
+        if (_effectiveViewport is { } viewport)
+            clipped = Intersect(clipped, transform.TransformBounds(Intersect(new Rect(0, 0, ActualWidth, ActualHeight), viewport)));
+        for (DependencyObject? node = this; node is UIElement element; node = VisualTreeHelper.GetParent(node))
+            if (element.Clip is { } clip)
+                clipped = Intersect(clipped, element.TransformToVisual(null).TransformBounds(clip.Rect));
+        var position = new Vector2((float)(bounds.X * scale), (float)(bounds.Y * scale));
+        var size = new Vector2((float)(bounds.Width * scale), (float)(bounds.Height * scale));
+        var localClip = clipped.Width <= 0 || clipped.Height <= 0 ? new Rect() : LocalPixels(clipped);
+        var scaleX = bounds.Width / ActualWidth * scale;
+        var scaleY = bounds.Height / ActualHeight * scale;
+        Rect[] elements;
+        if (_kind == ProgramActivityKind.TabIcon)
+        {
+            if (_dots.Children.Cast<Ellipse>().Any(dot => dot.ActualWidth <= 0 || dot.ActualHeight <= 0)) return;
+            var origin = _dots.ActualOffset;
+            elements = _dots.Children.Cast<Ellipse>().Select(dot =>
+                Local(origin.X + dot.ActualOffset.X, origin.Y + dot.ActualOffset.Y, dot.ActualWidth, dot.ActualHeight)).ToArray();
+        }
+        else
+        {
+            if (_beam.ActualWidth <= 0 || _beam.ActualHeight <= 0) return;
+            elements = [Local(_beam.ActualOffset.X, _beam.ActualOffset.Y, _beam.ActualWidth, _beam.ActualHeight)];
+        }
+        _native.SetGeometry(new ActivityOverlayGeometry(position, size, localClip, elements,
+            _kind == ProgramActivityKind.PaneEdge ? (float)(-_beam.Width * scaleX) : 0, size.X), AnimationPhaseSeconds);
+        Refresh();
+
+        Rect LocalPixels(Rect rect) => new((rect.X - bounds.X) * scale, (rect.Y - bounds.Y) * scale, rect.Width * scale, rect.Height * scale);
+        Rect Local(double x, double y, double width, double height) => new(x * scaleX, y * scaleY, width * scaleX, height * scaleY);
     }
 
     private bool IsOverlayUncovered()
@@ -413,6 +421,7 @@ internal sealed class ProgramActivity : Grid
     // Seconds per sweep. Diagonals start SweepStep of a cycle apart, so the band crosses in three quarters of a
     // cycle and the grid rests at its floor for the last quarter.
     internal const double SweepCycle = 1.2;
+    internal const double BeamCycle = 2.4;
     internal const double SweepStep = 1 / 12d;
     internal static readonly double[] SweepPhases = [0, .12, .3, .5];
     private static readonly double[] SweepOpacity = [.18, 1, .45, .18];

@@ -69,7 +69,7 @@ Settings save the default profile, tab position, shared appearance defaults, and
 
 Automatic font selection prefers an installed CaskaydiaCove Nerd Font, then Cascadia Mono, then Consolas. Settings lists available terminal fonts. No fonts are downloaded or installed. Acrylic panes use `SystemBackdropElement`; at low opacity they reveal a blurred desktop backdrop, not a clear view through the window. Windows controls material fallback when transparency is unavailable or the window is inactive. Mica is an opaque wallpaper-based material, so the window chrome itself does not reveal other windows.
 
-New panes fade in over 200 ms. Closing panes fade out over 140 ms before removal, followed by a 190 ms expansion of the remaining panes. These transitions animate visual transforms without resizing ConPTY every animation frame. Divider dragging remains immediate. Turning off Windows animations disables these transitions.
+New panes fade in over 200 ms. Closing panes fade out over 140 ms before removal, followed by a 190 ms expansion of the remaining panes. These transitions animate visual transforms without resizing ConPTY every animation frame. Divider dragging moves panes immediately. Turning off Windows animations disables these transitions.
 
 Zoom applies to the current pane; Ctrl+0 restores that profile's font size. A saved font-size change updates panes whose resolved profile size changed. Saving another profile's settings preserves unrelated pane zoom. History is configured for 10 MiB and 10,000 physical lines; Ghostty retains whole pages, so these limits are approximate. WSL discovery is bounded and skips unavailable distributions. WSL itself is not installed by the app.
 
@@ -138,7 +138,7 @@ The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packa
 - `src/AgentTerm.App/TerminalTab.cs` owns nested pane layout, resizing, transitions, and active-pane focus.
 - `src/AgentTerm.App/TerminalPane` owns each card's material, directory/Git header, controls, and focus outline.
 - `src/AgentTerm.App/PaneStatus/` owns Git query execution, parsing, summaries, and one-query-per-pane scheduling. `ShellDirectory.cs` and `ShellIntegration.cs` in the terminal project own reported filesystem context and session-only Windows prompt integration.
-- `src/AgentTerm.App/MainPage` owns one terminal view, input, clipboard, search, and session presentation.
+- `src/AgentTerm.App/MainPage` owns one terminal view, input, clipboard, search, and session presentation. A `TrailingThrottle` limits grid sizes sent to the session during window resizes, divider drags and pane layout changes to one per 25 ms, so ConPTY resizes and reflows do not delay program output. The last size always reaches the session. Font and zoom changes, session starts and tab switches send their size at once.
 - `src/AgentTerm.App/TerminalSurface.cs` draws cells, selection, and cursors with shared font metrics.
 - `src/AgentTerm.App/MainPage.Composer.cs` applies the saved terminal start position and owns native `/agent` intake, the agent surface and its reply field, and task card placement. `TerminalSurface.cs` owns the single cell mapping, `TerminalGridGeometry`, used for drawing, IME, hit testing, mouse and cards. `AgentTimelineView.cs` renders one task's conversation, `AgentTaskCard.cs` renders a card in history, and `AgentStyles.xaml` holds their theme-aware styles.
 - `src/AgentTerm.Terminal/GhosttyTerminal.Anchors.cs` owns history anchors: tracked rows that follow output, scrolling and reflow, and expire on trim or clear.

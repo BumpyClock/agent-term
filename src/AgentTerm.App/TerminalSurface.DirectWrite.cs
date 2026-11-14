@@ -7,6 +7,20 @@ namespace AgentTerm_App;
 
 internal readonly record struct ScriptRange(int Start, int Length, ushort Script, int Shapes);
 
+internal readonly record struct InkBounds(float Left, float Right, float Top, float Bottom)
+{
+    internal static readonly InkBounds Empty = new(float.MaxValue, float.MinValue, float.MaxValue, float.MinValue);
+
+    internal InkBounds Union(InkBounds other) =>
+        new(MathF.Min(Left, other.Left), MathF.Max(Right, other.Right), MathF.Min(Top, other.Top), MathF.Max(Bottom, other.Bottom));
+
+    internal bool Fits(float width, float top, float bottom)
+    {
+        const float Tolerance = 0.01f;
+        return Left >= -Tolerance && Right <= width + Tolerance && Top >= top - Tolerance && Bottom <= bottom + Tolerance;
+    }
+}
+
 internal sealed unsafe class DirectWriteShaper : IDisposable
 {
     private static readonly Guid FactoryId = new("b859ee5a-d838-4b5b-a2e8-1adc7d93db48");
@@ -213,6 +227,60 @@ internal sealed unsafe class DirectWriteShaper : IDisposable
     internal static void ReleaseFontFace(nint face)
     {
         if (face != 0) Marshal.Release(face);
+    }
+
+    internal static InkBounds? MeasureInk(nint face, float fontSize, ReadOnlySpan<CanvasGlyph> glyphs, float originX)
+    {
+        var ink = InkBounds.Empty;
+        if (glyphs.IsEmpty) return ink;
+        FontMetrics font;
+        ((delegate* unmanaged[Stdcall]<nint, FontMetrics*, void>)Slot(face, 8))(face, &font);
+        if (font.DesignUnitsPerEm == 0) return null;
+        var scale = fontSize / font.DesignUnitsPerEm;
+        Span<ushort> indices = glyphs.Length <= 256 ? stackalloc ushort[glyphs.Length] : new ushort[glyphs.Length];
+        Span<GlyphMetrics> metrics = glyphs.Length <= 256 ? stackalloc GlyphMetrics[glyphs.Length] : new GlyphMetrics[glyphs.Length];
+        for (var index = 0; index < glyphs.Length; index++) indices[index] = (ushort)glyphs[index].Index;
+        fixed (ushort* indexPointer = indices)
+        fixed (GlyphMetrics* metricPointer = metrics)
+            if (((delegate* unmanaged[Stdcall]<nint, ushort*, uint, GlyphMetrics*, int, int>)Slot(face, 10))(
+                face, indexPointer, (uint)glyphs.Length, metricPointer, 0) < 0) return null;
+        var pen = originX;
+        for (var index = 0; index < glyphs.Length; index++)
+        {
+            var glyph = glyphs[index];
+            var metric = metrics[index];
+            var x = pen + glyph.AdvanceOffset;
+            // Design space is y up from the baseline; the black box spans [yMin, yMax].
+            var yMax = metric.VerticalOriginY - metric.TopSideBearing;
+            var yMin = metric.VerticalOriginY - (int)metric.AdvanceHeight + metric.BottomSideBearing;
+            if (yMax > yMin && metric.AdvanceWidth > metric.LeftSideBearing + metric.RightSideBearing)
+                ink = ink.Union(new(x + metric.LeftSideBearing * scale, x + ((int)metric.AdvanceWidth - metric.RightSideBearing) * scale,
+                    -yMax * scale - glyph.AscenderOffset, -yMin * scale - glyph.AscenderOffset));
+            pen += glyph.Advance;
+        }
+        return ink;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FontMetrics
+    {
+        internal ushort DesignUnitsPerEm, Ascent, Descent;
+        internal short LineGap;
+        internal ushort CapHeight, XHeight;
+        internal short UnderlinePosition;
+        internal ushort UnderlineThickness;
+        internal short StrikethroughPosition;
+        internal ushort StrikethroughThickness;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GlyphMetrics
+    {
+        internal int LeftSideBearing;
+        internal uint AdvanceWidth;
+        internal int RightSideBearing, TopSideBearing;
+        internal uint AdvanceHeight;
+        internal int BottomSideBearing, VerticalOriginY;
     }
 
     [DllImport("dwrite.dll")]

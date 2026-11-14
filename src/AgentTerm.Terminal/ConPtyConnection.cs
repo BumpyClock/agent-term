@@ -52,7 +52,7 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
             try
             {
                 Check(Native.CreatePipe(out inputRead, out inputWrite, IntPtr.Zero, 0));
-                Check(Native.CreatePipe(out outputRead, out outputWrite, IntPtr.Zero, 0));
+                Check(Native.CreatePipe(out outputRead, out outputWrite, IntPtr.Zero, OutputBufferBytes));
                 Marshal.ThrowExceptionForHR(Native.CreatePseudoConsole(new Coord(columns, rows), inputRead, outputWrite, 0, out pseudoConsole));
                 nuint bytes = 0;
                 Native.InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref bytes);
@@ -226,9 +226,11 @@ public sealed partial class ConPtyConnection : IAsyncDisposable
         }
     }
 
+    private const int OutputBufferBytes = 128 * 1024;
+
     private Exception? ReadOutput(IntPtr handle)
     {
-        var buffer = new byte[16384];
+        var buffer = GC.AllocateUninitializedArray<byte>(OutputBufferBytes);
         Exception? callbackError = null;
         while (true)
         {

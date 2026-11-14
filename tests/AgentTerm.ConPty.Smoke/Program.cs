@@ -5,6 +5,7 @@ using AgentTerm.Terminal;
 
 if (args.Contains("--transport-fixture")) { TransportChecks.RunFixture(false); return; }
 if (args.Contains("--transport-hold-fixture")) { TransportChecks.RunFixture(true); return; }
+if (args.Contains("--transport-burst-fixture")) { TransportChecks.RunBurstFixture(); return; }
 
 if (args.Contains("--default-profile-only"))
 {
