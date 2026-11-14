@@ -31,6 +31,11 @@ internal static class Program
             TextRunRasterChecks.Run(device);
             return;
         }
+        if (args.Contains("--box-glyphs-only"))
+        {
+            BoxGlyphChecks.Run(device);
+            return;
+        }
         if (args.Contains("--raster-worker-only"))
         {
             RasterWorkerChecks.Run(device);
@@ -39,6 +44,7 @@ internal static class Program
         SmoothScrollRasterChecks.Run(device);
         if (args.Contains("--smooth-scroll-only")) return;
         FidelityRasterChecks.Run(device);
+        DecorationRunChecks.Run(device);
         SearchRasterChecks.Run(device);
         AcrylicRecipeChecks.Run(device);
         using var image = new CanvasRenderTarget(device, 400, 240, 96);
@@ -121,6 +127,7 @@ internal static class Program
         AssertBackgroundContinuity(device);
         GlyphClippingChecks.Run(device);
         TextRunRasterChecks.Run(device);
+        BoxGlyphChecks.Run(device);
         GridGeometryChecks.Run(device);
         KittyImageRenderChecks.Run(device);
         RasterWorkerChecks.Run(device);
