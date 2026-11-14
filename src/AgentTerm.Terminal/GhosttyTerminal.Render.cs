@@ -19,6 +19,9 @@ public sealed partial class GhosttyTerminal
     // Borrowed from the handles above. Use only inside a HandleLease on the owning handle.
     private IntPtr _renderState, _rowIterator, _cellIterator;
     private TerminalFrame? _frame;
+    private RenderRowId[]? _frameRowIds;
+    private RenderRowId[]? _captureRowIds;
+    private readonly Dictionary<RenderRowId, (int Previous, int Current)> _rowMatches = [];
     private long _frameRefreshAt;
     private bool _frameReverse;
     private bool _frameOverscanEnabled;
@@ -168,8 +171,34 @@ public sealed partial class GhosttyTerminal
             (reverse ? defaultBg : defaultFg) != previous.Foreground || (reverse ? defaultFg : defaultBg) != previous.Background ||
             (!current && hasSelection);
         var grid = new TerminalCellGrid.Builder(previous?.Cells, columns, rowsCount);
+        var matchingShape = previous is not null && previous.Columns == columns && previous.Rows == rowsCount && _frameRowIds?.Length == rowsCount;
+        if (_captureRowIds?.Length != rowsCount) _captureRowIds = new RenderRowId[rowsCount];
+        if (matchingShape) _frameRowIds!.CopyTo(_captureRowIds, 0);
+        else Array.Clear(_captureRowIds);
+        _rowMatches.Clear();
         var rowPtr = _rowIterator;
         StateGet(RenderStateData.RowIterator, &rowPtr);
+        if (captureAll && matchingShape)
+        {
+            for (var row = 0; row < rowsCount; row++)
+            {
+                var id = _frameRowIds![row];
+                if (id.IsValid && !_rowMatches.TryAdd(id, (row, -1))) _rowMatches[id] = (-1, -1);
+            }
+            var position = 0;
+            while (RenderNative.ghostty_render_state_row_iterator_next(_rowIterator) != 0)
+            {
+                var row = position++;
+                if (capture.OverscanEnabled) RowGet(RenderRowData.ViewportY, &row);
+                if (row < 0 || row >= rowsCount) continue;
+                var id = default(RenderRowId);
+                RowGet(RenderRowData.Id, &id);
+                _captureRowIds[row] = id;
+                if (_rowMatches.TryGetValue(id, out var match))
+                    _rowMatches[id] = (match.Current == -1 ? match.Previous : -1, row);
+            }
+            StateGet(RenderStateData.RowIterator, &rowPtr);
+        }
         byte* scratch = stackalloc byte[ScratchTextBytes];
         var cellKeys = stackalloc RenderCellData[] { RenderCellData.Raw, RenderCellData.Style, RenderCellData.GraphemesUtf8 };
         ulong raw = 0;
@@ -202,6 +231,18 @@ public sealed partial class GhosttyTerminal
             if (row < -1 || row > rowsCount) throw new InvalidOperationException("Render state returned an unexpected overscan row.");
             var extra = row < 0 || row >= rowsCount;
             if (!extra) visibleRows++;
+            var previousRow = row;
+            if (!extra)
+            {
+                var id = _captureRowIds[row];
+                if (!captureAll || !matchingShape)
+                {
+                    RowGet(RenderRowData.Id, &id);
+                    _captureRowIds[row] = id;
+                }
+                if (captureAll && _rowMatches.TryGetValue(id, out var match) && match.Previous >= 0)
+                    previousRow = match.Previous;
+            }
             int selectionStart = -1, selectionEnd = -1;
             if (hasSelection)
             {
@@ -212,7 +253,7 @@ public sealed partial class GhosttyTerminal
             }
             var cellPtr = _cellIterator;
             RowGet(RenderRowData.Cells, &cellPtr);
-            var oldRow = extra ? default : grid.Previous(row);
+            var oldRow = extra ? default : grid.Previous(previousRow);
             var rowCells = oldRow.IsEmpty ? new TerminalCell[columns] : null;
             var index = 0;
             var start = 0;
@@ -274,7 +315,11 @@ public sealed partial class GhosttyTerminal
                     cell.UnderlineStyle == underlineStyle && cell.UnderlineColor == underlineColor && cell.Overline == overline && cell.Blink == textBlink;
             }
             if (index != end) throw new InvalidOperationException("Render state returned an incomplete grid.");
-            if (rowCells is null) continue;
+            if (rowCells is null)
+            {
+                grid.Reuse(row, previousRow);
+                continue;
+            }
             for (var i = 0; i + 1 < rowCells.Length; i++)
                 if (rowCells[i].Width == 2 && rowCells[i].Selected && rowCells[i + 1].Width == 0)
                     rowCells[i + 1] = rowCells[i + 1] with { Selected = true };
@@ -301,6 +346,7 @@ public sealed partial class GhosttyTerminal
             CursorText = capture.Theme is null ? null : capture.Theme.CursorText ?? background.ToColor(),
         };
         _capturedViewRevision = capture.ViewRevision;
+        (_frameRowIds, _captureRowIds) = (_captureRowIds, _frameRowIds);
         return _frame;
     }
 
@@ -336,6 +382,8 @@ public sealed partial class GhosttyTerminal
     /// <summary>Frees the render state with the iterators that borrow from it. The next capture rebuilds every row.</summary>
     private void RetireRender()
     {
+        _frameRowIds = null;
+        _rowMatches.Clear();
         _placementsGeneration = _retriedPlacements = null;
         _renderState = _rowIterator = _cellIterator = IntPtr.Zero;
         _renderCells?.Dispose(); _renderRows?.Dispose(); _render?.Dispose();

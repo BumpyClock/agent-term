@@ -11,7 +11,7 @@ using WinRT;
 using Request = AgentTerm_App.TerminalSurface.RasterRequest;
 using Presentation = AgentTerm_App.TerminalSurface.RasterPresentation;
 
-internal static class RasterWorkerChecks
+internal static partial class RasterWorkerChecks
 {
     private const float CellWidth = 10, CellHeight = 20;
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
@@ -21,6 +21,7 @@ internal static class RasterWorkerChecks
         CheckSharedRaster();
         CheckContendedHandoff();
         CheckPublishedParity(reference);
+        RunScrollReuse(reference);
         CheckHeldPaneIndependence(reference);
         CheckReadbackAfterQueuedFrame(reference);
         CheckCloseWhileHeld();

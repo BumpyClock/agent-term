@@ -21,6 +21,12 @@ internal static class Program
             DecorationRunChecks.Run(device, args.SkipWhile(arg => arg != "--decorations-only").Skip(1).FirstOrDefault());
             return;
         }
+        if (args.Contains("--scroll-row-reuse-only"))
+        {
+            var hashOutput = args.FirstOrDefault(value => value.StartsWith("--hashes="))?[9..];
+            RasterWorkerChecks.RunScrollReuse(device, hashOutput);
+            return;
+        }
         if (args.Contains("--images-only"))
         {
             KittyImageRenderChecks.Run(device);

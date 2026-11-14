@@ -42,6 +42,7 @@ public sealed class TerminalCellGrid : IReadOnlyList<TerminalCell>
     public TerminalCell this[int index] => _rows[index / _columns][index % _columns];
     public TerminalCell this[Index index] => this[index.GetOffset(Length)];
     public bool SharesRowWith(TerminalCellGrid other, int row) => ReferenceEquals(_rows[row], other._rows[row]);
+    internal bool SharesRowWith(TerminalCellGrid other, int row, int otherRow) => ReferenceEquals(_rows[row], other._rows[otherRow]);
     public IEnumerator<TerminalCell> GetEnumerator() => _rows.SelectMany(row => row).GetEnumerator();
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 
@@ -64,6 +65,11 @@ public sealed class TerminalCellGrid : IReadOnlyList<TerminalCell>
 
         /// <summary>The previous row's cells, or empty when there is no previous grid of this shape.</summary>
         public readonly ReadOnlySpan<TerminalCell> Previous(int row) => _previous is null ? default : _previous._rows[row];
+
+        public void Reuse(int row, int previousRow)
+        {
+            if (row != previousRow) Replace(row, _previous!._rows[previousRow]);
+        }
 
         public void Replace(int row, TerminalCell[] cells) => (_rows ??= (TerminalCell[][])_previous!._rows.Clone())[row] = cells;
 
