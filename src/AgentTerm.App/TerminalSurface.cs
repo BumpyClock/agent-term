@@ -428,8 +428,9 @@ public sealed partial class TerminalSurface : UserControl
                 var end = start + 1;
                 if (!DrawsText(first, textPhase)) { start = end; continue; }
                 if (IsBoxGlyph(first)) { start = DrawBoxRun(drawing, frame, row, start, endColumn, gridTop, cellWidth, cellHeight, textPhase); continue; }
-                while (end < frame.Columns && JoinsTextRun(frame, CellAt(frame, row, end - 1), CellAt(frame, row, end), textPhase)) end++;
                 var foreground = TextColor(frame, first);
+                if (first.Width == 1)
+                    while (end < frame.Columns && ContinuesTextRun(frame, first, foreground, CellAt(frame, row, end), textPhase)) end++;
                 var shape = glyphRuns && end - start > 1;
                 if (shape)
                 {
@@ -464,10 +465,12 @@ public sealed partial class TerminalSurface : UserControl
     private static bool DrawsText(TerminalCell cell, bool textPhase) => ShowsInk(cell, textPhase) && !string.IsNullOrWhiteSpace(cell.Text);
 
     internal static bool JoinsTextRun(TerminalFrame frame, TerminalCell left, TerminalCell right, bool textPhase) =>
-        left.Width == 1 && right.Width == 1 && DrawsText(left, textPhase) && DrawsText(right, textPhase) &&
-        !IsBoxGlyph(left) && !IsBoxGlyph(right) &&
-        left.Bold == right.Bold && left.Italic == right.Italic && left.Blink == right.Blink &&
-        TextColor(frame, left) == TextColor(frame, right);
+        left.Width == 1 && DrawsText(left, textPhase) && !IsBoxGlyph(left) &&
+        ContinuesTextRun(frame, left, TextColor(frame, left), right, textPhase);
+
+    private static bool ContinuesTextRun(TerminalFrame frame, TerminalCell first, Color foreground, TerminalCell next, bool textPhase) =>
+        next.Width == 1 && DrawsText(next, textPhase) && !IsBoxGlyph(next) && next.Bold == first.Bold && next.Italic == first.Italic && next.Blink == first.Blink &&
+        TextColor(frame, next) == foreground;
 
     private static Color TextColor(TerminalFrame frame, TerminalCell cell)
     {

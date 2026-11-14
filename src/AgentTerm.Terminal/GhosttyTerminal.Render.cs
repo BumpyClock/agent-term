@@ -177,6 +177,8 @@ public sealed partial class GhosttyTerminal
         int wide = 0;
         var buffer = default(ByteBuffer);
         var cellValues = stackalloc void*[] { &raw, &style, &buffer };
+        Style? runStyle = null;
+        (TerminalColor Fg, TerminalColor Bg, bool HasBackground) runColors = default;
         var capturedRows = 0;
         var visibleRows = 0;
         var above = captureAll ? [] : previous!.OverscanAbove;
@@ -236,9 +238,16 @@ public sealed partial class GhosttyTerminal
                     text = CellText(bytes.AsSpan(0, checked((int)buffer.Length)), old?.Text);
                 }
                 ThrowIfFailed(RenderNative.ghostty_cell_get(raw, CellData.Wide, &wide), "Could not read cell width.");
+                var content = CellContent.Codepoint;
+                if (text.Length == 0) ThrowIfFailed(RenderNative.ghostty_cell_get(raw, CellData.ContentTag, &content), "Could not read cell content.");
                 var inverse = style.Has(StyleFlags.Inverse);
-                var (fg, bg, hasBackground) = CellColors(defaultFg, defaultBg, inverse ^ reverse);
-                hasBackground |= inverse;
+                if (!ColorsFromStyle(content) || runStyle?.Equals(style) != true)
+                {
+                    runColors = CellColors(defaultFg, defaultBg, inverse ^ reverse);
+                    runColors.HasBackground |= inverse;
+                    runStyle = ColorsFromStyle(content) ? style : null;
+                }
+                var (fg, bg, hasBackground) = runColors;
                 var column = index - start;
                 var selected = column >= selectionStart && column <= selectionEnd;
                 var width = (byte)((CellWide)wide == CellWide.Wide ? 2 : (CellWide)wide >= CellWide.SpacerTail ? 0 : 1);
