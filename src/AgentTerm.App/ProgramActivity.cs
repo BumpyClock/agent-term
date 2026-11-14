@@ -33,6 +33,11 @@ internal sealed class ProgramActivity : Grid
     private Color _accent;
     private Rect? _effectiveViewport;
     private bool _geometryQueued;
+    private long _lastGeometryPass;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _geometryTimer;
+    // Layout passes arrive once per frame during a live resize. Each geometry pass hit-tests
+    // the window, and every element it returns is a new WinRT wrapper, so cap the rate.
+    private static readonly TimeSpan GeometryInterval = TimeSpan.FromMilliseconds(33);
     private bool _overlayUncovered;
     private double _rasterizationScale;
     private long? _animationOrigin;
@@ -192,6 +197,8 @@ internal sealed class ProgramActivity : Grid
 
     private void Disconnect()
     {
+        _geometryTimer?.Stop();
+        _geometryQueued = false;
         _settings.AnimationsEnabledChanged -= SettingsChanged;
         _settings.ColorValuesChanged -= SettingsChanged;
         foreach (var entry in _visibility) entry.Element.UnregisterPropertyChangedCallback(VisibilityProperty, entry.Token);
@@ -317,43 +324,64 @@ internal sealed class ProgramActivity : Grid
     {
         if (!_working || !IsLoaded || _geometryQueued) return;
         _geometryQueued = true;
-        DispatcherQueue.TryEnqueue(() =>
+        var wait = GeometryInterval - Stopwatch.GetElapsedTime(_lastGeometryPass);
+        if (_lastGeometryPass == 0 || wait <= TimeSpan.Zero)
         {
-            _geometryQueued = false;
-            _overlayUncovered = IsOverlayUncovered();
-            Refresh();
-            if (_native is null || ActualWidth <= 0 || ActualHeight <= 0) return;
-            var scale = XamlRoot.RasterizationScale;
-            var transform = TransformToVisual(null);
-            var bounds = transform.TransformBounds(new Rect(0, 0, ActualWidth, ActualHeight));
-            var clipped = Intersect(bounds, new Rect(0, 0, XamlRoot.Size.Width, XamlRoot.Size.Height));
-            if (_effectiveViewport is { } viewport)
-                clipped = Intersect(clipped, transform.TransformBounds(Intersect(new Rect(0, 0, ActualWidth, ActualHeight), viewport)));
-            for (DependencyObject? node = this; node is UIElement element; node = VisualTreeHelper.GetParent(node))
-                if (element.Clip is { } clip)
-                    clipped = Intersect(clipped, element.TransformToVisual(null).TransformBounds(clip.Rect));
-            var position = new Vector2((float)(bounds.X * scale), (float)(bounds.Y * scale));
-            var size = new Vector2((float)(bounds.Width * scale), (float)(bounds.Height * scale));
-            var localClip = clipped.Width <= 0 || clipped.Height <= 0 ? new Rect() : LocalPixels(clipped);
-            Rect[] elements;
-            if (_kind == ProgramActivityKind.TabIcon)
-            {
-                if (_dots.Children.Cast<Ellipse>().Any(dot => dot.ActualWidth <= 0 || dot.ActualHeight <= 0)) return;
-                elements = _dots.Children.Cast<Ellipse>().Select(dot => LocalPixels(dot.TransformToVisual(null)
-                    .TransformBounds(new Rect(0, 0, dot.ActualWidth, dot.ActualHeight)))).ToArray();
-            }
-            else
-            {
-                if (_beam.ActualWidth <= 0 || _beam.ActualHeight <= 0) return;
-                elements = [LocalPixels(transform.TransformBounds(new Rect(_beam.ActualOffset.X, _beam.ActualOffset.Y,
-                    _beam.ActualWidth, _beam.ActualHeight)))];
-            }
-            _native.SetGeometry(new ActivityOverlayGeometry(position, size, localClip, elements,
-                _kind == ProgramActivityKind.PaneEdge ? (float)(-_beam.Width * bounds.Width / ActualWidth * scale) : 0, size.X), AnimationPhaseSeconds);
-            Refresh();
+            DispatcherQueue.TryEnqueue(UpdateNativeGeometry);
+            return;
+        }
+        if (_geometryTimer is null)
+        {
+            _geometryTimer = DispatcherQueue.CreateTimer();
+            _geometryTimer.IsRepeating = false;
+            _geometryTimer.Tick += (_, _) => UpdateNativeGeometry();
+        }
+        _geometryTimer.Interval = wait;
+        _geometryTimer.Start();
+    }
 
-            Rect LocalPixels(Rect rect) => new((rect.X - bounds.X) * scale, (rect.Y - bounds.Y) * scale, rect.Width * scale, rect.Height * scale);
-        });
+    private void UpdateNativeGeometry()
+    {
+        _geometryQueued = false;
+        _lastGeometryPass = Stopwatch.GetTimestamp();
+        _overlayUncovered = IsOverlayUncovered();
+        Refresh();
+        if (_native is null || ActualWidth <= 0 || ActualHeight <= 0) return;
+        var scale = XamlRoot.RasterizationScale;
+        var transform = TransformToVisual(null);
+        var bounds = transform.TransformBounds(new Rect(0, 0, ActualWidth, ActualHeight));
+        var clipped = Intersect(bounds, new Rect(0, 0, XamlRoot.Size.Width, XamlRoot.Size.Height));
+        if (_effectiveViewport is { } viewport)
+            clipped = Intersect(clipped, transform.TransformBounds(Intersect(new Rect(0, 0, ActualWidth, ActualHeight), viewport)));
+        for (DependencyObject? node = this; node is UIElement element; node = VisualTreeHelper.GetParent(node))
+            if (element.Clip is { } clip)
+                clipped = Intersect(clipped, element.TransformToVisual(null).TransformBounds(clip.Rect));
+        var position = new Vector2((float)(bounds.X * scale), (float)(bounds.Y * scale));
+        var size = new Vector2((float)(bounds.Width * scale), (float)(bounds.Height * scale));
+        var localClip = clipped.Width <= 0 || clipped.Height <= 0 ? new Rect() : LocalPixels(clipped);
+        Rect[] elements;
+        if (_kind == ProgramActivityKind.TabIcon)
+        {
+            if (_dots.Children.Cast<Ellipse>().Any(dot => dot.ActualWidth <= 0 || dot.ActualHeight <= 0)) return;
+            // Layout offsets need no WinRT transform objects. Ancestor scale is the ratio of
+            // transformed to layout width; the dots carry no transforms of their own.
+            var ratio = bounds.Width / ActualWidth;
+            var origin = _dots.ActualOffset;
+            elements = _dots.Children.Cast<Ellipse>().Select(dot => new Rect(
+                (origin.X + dot.ActualOffset.X) * ratio * scale, (origin.Y + dot.ActualOffset.Y) * ratio * scale,
+                dot.ActualWidth * ratio * scale, dot.ActualHeight * ratio * scale)).ToArray();
+        }
+        else
+        {
+            if (_beam.ActualWidth <= 0 || _beam.ActualHeight <= 0) return;
+            elements = [LocalPixels(transform.TransformBounds(new Rect(_beam.ActualOffset.X, _beam.ActualOffset.Y,
+                _beam.ActualWidth, _beam.ActualHeight)))];
+        }
+        _native.SetGeometry(new ActivityOverlayGeometry(position, size, localClip, elements,
+            _kind == ProgramActivityKind.PaneEdge ? (float)(-_beam.Width * bounds.Width / ActualWidth * scale) : 0, size.X), AnimationPhaseSeconds);
+        Refresh();
+
+        Rect LocalPixels(Rect rect) => new((rect.X - bounds.X) * scale, (rect.Y - bounds.Y) * scale, rect.Width * scale, rect.Height * scale);
     }
 
     private bool IsOverlayUncovered()

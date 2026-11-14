@@ -26,6 +26,7 @@ internal sealed class ProgramActivityOverlay : IDisposable
     private ContainerVisual? _tree;
     private CompositionColorBrush? _inkBrush;
     private CompositionLinearGradientBrush? _edgeBrush;
+    private SpriteVisual? _edgeBeam;
     private Color _ink, _accent;
     private readonly List<CompositionObject> _resources = [];
     private readonly List<CanvasGeometry> _paths = [];
@@ -59,6 +60,17 @@ internal sealed class ProgramActivityOverlay : IDisposable
             previous.TravelFrom == geometry.TravelFrom && previous.TravelTo == geometry.TravelTo && previous.Elements.SequenceEqual(geometry.Elements))
         {
             _geometry = geometry;
+            PlaceTree();
+            return;
+        }
+        // A resizing pane changes the beam's size and travel on every layout pass. Update the
+        // existing visual instead of rebuilding the graph, which also restarts its animation.
+        if (_tree is not null && _edgeBeam is not null && geometry.Elements.Length == 1)
+        {
+            var travelChanged = _geometry!.TravelFrom != geometry.TravelFrom || _geometry.TravelTo != geometry.TravelTo;
+            _geometry = geometry;
+            PlaceBeam(geometry.Elements[0]);
+            if (travelChanged) StartBeam(compositor, phaseSeconds);
             PlaceTree();
             return;
         }
@@ -108,10 +120,8 @@ internal sealed class ProgramActivityOverlay : IDisposable
             }
             else
             {
-                var bounds = geometry.Elements[0];
-                var beam = Own(compositor.CreateSpriteVisual());
-                beam.Size = new Vector2((float)bounds.Width, (float)bounds.Height);
-                beam.Offset = new Vector3((float)bounds.X, (float)bounds.Y, 0);
+                var beam = _edgeBeam = Own(compositor.CreateSpriteVisual());
+                PlaceBeam(geometry.Elements[0]);
                 _edgeBrush = Own(compositor.CreateLinearGradientBrush());
                 _edgeBrush.StartPoint = Vector2.Zero;
                 _edgeBrush.EndPoint = Vector2.UnitX;
@@ -121,13 +131,7 @@ internal sealed class ProgramActivityOverlay : IDisposable
                     _edgeBrush.ColorStops.Add(Own(compositor.CreateColorGradientStop(offset, color)));
                 beam.Brush = _edgeBrush;
                 _tree.Children.InsertAtTop(beam);
-                using var animation = compositor.CreateScalarKeyFrameAnimation();
-                animation.Duration = TimeSpan.FromSeconds(2.4);
-                animation.IterationBehavior = AnimationIterationBehavior.Forever;
-                animation.InsertKeyFrame(0, geometry.TravelFrom, linear);
-                animation.InsertKeyFrame(1, geometry.TravelTo, linear);
-                beam.StartAnimation("Offset.X", animation);
-                _animations.Add((beam, "Offset.X"));
+                StartBeam(compositor, phaseSeconds);
             }
             var duration = _kind == ProgramActivityKind.TabIcon ? ProgramActivity.SweepCycle : 2.4;
             foreach (var (visual, property) in _animations)
@@ -147,6 +151,32 @@ internal sealed class ProgramActivityOverlay : IDisposable
             Debug.WriteLine($"Activity desktop overlay unavailable: {error.Message}");
             ClearGraph();
         }
+    }
+
+    private void PlaceBeam(Rect bounds)
+    {
+        _edgeBeam!.Size = new Vector2((float)bounds.Width, (float)bounds.Height);
+        _edgeBeam.Offset = new Vector3((float)bounds.X, (float)bounds.Y, 0);
+    }
+
+    private void StartBeam(Compositor compositor, double phaseSeconds)
+    {
+        var beam = _edgeBeam!;
+        var geometry = _geometry!;
+        beam.StopAnimation("Offset.X");
+        using var linear = compositor.CreateLinearEasingFunction();
+        using var animation = compositor.CreateScalarKeyFrameAnimation();
+        animation.Duration = TimeSpan.FromSeconds(2.4);
+        animation.IterationBehavior = AnimationIterationBehavior.Forever;
+        animation.InsertKeyFrame(0, geometry.TravelFrom, linear);
+        animation.InsertKeyFrame(1, geometry.TravelTo, linear);
+        beam.StartAnimation("Offset.X", animation);
+        if (!_animations.Contains((beam, "Offset.X"))) _animations.Add((beam, "Offset.X"));
+        // The running animation owns its controller; do not dispose it.
+        var controller = beam.TryGetAnimationController("Offset.X");
+        controller.Pause();
+        controller.Progress = (float)(phaseSeconds / 2.4);
+        controller.Resume();
     }
 
     private void PlaceTree()
@@ -171,6 +201,7 @@ internal sealed class ProgramActivityOverlay : IDisposable
         foreach (var path in _paths) path.Dispose();
         _paths.Clear();
         _tree = null;
+        _edgeBeam = null;
         _inkBrush = null;
         _edgeBrush = null;
     }
