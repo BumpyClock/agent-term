@@ -250,13 +250,17 @@ public sealed partial class GhosttyTerminal
                 var underlineStyle = (TerminalUnderlineStyle)((style.Flags >> 8) & 7);
                 TerminalColor? underlineColor = style.UnderlineTag == 1 ? palette[style.UnderlineR].ToColor() : style.UnderlineTag == 2 ? new TerminalColor(style.UnderlineR, style.UnderlineG, style.UnderlineB) : null;
                 bool overline = style.Has(StyleFlags.Overline), textBlink = style.Has(StyleFlags.Blink);
-                rowCells[index++] = old is not null && old.Text == text && old.Width == width && old.Foreground == fg && old.Background == bg && old.HasBackground == hasBackground &&
-                    old.Bold == bold && old.Italic == italic && old.Underline == underline && old.Strikethrough == strikethrough &&
-                    old.Dim == dim && old.Hidden == hidden && old.Selected == selected && old.UnderlineStyle == underlineStyle &&
-                    old.UnderlineColor == underlineColor && old.Overline == overline && old.Blink == textBlink
-                    ? old
+                // Published cells are immutable, so equal cells can share one instance. Reuse the previous
+                // frame's cell, else the left neighbour; blank and box-drawing runs then allocate once.
+                var left = index > 0 ? rowCells[index - 1] : null;
+                rowCells[index++] = Same(old) ? old! : Same(left) ? left!
                     : new TerminalCell(text, width, fg, bg, bold, italic, underline, strikethrough, dim, hidden)
                     { HasBackground = hasBackground, Selected = selected, UnderlineStyle = underlineStyle, UnderlineColor = underlineColor, Overline = overline, Blink = textBlink };
+
+                bool Same(TerminalCell? cell) => cell is not null && cell.Text == text && cell.Width == width && cell.Foreground == fg && cell.Background == bg &&
+                    cell.HasBackground == hasBackground && cell.Bold == bold && cell.Italic == italic && cell.Underline == underline &&
+                    cell.Strikethrough == strikethrough && cell.Dim == dim && cell.Hidden == hidden && cell.Selected == selected &&
+                    cell.UnderlineStyle == underlineStyle && cell.UnderlineColor == underlineColor && cell.Overline == overline && cell.Blink == textBlink;
             }
             if (index != end) throw new InvalidOperationException("Render state returned an incomplete grid.");
             for (var i = 0; i + 1 < rowCells.Length; i++)
