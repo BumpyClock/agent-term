@@ -22,7 +22,6 @@ public sealed partial class TerminalSession
     });
     private Task? _worker;
     private bool _workerClosed;
-    private int _outstandingOperations;
     private long _operationVersion;
     private long _captureVersion;
     private Task<TerminalFrameSnapshot>? _pendingCapture;
@@ -35,7 +34,7 @@ public sealed partial class TerminalSession
     /// Executes a terminal operation in session order, away from the UI thread. Capture UI-owned values before
     /// submitting. Operations must not access UI objects, block on another dispatched operation, or dispose the session.
     /// A full queue rejects the operation explicitly; accepted operations are never silently discarded.
-    /// Between output slices the parser gives queued work a bounded scheduling opportunity without waiting for it to finish.
+    /// Output parsing pauses between slices from enqueue until the operation first holds the terminal.
     /// </summary>
     public Task DispatchAsync(Action<TerminalSession> operation) => DispatchAsync(session =>
     {
@@ -68,11 +67,12 @@ public sealed partial class TerminalSession
             {
                 var frame = session.ReadFrame();
                 Volatile.Write(ref _latestFrame, frame);
-                return new TerminalFrameSnapshot(frame, session.PendingFrameRefreshDelay)
-                {
-                    PointerMode = session.ReadPointerMode(),
-                    PromptState = session.PromptState
-                };
+                using (_gate.Enter())
+                    return new TerminalFrameSnapshot(frame, session.PendingFrameRefreshDelay)
+                    {
+                        PointerMode = session.ReadPointerMode(),
+                        PromptState = session.PromptState
+                    };
             });
         }
     }
@@ -86,20 +86,16 @@ public sealed partial class TerminalSession
     {
         if (_workerClosed) return Task.FromException<T>(new ObjectDisposedException(nameof(TerminalSession)));
         var result = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_operations.Writer.TryWrite(() =>
+        _gate.Reserve();
+        if (!_operations.Writer.TryWrite(() => _gate.RunReserved(() =>
         {
             try { result.SetResult(operation(this)); }
             catch (Exception error) { result.SetException(error); }
-            finally
-            {
-                lock (_workerGate)
-                {
-                    _outstandingOperations--;
-                    Monitor.PulseAll(_workerGate);
-                }
-            }
-        })) return Task.FromException<T>(new TerminalOperationQueueFullException());
-        _outstandingOperations++;
+        })))
+        {
+            _gate.Unreserve();
+            return Task.FromException<T>(new TerminalOperationQueueFullException());
+        }
         _worker ??= Task.Run(async () =>
         {
             await foreach (var action in _operations.Reader.ReadAllAsync().ConfigureAwait(false)) action();
@@ -107,20 +103,11 @@ public sealed partial class TerminalSession
         return result.Task;
     }
 
-    private void YieldOutputToWorker()
-    {
-        lock (_workerGate)
-        {
-            if (!_workerClosed && _outstandingOperations != 0) Monitor.Wait(_workerGate, 1);
-        }
-    }
-
     private Task StopWorkerAsync()
     {
         lock (_workerGate)
         {
             _workerClosed = true;
-            Monitor.PulseAll(_workerGate);
             _operations.Writer.TryComplete();
             return _worker ?? Task.CompletedTask;
         }

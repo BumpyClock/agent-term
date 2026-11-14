@@ -7,7 +7,7 @@ namespace AgentTerm.Terminal;
 public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 {
     private readonly object _renderGate = new();
-    private readonly object _gate = new();
+    private readonly TerminalGate _gate = new();
     private readonly GhosttyTerminal _terminal;
     private readonly ConPtyConnection _connection;
     private readonly Task<int> _completion;
@@ -27,8 +27,8 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         public bool InteractiveInput;
     }
     private OwnedCommand? _owned;
-    public bool AgentOwnsTerminal { get { lock (_gate) return _owned is not null || ReservationPending || _restoringDraft; } }
-    public void AllowAgentInteractiveInput() { lock (_gate) { if (_owned is not null) _owned.InteractiveInput = true; } }
+    public bool AgentOwnsTerminal { get { using (_gate.Enter()) return _owned is not null || ReservationPending || _restoringDraft; } }
+    public void AllowAgentInteractiveInput() { using (_gate.Enter()) { if (_owned is not null) _owned.InteractiveInput = true; } }
     private bool _started;
     private Task? _stopTask;
     private Task? _disposeTask;
@@ -56,7 +56,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     }
 
     public void SetBottomAnchored(bool anchored) => MutateView(() => _terminal.SetBottomAnchored(anchored));
-    public bool AgentEntryAvailable { get { lock (_gate) return _prompt.AgentEntryAvailable; } }
+    public bool AgentEntryAvailable { get { using (_gate.Enter()) return _prompt.AgentEntryAvailable; } }
 
     public string ShellName => _profile.Name;
     public ShellProfile Profile => _profile;
@@ -66,17 +66,17 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     public event Action? OutputAvailable;
 
     /// <summary>Remaining synchronized-output hold delay after ReadFrame, or null when no recapture is required.</summary>
-    public TimeSpan? PendingFrameRefreshDelay { get { lock (_gate) return _disposeTask is null ? _terminal.PendingFrameRefreshDelay : null; } }
+    public TimeSpan? PendingFrameRefreshDelay { get { using (_gate.Enter()) return _disposeTask is null ? _terminal.PendingFrameRefreshDelay : null; } }
 
     public IReadOnlyList<ProgramStatus> ReadProgramStatuses()
     {
-        lock (_gate) return _programStatus.ReadStatuses();
+        using (_gate.Enter()) return _programStatus.ReadStatuses();
     }
 
     private string _title = "";
 
     /// <summary>The title a program set with OSC 0 or OSC 2 since the last integrated prompt, or empty.</summary>
-    public string Title { get { lock (_gate) return _title; } }
+    public string Title { get { using (_gate.Enter()) return _title; } }
 
     private void ClearTitle() => _title = "";
 
@@ -85,14 +85,14 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         try { return await _connection.Completion.ConfigureAwait(false); }
         finally
         {
-            lock (_gate) _programStatus.EndCommand();
+            using (_gate.Enter()) _programStatus.EndCommand();
             EndEffects();
         }
     }
 
     public void Start()
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_started) throw new InvalidOperationException("This session has already started.");
@@ -115,7 +115,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void Send(string text)
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
@@ -125,9 +125,9 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         }
     }
 
-    public ShellPromptState PromptState { get { lock (_gate) return Completion.IsCompleted ? ShellPromptState.Exited : _mailboxPending is not null ? ShellPromptState.Executing : _prompt.State; } }
-    public bool? LastCommandSucceeded { get { lock (_gate) return _prompt.LastCommandSucceeded; } }
-    public string? TakeAgentRequest() { lock (_gate) return _prompt.TakeAgentRequest(); }
+    public ShellPromptState PromptState { get { using (_gate.Enter()) return Completion.IsCompleted ? ShellPromptState.Exited : _mailboxPending is not null ? ShellPromptState.Executing : _prompt.State; } }
+    public bool? LastCommandSucceeded { get { using (_gate.Enter()) return _prompt.LastCommandSucceeded; } }
+    public string? TakeAgentRequest() { using (_gate.Enter()) return _prompt.TakeAgentRequest(); }
     private bool ReservationPending => _mailboxPending?.StartsWith("c:", StringComparison.Ordinal) == true;
     private string? _mailboxPending;
     private bool _mailboxArmed;
@@ -136,7 +136,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     public void SubmitCommand(string command) => SubmitCommand(command, Guid.NewGuid().ToString("N"));
     private void SubmitCommand(string command, string id)
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             if (_owned is not null && _owned.Id != id) throw new InvalidOperationException("Agent using terminal.");
             if (_prompt.State != ShellPromptState.Ready) throw new InvalidOperationException("Wait for shell readiness or use terminal input.");
@@ -169,7 +169,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     /// </summary>
     public TerminalAnchor? ReserveRows()
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is not null || _mailboxPending is not null || _prompt.State != ShellPromptState.Ready) return null;
@@ -182,18 +182,18 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     }
     public long? ReadAnchor(TerminalAnchor anchor)
     {
-        lock (_renderGate) lock (_gate) return _disposeTask is null ? _terminal.ReadAnchor(anchor) : null;
+        lock (_renderGate) using (_gate.Enter()) return _disposeTask is null ? _terminal.ReadAnchor(anchor) : null;
     }
     public void ReleaseAnchor(TerminalAnchor anchor)
     {
-        lock (_gate) { if (_disposeTask is null) _terminal.ReleaseAnchor(anchor); }
+        using (_gate.Enter()) { if (_disposeTask is null) _terminal.ReleaseAnchor(anchor); }
     }
 
     public async Task<TerminalExecutionResult> ExecuteAsync(TerminalExecutionRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         OwnedCommand owned;
-        lock (_gate)
+        using (_gate.Enter())
         {
             if (_disposeTask is not null || Completion.IsCompleted) return new(TerminalExecutionStatus.Exited);
             if (_owned is not null || _mailboxPending is not null || _prompt.State == ShellPromptState.Executing) return new(TerminalExecutionStatus.Busy);
@@ -203,14 +203,14 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             ReleaseOwnedOutputStart();
             _owned = owned;
         }
-        lock (_gate)
+        using (_gate.Enter())
         {
             try { SubmitCommand(request.Command, owned.Id); }
             catch { ReleaseOwnedOutputStart(); _owned = null; throw; }
         }
         using var cancel = cancellationToken.Register(() =>
         {
-            lock (_gate)
+            using (_gate.Enter())
             {
                 if (_owned != owned) return;
                 owned.Interrupted = true;
@@ -225,7 +225,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         try { await Task.WhenAny(owned.Completion.Task, exited).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
         catch (TimeoutException) { }
         if (Settle() is { } recovered) return recovered;
-        lock (_gate)
+        using (_gate.Enter())
             return new(TerminalExecutionStatus.InterruptionFailed, owned.Capture.Text,
                 Message: "PowerShell did not report readiness after Ctrl+C. Terminal remains agent-owned; use interactive input or close the pane.");
 
@@ -234,7 +234,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             var shellExited = exited.IsCompleted;
             if (owned.Completion.Task.IsCompleted) return owned.Completion.Task.Result;
             if (!shellExited) return null;
-            lock (_gate) { if (_owned == owned) { ReleaseOwnedOutputStart(); _owned = null; } }
+            using (_gate.Enter()) { if (_owned == owned) { ReleaseOwnedOutputStart(); _owned = null; } }
             return new(TerminalExecutionStatus.Exited, owned.Capture.Text);
         }
     }
@@ -246,7 +246,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public string ReadText()
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             return _terminal.ReadText();
@@ -255,7 +255,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public ShellDirectory? ReadWorkingDirectory()
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             return ShellDirectory.FromReport(_terminal.ReadWorkingDirectory(), _profile);
@@ -267,7 +267,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         lock (_renderGate)
         {
             GhosttyTerminal.FrameCapture capture;
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
                 ScheduleSearchHighlights();
@@ -279,7 +279,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void SendKey(uint virtualKey, TerminalModifiers modifiers, TerminalKeyAction action, string? text = null)
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
@@ -294,7 +294,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     {
         get
         {
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
                 return _terminal.HasSelection();
@@ -306,7 +306,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     {
         get
         {
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
                 return _terminal.IsMouseTrackingEnabled;
@@ -317,7 +317,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     /// <summary>Returns true when application mouse tracking owns this event, including filtered events.</summary>
     public bool SendMouse(TerminalMouseEvent mouse, TerminalMouseGeometry geometry, TerminalFrame? displayed = null)
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return true;
@@ -339,7 +339,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void Paste(string text)
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_owned is { InteractiveInput: false } || ReservationPending || _restoringDraft) return;
@@ -351,7 +351,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public void SetFocus(bool focused)
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             _connection.SendReply(_terminal.EncodeFocus(focused));
@@ -365,7 +365,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
     public void Resize(ushort columns, ushort rows, uint cellWidthPx = 0, uint cellHeightPx = 0)
     {
         bool stopped, widthChanged;
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
@@ -378,7 +378,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         if (stopped) return;
         _connection.Resize(columns, rows);
         if (!widthChanged) return;
-        lock (_gate)
+        using (_gate.Enter())
         {
             if (_disposeTask is not null || _columns != columns) return;
             _reanchorColumns = columns;
@@ -457,7 +457,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public string? ReadSelectionText()
     {
-        lock (_gate)
+        using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             return _terminal.ReadSelectionText();
@@ -466,7 +466,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     private void MutateView(Action change)
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             change();
@@ -481,7 +481,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
         while (!bytes.IsEmpty)
         {
             var length = Math.Min(bytes.Length, OutputParseSliceBytes);
-            lock (_gate)
+            using (_gate.Enter())
             {
                 _stream.Write(bytes.Span[..length]);
                 foreach (var reply in _terminal.TakeResponses())
@@ -490,10 +490,10 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
                 }
             }
             bytes = bytes[length..];
-            YieldOutputToWorker();
+            if (!bytes.IsEmpty) _gate.YieldToWaiters();
         }
         TerminalProtocolEvent[]? events;
-        lock (_gate)
+        using (_gate.Enter())
         {
             HistoryActivity();
             if (_mailboxPending is { } pending && !_restoringDraft && _prompt.State == ShellPromptState.Ready && _prompt.ReadyCommandId == pending)
@@ -524,13 +524,13 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
 
     public ValueTask DisposeAsync()
     {
-        lock (_gate) return new ValueTask(_disposeTask ??= Task.Run(CloseAsync));
+        using (_gate.Enter()) return new ValueTask(_disposeTask ??= Task.Run(CloseAsync));
     }
 
     /// <summary>Stops the owned shell while retaining its screen and history for inspection.</summary>
     public ValueTask StopAsync()
     {
-        lock (_gate) return new ValueTask(_stopTask ??= Task.Run(async () =>
+        using (_gate.Enter()) return new ValueTask(_stopTask ??= Task.Run(async () =>
             await _connection.DisposeAsync().ConfigureAwait(false)));
     }
 
@@ -546,7 +546,7 @@ public sealed partial class TerminalSession : IAsyncDisposable, IHostTerminal
             await _searchOwner.WaitAsync().ConfigureAwait(false);
             try
             {
-                lock (_renderGate) lock (_gate)
+                lock (_renderGate) using (_gate.Enter())
                 {
                     _historyIdle?.Dispose();
                     _connection.OutputReceived -= ProcessOutput;

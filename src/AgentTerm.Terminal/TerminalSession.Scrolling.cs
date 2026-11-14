@@ -12,7 +12,7 @@ public sealed partial class TerminalSession
 
     public bool TrySelectFrameCommandOutput(TerminalFrame frame, int column, int row)
     {
-        lock (_renderGate) lock (_gate)
+        lock (_renderGate) using (_gate.Enter())
         {
             ThrowIfClosed();
             if ((uint)column >= frame.Columns || (uint)row >= frame.Rows ||
@@ -60,17 +60,13 @@ public sealed partial class TerminalSession
             if (!Monitor.TryEnter(_renderGate, Remaining())) return TerminalSelectionOutcome.Busy;
             try
             {
-                if (!Monitor.TryEnter(_gate, Remaining())) return TerminalSelectionOutcome.Busy;
-                try
-                {
-                    if (Remaining() == TimeSpan.Zero || Interlocked.CompareExchange(ref claim, Running, Queued) != Queued)
-                        return TerminalSelectionOutcome.Busy;
-                    ThrowIfClosed();
-                    if (!change()) return TerminalSelectionOutcome.Stale;
-                    ScheduleHistoryCompression();
-                    return TerminalSelectionOutcome.Applied;
-                }
-                finally { Monitor.Exit(_gate); }
+                using var terminal = _gate.TryEnter(Remaining());
+                if (!terminal.Entered || Remaining() == TimeSpan.Zero || Interlocked.CompareExchange(ref claim, Running, Queued) != Queued)
+                    return TerminalSelectionOutcome.Busy;
+                ThrowIfClosed();
+                if (!change()) return TerminalSelectionOutcome.Stale;
+                ScheduleHistoryCompression();
+                return TerminalSelectionOutcome.Applied;
             }
             finally { Monitor.Exit(_renderGate); }
         });

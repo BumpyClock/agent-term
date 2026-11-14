@@ -40,6 +40,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private Task? _dispose;
     private ushort _columns = 80;
     private ushort _rows = 24;
+    private (ushort Columns, ushort Rows) _shownGridSize;
     private readonly TerminalKeyboardInput _keyboard = new();
     private readonly TerminalCompositionInput _composition = new();
     public bool IsComposing => _composition.IsComposing || _replyIme;
@@ -351,7 +352,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     {
         if (!_acceptOutputNotifications || Volatile.Read(ref _surfaceOpen) || Interlocked.Exchange(ref _outputRefreshQueued, 1) != 0) return;
         var queued = PerformanceCapture.Enabled ? Stopwatch.GetTimestamp() : 0;
-        if (!_dispatcher.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        if (!_dispatcher.TryEnqueue(() =>
         {
             if (queued != 0) PerformanceCapture.Record(PerformanceMetric.OutputQueueDelay, Stopwatch.GetElapsedTime(queued).TotalMilliseconds, Terminal.CapturePaneId);
             if (!CanRefreshFrames)
@@ -402,7 +403,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _renderingSubscribed = false;
         if ((!_frameRefreshPending && !_scrollAnimation.IsActive) || _frameRefreshQueued || !CanRefreshFrames) return;
         _frameRefreshPending = false;
-        _frameRefreshQueued = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, RefreshQueuedFrame);
+        _frameRefreshQueued = DispatcherQueue.TryEnqueue(RefreshQueuedFrame);
     }
 
     private void RefreshQueuedFrame()
@@ -630,7 +631,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _hostCellWidth = HostCellWidth;
             _hostCellHeight = HostCellHeight;
         }
-        GridSizeText.Text = $"{_columns} x {_rows}";
+        if (_shownGridSize != (_columns, _rows))
+        {
+            _shownGridSize = (_columns, _rows);
+            GridSizeText.Text = $"{_columns} x {_rows}";
+        }
         return true;
     }
 

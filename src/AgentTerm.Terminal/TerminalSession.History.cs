@@ -27,7 +27,7 @@ public sealed partial class TerminalSession
     private ulong? _compressionToken;
     private long _compressionActivityAt;
 
-    public long HistoryVersion { get { lock (_gate) return _terminal.ContentVersion; } }
+    public long HistoryVersion { get { using (_gate.Enter()) return _terminal.ContentVersion; } }
 
     public void NavigatePrompt(int delta) => MutateView(() => _terminal.NavigatePrompt(delta));
 
@@ -39,7 +39,7 @@ public sealed partial class TerminalSession
         DispatchAsync<TerminalHistoryExport?>(_ =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            lock (_gate)
+            using (_gate.Enter())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfClosed();
@@ -57,7 +57,7 @@ public sealed partial class TerminalSession
             cancellationToken.ThrowIfCancellationRequested();
             byte[]? html;
             string? text;
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ThrowIfClosed();
                 html = _terminal.ExportHistoryUtf8(TerminalExportFormat.Html, true);
@@ -81,7 +81,7 @@ public sealed partial class TerminalSession
         {
             await DispatchAsync(_ =>
             {
-                lock (_gate)
+                using (_gate.Enter())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     ThrowIfClosed();
@@ -93,7 +93,7 @@ public sealed partial class TerminalSession
         }
         finally
         {
-            try { lock (_gate) ScheduleHistoryCompression(); }
+            try { using (_gate.Enter()) ScheduleHistoryCompression(); }
             finally { _searchOwner.Release(); }
         }
     }
@@ -103,7 +103,7 @@ public sealed partial class TerminalSession
         var started = Stopwatch.StartNew();
         long reportedAt = -ProgressIntervalMs;
         bool owned, keepUserSelection;
-        lock (_gate)
+        using (_gate.Enter())
         {
             ThrowIfClosed();
             owned = retain && _terminal.IsSearchMatchSelected();
@@ -120,7 +120,7 @@ public sealed partial class TerminalSession
             if (owned || keepUserSelection || started.ElapsedMilliseconds < ProvisionalDelayMs) return;
             bool selected;
             long matches;
-            lock (_renderGate) lock (_gate)
+            lock (_renderGate) using (_gate.Enter())
             {
                 ThrowIfClosed();
                 if (_terminal.ContentVersion != version) return;
@@ -139,12 +139,12 @@ public sealed partial class TerminalSession
             if (fed is { } previous)
             {
                 bool changed;
-                lock (_gate) { ThrowIfClosed(); changed = _terminal.ContentVersion != previous; }
+                using (_gate.Enter()) { ThrowIfClosed(); changed = _terminal.ContentVersion != previous; }
                 if (changed) await Task.Delay(StaleRetryDelayMs, token).ConfigureAwait(false);
             }
             long version;
             GhosttyTerminal.SearchResults? completed;
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ThrowIfClosed();
                 fed = version = _terminal.ContentVersion;
@@ -158,7 +158,7 @@ public sealed partial class TerminalSession
             {
                 token.ThrowIfCancellationRequested();
                 long matches;
-                lock (_gate)
+                using (_gate.Enter())
                 {
                     ThrowIfClosed();
                     if (_terminal.ContentVersion != version) { stale = true; break; }
@@ -175,7 +175,7 @@ public sealed partial class TerminalSession
 
             long count, exact;
             bool[]? exactFlags = null;
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ThrowIfClosed();
                 if (_terminal.ContentVersion != version) continue;
@@ -190,7 +190,7 @@ public sealed partial class TerminalSession
                 for (var i = 0; i < exactFlags.Length && !stale;)
                 {
                     token.ThrowIfCancellationRequested();
-                    lock (_gate)
+                    using (_gate.Enter())
                     {
                         ThrowIfClosed();
                         if (_terminal.ContentVersion != version) { stale = true; break; }
@@ -206,7 +206,7 @@ public sealed partial class TerminalSession
             }
 
             bool found;
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ThrowIfClosed();
                 if (_terminal.ContentVersion != version) continue;
@@ -217,7 +217,7 @@ public sealed partial class TerminalSession
             for (long steps = 0; !found && !keepUserSelection && exact != 0 && steps < count;)
             {
                 token.ThrowIfCancellationRequested();
-                lock (_renderGate) lock (_gate)
+                lock (_renderGate) using (_gate.Enter())
                 {
                     ThrowIfClosed();
                     if (_terminal.ContentVersion != version) { stale = true; break; }
@@ -229,7 +229,7 @@ public sealed partial class TerminalSession
             }
             if (stale) continue;
             long? ordinal = null;
-            lock (_gate)
+            using (_gate.Enter())
             {
                 ThrowIfClosed();
                 if (_terminal.ContentVersion != version) continue;
@@ -264,27 +264,24 @@ public sealed partial class TerminalSession
         if (!Monitor.TryEnter(_renderGate)) { RetryCompressionWhenIdle(); return; }
         try
         {
-            if (!Monitor.TryEnter(_gate)) { RetryCompressionWhenIdle(); return; }
-            try
+            using var terminal = _gate.TryEnter(TimeSpan.Zero);
+            if (!terminal.Entered) { RetryCompressionWhenIdle(); return; }
+            if (_disposeTask is not null) return;
+            var token = _terminal.CompressionActivity;
+            if (_compressionToken != token)
             {
-                if (_disposeTask is not null) return;
-                var token = _terminal.CompressionActivity;
-                if (_compressionToken != token)
-                {
-                    _compressionToken = token;
-                    _compressionActivityAt = Stopwatch.GetTimestamp();
-                    _historyIdle!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
-                    return;
-                }
-                var remaining = TimeSpan.FromSeconds(2) - Stopwatch.GetElapsedTime(_compressionActivityAt);
-                if (remaining > TimeSpan.Zero)
-                {
-                    _historyIdle!.Change(remaining, Timeout.InfiniteTimeSpan);
-                    return;
-                }
-                if (_terminal.CompressHistoryStep()) _historyIdle!.Change(25, Timeout.Infinite);
+                _compressionToken = token;
+                _compressionActivityAt = Stopwatch.GetTimestamp();
+                _historyIdle!.Change(TimeSpan.FromSeconds(2), Timeout.InfiniteTimeSpan);
+                return;
             }
-            finally { Monitor.Exit(_gate); }
+            var remaining = TimeSpan.FromSeconds(2) - Stopwatch.GetElapsedTime(_compressionActivityAt);
+            if (remaining > TimeSpan.Zero)
+            {
+                _historyIdle!.Change(remaining, Timeout.InfiniteTimeSpan);
+                return;
+            }
+            if (_terminal.CompressHistoryStep()) _historyIdle!.Change(25, Timeout.Infinite);
         }
         finally { Monitor.Exit(_renderGate); }
     }
