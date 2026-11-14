@@ -60,9 +60,11 @@ internal static class FidelityRasterChecks
         var block = new TerminalFrame(1, 1, [decorated], new TerminalCursor(0, 0, true, false, TerminalCursorShape.Block, white), white, black)
             { CursorText = new TerminalColor(0, 0, 255) };
         using (var drawing = image.CreateDrawingSession()) TerminalSurface.DrawFrame(drawing, block, 60, 20, true, true);
-        foreach (var y in new[] { 0, 9, 15, 17 })
-            if (!image.GetPixelColors(2, y, 55, 2).Any(c => c.B > c.R + 60 && c.B > c.G + 60))
+        foreach (var y in new[] { 0, 9, 17, 19 })
+            if (!image.GetPixelColors(2, y, 55, 1).Any(c => c.B > c.R + 60 && c.B > c.G + 60))
                 throw new Exception($"Block cursor lost its cell decoration at y={y}.");
+        if (image.GetPixelColors(2, 18, 55, 1).Any(c => c.R != 255 || c.G != 255 || c.B != 255))
+            throw new Exception("Double underline inside a block cursor must preserve the cursor background in its gap.");
         var wide = new TerminalCell("界", 2, white, black, false, false, false, false, false, false);
         var tail = wide with { Text = "", Width = 0 };
         var cursorFrame = new TerminalFrame(2, 1, [wide, tail], new TerminalCursor(1, 0, true, false, TerminalCursorShape.Hollow, red) { WideTail = true }, white, black);

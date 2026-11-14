@@ -65,8 +65,15 @@ public sealed partial class TerminalSurface
             switch (run.Style)
             {
                 case TerminalUnderlineStyle.Double:
-                    drawing.DrawLine(left, run.Y - 2, right, run.Y - 2, run.Color);
-                    goto default;
+                    var scale = drawing.Dpi / 96;
+                    var thickness = MathF.Max(1, MathF.Round(scale));
+                    var position = MathF.Min(MathF.Round(run.Y * scale), MathF.Round((run.Y + 2) * scale) - 2 * thickness);
+                    var antialiasing = drawing.Antialiasing;
+                    drawing.Antialiasing = CanvasAntialiasing.Aliased;
+                    drawing.FillRectangle(left, (position - thickness) / scale, right - left, thickness / scale, run.Color);
+                    drawing.FillRectangle(left, (position + thickness) / scale, right - left, thickness / scale, run.Color);
+                    drawing.Antialiasing = antialiasing;
+                    break;
                 case TerminalUnderlineStyle.Curly:
                 case TerminalUnderlineStyle.Dotted:
                 case TerminalUnderlineStyle.Dashed:
