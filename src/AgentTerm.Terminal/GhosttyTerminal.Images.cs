@@ -164,7 +164,8 @@ public sealed partial class GhosttyTerminal
             if (channels == 0 || width == 0 || height == 0 || (ulong)width * height > (ulong)Array.MaxLength / 4 ||
                 pixels.Length != (nuint)((ulong)width * height * (ulong)channels)) continue;
             var decoded = (long)width * height * 4;
-            if (copied > 0 && copied + decoded > PixelCopyPerFrame) { deferred = true; continue; }
+            // A held frame is reused without image retries until the hold ends, so it copies every visible image.
+            if (!_holdActive && copied > 0 && copied + decoded > PixelCopyPerFrame) { deferred = true; continue; }
             copied += decoded;
             var copy = GC.AllocateUninitializedArray<byte>(checked((int)pixels.Length));
             Marshal.Copy(pixels.Data, copy, 0, copy.Length);

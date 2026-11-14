@@ -408,6 +408,21 @@ internal static class KittyImageChecks
         var second = terminal.ReadFrame().Images.Placements;
         Check(second.Count == count && second.All(p => p.Image.Pixels.Span[0] == p.Image.Id - 199),
             $"Deferred visible images must draw on the following frame, got {second.Count}.");
+
+        using var held = Terminal(80, 24);
+        held.SetImageStorageLimit(320UL * 1000 * 1000);
+        for (var i = 0; i < count; i++)
+        {
+            held.Write(Encoding.ASCII.GetBytes($"\x1b[1;{i * 5 + 1}H"));
+            held.Write(SolidImage(side, (byte)(i + 1), $"c=4,r=2,C=1,i={200 + i}"));
+        }
+        held.Write("\x1b[?2026h"u8);
+        foreach (var id in Enumerable.Range(200, count)) held.Write(Apc($"a=d,d=I,i={id},q=2"));
+        var boundary = held.ReadFrame().Images.Placements;
+        Check(boundary.Count == count && boundary.All(p => p.Image.Pixels.Span[0] == p.Image.Id - 199),
+            $"A hold boundary must copy every visible image past the per-frame budget, got {boundary.Count}.");
+        var reused = held.ReadFrame().Images.Placements;
+        Check(reused.Count == count, $"The held frame must keep every boundary image, got {reused.Count}.");
     }
 
     private static void CheckStorageLimit()
