@@ -132,7 +132,9 @@ internal sealed class ProgramActivityOverlay : IDisposable
             var duration = _kind == ProgramActivityKind.TabIcon ? ProgramActivity.SweepCycle : 2.4;
             foreach (var (visual, property) in _animations)
             {
-                var controller = Own(visual.TryGetAnimationController(property));
+                // The running animation owns its controller. Closing it after StopAnimation
+                // leaves DirectComposition with a freed object and fail-fasts the process.
+                var controller = visual.TryGetAnimationController(property);
                 controller.Pause();
                 controller.Progress = (float)(phaseSeconds / duration);
                 controller.Resume();
