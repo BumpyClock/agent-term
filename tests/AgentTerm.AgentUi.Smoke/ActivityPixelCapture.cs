@@ -34,7 +34,10 @@ internal static class ActivityPixelCapture
             if (!GetClientRect(hwnd, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());
             if (left < client.X || top < client.Y || left + width > client.X + bounds.Right || top + height > client.Y + bounds.Bottom)
                 throw new InvalidOperationException("Activity pixel capture extends outside its own window.");
+            var sampledBounds = new Rect { Left = left, Top = top, Right = left + width, Bottom = top + height };
+            RequireUncovered(hwnd, sampledBounds);
             var pixels = Capture(left, top, width, height);
+            RequireUncovered(hwnd, sampledBounds);
             hashes.Add(Convert.ToHexString(SHA256.HashData(pixels)));
             if (artifactName is not null)
             {
@@ -50,6 +53,28 @@ internal static class ActivityPixelCapture
             await Task.Delay(250);
         }
         return hashes.Count;
+    }
+
+    private static void RequireUncovered(IntPtr hwnd, Rect sampledBounds)
+    {
+        if (GetForegroundWindow() != hwnd)
+            throw new InvalidOperationException("Activity pixel capture requires the smoke window in the foreground.");
+        GetWindowThreadProcessId(hwnd, out var process);
+        var visited = new HashSet<IntPtr>();
+        for (var above = GetWindow(hwnd, 3); above != IntPtr.Zero; above = GetWindow(above, 3))
+        {
+            if (!visited.Add(above))
+                throw new InvalidOperationException("Activity pixel capture encountered changing window order.");
+            if (!IsWindowVisible(above)) continue;
+            GetWindowThreadProcessId(above, out var otherProcess);
+            if (otherProcess == process && GetAncestor(above, 3) == hwnd) continue;
+            if (!GetWindowRect(above, out var bounds)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (bounds.Left >= sampledBounds.Right || bounds.Right <= sampledBounds.Left ||
+                bounds.Top >= sampledBounds.Bottom || bounds.Bottom <= sampledBounds.Top) continue;
+            Marshal.ThrowExceptionForHR(DwmGetWindowAttribute(above, 14, out var cloaked, sizeof(int)));
+            if (cloaked != 0) continue;
+            throw new InvalidOperationException($"Activity pixel capture is covered by a foreign window ({above:X}).");
+        }
     }
 
     private static byte[] Capture(int left, int top, int width, int height)
@@ -104,6 +129,12 @@ internal static class ActivityPixelCapture
         public uint ColorsUsed, ColorsImportant;
     }
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr GetDC(IntPtr hwnd);
