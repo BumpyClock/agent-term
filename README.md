@@ -312,3 +312,8 @@ the pause; the done report survives the prompt that follows.
 Protocol regression checks live in `ProgramStatusChecks` in the terminal smoke
 suite. They cover chunked input, detection, validation, replacement, inheritance,
 clearing, reset, lifecycle, and record eviction.
+
+Run native status and timeline checks with `dotnet run --project
+tests/AgentTerm.AgentUi.Smoke -c Release -p:Platform=x64` on an unlocked Windows
+desktop. Keep the smoke window in the foreground. Activity assertions sample
+displayed pixels so they include compositor-owned motion.
