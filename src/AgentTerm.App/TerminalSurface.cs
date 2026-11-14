@@ -374,8 +374,6 @@ public sealed partial class TerminalSurface : UserControl
         int firstRow, int endRow, int firstColumn, int endColumn, bool textPhase, ImageBitmaps? images = null,
         Rect? viewportClip = null, Rect? damageClip = null)
     {
-        TerminalCell CellAt(int row, int col) => row < 0 ? frame.OverscanAbove[0].Cells[col]
-            : row >= frame.Rows ? frame.OverscanBelow[0].Cells[col] : frame.Cells[row * frame.Columns + col];
         var device = drawing.Device;
         DrawImages(drawing, frame, TerminalImageLayer.BelowBackground, cellWidth, cellHeight, gridTop, images, viewportClip, damageClip);
         var antialiasing = drawing.Antialiasing;
@@ -391,7 +389,7 @@ public sealed partial class TerminalSurface : UserControl
                 var color = frame.Background;
                 if (col < endColumn)
                 {
-                    var cell = CellAt(row, col);
+                    var cell = CellAt(frame, row, col);
                     fill = cell.Selected || cell.HasBackground || cell.Background != frame.Background;
                     color = cell.Selected ? frame.SelectionBackground : cell.Background;
                 }
@@ -411,7 +409,7 @@ public sealed partial class TerminalSurface : UserControl
                 if (span.Row < firstRow || span.Row >= endRow || span.Row < 0 || span.Row >= frame.Rows) continue;
                 var first = Math.Max(firstColumn, Math.Clamp(span.StartColumn, 0, frame.Columns - 1));
                 var last = Math.Clamp(span.EndColumn, 0, frame.Columns - 1);
-                last = Math.Min(endColumn - 1, last + Math.Max(1, (int)CellAt(span.Row, last).Width) - 1);
+                last = Math.Min(endColumn - 1, last + Math.Max(1, (int)CellAt(frame, span.Row, last).Width) - 1);
                 if (last < first) continue;
                 var color = span.Selected ? Color.FromArgb(100, 255, 170, 30) : Color.FromArgb(65, 255, 210, 70);
                 drawing.FillRectangle(first * cellWidth, gridTop + span.Row * cellHeight,
@@ -423,42 +421,43 @@ public sealed partial class TerminalSurface : UserControl
         {
             var y = gridTop + row * cellHeight;
             var start = firstColumn;
-            while (start > 0 && JoinsTextRun(frame, CellAt(row, start - 1), CellAt(row, start), textPhase)) start--;
+            while (start > 0 && JoinsTextRun(frame, CellAt(frame, row, start - 1), CellAt(frame, row, start), textPhase)) start--;
             while (start < endColumn)
             {
-                var first = CellAt(row, start);
+                var first = CellAt(frame, row, start);
                 var end = start + 1;
                 if (!DrawsText(first, textPhase)) { start = end; continue; }
-                while (end < frame.Columns && JoinsTextRun(frame, CellAt(row, end - 1), CellAt(row, end), textPhase)) end++;
+                if (IsBoxGlyph(first)) { start = DrawBoxRun(drawing, frame, row, start, endColumn, gridTop, cellWidth, cellHeight, textPhase); continue; }
+                while (end < frame.Columns && JoinsTextRun(frame, CellAt(frame, row, end - 1), CellAt(frame, row, end), textPhase)) end++;
                 var foreground = TextColor(frame, first);
                 var shape = glyphRuns && end - start > 1;
                 if (shape)
                 {
                     layouts.Runs.Begin();
-                    for (var col = start; col < end; col++) layouts.Runs.AppendCell(CellAt(row, col).Text);
+                    for (var col = start; col < end; col++) layouts.Runs.AppendCell(CellAt(frame, row, col).Text);
                     if (layouts.Runs.Draw(drawing, device, dpi, start, y, foreground, first.Bold, first.Italic)) { start = end; continue; }
                 }
                 CanvasTextLayout? run = null;
                 if (end - start > 1 && !shape)
                 {
                     layouts.ResetKey();
-                    for (var col = start; col < end; col++) layouts.AppendCell(CellAt(row, col).Text);
+                    for (var col = start; col < end; col++) layouts.AppendCell(CellAt(frame, row, col).Text);
                     run = layouts.GetRun(device, end - start, first.Bold, first.Italic);
                 }
                 if (run is not null) drawing.DrawTextLayout(run, start * cellWidth, y, foreground);
                 else
                     for (var col = start; col < end; col++)
-                    {
-                        var cell = CellAt(row, col);
-                        drawing.DrawTextLayout(layouts.Get(device, cell.Text, cell.Width, cell.Bold, cell.Italic), col * cellWidth, y, foreground);
-                    }
+                        DrawCellGlyph(drawing, layouts, CellAt(frame, row, col), col, row, gridTop, cellWidth, cellHeight, foreground);
                 start = end;
             }
-            for (var col = firstColumn; col < endColumn; col++) layouts.Decorations.Add(drawing, frame, CellAt(row, col), col, y, textPhase);
+            for (var col = firstColumn; col < endColumn; col++) layouts.Decorations.Add(drawing, frame, CellAt(frame, row, col), col, y, textPhase);
             layouts.Decorations.Flush(drawing);
         }
         DrawImages(drawing, frame, TerminalImageLayer.AboveText, cellWidth, cellHeight, gridTop, images, viewportClip, damageClip);
     }
+
+    private static TerminalCell CellAt(TerminalFrame frame, int row, int column) => row < 0 ? frame.OverscanAbove[0].Cells[column]
+        : row >= frame.Rows ? frame.OverscanBelow[0].Cells[column] : frame.Cells[row * frame.Columns + column];
 
     private static bool ShowsInk(TerminalCell cell, bool textPhase) => cell.Width != 0 && !cell.Hidden && (!cell.Blink || textPhase);
 
@@ -466,6 +465,7 @@ public sealed partial class TerminalSurface : UserControl
 
     internal static bool JoinsTextRun(TerminalFrame frame, TerminalCell left, TerminalCell right, bool textPhase) =>
         left.Width == 1 && right.Width == 1 && DrawsText(left, textPhase) && DrawsText(right, textPhase) &&
+        !IsBoxGlyph(left) && !IsBoxGlyph(right) &&
         left.Bold == right.Bold && left.Italic == right.Italic && left.Blink == right.Blink &&
         TextColor(frame, left) == TextColor(frame, right);
 
@@ -481,7 +481,6 @@ public sealed partial class TerminalSurface : UserControl
         float cellHeight, GlyphLayouts layouts, bool focused, bool cursorPhase, bool hideCursor, float gridTop, bool textPhase)
     {
         var rows = TerminalGridGeometry.VisibleRows(frame);
-        var device = drawing.Device;
         var cursor = frame.Cursor;
         if (hideCursor || !cursor.Visible || (cursor.Blink && focused && !cursorPhase) || cursor.Column < 0 || cursor.Column >= frame.Columns || cursor.Row < 0 || cursor.Row >= rows) return;
         var column = cursor.WideTail && cursor.Column > 0 ? cursor.Column - 1 : cursor.Column;
@@ -502,7 +501,7 @@ public sealed partial class TerminalSurface : UserControl
             if (ShowsInk(cell, textPhase))
             {
                 var text = ToColor(frame.CursorText ?? cell.Background);
-                drawing.DrawTextLayout(layouts.Get(device, cell.Text, cell.Width, cell.Bold, cell.Italic), cx, cy, text);
+                DrawCellGlyph(drawing, layouts, cell, column, cursor.Row, gridTop, cellWidth, cellHeight, text);
                 layouts.Decorations.Add(drawing, frame, cell, column, cy, textPhase, text);
                 layouts.Decorations.Flush(drawing);
             }

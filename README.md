@@ -12,7 +12,7 @@ Child shells receive `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PRO
 
 The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles, cursor shapes, and alternate screens. History, search, selection, and keyboard encoding use Ghostty's native APIs. Selection pins the viewport while output continues. Typing or pasting returns to live output.
 
-Terminal drawing reuses dirty cells, clipped glyph layouts, and a bitmap of painted content. Idle panes stop requesting frames, and hidden panes release cached GPU content. The [native performance fixture](tests/AgentTerm.Renderer.Perf/README.md) checks simulated ConPTY output, final pixels, scheduling and GC pauses.
+Terminal drawing reuses dirty cells, clipped glyph layouts, and a bitmap of painted content. Box-drawing (U+2500 to U+257F) and block element (U+2580 to U+259F) characters are drawn as pixel-snapped shapes in the foreground color instead of font glyphs, so borders join across cells in every font and at every display scale. Idle panes stop requesting frames, and hidden panes release cached GPU content. The [native performance fixture](tests/AgentTerm.Renderer.Perf/README.md) checks simulated ConPTY output, final pixels, scheduling and GC pauses.
 
 Terminal colors default to Auto, following the Windows light or dark appearance. Settings offers independent light and dark theme choices and Auto, Light, or Dark appearance, shared or per profile. Saving recolors open terminals without restarting shells. Switching themes preserves output, history, selection, and application-defined RGB or OSC colors.
 

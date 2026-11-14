@@ -31,6 +31,11 @@ internal static class Program
             TextRunRasterChecks.Run(device);
             return;
         }
+        if (args.Contains("--box-glyphs-only"))
+        {
+            BoxGlyphChecks.Run(device);
+            return;
+        }
         if (args.Contains("--raster-worker-only"))
         {
             RasterWorkerChecks.Run(device);
@@ -122,6 +127,7 @@ internal static class Program
         AssertBackgroundContinuity(device);
         GlyphClippingChecks.Run(device);
         TextRunRasterChecks.Run(device);
+        BoxGlyphChecks.Run(device);
         GridGeometryChecks.Run(device);
         KittyImageRenderChecks.Run(device);
         RasterWorkerChecks.Run(device);
