@@ -29,6 +29,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private readonly DispatcherQueueTimer _chromeTimer;
     private readonly DispatcherQueueTimer _cursorTimer;
     private readonly DispatcherQueueTimer _synchronizedRefreshTimer;
+    private readonly DispatcherQueueTimer _gridResizeTimer;
+    private readonly GridResizeThrottle _gridResize;
     private readonly DispatcherQueue _dispatcher;
     private TerminalSession? _session;
     private SessionState _state;
@@ -156,6 +158,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         _synchronizedRefreshTimer = DispatcherQueue.CreateTimer();
         _synchronizedRefreshTimer.IsRepeating = false;
         _synchronizedRefreshTimer.Tick += (_, _) => RequestFrameRefresh();
+        _gridResizeTimer = DispatcherQueue.CreateTimer();
+        _gridResizeTimer.IsRepeating = false;
+        _gridResizeTimer.Interval = GridResizeThrottle.Interval;
+        _gridResize = new(SessionGrid, _gridResizeTimer.Start, _gridResizeTimer.Stop, SendSessionGrid);
+        _gridResizeTimer.Tick += (_, _) => _gridResize.Flush();
         Terminal.MetricsChanged += UpdateGridSize;
         ConfigureHostUi();
         SetFontSize(_appearance.FontSize);
@@ -257,11 +264,6 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             SetState(SessionState.Running);
             StatusText.Text = "Running · Local session";
             UpdateGridSize();
-            var columns = _columns;
-            var rows = _rows;
-            var cellWidth = HostCellWidth;
-            var cellHeight = HostCellHeight;
-            QueueSessionUpdate(session, s => s.Resize(columns, rows, cellWidth, cellHeight));
             RefreshOutput(session);
             if (_viewActive) StartRefresh();
             SessionReady?.Invoke();
@@ -596,7 +598,8 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async void Output_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        try { UpdateGridSize(); }
+        // Live window resizes, divider drags, and split layout changes raise this once per layout pass, so the session size is throttled.
+        try { UpdateGridSize(immediate: false); }
         catch (Exception exception)
         {
             if (_state == SessionState.Running) await FailSessionAsync(exception);
@@ -604,7 +607,10 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         }
     }
 
-    private void UpdateGridSize()
+    private void UpdateGridSize() => UpdateGridSize(immediate: true);
+
+    /// <summary>Updates the local grid and status text now. Sends the size to the session now, or at the next throttle tick.</summary>
+    private void UpdateGridSize(bool immediate)
     {
         if (Terminal.ActualWidth <= 0 || Terminal.ActualHeight <= 0) return;
         var columns = (ushort)Math.Clamp(Math.Floor(Terminal.ActualWidth / Terminal.CellWidth), 2, 1000);
@@ -616,14 +622,20 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _rows = rows;
             _hostCellWidth = HostCellWidth;
             _hostCellHeight = HostCellHeight;
-            if (_state is SessionState.Running or SessionState.Idle && _session is not null)
-            {
-                var cellWidth = _hostCellWidth;
-                var cellHeight = _hostCellHeight;
-                QueueSessionUpdate(_session, s => s.Resize(columns, rows, cellWidth, cellHeight), refresh: true);
-            }
         }
+        if (immediate) _gridResize.Flush();
+        else _gridResize.Request();
         GridSizeText.Text = $"{_columns} x {_rows}";
+    }
+
+    private TerminalGrid? SessionGrid() => _state is SessionState.Running or SessionState.Idle && _session is not null
+        ? new(_columns, _rows, _hostCellWidth, _hostCellHeight)
+        : null;
+
+    private void SendSessionGrid(TerminalGrid grid)
+    {
+        if (_session is { } session)
+            QueueSessionUpdate(session, s => s.Resize(grid.Columns, grid.Rows, grid.CellWidth, grid.CellHeight), refresh: true);
     }
 
     [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
@@ -1434,6 +1446,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
         CancelFind();
         StopRefresh();
         CancelSelectionGesture();
+        _gridResize.Reset();
         if (_session is not { } session)
             return _release;
 

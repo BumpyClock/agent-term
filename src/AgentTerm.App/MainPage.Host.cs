@@ -35,7 +35,8 @@ public sealed partial class MainPage
         KeyboardAccelerators.Add(diagnostics);
     }
 
-    private void HostRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => UpdateGridSize();
+    // XamlRoot.Changed fires on every window size step as well as on scale changes, so it is throttled like SizeChanged.
+    private void HostRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => UpdateGridSize(immediate: false);
 
     /// <summary>Shared diagnostic command, also available with Ctrl+Shift+F12.</summary>
     public async Task ShowHostDiagnosticsAsync()

@@ -20,6 +20,7 @@ if (args.Contains("--effects-only"))
     return;
 }
 
+GridResizeChecks.Run();
 PromptFocusChecks.Run();
 if (args.Contains("--focus-policy-only")) return;
 ProgramTitleChecks.Run();

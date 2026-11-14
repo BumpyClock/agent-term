@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/AgentTerm.Terminal/AgentTerm.Terminal.csproj" />
+    <Compile Include="../../src/AgentTerm.App/GridResizeThrottle.cs" Link="GridResizeThrottle.cs" />
     <Compile Include="../../src/AgentTerm.App/PromptFocusPolicy.cs" Link="PromptFocusPolicy.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalKeyboardInput.cs" Link="TerminalKeyboardInput.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalCompositionInput.cs" Link="TerminalCompositionInput.cs" />
