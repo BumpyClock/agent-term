@@ -27,6 +27,11 @@ internal static class BoxGlyphChecks
         "         ",
         "▏▏▏▏▏▏▏▏▏",
         "▕▕▕▕▕▕▕▕▕",
+        "┈┈┈┈┈┈┈┈┈",
+        "┄┄┄┄┄┄┄┄┄",
+        "╌╌╌╌╌╌╌╌╌",
+        "┉┉┉┉┉┉┉┉┉",
+        "┊┆╎┋     ",
     ];
 
     internal static void Run(CanvasDevice device)
@@ -45,7 +50,9 @@ internal static class BoxGlyphChecks
             AssertArcReachesEdges(setup, raster);
             AssertBlocks(setup, raster);
             AssertDiagonalsStayInCell(setup, setup.Render(Edges, "Consolas", 0));
-            AssertEighthBlocksKeepInk(setup, setup.Render(Edges, "Consolas"));
+            var edges = setup.Render(Edges, "Consolas");
+            AssertEighthBlocksKeepInk(setup, edges);
+            AssertDashesStaySeparate(setup, edges);
             foreach (var family in new[] { "Cascadia Mono", "MS Gothic" }.Where(installed.Contains))
                 if (!setup.Render(Box, family).SequenceEqual(raster))
                     throw new Exception($"Box glyphs must not depend on the font: {family} differs from Consolas at {setup}.");
@@ -125,6 +132,30 @@ internal static class BoxGlyphChecks
                 throw new Exception($"A left one-eighth block must ink only its cell's left edge in column {column} at {setup}.");
             if (!lit[right - 1, setup.Y(4)] || lit[left, setup.Y(4)])
                 throw new Exception($"A right one-eighth block must ink only its cell's right edge in column {column} at {setup}.");
+        }
+    }
+
+    private static void AssertDashesStaySeparate(Setup setup, bool[,] lit)
+    {
+        foreach (var (row, dashes) in new[] { (5, 4), (6, 3), (7, 2), (8, 4) })
+        for (var column = 0; column < Edges[row].Length; column++)
+        {
+            var (left, right) = (setup.X(column), setup.X(column + 1));
+            if (right - left < 2 * dashes) continue;
+            var ink = Enumerable.Range(setup.Y(row), setup.Y(row + 1) - setup.Y(row))
+                .Where(y => Enumerable.Range(left, right - left).Any(x => lit[x, y])).ToArray();
+            var runs = ink.Length == 0 ? 0 : Enumerable.Range(left, right - left).Count(x => lit[x, ink[0]] && (x == left || !lit[x - 1, ink[0]]));
+            if (runs != dashes || lit[right - 1, ink[0]])
+                throw new Exception($"{Edges[row][column]} must draw {dashes} separate dashes in a {right - left}-pixel cell at {setup}, got {runs}.");
+        }
+        foreach (var (column, dashes) in new[] { (0, 4), (1, 3), (2, 2), (3, 4) })
+        {
+            var (top, bottom) = (setup.Y(9), setup.Y(10));
+            var ink = Enumerable.Range(setup.X(column), setup.X(column + 1) - setup.X(column))
+                .Where(x => Enumerable.Range(top, bottom - top).Any(y => lit[x, y])).ToArray();
+            var runs = ink.Length == 0 ? 0 : Enumerable.Range(top, bottom - top).Count(y => lit[ink[0], y] && (y == top || !lit[ink[0], y - 1]));
+            if (runs != dashes || lit[ink[0], bottom - 1])
+                throw new Exception($"{Edges[9][column]} must draw {dashes} separate dashes at {setup}, got {runs}.");
         }
     }
 

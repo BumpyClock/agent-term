@@ -215,7 +215,10 @@ public sealed partial class TerminalSurface
             var thickness = heavy ? _light * 2 : _light;
             var top = _top + (Height - thickness) / 2;
             for (var dash = 0; dash < count; dash++)
-                Fill(_left + Width * dash / count, top, _left + Width * (3 * dash + 2) / (3 * count), top + thickness);
+            {
+                var (start, end) = Dash(_left, Width, dash, count);
+                Fill(start, top, end, top + thickness);
+            }
         }
 
         private void DashVertical(int count, bool heavy)
@@ -223,7 +226,17 @@ public sealed partial class TerminalSurface
             var thickness = heavy ? _light * 2 : _light;
             var left = _left + (Width - thickness) / 2;
             for (var dash = 0; dash < count; dash++)
-                Fill(left, _top + Height * dash / count, left + thickness, _top + Height * (3 * dash + 2) / (3 * count));
+            {
+                var (start, end) = Dash(_top, Height, dash, count);
+                Fill(left, start, left + thickness, end);
+            }
+        }
+
+        private static (int Start, int End) Dash(int origin, int length, int dash, int count)
+        {
+            var start = origin + length * dash / count;
+            var period = origin + length * (dash + 1) / count - start;
+            return (start, start + Math.Max(1, Math.Min(period - 1, (int)MathF.Round(period * 2 / 3f))));
         }
 
         private void Arc(char glyph)
