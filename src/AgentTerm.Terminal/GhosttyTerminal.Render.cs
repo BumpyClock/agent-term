@@ -81,7 +81,7 @@ public sealed partial class GhosttyTerminal
                 ConfigureOverscan(lease.Raw, capture.OverscanEnabled);
                 ThrowIfFailed(RenderNative.ghostty_render_state_begin_update(lease.Raw, _handle), "Could not update render state.");
             }
-            capture = capture with { ImageCapture = CaptureImagePixels() };
+            capture = capture with { ImageCapture = CaptureImagePixels(_renderState) };
             Volatile.Write(ref _captureInFlight, true);
             return capture;
         }

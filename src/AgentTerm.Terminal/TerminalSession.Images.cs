@@ -3,9 +3,7 @@ namespace AgentTerm.Terminal;
 public sealed partial class TerminalSession
 {
     /// <summary>
-    /// Kitty image storage per screen. libghostty-vt defaults to 10 MB, which one full-HD RGBA image fills. 64 MB
-    /// holds several screenshots while bounding memory: decoded pixels live natively, as an owned frame copy, and
-    /// as device bitmaps for drawn images.
+    /// Kitty image storage per screen.
     /// </summary>
     public const ulong DefaultImageStorageLimit = TerminalImages.DefaultStorageLimit;
 

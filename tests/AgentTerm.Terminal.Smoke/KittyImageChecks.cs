@@ -49,6 +49,8 @@ internal static class KittyImageChecks
         CheckVirtualPlacement();
         CheckRepliesAndDisabledMedia();
         CheckStorageLimit();
+        CheckRetainedPixelBudget();
+        CheckPixelCopyPerFrame();
         CheckAnimation();
         CheckComposition();
         CheckHoldCaptureAndLiveEdge();
@@ -346,6 +348,81 @@ internal static class KittyImageChecks
                 $"Disabled medium {medium} must reply with an error, got <{reply}>.");
         }
         Check(terminal.ReadFrame().Images.IsEmpty, "Rejected media must store nothing.");
+    }
+
+    private static byte[] SolidImage(int side, byte value, string control)
+    {
+        var raw = new byte[side * side * 4];
+        for (var i = 0; i < raw.Length; i += 4) { raw[i] = value; raw[i + 1] = value; raw[i + 2] = value; raw[i + 3] = 255; }
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true)) zlib.Write(raw);
+        return Apc($"a=T,f=32,o=z,s={side},v={side},{control},q=2", compressed.ToArray());
+    }
+
+    private static void CheckRetainedPixelBudget()
+    {
+        using var terminal = Terminal(80, 24);
+        terminal.SetImageStorageLimit(320UL * 1000 * 1000);
+        const int count = 16, side = 1024;
+        long peak = 0;
+        for (var i = 0; i < count; i++)
+        {
+            terminal.Write(SolidImage(side, (byte)(i + 1), $"c=4,r=2,i={100 + i}"));
+            var shown = terminal.ReadFrame().Images.Placements.SingleOrDefault(p => p.Image.Id == 100 + i);
+            Check(shown?.Image.Pixels.Span[0] == i + 1, $"Image {100 + i} must draw while it is in view.");
+            terminal.Write(Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("\r\n", 30))));
+            Check(terminal.ReadFrame().Images.IsEmpty, "Images scrolled out of view must not draw.");
+            peak = Math.Max(peak, terminal.ImageCacheBytes);
+        }
+        Check(peak <= GhosttyTerminal.RetainedPixelBudget,
+            $"{count} images of {side * side * 4} bytes must keep at most {GhosttyTerminal.RetainedPixelBudget} decoded bytes, held {peak}.");
+        terminal.Write(SolidImage(side, 99, "c=4,r=2,i=199"));
+        var visible = terminal.ReadFrame().Images.Placements.Single().Image.ByteCount;
+        Check(terminal.ImageCacheBytes == visible + GhosttyTerminal.RetainedPixelBudget,
+            $"Visible images must not count against the hidden budget, held {terminal.ImageCacheBytes}.");
+        terminal.ScrollTo(0);
+        var revisited = terminal.ReadFrame().Images.Placements.SingleOrDefault(p => p.Image.Id == 100);
+        Check(revisited?.Image.Pixels.Span[0] == 1 && revisited.Image.Width == side,
+            "An evicted image must draw its own pixels again when scrolled back into view.");
+        Check(terminal.ImageCacheBytes == revisited.Image.ByteCount + GhosttyTerminal.RetainedPixelBudget,
+            $"Revisiting must keep the hidden images within the budget, held {terminal.ImageCacheBytes}.");
+        foreach (var id in Enumerable.Range(100, count).Append(199)) terminal.Write(Apc($"a=d,d=I,i={id},q=2"));
+        Check(terminal.ReadFrame().Images.IsEmpty && terminal.ImageCacheBytes == 0, "Deleting images must free hidden copies too.");
+        Console.WriteLine($"Kitty pixel budget: {count} images of {side * side * 4} bytes held at most {peak} hidden decoded bytes.");
+    }
+
+    private static void CheckPixelCopyPerFrame()
+    {
+        using var terminal = Terminal(80, 24);
+        terminal.SetImageStorageLimit(320UL * 1000 * 1000);
+        const int count = 6, side = 1024;
+        for (var i = 0; i < count; i++)
+        {
+            terminal.Write(Encoding.ASCII.GetBytes($"\x1b[1;{i * 5 + 1}H"));
+            terminal.Write(SolidImage(side, (byte)(i + 1), $"c=4,r=2,C=1,i={200 + i}"));
+        }
+        var first = terminal.ReadFrame().Images.Placements.Count;
+        var perFrame = (int)(GhosttyTerminal.PixelCopyPerFrame / (side * side * 4));
+        Check(first == perFrame, $"One frame must copy {perFrame} images of {side * side * 4} bytes, got {first}.");
+        Check(terminal.PendingFrameRefreshDelay == TimeSpan.Zero, "Deferred images must request the next frame.");
+        var second = terminal.ReadFrame().Images.Placements;
+        Check(second.Count == count && second.All(p => p.Image.Pixels.Span[0] == p.Image.Id - 199),
+            $"Deferred visible images must draw on the following frame, got {second.Count}.");
+
+        using var held = Terminal(80, 24);
+        held.SetImageStorageLimit(320UL * 1000 * 1000);
+        for (var i = 0; i < count; i++)
+        {
+            held.Write(Encoding.ASCII.GetBytes($"\x1b[1;{i * 5 + 1}H"));
+            held.Write(SolidImage(side, (byte)(i + 1), $"c=4,r=2,C=1,i={200 + i}"));
+        }
+        held.Write("\x1b[?2026h"u8);
+        foreach (var id in Enumerable.Range(200, count)) held.Write(Apc($"a=d,d=I,i={id},q=2"));
+        var boundary = held.ReadFrame().Images.Placements;
+        Check(boundary.Count == count && boundary.All(p => p.Image.Pixels.Span[0] == p.Image.Id - 199),
+            $"A hold boundary must copy every visible image past the per-frame budget, got {boundary.Count}.");
+        var reused = held.ReadFrame().Images.Placements;
+        Check(reused.Count == count, $"The held frame must keep every boundary image, got {reused.Count}.");
     }
 
     private static void CheckStorageLimit()

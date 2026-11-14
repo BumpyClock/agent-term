@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -28,10 +29,7 @@ public sealed partial class GhosttyTerminal
     // Native matching is byte-exact except ASCII letters, so only a needle with one needs exact-case filtering.
     private bool _needleFoldsCase;
     private long _searchRevision;
-    // Owned screen coordinates of native matches, newest first, captured at one ContentVersion. No grid reference
-    // survives terminal exclusion; each exact check rebuilds its references from these coordinates.
     private ScreenSpan[] _candidates = [];
-    private int _candidateCount;
     private Native.Selection[] _matchScratch = [];
     // One formatter and one needle-sized buffer serve every match comparison. Neither allocates per candidate.
     private FormatterHandle? _matchFormatter;
@@ -48,8 +46,11 @@ public sealed partial class GhosttyTerminal
 
     internal sealed record SearchResults(long ContentVersion, long Candidates, long Matches, bool[]? ExactFlags);
     internal SearchResults? CompletedSearch => _completedSearch?.ContentVersion == ContentVersion ? _completedSearch : null;
-    internal void CompleteSearch(long candidates, long matches, bool[]? exactFlags) =>
+    internal void CompleteSearch(long candidates, long matches, bool[]? exactFlags)
+    {
         _completedSearch = new(ContentVersion, candidates, matches, exactFlags);
+        _candidates = [];
+    }
 
     private readonly record struct ScreenSpan(uint StartY, ushort StartX, uint EndY, ushort EndX);
 
@@ -110,7 +111,7 @@ public sealed partial class GhosttyTerminal
 
     internal void FeedSearch()
     {
-        _candidateCount = 0;
+        _candidates = [];
         ThrowIfFailed(SearchNative.ghostty_search_feed(_search!), "Could not feed search.");
     }
     internal unsafe int TickSearch()
@@ -135,26 +136,35 @@ public sealed partial class GhosttyTerminal
         return checked((long)index);
     }
 
-    /// <summary>Converts every native match to owned screen coordinates. The caller checks ContentVersion before using them.</summary>
-    internal unsafe int CaptureSearchCandidates()
+    /// <summary>
+    /// Classifies exact-case candidates from <paramref name="from"/>, at least one, until <paramref name="budget"/>
+    /// ends, and returns the next index. A call from 0 reads the native match list and keeps the unclassified rest as
+    /// owned screen coordinates for later calls. The caller checks ContentVersion is unchanged between calls.
+    /// </summary>
+    internal unsafe int ClassifySearchCandidates(bool[] flags, int from, TimeSpan budget)
     {
-        var count = ReadMatches(SearchDataMatches);
-        if (_candidates.Length < count) _candidates = new ScreenSpan[count];
-        _candidateCount = 0;
-        for (var i = 0; i < count; i++)
+        var started = Stopwatch.GetTimestamp();
+        if (from != 0)
         {
-            // A match that cannot be converted was pruned by eviction; it stays a non-exact placeholder.
-            _candidates[i] = ToScreen(_matchScratch[i]) ?? new ScreenSpan(uint.MaxValue, 0, 0, 0);
-            _candidateCount++;
+            var first = flags.Length - _candidates.Length;
+            do flags[from] = _candidates[from - first] is { StartY: not uint.MaxValue } span && ExactSearchSpan(span);
+            while (++from < flags.Length && Stopwatch.GetElapsedTime(started) < budget);
+            return from;
         }
-        return count;
-    }
-
-    /// <summary>Exact-case test for one captured candidate. Valid only at the ContentVersion of the capture.</summary>
-    internal bool ExactSearchCandidate(int index)
-    {
-        if (index >= _candidateCount || _candidates[index] is not { StartY: not uint.MaxValue } span) return false;
-        return ExactSearchSpan(span);
+        var count = ReadMatches(_search!, SearchDataMatches, null, 0);
+        var matches = (Native.Selection*)NativeMemory.Alloc((nuint)count, (nuint)sizeof(Native.Selection));
+        try
+        {
+            count = ReadMatches(_search!, SearchDataMatches, matches, count);
+            do flags[from] = from < count && MatchText(matches[from], exact: true);
+            while (++from < flags.Length && Stopwatch.GetElapsedTime(started) < budget);
+            _candidates = new ScreenSpan[flags.Length - from];
+            // A match that cannot be converted was pruned by eviction; it stays a non-exact placeholder.
+            for (var i = from; i < flags.Length; i++)
+                _candidates[i - from] = i < count && ToScreen(matches[i]) is { } span ? span : new ScreenSpan(uint.MaxValue, 0, 0, 0);
+            return from;
+        }
+        finally { NativeMemory.Free(matches); }
     }
 
     private bool ExactSearchSpan(ScreenSpan span)
@@ -282,16 +292,19 @@ public sealed partial class GhosttyTerminal
 
     private unsafe int ReadMatches(SearchHandle search, int data)
     {
-        var buffer = new SearchSelectionBuffer();
+        int count;
+        fixed (Native.Selection* ptr = _matchScratch) count = ReadMatches(search, data, ptr, _matchScratch.Length);
+        if (count <= _matchScratch.Length) return count;
+        _matchScratch = new Native.Selection[count];
+        fixed (Native.Selection* ptr = _matchScratch) return ReadMatches(search, data, ptr, count);
+    }
+
+    /// <summary>Returns the match count. A count above <paramref name="capacity"/> wrote nothing.</summary>
+    private static unsafe int ReadMatches(SearchHandle search, int data, Native.Selection* destination, int capacity)
+    {
+        var buffer = new SearchSelectionBuffer { Pointer = destination, Capacity = (nuint)capacity };
         var result = SearchNative.ghostty_search_get(search, data, &buffer);
-        if (result == NativeResult.Success) return 0;
-        if (result != NativeResult.OutOfSpace) ThrowIfFailed(result, "Could not size search matches.");
-        if (_matchScratch.Length < (int)buffer.Length) _matchScratch = new Native.Selection[(int)buffer.Length];
-        fixed (Native.Selection* ptr = _matchScratch)
-        {
-            buffer = new SearchSelectionBuffer { Pointer = ptr, Capacity = (nuint)_matchScratch.Length };
-            ThrowIfFailed(SearchNative.ghostty_search_get(search, data, &buffer), "Could not read search matches.");
-        }
+        if (result != NativeResult.OutOfSpace) ThrowIfFailed(result, "Could not read search matches.");
         return checked((int)buffer.Length);
     }
 
@@ -333,28 +346,27 @@ public sealed partial class GhosttyTerminal
         return true;
     }
 
+    // libghostty-vt formatters borrow the terminal, which must outlive them.
     private void ResetSearch()
     {
         _completedSearch = null;
         _highlightSearch?.Dispose();
         _highlightSearch = null;
         _highlightPreparation = null;
+        _preparedHighlights = null;
+        _preparedHighlightKey = null;
         _search?.Dispose();
         _search = null; _searchQuery = null;
         _needle = []; _needleFoldsCase = false;
-        _candidateCount = 0;
+        _candidates = [];
+        _matchScratch = [];
+        _matchText = [];
+        _matchFormatter?.Dispose();
+        _matchFormatter = null;
         _searchRevision++;
         _highlights = null;
         _highlightDataKey = (-1, -1, -1);
         _highlightData = [];
-    }
-
-    // Terminal disposal is the only caller. The formatter borrows the terminal, so it goes before the handle.
-    private void DisposeSearch()
-    {
-        ResetSearch();
-        _matchFormatter?.Dispose();
-        _matchFormatter = null;
     }
 
     [StructLayout(LayoutKind.Sequential)]

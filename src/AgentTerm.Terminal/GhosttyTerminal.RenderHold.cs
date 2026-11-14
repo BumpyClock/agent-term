@@ -90,7 +90,7 @@ public sealed partial class GhosttyTerminal
                 }
             }
             _handoff = handoff;
-            _boundary = CaptureMetadata() with { Boundary = true, ImageCapture = CaptureImagePixels() };
+            _boundary = CaptureMetadata() with { Boundary = true, ImageCapture = CaptureImagePixels(handoff.DangerousGetHandle()) };
             _holdCounters.HandoffCaptures++;
             return;
         }
@@ -102,7 +102,7 @@ public sealed partial class GhosttyTerminal
             var result = RenderNative.ghostty_render_state_update(lease.Raw, _handle);
             if (result != NativeResult.Success) { RetireRender(); ThrowIfFailed(result, "Could not capture a render hold boundary."); }
         }
-        _boundary = capture with { ImageCapture = CaptureImagePixels() };
+        _boundary = capture with { ImageCapture = CaptureImagePixels(_renderState) };
         _holdCounters.DirectCaptures++;
     }
 
