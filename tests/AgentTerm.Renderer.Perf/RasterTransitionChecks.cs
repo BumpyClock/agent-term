@@ -227,6 +227,10 @@ internal static partial class Program
         {
             var frame = snapshot ?? terminal.ReadFrame();
             surface.SetFrame(frame);
+            var caret = surface.GeometryFor(frame).Caret(frame.Cursor);
+            if (surface.Input.Margin != new Thickness(caret.X, caret.Y, 0, 0) || surface.Input.Height != surface.CellHeight ||
+                surface.Input.Width != Math.Max(surface.CellWidth, frame.Columns * surface.CellWidth - caret.X))
+                throw new Exception($"The input box did not follow the cursor after {name}.");
             await probe.WhenPresentedAsync(frame, name);
             var readback = await probe.ReadRasterAsync() ?? throw new Exception($"Retained raster missing after {name}.");
             var gridTop = (float)surface.GeometryFor(frame).Top;

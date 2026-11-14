@@ -22,6 +22,8 @@ public sealed partial class TerminalSurface : UserControl
     private static readonly Lazy<string[]> AvailableFonts = new(FindTerminalFonts);
     private static Task? _fontLookup;
     private CanvasControl? _cursorCanvas;
+    private double _cursorOpacity;
+    private (Thickness Margin, double Width, double Height) _inputLayout;
     private readonly GlyphLayouts _cursorLayouts = new();
     private TerminalFrame? _paintedFrame;
     private (Rect Bounds, TerminalCursor Cursor, TerminalCell Cell, TerminalColor? CursorText, bool Focused,
@@ -226,6 +228,7 @@ public sealed partial class TerminalSurface : UserControl
         };
         _cursorCanvas = cursor;
         _cursorContent = default;
+        _cursorOpacity = 0;
         cursor.Draw += DrawCursorOverlay;
         cursor.CreateResources += CreateCursorResources;
         ((Grid)Content).Children.Insert(1, cursor);
@@ -263,9 +266,16 @@ public sealed partial class TerminalSurface : UserControl
     {
         if (_frame is not { } frame) return;
         var caret = Geometry.Caret(frame.Cursor);
-        _input.Margin = new Thickness(caret.X, caret.Y, 0, 0);
-        _input.Width = Math.Max(CellWidth, (frame.Columns * CellWidth) - caret.X);
-        _input.Height = CellHeight;
+        if (!Changed(ref _inputLayout,
+            (new Thickness(caret.X, caret.Y, 0, 0), Math.Max(CellWidth, (frame.Columns * CellWidth) - caret.X), CellHeight))) return;
+        (_input.Margin, _input.Width, _input.Height) = _inputLayout;
+    }
+
+    private static bool Changed<T>(ref T shadow, T value)
+    {
+        if (EqualityComparer<T>.Default.Equals(shadow, value)) return false;
+        shadow = value;
+        return true;
     }
 
     private static int _nextCapturePaneId;
@@ -280,7 +290,7 @@ public sealed partial class TerminalSurface : UserControl
             frame.Cursor.Column < 0 || frame.Cursor.Column >= frame.Columns ||
             frame.Cursor.Row < 0 || frame.Cursor.Row >= TerminalGridGeometry.VisibleRows(frame))
         {
-            overlay.Opacity = 0;
+            if (Changed(ref _cursorOpacity, 0)) overlay.Opacity = 0;
             return;
         }
         var cursor = frame.Cursor;
@@ -299,7 +309,7 @@ public sealed partial class TerminalSurface : UserControl
             _cursorContent = content;
             overlay.Invalidate();
         }
-        overlay.Opacity = cursor.Blink && focused && !_cursorPhase ? 0 : 1;
+        if (Changed(ref _cursorOpacity, cursor.Blink && focused && !_cursorPhase ? 0 : 1)) overlay.Opacity = _cursorOpacity;
     }
 
     internal static (Rect Bounds, double GridTop) CursorOverlayGeometry(TerminalGridGeometry geometry,

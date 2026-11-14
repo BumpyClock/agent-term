@@ -40,6 +40,7 @@ public sealed partial class MainPage : Page, IAsyncDisposable
     private Task? _dispose;
     private ushort _columns = 80;
     private ushort _rows = 24;
+    private (ushort Columns, ushort Rows) _shownGridSize;
     private readonly TerminalKeyboardInput _keyboard = new();
     private readonly TerminalCompositionInput _composition = new();
     public bool IsComposing => _composition.IsComposing || _replyIme;
@@ -630,7 +631,11 @@ public sealed partial class MainPage : Page, IAsyncDisposable
             _hostCellWidth = HostCellWidth;
             _hostCellHeight = HostCellHeight;
         }
-        GridSizeText.Text = $"{_columns} x {_rows}";
+        if (_shownGridSize != (_columns, _rows))
+        {
+            _shownGridSize = (_columns, _rows);
+            GridSizeText.Text = $"{_columns} x {_rows}";
+        }
         return true;
     }
 

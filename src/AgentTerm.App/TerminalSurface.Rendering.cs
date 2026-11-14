@@ -65,6 +65,7 @@ public sealed partial class TerminalSurface
 
     private readonly Microsoft.UI.Xaml.Controls.Border _rasterHost = new() { IsHitTestVisible = true };
     private readonly SolidColorBrush _transparentHost = new(Microsoft.UI.Colors.Transparent);
+    private Vector2 _brushScale;
     private RasterOwner? _raster;
     private RasterRequest? _submitted;
     private RasterPresentation? _presentation;
@@ -92,6 +93,7 @@ public sealed partial class TerminalSurface
         var surface = graphics.CreateDrawingSurface2(new SizeInt32(0, 0), DirectXPixelFormat.B8G8R8A8UIntNormalized, DirectXAlphaMode.Premultiplied);
         var sink = new SharedRasterSink(device, presentationDevice, surface);
         var brush = compositor.CreateSurfaceBrush(surface);
+        _brushScale = Vector2.One;
         brush.Stretch = CompositionStretch.None;
         brush.HorizontalAlignmentRatio = 0;
         brush.VerticalAlignmentRatio = 0;
@@ -156,7 +158,7 @@ public sealed partial class TerminalSurface
         _presentation = presentation;
         var presented = presentation.Request.Frame;
         _paintedFrame = _frame is { } current && RasterEquivalent(presented, current) ? current : presented;
-        owner.Brush.Scale = new Vector2(96 / presentation.Request.Metrics.Dpi);
+        if (Changed(ref _brushScale, new Vector2(96 / presentation.Request.Metrics.Dpi))) owner.Brush.Scale = _brushScale;
         DrawCompleted?.Invoke(presentation.PrepareMilliseconds);
         if (PerformanceCapture.Enabled) PerformanceCapture.Record(PerformanceMetric.RasterPreparation, presentation.PrepareMilliseconds, CapturePaneId);
         UpdateCursorOverlay();
