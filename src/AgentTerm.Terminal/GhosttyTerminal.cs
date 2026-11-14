@@ -190,7 +190,7 @@ public sealed partial class GhosttyTerminal : IDisposable
 
         _disposed = true;
         DisposeHost();
-        DisposeSearch();
+        ResetSearch();
         DisposeAnchors();
         DisposeSelection();
         DisposeInput();

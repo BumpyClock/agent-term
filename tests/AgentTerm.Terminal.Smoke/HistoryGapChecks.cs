@@ -173,8 +173,67 @@ internal static class HistoryGapChecks
         await large.FindAsync("", true);
         Check(large.ReadSearchHighlights() is null, "Closing find clears highlights.");
 
+        await MixedCaseSearchAsync();
+        await SearchBuffersReleasedAsync();
+
         await session.DisposeAsync();
         try { session.ReadSearchHighlights(); throw new Exception("Disposed highlights must fail."); } catch (ObjectDisposedException) { }
+    }
+
+    private static async Task MixedCaseSearchAsync()
+    {
+        await using var session = new TerminalSession(60, 8);
+        var terminal = (GhosttyTerminal)typeof(TerminalSession).GetField("_terminal", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session)!;
+        var gate = typeof(TerminalSession).GetField("_gate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session)!;
+        lock (gate) terminal.Write(Encoding.UTF8.GetBytes(string.Concat(Enumerable.Range(0, 500).Select(i => $"{i:D3} Needle needle NEEDLE nEEDLE needle\r\n"))));
+        var insensitive = await session.FindAsync("needle", true);
+        var lower = await session.FindAsync("needle", true, true);
+        var upper = await session.FindAsync("NEEDLE", true, true);
+        Check(upper.Found && session.ReadSelectionText() == "NEEDLE", $"Case-sensitive search selects an exact match: <{session.ReadSelectionText()}>.");
+        var title = await session.FindAsync("Needle", true, true);
+        var absent = await session.FindAsync("NeEdLe", true, true);
+        Check(insensitive.Matches == 2500 && lower.Matches == 1000 && upper.Matches == 500 && title.Matches == 500 && absent is { Matches: 0, Found: false },
+            $"Case-sensitive search counts only exact matches: {insensitive.Matches}/{lower.Matches}/{upper.Matches}/{title.Matches}/{absent.Matches}.");
+
+        bool[] Classify(TimeSpan budget)
+        {
+            lock (gate)
+            {
+                terminal.PrepareSearch("", false);
+                terminal.PrepareSearch("needle", true);
+                Check(terminal.Find("needle", true, true), "Classification fixture needs a match.");
+                var flags = new bool[terminal.SearchCount()];
+                for (var i = 0; i < flags.Length;) i = terminal.ClassifySearchCandidates(flags, i, budget);
+                return flags;
+            }
+        }
+        var direct = Classify(TimeSpan.MaxValue);
+        var deferred = Classify(TimeSpan.Zero);
+        Check(direct.Length == 2500 && direct.Count(f => f) == 1000 && direct.SequenceEqual(deferred),
+            $"Direct and deferred exact classification agree: {direct.Count(f => f)}/{deferred.Count(f => f)} of {direct.Length}.");
+    }
+
+    private static async Task SearchBuffersReleasedAsync()
+    {
+        await using var session = new TerminalSession(100, 30);
+        var terminal = (GhosttyTerminal)typeof(TerminalSession).GetField("_terminal", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session)!;
+        var gate = typeof(TerminalSession).GetField("_gate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session)!;
+        var row = string.Concat(Enumerable.Repeat("aA ", 30));
+        lock (gate) terminal.Write(Encoding.UTF8.GetBytes(string.Concat(Enumerable.Range(0, 3000).Select(_ => row + "\r\n"))));
+        static long Live() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); return GC.GetTotalMemory(true); }
+        await session.FindAsync("warm", true, true);
+        await session.FindAsync("", true);
+        var baseline = Live();
+        var timer = Stopwatch.StartNew();
+        var exact = await session.FindAsync("a", true, true);
+        var elapsed = timer.ElapsedMilliseconds;
+        var open = Live() - baseline;
+        await session.FindAsync("", true);
+        var closed = Live() - baseline;
+        Console.WriteLine($"Exact-case search over {exact.Matches * 2} candidates: {elapsed} ms, {open / 1024} KiB held open, {closed / 1024} KiB after close.");
+        Check(exact.Matches == 90_000, $"Dense exact search: {exact}.");
+        Check(open < exact.Matches * 4, $"An open exact search holds at most its per-candidate flags: {open} bytes for {exact.Matches * 2} candidates.");
+        Check(closed < 256 * 1024, $"Closing find releases search buffers: {closed} bytes retained.");
     }
 
     private sealed class Progress(Action<TerminalSearchProgress> action) : IProgress<TerminalSearchProgress>

@@ -182,7 +182,7 @@ public sealed partial class TerminalSession
                 count = completed?.Candidates ?? _terminal.SearchCount();
                 exact = completed?.Matches ?? count;
                 exactFlags = completed?.ExactFlags;
-                if (completed is null && _terminal.SearchNeedsExactFilter) exactFlags = new bool[_terminal.CaptureSearchCandidates()];
+                if (completed is null && _terminal.SearchNeedsExactFilter) exactFlags = new bool[count];
             }
             if (completed is null && exactFlags is not null)
             {
@@ -194,9 +194,9 @@ public sealed partial class TerminalSession
                     {
                         ThrowIfClosed();
                         if (_terminal.ContentVersion != version) { stale = true; break; }
-                        var slice = Stopwatch.GetTimestamp();
-                        do { if (exactFlags[i] = _terminal.ExactSearchCandidate(i)) exact++; i++; }
-                        while (i < exactFlags.Length && Stopwatch.GetElapsedTime(slice) < SearchSlice);
+                        var next = _terminal.ClassifySearchCandidates(exactFlags, i, SearchSlice);
+                        exact += exactFlags.AsSpan(i, next - i).Count(true);
+                        i = next;
                     }
                     Report(exact);
                     Provisional(version);

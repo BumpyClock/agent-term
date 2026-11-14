@@ -69,7 +69,7 @@ internal static class SearchFrameChecks
         terminal.CompleteFrame(empty);
         if (terminal.PrepareSearchHighlightsSlice(TimeSpan.Zero)) throw new Exception("Dense preparation must yield.");
         var feedsDuringPreparation = terminal.HighlightFeeds;
-        terminal.CaptureSearchCandidates();
+        terminal.ClassifySearchCandidates(new bool[terminal.SearchCount()], 0, TimeSpan.Zero);
         terminal.PrepareSearchHighlightsSlice(TimeSpan.Zero);
         if (terminal.HighlightFeeds != feedsDuringPreparation)
             throw new Exception("History candidate reads must not restart owned highlight preparation.");
