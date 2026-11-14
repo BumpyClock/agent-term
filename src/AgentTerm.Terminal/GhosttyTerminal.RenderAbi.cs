@@ -28,7 +28,7 @@ public sealed partial class GhosttyTerminal
         ColorCursor = 7, ColorCursorHasValue = 8, Palette = 9, Cursor = 18, Overscan = 20, ImageIterator = 22, ImageGeneration = 23,
     }
     private enum RenderDirty { Clean = 0, Partial = 1, Full = 2 }
-    private enum RenderRowData { Dirty = 1, Cells = 3, Selection = 4, ViewportY = 6 }
+    private enum RenderRowData { Dirty = 1, Cells = 3, Selection = 4, ViewportY = 6, Id = 7 }
     private enum RenderCellData { Raw = 1, Style = 2, BackgroundColor = 5, ForegroundColor = 6, GraphemesUtf8 = 9 }
     private enum CellData { Codepoint = 1, ContentTag = 2, Wide = 3, StyleId = 6, Hyperlink = 7 }
     private enum CellContent { Codepoint = 0, CodepointGrapheme = 1, BackgroundPalette = 2, BackgroundRgb = 3 }
@@ -67,6 +67,13 @@ public sealed partial class GhosttyTerminal
     }
     [StructLayout(LayoutKind.Sequential)] private unsafe struct ByteBuffer { public byte* Pointer; public nuint Capacity, Length; }
 
+    // render.h defines an opaque two-word identity, with only the all-zero value invalid.
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct RenderRowId(ulong First, ulong Second)
+    {
+        public bool IsValid => First != 0 || Second != 0;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RenderCursor
     {
@@ -92,6 +99,7 @@ public sealed partial class GhosttyTerminal
         ("GhosttyColorRgb", typeof(Rgb), [("r", nameof(Rgb.R)), ("g", nameof(Rgb.G)), ("b", nameof(Rgb.B))]),
         ("GhosttyStyle", typeof(Style), [("fg_color", nameof(Style.Low)), ("underline_color", nameof(Style.High)), ("flags", nameof(Style.Flags))]),
         ("GhosttyBuffer", typeof(ByteBuffer), [("ptr", nameof(ByteBuffer.Pointer)), ("cap", nameof(ByteBuffer.Capacity)), ("len", nameof(ByteBuffer.Length))]),
+        ("GhosttyRenderStateRowId", typeof(RenderRowId), []),
         ("GhosttyTerminalModeConfig", typeof(Mode), [("mode", nameof(Mode.Value)), ("value", nameof(Mode.Enabled))]),
         ("GhosttyRenderStateRowSelection", typeof(RowSelection), [("size", nameof(RowSelection.Size)), ("start_x", nameof(RowSelection.StartX)), ("end_x", nameof(RowSelection.EndX))]),
         ("GhosttyRenderStateCursor", typeof(RenderCursor), [

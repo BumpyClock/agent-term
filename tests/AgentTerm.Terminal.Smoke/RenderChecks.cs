@@ -11,6 +11,7 @@ internal static class RenderChecks
     public static void Run()
     {
         CheckSnapshotOwnership();
+        RowReuseChecks.Run();
         CheckBackgroundPresence();
         CheckStyleRuns();
         OverscanChecks.Run();

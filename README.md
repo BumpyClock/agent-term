@@ -160,6 +160,8 @@ The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packa
 
 `StopAsync` releases ConPTY while retaining Ghostty state for inspection. `DisposeAsync` also releases that terminal state. Hidden tabs pause drawing, not their shell output reader. Native Ghostty owns scrollback and tracked selection references; frame snapshots own their cell arrays and consumers must not mutate them.
 
+Capture-owned native row identities locate prior rows during full captures. A unique identity permits sharing a shifted row array only after every rendered cell field matches. Missing or ambiguous identities and partial dirty captures use the previous row at the same position. Retained snapshots stay immutable across scrolling, edits, screen switches, and resize. `AgentTerm.Terminal.Smoke` checks sharing and fresh-capture parity. `AgentTerm.Renderer.Smoke --scroll-row-reuse-only --hashes=<path>` checks retained raster parity and exports scroll-transition pixel hashes for comparisons between builds.
+
 ## CI and verification
 
 Pull requests run the shared pre-commit checks and GitHub Actions workflow lint on `boat-small`, without restoring .NET dependencies or compiling the app or native code. Formatting hooks leave third-party license and notice files unchanged. Pushes to `release` or `release/**` run lint first, then the full Linux and Windows builds and smoke tests. Pushes to other branches and tags do not start CI. New commits cancel older runs for the same pull request or release branch. Jobs have time limits, read-only repository permissions, and pinned action versions.

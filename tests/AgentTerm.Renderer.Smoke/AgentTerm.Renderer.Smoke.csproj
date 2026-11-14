@@ -11,12 +11,13 @@
     <SelfContained>true</SelfContained>
     <Platforms>AnyCPU;x64</Platforms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TerminalProject Condition="'$(TerminalProject)' == ''">$(MSBuildThisFileDirectory)../../src/AgentTerm.Terminal/AgentTerm.Terminal.csproj</TerminalProject>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
-    <ProjectReference Include="../../src/AgentTerm.Terminal/AgentTerm.Terminal.csproj" />
+    <ProjectReference Include="$(TerminalProject)" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.cs" Link="TerminalSurface.cs" />
     <Compile Include="../../src/AgentTerm.App/PerformanceCapture.cs" Link="PerformanceCapture.cs" />
     <Compile Include="../../src/AgentTerm.App/TerminalSurface.Scrolling.cs" Link="TerminalSurface.Scrolling.cs" />
