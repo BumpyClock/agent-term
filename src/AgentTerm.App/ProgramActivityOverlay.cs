@@ -66,10 +66,11 @@ internal sealed class ProgramActivityOverlay : IDisposable
                 Build(compositor, phaseSeconds);
                 return;
             }
-            if (_kind == ProgramActivityKind.PaneEdge)
+            if (_kind == ProgramActivityKind.PaneEdge && (!previous.Elements.SequenceEqual(geometry.Elements) ||
+                previous.TravelFrom != geometry.TravelFrom || previous.TravelTo != geometry.TravelTo))
             {
                 PlaceBeam();
-                if (previous.TravelFrom != geometry.TravelFrom || previous.TravelTo != geometry.TravelTo) AnimateBeam(compositor, phaseSeconds);
+                AnimateBeam(compositor, phaseSeconds);
             }
             PlaceTree();
         }

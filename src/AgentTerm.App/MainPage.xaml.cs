@@ -1390,7 +1390,12 @@ public sealed partial class MainPage : Page, IAsyncDisposable
 
     private async Task FailSessionAsync(Exception exception)
     {
-        if (exception is TerminalOperationQueueFullException) { ShowInteractionFailure(exception); return; }
+        if (exception is TerminalOperationQueueFullException)
+        {
+            _sentGrid = null;
+            ShowInteractionFailure(exception);
+            return;
+        }
         SetState(SessionState.Stopping);
         await ReleaseSessionAsync();
         if (_state != SessionState.Disposed)
