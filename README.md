@@ -14,6 +14,8 @@ The renderer supports ANSI, indexed, and RGB colors, Unicode cells, text styles,
 
 Terminal drawing reuses dirty cells, clipped glyph layouts, and a bitmap of painted content. Box-drawing (U+2500 to U+257F) and block element (U+2580 to U+259F) characters are drawn as pixel-snapped shapes in the foreground color instead of font glyphs, so borders join across cells in every font and at every display scale. Idle panes stop requesting frames, and hidden panes release cached GPU content. The [native performance fixture](tests/AgentTerm.Renderer.Perf/README.md) checks simulated ConPTY output, final pixels, scheduling and GC pauses.
 
+SGR 4:2 double underlines use two pixel-aligned filled strokes with a full background gap equal to one stroke thickness, following [Ghostty's double-underline geometry](https://github.com/ghostty-org/ghostty/blob/9fff23493f87a2a9a9b56b29dca45e27d5adf27e/src/font/sprite/draw/special.zig#L39). Each stroke is one DIP rounded to at least one physical pixel. The pair shifts up when needed to fit inside the cell. This renderer uses fixed decoration metrics rather than Ghostty's font-derived thickness and position.
+
 Terminal colors default to Auto, following the Windows light or dark appearance. Settings offers independent light and dark theme choices and Auto, Light, or Dark appearance, shared or per profile. Saving recolors open terminals without restarting shells. Switching themes preserves output, history, selection, and application-defined RGB or OSC colors.
 
 Colored cell backgrounds and selection join without grid seams at fractional cell widths or display scaling. Text retains normal antialiasing.
@@ -128,6 +130,8 @@ dotnet run --project src/AgentTerm.App -p:Platform=x64 -c Release
 ```
 
 The check script downloads checksum-pinned Ghostty and Zig archives, builds the native DLL and app, and runs shell-icon extraction and WinUI decoding checks, native VT/input/history/search tests, GitHub dashboard parsing, cache, refresh, and presentation checks, real shell integration tests, and Win2D pixel checks. The GitHub checks run inside `AgentTerm.Terminal.Smoke` with fake transports and no network. Images are saved to `artifacts/renderer-smoke.png` and `artifacts/selection-smoke.png`. Generated files stay in ignored `.deps`, `artifacts`, `bin`, and `obj` folders. First native builds take several minutes.
+
+For offscreen decoration pixels only, run `dotnet run --project tests/AgentTerm.Renderer.Smoke -c Release -- --decorations-only`. Add an output directory after the flag to save rasters. The check covers double-underline stroke and gap thickness, opaque coverage, and continuity across cells at 96, 120, 144, and 192 DPI with fractional cell dimensions, grid offsets, Consolas, and Cascadia Mono.
 
 The app is unpackaged and self-contained. Windows App SDK 2.6.5 is pinned. Packaging, signing, and additional architectures are future work.
 
