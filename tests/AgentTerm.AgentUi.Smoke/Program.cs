@@ -31,6 +31,11 @@ internal static class Program
         var window = new Window();
         try
         {
+            if (Environment.GetCommandLineArgs().Contains("--capture-overlays"))
+            {
+                await ActivityPixelCaptureChecks.RunAsync(window);
+                return;
+            }
             if (Environment.GetCommandLineArgs().Contains("--activity-parity") ||
                 Environment.GetCommandLineArgs().Contains("--activity-occlusion") || Environment.GetCommandLineArgs().Contains("--activity-transitions"))
             {
@@ -80,6 +85,7 @@ internal static class Program
             }
             if (!Environment.GetCommandLineArgs().Contains("--timeline-only"))
             {
+                await ActivityPixelCaptureChecks.RunAsync(window);
                 await ProgramActivityChecks.RunAsync(window);
                 await ProgramStatusUiChecks.CheckIconPreferencesAsync(window);
                 await ProgramStatusUiChecks.CheckDetailsAsync(window);

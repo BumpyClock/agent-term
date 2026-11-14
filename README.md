@@ -316,3 +316,15 @@ the pause; the done report survives the prompt that follows.
 Protocol regression checks live in `ProgramStatusChecks` in the terminal smoke
 suite. They cover chunked input, detection, validation, replacement, inheritance,
 clearing, reset, lifecycle, and record eviction.
+
+Run native status and timeline checks with `dotnet run --project
+tests/AgentTerm.AgentUi.Smoke -c Release -p:Platform=x64` on an unlocked Windows
+desktop. Keep the smoke window in the foreground. Activity assertions sample
+displayed pixels so they include compositor-owned motion.
+The sampler rejects intersecting visible foreign window bounds above the smoke
+window before and after each capture, including disabled and nonactivating
+overlays. Same-process popups owned by the smoke window remain valid occlusion
+fixtures. Run the overlay regression alone with `-- --capture-overlays`.
+Bounds checks are conservative for shaped or transparent windows. They cannot
+exclude overlays that appear and disappear entirely between scans, or effects
+outside reported window bounds. Capture is not atomic with desktop composition.

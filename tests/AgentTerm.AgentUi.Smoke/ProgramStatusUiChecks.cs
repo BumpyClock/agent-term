@@ -307,7 +307,7 @@ internal static class ProgramStatusUiChecks
         for (var attempt = 0; attempt < 30 && tab.IconSource is not ImageIconSource; attempt++) await Task.Delay(100);
         Check(tab.IconSource is ImageIconSource, "A reported local executable must resolve its actual icon.");
         var moving = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled && !new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
-        var frames = await Program.SampleAsync(canvas, 6);
+        var frames = await ActivityPixelCapture.SampleAsync(window, canvas, 6);
         Check(moving ? frames > 1 : frames == 1, "The tab activity indicator must animate only when Windows permits motion.");
         await CaptureAsync(canvas, "icon-working");
         status.Update([working with { Status = working.Status with { Progress = 62 } }]);
@@ -318,7 +318,7 @@ internal static class ProgramStatusUiChecks
         var executableIcon = tab.IconSource;
         status.Update([working with { Status = working.Status with { State = ProgramState.Done } }]);
         Check(ReferenceEquals(tab.IconSource, executableIcon), "Completed work must retain executable identity while the program is running.");
-        Check(await Program.SampleAsync(canvas, 3) == 1, "Completed tabs must stop animating.");
+        Check(await ActivityPixelCapture.SampleAsync(window, canvas, 3) == 1, "Completed tabs must stop animating.");
         await CaptureAsync(canvas, "icon-done");
         status.Update([working with { Status = working.Status with { State = ProgramState.Done, IsActive = false } }]);
         Check(ReferenceEquals(tab.IconSource, shell), "Returning to the shell must restore its icon even with retained outcomes.");
