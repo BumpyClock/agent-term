@@ -2,6 +2,7 @@ using System;
 using AgentTerm.Terminal;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
+using Windows.Foundation;
 using Windows.UI;
 
 namespace AgentTerm_App;
@@ -99,9 +100,9 @@ public sealed partial class TerminalSurface
                 case '╌' or '╍': DashHorizontal(2, glyph == '╍'); break;
                 case '╎' or '╏': DashVertical(2, glyph == '╏'); break;
                 case >= '╭' and <= '╰': Arc(glyph); break;
-                case '╱': Diagonal(false); break;
-                case '╲': Diagonal(true); break;
-                case '╳': Diagonal(false); Diagonal(true); break;
+                case '╱': Diagonals(rising: true, falling: false); break;
+                case '╲': Diagonals(rising: false, falling: true); break;
+                case '╳': Diagonals(rising: true, falling: true); break;
                 case '▀': Fill(_left, _top, _right, Row(4)); break;
                 case >= '▁' and <= '█': Fill(_left, Row('█' - glyph), _right, _bottom); break;
                 case >= '▉' and <= '▏': Fill(_left, _top, Column('▐' - glyph), _bottom); break;
@@ -113,8 +114,14 @@ public sealed partial class TerminalSurface
             }
         }
 
-        private int Column(int eighths) => _left + Width * eighths / 8;
-        private int Row(int eighths) => _top + Height * eighths / 8;
+        private int Column(int eighths) => Eighth(_left, _right, eighths);
+        private int Row(int eighths) => Eighth(_top, _bottom, eighths);
+
+        private static int Eighth(int start, int end, int eighths)
+        {
+            var edge = start + (end - start) * eighths / 8;
+            return eighths is <= 0 or >= 8 ? edge : Math.Max(start + 1, Math.Min(end - 1, edge));
+        }
 
         private void Fill(int left, int top, int right, int bottom, Color? color = null)
         {
@@ -243,12 +250,15 @@ public sealed partial class TerminalSurface
             _drawing.Antialiasing = CanvasAntialiasing.Aliased;
         }
 
-        private void Diagonal(bool falling)
+        private void Diagonals(bool rising, bool falling)
         {
-            _drawing.Antialiasing = CanvasAntialiasing.Antialiased;
-            _drawing.DrawLine(_left / _scale, (falling ? _top : _bottom) / _scale, _right / _scale, (falling ? _bottom : _top) / _scale,
-                _color, _light / _scale);
-            _drawing.Antialiasing = CanvasAntialiasing.Aliased;
+            using (_drawing.CreateLayer(1, new Rect(_left / _scale, _top / _scale, Width / _scale, Height / _scale)))
+            {
+                _drawing.Antialiasing = CanvasAntialiasing.Antialiased;
+                if (rising) _drawing.DrawLine(_left / _scale, _bottom / _scale, _right / _scale, _top / _scale, _color, _light / _scale);
+                if (falling) _drawing.DrawLine(_left / _scale, _top / _scale, _right / _scale, _bottom / _scale, _color, _light / _scale);
+                _drawing.Antialiasing = CanvasAntialiasing.Aliased;
+            }
         }
     }
 }

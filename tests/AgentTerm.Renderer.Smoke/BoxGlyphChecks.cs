@@ -20,6 +20,15 @@ internal static class BoxGlyphChecks
         "       ",
     ];
 
+    private static readonly string[] Edges =
+    [
+        "         ",
+        " ╱ ╲ ╳   ",
+        "         ",
+        "▏▏▏▏▏▏▏▏▏",
+        "▕▕▕▕▕▕▕▕▕",
+    ];
+
     internal static void Run(CanvasDevice device)
     {
         var installed = CanvasTextFormat.GetSystemFontFamilies().ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -35,6 +44,8 @@ internal static class BoxGlyphChecks
             foreach (var column in new[] { 1, 3, 5 }) AssertVertical(setup, raster, column, 2, 4);
             AssertArcReachesEdges(setup, raster);
             AssertBlocks(setup, raster);
+            AssertDiagonalsStayInCell(setup, setup.Render(Edges, "Consolas", 0));
+            AssertEighthBlocksKeepInk(setup, setup.Render(Edges, "Consolas"));
             foreach (var family in new[] { "Cascadia Mono", "MS Gothic" }.Where(installed.Contains))
                 if (!setup.Render(Box, family).SequenceEqual(raster))
                     throw new Exception($"Box glyphs must not depend on the font: {family} differs from Consolas at {setup}.");
@@ -88,13 +99,42 @@ internal static class BoxGlyphChecks
             throw new Exception($"An upper half block must start at the top cell edge and span its width at {setup}.");
     }
 
+    private static void AssertDiagonalsStayInCell(Setup setup, bool[,] ink)
+    {
+        foreach (var column in new[] { 1, 3, 5 })
+        {
+            var (left, right, top, bottom) = (setup.X(column), setup.X(column + 1), setup.Y(1), setup.Y(2));
+            for (var x = setup.X(column - 1); x < setup.X(column + 2); x++)
+            for (var y = setup.Y(0); y < setup.Y(3); y++)
+            {
+                var inside = x >= left && x < right && y >= top && y < bottom;
+                if (ink[x, y] && !inside)
+                    throw new Exception($"Diagonal in column {column} must not ink neighbouring cells at {setup} (pixel {x},{y}).");
+            }
+            if (!ink[left, column == 3 ? top : bottom - 1] || !ink[right - 1, column == 3 ? bottom - 1 : top])
+                throw new Exception($"Diagonal in column {column} must reach its cell corners at {setup}.");
+        }
+    }
+
+    private static void AssertEighthBlocksKeepInk(Setup setup, bool[,] lit)
+    {
+        for (var column = 0; column < Edges[3].Length; column++)
+        {
+            var (left, right) = (setup.X(column), setup.X(column + 1));
+            if (!lit[left, setup.Y(3)] || lit[right - 1, setup.Y(3)])
+                throw new Exception($"A left one-eighth block must ink only its cell's left edge in column {column} at {setup}.");
+            if (!lit[right - 1, setup.Y(4)] || lit[left, setup.Y(4)])
+                throw new Exception($"A right one-eighth block must ink only its cell's right edge in column {column} at {setup}.");
+        }
+    }
+
     private sealed record Setup(CanvasDevice Device, float Dpi, float CellWidth, float CellHeight, float GridTop)
     {
         private float Scale => Dpi / 96;
         internal int X(int column) => (int)MathF.Round(column * CellWidth * Scale);
         internal int Y(int row) => (int)MathF.Round((GridTop + row * CellHeight) * Scale);
 
-        internal bool[,] Render(string[] screen, string family)
+        internal bool[,] Render(string[] screen, string family, int threshold = 128)
         {
             var columns = screen[0].Length;
             var cells = screen.SelectMany(line => line.Select(text =>
@@ -109,7 +149,7 @@ internal static class BoxGlyphChecks
             var lit = new bool[width, height];
             for (var y = 0; y < height; y++)
             for (var x = 0; x < width; x++)
-                lit[x, y] = pixels[y * width + x].R > 128;
+                lit[x, y] = pixels[y * width + x].R > threshold;
             return lit;
         }
 
